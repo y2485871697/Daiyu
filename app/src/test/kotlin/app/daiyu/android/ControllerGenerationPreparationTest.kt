@@ -100,7 +100,9 @@ class ControllerGenerationPreparationTest {
         assertEquals(3, p.preview.config.maxPolls)
         assertFalse(p.preview.toString().contains("never-echo"))
         assertFalse(profile().toString().contains("never-echo"))
-        rejects { prepare(maxPolls = 33) }
+        assertEquals(240, prepare(maxPolls = 240).preview.config.maxPolls)
+        rejects { prepare(maxPolls = -1) }
+        rejects { prepare(maxPolls = 241) }
     }
 
     @Test fun referencesMaskParametersAndPollsAreFrozenWithoutSilentSizeDowngrade() {

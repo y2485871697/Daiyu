@@ -201,6 +201,19 @@ class SQLiteGenerationAttemptStore(
         const val TABLE = "generation_attempts"
 
         /** Additive helper only. Parent owns onCreate/onUpgrade and the public DB version. */
+        internal fun upgradeOutcomeLimit(db: SQLiteDatabase) {
+            val schema = db.rawQuery("SELECT sql FROM sqlite_master WHERE type='table' AND name=?", arrayOf(TABLE))
+                .use { if (it.moveToFirst()) it.getString(0) else null }
+            if (schema == null) { installSchema(db); return }
+            if (schema.contains("BETWEEN 1 AND ${GenerationAttemptCodec.MAX_ENCODED_BYTES}")) return
+            val rows = db.rawQuery("SELECT COUNT(*) FROM generation_attempts", null).use { it.moveToFirst(); it.getLong(0) }
+            db.execSQL("ALTER TABLE generation_attempts RENAME TO generation_attempts_legacy_limit")
+            installSchema(db)
+            db.execSQL("INSERT INTO generation_attempts SELECT * FROM generation_attempts_legacy_limit")
+            check(db.rawQuery("SELECT COUNT(*) FROM generation_attempts", null).use { it.moveToFirst(); it.getLong(0) } == rows)
+            db.execSQL("DROP TABLE generation_attempts_legacy_limit")
+        }
+
         fun installSchema(db: SQLiteDatabase) {
             db.execSQL("""CREATE TABLE IF NOT EXISTS generation_attempts (
                 operation_id TEXT NOT NULL CHECK(length(operation_id) BETWEEN 1 AND 128),

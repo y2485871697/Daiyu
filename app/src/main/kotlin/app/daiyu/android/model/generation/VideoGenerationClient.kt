@@ -9,11 +9,11 @@ class VideoGenerationClient(private val io: GenerationIo) {
     fun submit(request: GenerationRequest): Submission = try { submit(prepare(request)) }
         catch (failure: GenerationPreflightException) { Submission.NotExecuted(failure.failure) }
     fun submit(plan: GenerationRequestPlan): Submission = if (plan.kind != GenerationKind.VIDEO)
-        Submission.NotExecuted(GenerationFailure.INVALID_REQUEST) else resolveContent(plan, io.submit(plan) { parse(plan, it) })
+        Submission.NotExecuted(GenerationFailure.INVALID_REQUEST) else io.submit(plan) { resolveContent(plan, parse(plan, it)) }
     fun submitBatch(requests: List<GenerationRequest>): List<GenerationBatchItem> =
         io.batch(requests, { it.isVideo }, ::submit)
     fun poll(plan: GenerationRequestPlan, handle: GenerationHandle): Submission =
-        resolveContent(plan, io.poll(plan, handle) { parse(plan, it, handle.taskId) })
+        io.poll(plan, handle) { resolveContent(plan, parse(plan, it, handle.taskId)) }
 
     private fun resolveContent(plan: GenerationRequestPlan, result: Submission): Submission {
         val output = (result as? Submission.Completed)?.outputs?.singleOrNull() ?: return result
@@ -57,7 +57,8 @@ class VideoGenerationClient(private val io: GenerationIo) {
                 } catch (_: Exception) { GenerationOutput(index, failure = GenerationFailure.PROTOCOL) }
             })
         }
-        if (!allowTask) return Submission.Unknown(GenerationFailure.PROTOCOL)
+        if (!allowTask || (parsed.taskId == null && parsed.status == null))
+            return Submission.Unknown(GenerationFailure.PROTOCOL)
         val id = parsed.taskId ?: expectedId ?: return Submission.Unknown(GenerationFailure.PROTOCOL)
         if (!GenerationIo.validTaskId(id)) return Submission.Unknown(GenerationFailure.PROTOCOL)
         val (poll, content) = plan.taskUrls(id)

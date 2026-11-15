@@ -125,11 +125,15 @@ class GenerationInputHostTest {
         rejects { read(byteArrayOf(1), source = "file:///private/photo.png") }
         rejects { read(byteArrayOf(1), source = "https://remote.invalid/photo.png") }
         rejects { read(byteArrayOf(1), cancelled = { true }) }
-        rejects { read(byteArrayOf(1), protocol = GenerationProtocol.OPENAI_IMAGES_JSON) }
+        rejects { read(byteArrayOf(1), protocol = GenerationProtocol.NOVELAI_IMAGE_JSON) }
+        assertArrayEquals(byteArrayOf(1), read(byteArrayOf(1), protocol = GenerationProtocol.OPENAI_IMAGES_JSON).bytes)
         rejects { read(byteArrayOf(1), target = GenerationInputTarget.MASK) }
         rejects { read(byteArrayOf(1), protocol = GenerationProtocol.OPENAI_VIDEO_MULTIPART,
             target = GenerationInputTarget.MASK, reference = png) }
-        rejects { read(byteArrayOf(1), inspector = ImageInspector { ImageDimensions("image/jpeg", 2, 3) }) }
+        rejects { read(byteArrayOf(1), inspector = ImageInspector { ImageDimensions("image/gif", 2, 3) }) }
+        assertEquals("image/jpeg", read(byteArrayOf(1), inspector = ImageInspector { ImageDimensions("image/jpeg", 2, 3) }).mimeType)
+        rejects { read(byteArrayOf(1), target = GenerationInputTarget.MASK, reference = png,
+            inspector = ImageInspector { ImageDimensions("image/jpeg", 2, 3) }) }
         rejects { read(byteArrayOf(1), inspector = ImageInspector { ImageDimensions("image/png", 0, 3) }) }
         rejects { read(byteArrayOf(1), inspector = ImageInspector { ImageDimensions("image/png", 40001, 1000) }) }
         rejects { read(byteArrayOf(1), target = GenerationInputTarget.MASK, reference = png,
@@ -164,8 +168,14 @@ class GenerationInputHostTest {
         assertEquals(a, GenerationFormInputs.ids(listOf(GenerationInput(png.bytes, png.mimeType)), png))
         assertNotEquals(a, GenerationFormInputs.ids(listOf(GenerationInput(byteArrayOf(4), "image/png")), png))
         assertTrue(GenerationFormInputs.supported(edit, listOf(png), png))
-        assertFalse(GenerationFormInputs.supported(edit, listOf(png, png), null))
-        assertFalse(GenerationFormInputs.supported(GenerationProtocol.OPENAI_IMAGES_JSON, listOf(png), null))
+        assertTrue(GenerationFormInputs.supported(edit, listOf(png, png), null))
+        assertFalse(GenerationFormInputs.supported(edit, listOf(png, png), png))
+        assertFalse(GenerationFormInputs.supported(edit, emptyList(), null))
+        assertTrue(GenerationFormInputs.supported(GenerationProtocol.OPENAI_IMAGES_JSON, listOf(png), null))
+        assertFalse(GenerationFormInputs.supported(GenerationProtocol.OPENAI_IMAGES_JSON, listOf(png, png), null))
+        assertFalse(GenerationFormInputs.supported(GenerationProtocol.NOVELAI_IMAGE_JSON, listOf(png), null))
+        assertFalse(GenerationFormInputs.supported(GenerationProtocol.OPENAI_IMAGE_EDIT_JSON, listOf(png, png), null))
+        assertFalse(GenerationFormInputs.supported(GenerationProtocol.OPENAI_IMAGE_EDIT_JSON, listOf(png), png))
         assertTrue(GenerationFormInputs.supported(GenerationProtocol.OPENAI_VIDEO_MULTIPART, listOf(png), null))
         assertFalse(GenerationFormInputs.supported(GenerationProtocol.OPENAI_VIDEO_MULTIPART, listOf(png), png))
     }

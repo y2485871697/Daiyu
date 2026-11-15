@@ -88,6 +88,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         check(oldVersion in 1..33 && newVersion == 34) { "不支持此数据库版本，保留原数据" }
         if (oldVersion == 33) {
             SQLiteGenerationOutputStore.upgradeProtocols(db)
+            SQLiteGenerationAttemptStore.upgradeOutcomeLimit(db)
             return
         }
         // Preserve installed receipts, including an authoritative empty v8 import.
@@ -151,6 +152,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         ConversationModelSelections.install(db)
         MessageDisplayStore.install(db)
         SQLiteGenerationOutputStore.upgradeProtocols(db)
+        SQLiteGenerationAttemptStore.upgradeOutcomeLimit(db)
         if (oldVersion >= 13) return // Existing command/video rows and witnesses remain unchanged.
         SQLiteMessageVideoStore.installSchema(db)
         ControllerVideoManifestWitness.installSchema(db)

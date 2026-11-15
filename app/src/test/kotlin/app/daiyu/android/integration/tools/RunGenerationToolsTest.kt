@@ -239,7 +239,7 @@ class RunGenerationToolsTest {
         var requests = 0
         Fixture(config(), http = GenerationHttp {
             requests++
-            GenerationHttpResponse(200, """{"data":[{"url":"https://cdn.example/image.png"},{"bad":true}]}""".toByteArray())
+            GenerationHttpResponse(200, """{"data":[{"url":"https://cdn.example/image.png"},{"url":"http://unsafe.example/image.png"}]}""".toByteArray())
         }).use { f ->
             assertTrue(f.dispatch() is DispatchOutcome.Unknown)
             val item = f.leaf.outcomes().single().items.single()

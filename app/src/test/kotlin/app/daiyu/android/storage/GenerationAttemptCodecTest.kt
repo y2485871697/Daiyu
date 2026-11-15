@@ -77,10 +77,10 @@ class GenerationAttemptCodecTest {
         rejects { GenerationAttemptCodec.encode(Submission.Completed(listOf(
             GenerationOutput(0, GenerationSource.Remote("x".repeat(16385)))))) }
         rejects { GenerationAttemptCodec.encode(Submission.Completed(listOf(
-            GenerationOutput(0, GenerationSource.Inline(ByteArray(20 * 1024 * 1024 + 1), "image/png"))))) }
+            GenerationOutput(0, GenerationSource.Inline(ByteArray(100 * 1024 * 1024 + 1), "video/mp4"))))) }
         // Each sibling is legal but the aggregate encoding must still be bounded.
-        val medium = GenerationSource.Inline(ByteArray(17 * 1024 * 1024), "image/png")
-        rejects { GenerationAttemptCodec.encode(Submission.Completed(listOf(
-            GenerationOutput(0, medium), GenerationOutput(1, medium)))) }
+        val medium = GenerationSource.Inline(ByteArray(18 * 1024 * 1024), "image/png")
+        rejects { GenerationAttemptCodec.encode(Submission.Completed((0 until 8).map {
+            GenerationOutput(it, medium) })) }
     }
 }

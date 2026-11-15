@@ -28,6 +28,18 @@ class VideoGenerationClientTest {
         assertEquals(3, fixture.http.requests.size)
     }
 
+    @Test fun immediateCompletionPersistsFinalContentBeforeAnyReplay() {
+        val fixture = GenerationFixture()
+        fixture.http.respond = { request -> if (request.method == "POST")
+            jsonResponse("""{"id":"direct","status":"completed"}""")
+            else GenerationHttpResponse(200, byteArrayOf(0,0,0,24,102,116,121,112,105,115,111,109,0,0,0,0), "video/mp4") }
+        val plan = fixture.videos.prepare(generationRequest(protocol = GenerationProtocol.OPENAI_VIDEO_MULTIPART))
+        val done = fixture.videos.submit(plan) as Submission.Completed
+        assertTrue(done.outputs.single().source is GenerationSource.Inline)
+        assertTrue((fixture.videos.submit(plan) as Submission.Completed).outputs.single().source is GenerationSource.Inline)
+        assertEquals(listOf("POST", "GET"), fixture.http.requests.map { it.method })
+    }
+
     @Test fun completedVideoDeniedByParentNeverDownloadsCommitsOrResubmits() {
         val authorizedUrls = mutableListOf<String>()
         val fixture = GenerationFixture(allowed = { url -> authorizedUrls += url; false })
@@ -77,8 +89,13 @@ class VideoGenerationClientTest {
         assertEquals(initial.handle, disconnected.handle)
         // Reservation remembers the pending handle, not a transient read failure.
         assertEquals(initial, fixture.videos.submit(plan))
-        fixture.http.respond = { jsonResponse("{broken") }
-        assertEquals(initial.handle, (fixture.videos.poll(plan, initial.handle) as Submission.Unknown).handle)
+        for (body in listOf("{broken", "{}", "unrelated text")) {
+            fixture.http.respond = { jsonResponse(body) }
+            val invalid = fixture.videos.poll(plan, initial.handle) as Submission.Unknown
+            assertEquals(GenerationFailure.PROTOCOL, invalid.reason)
+            assertEquals(initial.handle, invalid.handle)
+            assertEquals(initial, fixture.videos.submit(plan))
+        }
         fixture.http.respond = { jsonResponse("{\"id\":\"different\",\"status\":\"completed\"}") }
         assertTrue(fixture.videos.poll(plan, initial.handle) is Submission.Unknown)
         assertEquals(1, fixture.http.requests.count { it.method == "POST" })

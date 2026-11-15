@@ -112,7 +112,7 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         self.assertIn('if (currentActive && editorGeneration == editor', trusted)
         self.assertNotIn('retainedPage == "chat"', trusted)
         question = body(self.main, 'private fun DedicatedQuestion(')
-        self.assertIn('active && question.canAnswer', question)
+        self.assertIn('active && !sidebarVisible && displayWindow == null && question.canAnswer', question)
         folder = APP / 'ui/screens/chat/conversation'
         child = (folder / 'ChildTaskToolContent.kt').read_text()
         self.assertIn('if (!active) return@LaunchedEffect', child)

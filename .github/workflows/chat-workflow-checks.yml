@@ -14,7 +14,7 @@ on:
       check_scope:
         description: 工作流程、环境圆点、发送状态、表格样式、冷启动、任务滚动、附件弹层、权限界面、终端输出或工具回执的定向检查范围
         type: choice
-        options: [workflow, environment-dots, composer-send, markdown-table, cold-start, task-scroll, attachment-contracts, permission-contracts, terminal-output, tool-receipts, page-performance, rendering, legacy-restore, search-history, conversation-date, ime]
+        options: [workflow, environment-dots, composer-send, markdown-table, cold-start, session-switch, task-scroll, attachment-contracts, permission-contracts, terminal-output, tool-receipts, page-performance, rendering, legacy-restore, search-history, conversation-date, ime]
         default: workflow
 permissions:
   contents: read
@@ -76,7 +76,7 @@ jobs:
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'markdown-table':
               patterns = ('test_markdown_table_style_contract.py', 'test_markdown_entry_contract.py',
                           'test_markdown_body_visibility_contract.py')
-          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'cold-start':
+          if os.environ['WORKFLOW_CHECK_SCOPE'] in ('cold-start', 'session-switch'):
               patterns = ('test_chat_initial_position_contract.py', 'test_page_back_gesture_contract.py', 'test_chat_resume_scroll_contract.py',
                           'test_markdown_cold_start_contract.py', 'test_markdown_return_contract.py',
                           'test_markdown_body_visibility_contract.py', 'test_markdown_typing_contract.py',
@@ -93,6 +93,9 @@ jobs:
                           'test_acceptance_tool_receipt.py', 'test_speech_platform_discovery.py',
                           'test_page_back_smoke_scope.py', 'test_task_scroll_smoke_scope.py',
                           'test_screen_history_smoke_scope.py')
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'session-switch':
+              patterns = tuple(pattern for pattern in patterns if pattern != 'test_context_usage_wiring_contract.py')
+              patterns += ('test_page_back_repeat_contract.py', 'test_session_switch_check_scope.py')
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'task-scroll':
               patterns = ('test_reasoning_stream_cost_contract.py', 'test_workflow_render_isolation_contract.py',
                           'test_markdown_typing_contract.py', 'test_chat_resume_scroll_contract.py',
@@ -163,7 +166,7 @@ jobs:
             classes=(MarkdownTableGridTest)
             filters+=(--tests app.daiyu.android.MarkdownTableWidthTest)
           fi
-          if [[ "$WORKFLOW_CHECK_SCOPE" == cold-start ]]; then
+          if [[ "$WORKFLOW_CHECK_SCOPE" == cold-start || "$WORKFLOW_CHECK_SCOPE" == session-switch ]]; then
             classes=(RestoredMarkdownTest ToolPresentationCacheTest ToolPresentationJsonTest ToolCardPresentationTest ToolRichDetailsTest ToolBodyLayoutTest TerminalToolTargetTest MarkdownProjectionCacheTest MarkdownProjectionTest
                      MarkdownPreparationCompositionTest MarkdownRevealTest ChatTurnMapperTest ChatInitialPositionPolicyTest
                      AssistantWorkflowCompositionTest)
@@ -249,7 +252,7 @@ jobs:
                           'ChatProjectionTest', 'ComposerTextActionTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'markdown-table':
               expected = {'MarkdownTableGridTest', 'MarkdownTableWidthTest'}
-          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'cold-start':
+          if os.environ['WORKFLOW_CHECK_SCOPE'] in ('cold-start', 'session-switch'):
               expected = {'RestoredMarkdownTest', 'ToolPresentationCacheTest', 'ToolPresentationJsonTest', 'ToolCardPresentationTest', 'ToolRichDetailsTest', 'ToolBodyLayoutTest', 'TerminalToolTargetTest', 'MarkdownProjectionCacheTest', 'MarkdownProjectionTest',
                           'MarkdownPreparationCompositionTest', 'MarkdownRevealTest', 'ChatTurnMapperTest',
                           'ChatInitialPositionPolicyTest', 'ContextTimelineColdStartTest', 'AssistantWorkflowCompositionTest',

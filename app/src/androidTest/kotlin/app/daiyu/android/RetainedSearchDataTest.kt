@@ -99,6 +99,21 @@ class RetainedSearchDataTest : android.test.AndroidTestCase() {
         assertNull(second.nextCursor)
     }
 
+    fun testAllScopeExcludesTemporaryVoiceConversationsThatCannotBeOpenedFromHistory() {
+        val persisted = database.create("default")
+        val temporary = database.create("default", temporaryVoice = true)
+        turn(persisted, "visible-scope", "正文范围共同词")
+        turn(temporary, "hidden-voice", "正文范围共同词")
+        val page = data.searchPage("正文范围共同词", pageSize = 1)
+        assertTrue(page.results.all { it.conversationId == persisted.id.value })
+        assertEquals(listOf(persisted.id.value), checkNotNull(page.nextCursor).conversations.map { it.id })
+        val next = data.searchPage("正文范围共同词", cursor = page.nextCursor, pageSize = 1)
+        assertTrue(next.results.all { it.conversationId == persisted.id.value })
+        assertNull(next.nextCursor)
+        assertEquals(2, data.searchCurrentConversation("正文范围共同词", persisted.id.value).size)
+        assertTrue(database.conversations().none { it.id == temporary.id })
+    }
+
     fun testCurrentScopeIsReadBeforeGlobalCapAndStillFindsOldMessages() {
         val noisy = database.create("default")
         repeat(101) { turn(noisy, "noise-$it", "共同关键词 $it") }

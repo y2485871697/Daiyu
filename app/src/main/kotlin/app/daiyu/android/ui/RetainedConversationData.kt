@@ -109,7 +109,8 @@ internal class RetainedConversationData(private val database: ConversationDataba
         if (needle.isEmpty()) return MessageSearchPage(emptyList())
         return context.searchRead(cancellationSignal) { db ->
             val conversations = db.rawQuery(
-                "SELECT id,title FROM conversations" + (if (conversationId == null) "" else " WHERE id=?") +
+                "SELECT id,title FROM conversations WHERE id NOT GLOB 'voice-call-*'" +
+                    (if (conversationId == null) "" else " AND id=?") +
                     " ORDER BY pinned DESC,updated DESC,id ASC",
                 conversationId?.let { arrayOf(it) }, cancellationSignal,
             ).use { rows -> buildList {

@@ -18,9 +18,14 @@ class PetThinkingPickerActivityTest : WiredActivityTestCase() {
     private var pet: PetHost? = null
     private var modelChoices = 0
     private var modelRequests = 0
+    private fun createPetHost() = PetHost(
+        fixture.application,
+        PetModelPort { _, _ -> modelRequests++; PetCancel {} },
+        onOpenSettings = {}
+    )
     private fun mount() {
         mainThread {
-            pet = PetHost(fixture.application, PetModelPort { _, _ -> modelRequests++; PetCancel {} }, onOpenSettings = {})
+            pet = createPetHost()
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), false) {
                     PetSettingsContent(checkNotNull(pet), IndependentModelControls(true, false, "国模 / deepseek-v4.1-flash",
@@ -53,7 +58,8 @@ class PetThinkingPickerActivityTest : WiredActivityTestCase() {
     fun testChatThinkingButtonIsBeforeModelChevronAndOpensOnlyTheSharedPicker() {
         mount()
         val button = node("pet-thinking-button").fetchSemanticsNode().boundsInRoot
-        val arrow = node("pet-model-chevron").fetchSemanticsNode().boundsInRoot
+        val arrow = ui.onNodeWithTag("pet-model-chevron", useUnmergedTree = true)
+            .fetchSemanticsNode().boundsInRoot
         assertTrue(button.right <= arrow.left + 1f)
         assertTrue(kotlin.math.abs(button.center.y - arrow.center.y) <= 1f)
         openPicker()
@@ -83,7 +89,7 @@ class PetThinkingPickerActivityTest : WiredActivityTestCase() {
         mainThread {
             assertEquals(RequestReasoningEffort.MAX, AndroidPetStore(fixture.application).load().settings.reasoningEffort)
             checkNotNull(pet).close()
-            pet = PetHost(fixture.application, PetModelPort { _, _ -> modelRequests++; PetCancel {} }, onOpenSettings = {})
+            pet = createPetHost()
             assertEquals(RequestReasoningEffort.MAX, checkNotNull(pet).snapshot().pet.state.settings.reasoningEffort)
         }
         assertEquals(ReasoningEffort.LOW, fixture.controller.reasoningPreference.snapshot(null))

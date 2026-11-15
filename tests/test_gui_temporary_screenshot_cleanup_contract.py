@@ -76,7 +76,12 @@ class TemporaryScreenScreenshotCleanupContract(unittest.TestCase):
         self.assertIn('if (image != null || cleared)', cache)
         self.assertNotIn('.recycle()', cache)
         ui = (APP / 'ui/screens/chat/conversation/ToolScreenshotContent.kt').read_text()
-        self.assertIn('if (!controller.ready || controller.dataBusy) return', ui)
+        self.assertNotIn('if (!controller.ready || controller.dataBusy) return', ui)
+        effect = ui.split('    DisposableEffect(controller, owner, step.toolCallId, step.state,', 1)[1].split('    if (image == null)', 1)[0]
+        gate = 'if (!active || !controller.ready || controller.dataBusy) return@DisposableEffect onDispose { }'
+        self.assertIn(gate, effect)
+        self.assertLess(effect.index(gate), effect.index('controller.cachedToolScreenshot'))
+        self.assertLess(effect.index(gate), effect.index('controller.loadToolScreenshot'))
         self.assertIn('mutableStateOf(initial?.image)', ui)
         self.assertIn('mutableStateOf(initial == null)', ui)
         self.assertIn('controller.dataRevision', ui)

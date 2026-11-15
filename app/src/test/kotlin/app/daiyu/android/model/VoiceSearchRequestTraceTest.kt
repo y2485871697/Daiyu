@@ -3,6 +3,8 @@ package app.daiyu.android.model
 import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ModelSettings
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -15,8 +17,11 @@ import java.security.cert.Certificate
 import javax.net.ssl.HttpsURLConnection
 
 class VoiceSearchRequestTraceTest {
-    private class Connection(body: String, private val failWrite: Boolean = false) : HttpsURLConnection(URL("https://wire.invalid/v1/responses")) {
-        val sent = ByteArrayOutputStream()
+    private class Connection(body: String, private val failWrite: Boolean = false,
+                             private val afterWrite: () -> Unit = {}) : HttpsURLConnection(URL("https://wire.invalid/v1/responses")) {
+        val sent = object : ByteArrayOutputStream() {
+            override fun close() { super.close(); afterWrite() }
+        }
         override fun connect() { }
         override fun disconnect() { }
         override fun usingProxy() = false
@@ -47,12 +52,15 @@ class VoiceSearchRequestTraceTest {
         }
     }
 
-    private fun request(protocol: ProviderProtocol, enabled: Boolean, connection: Connection, sink: (ModelEvent) -> Unit = {}) {
+    private fun request(protocol: ProviderProtocol, enabled: Boolean, connection: Connection, sink: (ModelEvent) -> Unit = {},
+                        beforeNext: (ModelSession) -> Unit = {}) {
         val settings = ModelSettings("https://wire.invalid/v1", "search-fixture", "private-credential", false,
             protocol = protocol, requestOptions = ProviderRequestOptions(openAiWebSearchEnabled = enabled, voiceTextOnly = true))
         val model = if (protocol == ProviderProtocol.RESPONSES) ResponsesModel(settings) { connection }
             else NativeCompletionModel(settings, { connection })
-        model.open(emptyList(), emptyList<ToolDefinition>()).next(emptyList(), sink)
+        val session = model.open(emptyList(), emptyList<ToolDefinition>())
+        beforeNext(session)
+        session.next(emptyList(), sink)
     }
 
     private fun codes(): List<String> {
@@ -109,6 +117,67 @@ class VoiceSearchRequestTraceTest {
                 assertTrue(codes.contains("SEARCH_RESPONSE_INTERRUPTED"))
                 assertFalse(codes.contains("SEARCH_RUNNING"))
                 assertFalse(events.any { it is ModelEvent.NativeSearch })
+            }
+        } finally { RuntimeDiagnostics.enabled = false; RuntimeDiagnostics.clear() }
+    }
+
+    @Test fun cancellationBeforeSendAcknowledgementNeverClaimsCompletion() {
+        RuntimeDiagnostics.install(Files.createTempDirectory("voice-wire-cancel").toFile())
+        RuntimeDiagnostics.enabled = true
+        try {
+            for (protocol in listOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.RESPONSES)) {
+                RuntimeDiagnostics.clear()
+                lateinit var session: ModelSession
+                val connection = Connection("", afterWrite = { session.cancel() })
+                val events = mutableListOf<ModelEvent>()
+                val failure = runCatching {
+                    request(protocol, true, connection, events::add) { session = it }
+                }.exceptionOrNull()
+                assertNotNull(failure)
+                assertTrue(connection.sent.size() > 0)
+                val codes = codes()
+                assertEquals(1, codes.count { it == "SEARCH_SEND_ATTEMPTED" })
+                assertFalse(codes.contains("SEARCH_SEND_COMPLETED"))
+                assertTrue(codes.contains("SEARCH_RESPONSE_INTERRUPTED"))
+                assertFalse(events.any { it is ModelEvent.NativeSearch })
+            }
+        } finally { RuntimeDiagnostics.enabled = false; RuntimeDiagnostics.clear() }
+    }
+
+    @Test fun productionTransportReportsBodyCompletionNotWriterPreparation() {
+        RuntimeDiagnostics.install(Files.createTempDirectory("voice-wire-body").toFile())
+        RuntimeDiagnostics.enabled = true
+        try {
+            for (cancelBeforeExecute in listOf(true, false)) {
+                RuntimeDiagnostics.clear()
+                MockWebServer().use { server ->
+                    server.enqueue(MockResponse().setBody("fixture"))
+                    val wire = JSONObject().put("web_search_options", JSONObject())
+                    val trace = VoiceSearchRequestTrace(ProviderProtocol.CHAT_COMPLETIONS, wire)
+                    val connection = ModelHttpTransport.OkHttpModelConnection(
+                        server.url("/v1/chat/completions").newBuilder().host("127.0.0.1").build().toUrl(),
+                        ModelHttpTransport.client)
+                    try {
+                        connection.requestMethod = "POST"
+                        connection.doOutput = true
+                        val bytes = wire.toString().toByteArray(Charsets.UTF_8)
+                        connection.send(bytes.size.toLong()) { it.write(bytes) }
+                        assertFalse(codes().contains("SEARCH_SEND_COMPLETED"))
+                        if (cancelBeforeExecute) {
+                            connection.disconnect()
+                            val failure = runCatching { connection.responseCode { trace.sent() } }.exceptionOrNull()
+                            assertTrue(failure is java.io.IOException)
+                            assertEquals(0, server.requestCount)
+                            assertFalse(codes().contains("SEARCH_SEND_COMPLETED"))
+                        } else {
+                            assertEquals(200, connection.responseCode { trace.sent() })
+                            assertEquals(1, codes().count { it == "SEARCH_SEND_COMPLETED" })
+                            assertEquals(wire.toString(), requireNotNull(server.takeRequest(
+                                2, java.util.concurrent.TimeUnit.SECONDS)).body.readUtf8())
+                            trace.completed()
+                        }
+                    } finally { trace.close(cancelBeforeExecute); connection.disconnect() }
+                }
             }
         } finally { RuntimeDiagnostics.enabled = false; RuntimeDiagnostics.clear() }
     }

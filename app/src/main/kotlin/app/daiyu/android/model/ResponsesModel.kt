@@ -448,9 +448,11 @@ class ResponsesModel internal constructor(
                 trace.phase = ModelTransportPhase.SENDING
                 if (settings.requestOptions.voiceTextOnly) voiceSearch = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, wireRequest)
                 conn.send(requestBytes.size.toLong()) { requestBytes.writeTo(it, cancelled::get) }
-                voiceSearch?.sent()
                 checkCancelled()
-                val status = conn.responseCode { trace.phase = ModelTransportPhase.WAITING_HEADERS }
+                val status = conn.responseCode {
+                    trace.phase = ModelTransportPhase.WAITING_HEADERS
+                    voiceSearch?.sent()
+                }
                 trace.headersReceived()
                 checkCancelled()
                 if (status !in 200..299) {

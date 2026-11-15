@@ -148,9 +148,11 @@ class NativeCompletionModel internal constructor(
                 trace.phase = ModelTransportPhase.SENDING
                 if (settings.requestOptions.voiceTextOnly) voiceSearch = VoiceSearchRequestTrace(settings.protocol, request)
                 conn.send(bytes.size.toLong()) { bytes.writeTo(it, cancelled::get) }
-                voiceSearch?.sent()
                 checkCancelled()
-                val status = conn.responseCode { trace.phase = ModelTransportPhase.WAITING_HEADERS }
+                val status = conn.responseCode {
+                    trace.phase = ModelTransportPhase.WAITING_HEADERS
+                    voiceSearch?.sent()
+                }
                 trace.headersReceived()
                 checkCancelled()
                 if (status !in 200..299) throw ProviderHttpFailure.from(conn, status, cancelled::get, request = request)

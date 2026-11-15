@@ -89,9 +89,14 @@ internal fun headers(config: SpeechProviderConfig, vararg initial: Pair<String, 
 }
 
 /** Bytes are synthesis results, NOT evidence of playback start or permission to use a microphone. */
+enum class SpeechSynthesisFailureKind { REQUEST, TRANSPORT, HTTP_STATUS, RESPONSE_SIZE, EMPTY_RESPONSE, AUDIO_DECODE, AUDIO_SIZE }
+
+data class SpeechSynthesisFailure(val kind: SpeechSynthesisFailureKind, val httpStatus: Int?, val responseBytes: Int)
+
 class SpeechSynthesisClient(
     private val transport: VoiceHttpTransport,
     private val personalVoices: PersonalVoiceReference? = null,
+    private val onFailure: (SpeechSynthesisFailure) -> Unit = {},
 ) {
     suspend fun synthesize(
         config: SpeechProviderConfig,
@@ -99,9 +104,15 @@ class SpeechSynthesisClient(
         voice: String,
         doubaoPersonalVoice: DoubaoPersonalVoice? = null,
     ): ByteArray {
-        speechCheck(text.isNotBlank()) { "没有可朗读的文字" }
-        speechCheck(voice.isNotBlank()) { "请选择音色" }
+        var kind = SpeechSynthesisFailureKind.REQUEST
+        var status: Int? = null
+        var responseBytes = 0
+        fun report() {
+            try { onFailure(SpeechSynthesisFailure(kind, status, responseBytes)) } catch (_: Exception) { }
+        }
         return try {
+            speechCheck(text.isNotBlank()) { "没有可朗读的文字" }
+            speechCheck(voice.isNotBlank()) { "请选择音色" }
             currentCoroutineContext().ensureActive()
             val clone = voice.startsWith("mimo-local-")
             val request = if (clone) {
@@ -114,26 +125,36 @@ class SpeechSynthesisClient(
             } else if (config.engine == SpeechEngine.DOUBAO) {
                 DoubaoSpeech.request(config, text, voice, doubaoPersonalVoice)
             } else SpeechProtocols.request(config, text, voice)
+            kind = SpeechSynthesisFailureKind.TRANSPORT
             val response = try { transport.execute(request, MAX_AUDIO_BYTES) }
             catch (cancelled: CancellationException) { throw cancelled }
             catch (_: Exception) { throw VoiceProviderException("朗读网络请求失败") }
             currentCoroutineContext().ensureActive()
+            status = response.status.takeIf { it in 100..599 }
+            responseBytes = response.bytes.size
+            kind = SpeechSynthesisFailureKind.HTTP_STATUS
             speechCheck(response.status in 200..299) { "朗读接口 HTTP ${response.status}" }
+            kind = SpeechSynthesisFailureKind.RESPONSE_SIZE
             speechCheck(response.bytes.size <= MAX_AUDIO_BYTES) { "朗读音频超过大小限制" }
+            kind = SpeechSynthesisFailureKind.EMPTY_RESPONSE
             speechCheck(response.bytes.isNotEmpty()) { "朗读接口返回了空响应" }
+            kind = SpeechSynthesisFailureKind.AUDIO_DECODE
             val audio = when {
                 clone -> SpeechProtocols.decodeMimoClone(response.bytes)
                 config.engine == SpeechEngine.DOUBAO -> DoubaoSpeech.decodeResponse(response.contentType, response.bytes)
                 else -> SpeechProtocols.decode(config.engine, response.contentType, response.bytes)
             }
+            kind = SpeechSynthesisFailureKind.AUDIO_SIZE
             speechCheck(audio.isNotEmpty() && audio.size <= MAX_AUDIO_BYTES + 44) { "朗读音频为空或超过大小限制" }
             currentCoroutineContext().ensureActive()
             audio
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (safe: VoiceProviderException) {
+            report()
             throw safe
         } catch (_: Exception) {
+            report()
             // JSON/base64/network exceptions can contain user text, references or credentials.
             throw VoiceProviderException("朗读音频读取失败")
         }

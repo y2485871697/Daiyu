@@ -161,4 +161,61 @@ class VoiceSessionCoreTest {
         val next = gate.acquire(b) { cancelled++ }; assertTrue(gate.current(next))
         assertTrue(gate.cancel(b)); assertEquals(1, cancelled); assertFalse(gate.cancel(b))
     }
+    @Test fun punctuationOnlyTailDoesNotSubmitAnotherSynthesisOrBreakDrain() {
+        for (limit in listOf(32, 300)) {
+            val output = Output(); val states = mutableListOf<VoiceState>()
+            val chain = VoiceChain(AudioOwnerGate(), output, limit, states::add)
+            chain.begin(a)
+            val text = "回答！！。\"”**\n\u00a0"
+            text.forEach { chain.delta(a, it.toString()) }
+            chain.done(a, text)
+            assertEquals(listOf("回答！"), output.texts)
+            output.events.single().started()
+            assertEquals(VoicePhase.SPEAKING, states.last().phase)
+            output.events.single().completed()
+            assertEquals(listOf("回答！"), output.texts)
+            assertEquals(VoicePhase.COMPLETE, states.last().phase)
+            chain.close()
+        }
+    }
+
+    @Test fun punctuationOnlyAnswerDrainsLocallyWithoutPretendingAudioStarted() {
+        for (limit in listOf(32, 300)) {
+            val output = Output(); val states = mutableListOf<VoiceState>()
+            val chain = VoiceChain(AudioOwnerGate(), output, limit, states::add)
+            chain.begin(a)
+            "！！。\"”**\n\u00a0".forEach { chain.delta(a, it.toString()) }
+            chain.done(a)
+            assertTrue(output.texts.isEmpty())
+            assertEquals(VoicePhase.COMPLETE, states.last().phase)
+            assertFalse(states.last().firstSentenceStarted)
+            chain.close()
+        }
+    }
+
+    @Test fun punctuationSuppressionKeepsEmojiMathAndSupplementaryLetters() {
+        for (text in listOf("😀", "+＝", "𠀀", "还在。继续！！")) {
+            val output = Output(); val states = mutableListOf<VoiceState>()
+            val chain = VoiceChain(AudioOwnerGate(), output, states::add)
+            chain.begin(a); text.forEach { chain.delta(a, it.toString()) }; chain.done(a)
+            var index = 0
+            while (index < output.events.size) output.events[index++].completed()
+            assertEquals(if (text == "还在。继续！！") "还在。继续！" else text, output.texts.joinToString(""))
+            assertEquals(VoicePhase.COMPLETE, states.last().phase)
+            chain.close()
+        }
+    }
+
+    @Test fun skippedPunctuationStillCommitsTheExactFinalSnapshotPrefix() {
+        val output = Output(); val states = mutableListOf<VoiceState>()
+        val chain = VoiceChain(AudioOwnerGate(), output, states::add)
+        chain.begin(a); chain.delta(a, "！！")
+        assertTrue(output.texts.isEmpty())
+        chain.done(a, "！！回答。")
+        assertEquals(listOf("回答。"), output.texts)
+        output.events.single().completed()
+        assertEquals(VoicePhase.COMPLETE, states.last().phase)
+        chain.close()
+    }
+
 }

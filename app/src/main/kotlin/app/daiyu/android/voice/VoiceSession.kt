@@ -121,6 +121,8 @@ class ConfirmableTranscript {
     }
 }
 
+private val nonSpeechSegment = Regex("[\\p{P}\\p{Z}\\s]*")
+
 /** Speech chaining: speak complete sentences as soon as available, not each token. */
 class VoiceChain(private val gate: AudioOwnerGate, private val output: SpeechOutput,
     private val maxSegmentCodePoints: Int, private val publish: (VoiceState) -> Unit) {
@@ -236,7 +238,7 @@ class VoiceChain(private val gate: AudioOwnerGate, private val output: SpeechOut
             while (true) {
                 val token = lease ?: return
                 if (!gate.current(token) || busy || ended) return
-                while (pending.isNotEmpty() && pending.first().isBlank()) committed += pending.removeFirst()
+                while (pending.isNotEmpty() && nonSpeechSegment.matches(pending.first())) committed += pending.removeFirst()
                 if (pending.isEmpty()) {
                     if (final) finish(VoicePhase.COMPLETE)
                     // A terminal observer may begin and enqueue a new session reentrantly.

@@ -620,4 +620,30 @@ class RemoteVoiceHostPlayerAudioFocusTest {
         dispatcher.scheduler.runCurrent(); shadowOf(android.os.Looper.getMainLooper()).idle()
         assertEquals(SpeechPhase.STOPPED, host.state.value.phase); assertEquals(1, pcm.closes)
     }
+    @Test fun synthesisResponseRejectionIsDiagnosedBeforeNativePreparationWithoutRetry() {
+        val diagnostics = app.daiyu.android.diagnostics.RuntimeDiagnostics
+        diagnostics.install(java.nio.file.Files.createTempDirectory("speech-rejection").toFile())
+        diagnostics.clear(); diagnostics.enabled = true
+        try {
+            host.closeStrict()
+            host = newHost(transport = VoiceHttpTransport { _, _ ->
+                requests++
+                VoiceHttpResponse(429, "application/json", "private-response-body".toByteArray())
+            })
+            assertTrue(host.play("owner", "private-request", "private-speech"))
+            drainUntil { host.state.value.phase == SpeechPhase.ERROR }
+            diagnostics.awaitWrites()
+            val rows = diagnostics.export()
+            val failures = (0 until rows.length()).map(rows::getJSONObject)
+                .filter { it.optString("stage") == "SPEECH_SYNTHESIS" }
+            assertEquals(1, requests); assertTrue(media.isEmpty())
+            assertEquals(1, failures.size)
+            assertEquals("SPEECH_HTTP_REJECTED", failures.single().getString("code"))
+            assertEquals(429L, failures.single().getLong("revision_or_count"))
+            assertEquals("private-response-body".toByteArray().size.toLong(), failures.single().getLong("bytes_or_size"))
+            for (secret in listOf("private-response-body", "private-request", "private-speech", "fixture-only"))
+                assertFalse(rows.toString().contains(secret))
+        } finally { diagnostics.enabled = false; diagnostics.clear() }
+    }
+
 }

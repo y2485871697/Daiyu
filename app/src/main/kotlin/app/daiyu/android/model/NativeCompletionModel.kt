@@ -121,11 +121,12 @@ class NativeCompletionModel internal constructor(
             val headers = SessionGateway.headers(endpoint, sessionContext, settings.requestOptions.sessionGateway)
             val bytes = ImageRequestPreflight.prepare(request, settings, imagePlan, cancelled::get)
             var deliveryFailure: Exception? = null
+            var voiceSearch: VoiceSearchRequestTrace? = null
             val eventBuffer = StreamEventBuffer({ event ->
                 checkCancelled()
                 try { sink(event) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
             })
-            val deliver: (ModelEvent) -> Unit = eventBuffer::accept
+            val deliver: (ModelEvent) -> Unit = { event -> voiceSearch?.received(event); eventBuffer.accept(event) }
             var owned: ModelHttpConnection? = null
             val trace = ProviderRequestTrace()
             var configuringRequest = true
@@ -145,7 +146,9 @@ class NativeCompletionModel internal constructor(
                 headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 configuringRequest = false
                 trace.phase = ModelTransportPhase.SENDING
+                if (settings.requestOptions.voiceTextOnly) voiceSearch = VoiceSearchRequestTrace(settings.protocol, request)
                 conn.send(bytes.size.toLong()) { bytes.writeTo(it, cancelled::get) }
+                voiceSearch?.sent()
                 checkCancelled()
                 val status = conn.responseCode { trace.phase = ModelTransportPhase.WAITING_HEADERS }
                 trace.headersReceived()
@@ -157,6 +160,7 @@ class NativeCompletionModel internal constructor(
                 trace.reader(conn.inputStream).useProviderResponse { reader ->
                     val row = NativeCompletionStream.read(settings.protocol, reader, cancelled::get, deliver)
                     trace.completionReceived()
+                    voiceSearch?.completed()
                     checkCancelled()
                     app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImageNode(row)
                     val calls = NativeCompletionRequest.calls(settings.protocol, row)
@@ -182,6 +186,7 @@ class NativeCompletionModel internal constructor(
                 retry.failed(classified)
                 throw classified
             } finally {
+                voiceSearch?.close(cancelled.get() || Thread.currentThread().isInterrupted)
                 bytes.close()
                 try { owned?.errorStream?.close() } catch (_: Exception) {}
                 try { owned?.disconnect() } catch (_: Exception) {} finally { connection = null; connectionTrace = null }

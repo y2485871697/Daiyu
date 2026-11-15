@@ -132,8 +132,10 @@ class ResponsesModel internal constructor(
             val trace = ProviderRequestTrace(ModelRequestKind.RESUME)
             var conn: ModelHttpConnection? = null
             var configuringRequest = true
+            var voiceSearch: VoiceSearchRequestTrace? = null
             var deliveryFailure: Exception? = null
             val deliver: (ModelEventBatch) -> ModelDeliveryAck = { batch ->
+                batch.events.forEach { voiceSearch?.received(it) }
                 try { sink(batch) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
             }
             try {
@@ -148,8 +150,10 @@ class ResponsesModel internal constructor(
                 conn.setRequestProperty("Accept", "text/event-stream")
                 checkCancelled()
                 configuringRequest = false
+                if (settings.requestOptions.voiceTextOnly) voiceSearch = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, null)
                 val status = conn.responseCode { trace.phase = ModelTransportPhase.WAITING_HEADERS }
                 trace.headersReceived()
+                voiceSearch?.sent()
                 if (status !in 200..299) {
                     val retryAuth = retryAuthentication(status, authentication)
                     if (retryAuth == null && status != 429 && status !in 500..599) resumeAllowed = false
@@ -164,6 +168,7 @@ class ResponsesModel internal constructor(
                     decoder.read(it, cancelled::get, prefix = ownItems.toList(), acknowledgedSink = deliver)
                 }
                 trace.completionReceived()
+                voiceSearch?.completed()
                 acceptItems(items)
                 usable = true
                 resumeAllowed = false
@@ -187,6 +192,7 @@ class ResponsesModel internal constructor(
                     classified.failure == ModelFailure.AUTHENTICATION && rejectedAuthorization != null)
                 throw classified
             } finally {
+                voiceSearch?.close(cancelled.get() || Thread.currentThread().isInterrupted)
                 synchronized(postLock) { if (connection === conn) { connection = null; connectionTrace = null } }
                 try { conn?.disconnect() } catch (_: Exception) {}
             }
@@ -347,13 +353,15 @@ class ResponsesModel internal constructor(
             val uploaded = if (backgroundResume == null) imageFiles.resolve(wireRequest, imagePlan) else emptySet()
             val requestBytes = ImageRequestPreflight.prepare(wireRequest, settings, imagePlan, cancelled::get, videoPlan, uploaded)
             var deliveryFailure: Exception? = null
+            var voiceSearch: VoiceSearchRequestTrace? = null
             val eventBuffer = StreamEventBuffer({ event ->
                 checkCancelled()
                 try { sink(event) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
             })
-            val deliver: (ModelEvent) -> Unit = eventBuffer::accept
+            val deliver: (ModelEvent) -> Unit = { event -> voiceSearch?.received(event); eventBuffer.accept(event) }
             val deliverAcknowledged = acknowledgedSink?.let { target ->
                 { batch: ModelEventBatch ->
+                    batch.events.forEach { voiceSearch?.received(it) }
                     try { target(batch) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
                 }
             }
@@ -438,7 +446,9 @@ class ResponsesModel internal constructor(
                 checkCancelled()
                 configuringRequest = false
                 trace.phase = ModelTransportPhase.SENDING
+                if (settings.requestOptions.voiceTextOnly) voiceSearch = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, wireRequest)
                 conn.send(requestBytes.size.toLong()) { requestBytes.writeTo(it, cancelled::get) }
+                voiceSearch?.sent()
                 checkCancelled()
                 val status = conn.responseCode { trace.phase = ModelTransportPhase.WAITING_HEADERS }
                 trace.headersReceived()
@@ -456,6 +466,7 @@ class ResponsesModel internal constructor(
                         prefix = ownItems.toList(), acknowledgedSink = requireNotNull(deliverAcknowledged))
                     else ResponsesStream.readBuffered(reader, cancelled::get, deliver)
                     trace.completionReceived()
+                    voiceSearch?.completed()
                     checkCancelled()
                     acceptItems(items)
                     completedPost = true
@@ -488,6 +499,7 @@ class ResponsesModel internal constructor(
                     !((classified as? ModelRequestException)?.failure == ModelFailure.AUTHENTICATION && rejectedAuthorization != null)) resumeAllowed = false
                 throw classified
             } finally {
+                voiceSearch?.close(cancelled.get() || Thread.currentThread().isInterrupted)
                 requestBytes.close()
                 if (completedPost && pending.isEmpty()) imageFiles.closeAsync()
                 post?.invalidate()

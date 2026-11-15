@@ -176,4 +176,45 @@ class SpeechProtocolsTest {
         }
         assertThrows(VoiceProviderException::class.java) { SpeechProtocols.request(config(SpeechEngine.OPENAI, "https://user:password@relay.example/v1"), "t", "v") }
     }
+    @Test fun synthesisFailureRetainsOnlyTypedStageStatusAndSizeWithNoRetry() = runBlocking {
+        val cases = listOf(
+            VoiceHttpResponse(429, "application/json", "{\"error\":\"secret-provider-body\"}".toByteArray()) to SpeechSynthesisFailureKind.HTTP_STATUS,
+            VoiceHttpResponse(200, "audio/mpeg", byteArrayOf()) to SpeechSynthesisFailureKind.EMPTY_RESPONSE,
+            VoiceHttpResponse(200, "application/json", "secret-provider-body".toByteArray()) to SpeechSynthesisFailureKind.AUDIO_DECODE,
+        )
+        for ((response, expected) in cases) {
+            var calls = 0; val failures = mutableListOf<SpeechSynthesisFailure>()
+            val client = SpeechSynthesisClient(VoiceHttpTransport { _, _ -> calls++; response }, onFailure = failures::add)
+            try { client.synthesize(config(SpeechEngine.OPENAI), "private-speech", "voice"); fail("must reject") }
+            catch (failure: VoiceProviderException) {
+                assertFalse(failure.message.orEmpty().contains("secret-provider-body"))
+                assertNull(failure.cause)
+            }
+            assertEquals(1, calls)
+            assertEquals(listOf(SpeechSynthesisFailure(expected, response.status, response.bytes.size)), failures)
+            assertFalse(failures.toString().contains("private-speech"))
+            assertFalse(failures.toString().contains("secret-provider-body"))
+        }
+    }
+
+    @Test fun synthesisDiagnosticsDoNotTurnCancellationOrSuccessIntoFailure() = runBlocking {
+        val failures = mutableListOf<SpeechSynthesisFailure>()
+        val ok = SpeechSynthesisClient(VoiceHttpTransport { _, _ -> VoiceHttpResponse(200, "audio/mpeg", mp3) }, onFailure = failures::add)
+        assertArrayEquals(mp3, ok.synthesize(config(SpeechEngine.OPENAI), "private-speech", "voice"))
+        val cancelled = SpeechSynthesisClient(VoiceHttpTransport { _, _ -> throw kotlinx.coroutines.CancellationException("private-cancel") }, onFailure = failures::add)
+        try { cancelled.synthesize(config(SpeechEngine.OPENAI), "private-speech", "voice"); fail("cancel") }
+        catch (_: kotlinx.coroutines.CancellationException) { }
+        assertTrue(failures.isEmpty())
+    }
+
+    @Test fun diagnosticSinkFailureCannotReplaceTheSanitizedSynthesisError() = runBlocking {
+        val client = SpeechSynthesisClient(VoiceHttpTransport { _, _ -> throw java.io.IOException("private-network") },
+            onFailure = { throw IllegalStateException("private-diagnostic") })
+        try { client.synthesize(config(SpeechEngine.OPENAI), "private-speech", "voice"); fail("reject") }
+        catch (failure: VoiceProviderException) {
+            assertEquals("朗读网络请求失败", failure.message)
+            assertNull(failure.cause)
+        }
+    }
+
 }

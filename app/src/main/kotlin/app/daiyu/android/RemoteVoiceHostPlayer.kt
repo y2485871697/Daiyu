@@ -8,6 +8,7 @@ import android.os.Looper
 import app.daiyu.android.voice.*
 import app.daiyu.android.diagnostics.DiagnosticEvent
 import app.daiyu.android.diagnostics.DiagnosticLogStore
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import app.daiyu.android.voice.network.VoiceNetworkAdapters
 import app.daiyu.android.voice.providers.*
 import kotlinx.coroutines.*
@@ -108,7 +109,19 @@ internal class RemoteVoiceHostPlayer(
                         }
                     }
                     val account = if (frozen.doubaoResolver != null) frozen.doubaoResolver.invoke() else frozen.doubaoPersonal
-                    SpeechSynthesisClient(guarded, reference).synthesize(config.speech(), text, config.voice, account)
+                    SpeechSynthesisClient(guarded, reference, onFailure = { failure ->
+                        val code = when (failure.kind) {
+                            SpeechSynthesisFailureKind.REQUEST -> RuntimeDiagnostics.Code.SPEECH_REQUEST_INVALID
+                            SpeechSynthesisFailureKind.TRANSPORT -> RuntimeDiagnostics.Code.SPEECH_TRANSPORT_FAILED
+                            SpeechSynthesisFailureKind.HTTP_STATUS -> RuntimeDiagnostics.Code.SPEECH_HTTP_REJECTED
+                            SpeechSynthesisFailureKind.RESPONSE_SIZE -> RuntimeDiagnostics.Code.SPEECH_RESPONSE_TOO_LARGE
+                            SpeechSynthesisFailureKind.EMPTY_RESPONSE -> RuntimeDiagnostics.Code.SPEECH_RESPONSE_EMPTY
+                            SpeechSynthesisFailureKind.AUDIO_DECODE -> RuntimeDiagnostics.Code.SPEECH_AUDIO_REJECTED
+                            SpeechSynthesisFailureKind.AUDIO_SIZE -> RuntimeDiagnostics.Code.SPEECH_AUDIO_SIZE_INVALID
+                        }
+                        RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.SPEECH_SYNTHESIS, code,
+                            size = failure.responseBytes.toLong(), count = failure.httpStatus?.toLong() ?: -1)
+                    }).synthesize(config.speech(), text, config.voice, account)
                 }
                 diagnostics?.recordAsync(DiagnosticEvent.SPEECH_AUDIO_DECODED)
                 ensureActive()

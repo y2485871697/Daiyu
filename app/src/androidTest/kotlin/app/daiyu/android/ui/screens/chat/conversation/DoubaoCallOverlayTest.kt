@@ -171,7 +171,10 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
             click("doubao-call-hang-up")
             assertEquals(1, hangUps)
             val afterHangup = requests.size
-            ui.onNodeWithTag("doubao-call-hang-up").assertIsNotEnabled().performTouchInput { click() }
+            awaitMotionStart(0f)
+            ui.onNodeWithTag("doubao-call-hang-up").assertDoesNotExist()
+            ui.onNodeWithTag("doubao-call-hang-up", useUnmergedTree = true)
+                .assertIsNotEnabled().performTouchInput { click() }
             assertEquals(afterHangup, requests.size)
             advanceOverlayFrames(40)
             assertEquals(afterHangup, requests.size)

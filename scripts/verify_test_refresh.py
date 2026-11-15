@@ -65,7 +65,10 @@ def validate_build_group_only(before, after):
 def validate_build_validation_changes(before, after):
     if not isinstance(before, bytes) or not isinstance(after, bytes):
         raise ValueError('Raw workflow bytes required')
-    reviewed_route = b' if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest,app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest,app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi;'
+    reviewed_routes = (
+        b' if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest,app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest,app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi;',
+        b' if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "app.daiyu.android.QuestionBarrierIntegrationTest,app.daiyu.android.ConversationPaneSwitchActivityTest,app.daiyu.android.ui.screens.chat.conversation.MessageActionBarLayoutTest"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi;',
+    )
     handoff = b' test -s smoke/prelaunch-ready.txt && bash "$smoke_script"; code=$?; printf "%s\\n" "$code" > smoke/exit-code.txt; exit "$code"\'\n'
     old = before.splitlines(keepends=True)
     new = after.splitlines(keepends=True)
@@ -74,9 +77,13 @@ def validate_build_validation_changes(before, after):
         for index, (left, right) in enumerate(zip(old, new)):
             if (left.startswith(b"          script: bash -c 'set +e; smoke_script=scripts/smoke_boot.sh;") and
                     b'#' not in left and left.count(handoff) == 1 and left.endswith(handoff) and
-                    reviewed_route not in left and
-                    right == left[:-len(handoff)] + reviewed_route + handoff):
-                matches.append(index)
+                    right != left and right.startswith(left[:-len(handoff)]) and right.endswith(handoff)):
+                appended = right[len(left) - len(handoff):-len(handoff)]
+                for route in reviewed_routes:
+                    if route not in left and appended.startswith(route):
+                        appended = appended[len(route):]
+                if not appended:
+                    matches.append(index)
     if len(matches) == 1:
         new[matches[0]] = old[matches[0]]
     normalized = b''.join(new)

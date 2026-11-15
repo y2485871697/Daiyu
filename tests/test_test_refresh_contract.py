@@ -75,6 +75,30 @@ class TestRefreshContract(unittest.TestCase):
             validate_changes(['.github/workflows/build.yml'],
                              build_pair=(before + line, route_only + line.replace(b' test -s ', route + b' test -s ', 1)))
 
+    def test_build_workflow_accepts_only_exact_core_route_and_cumulative_reviewed_routes(self):
+        from verify_test_refresh import validate_build_validation_changes
+        line = b'          script: bash -c \'set +e; smoke_script=scripts/smoke_boot.sh; test -s smoke/prelaunch-ready.txt && bash "$smoke_script"; code=$?; printf "%s\\n" "$code" > smoke/exit-code.txt; exit "$code"\'\n'
+        previous = b' if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest,app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest,app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi;'
+        core = b' if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "app.daiyu.android.QuestionBarrierIntegrationTest,app.daiyu.android.ConversationPaneSwitchActivityTest,app.daiyu.android.ui.screens.chat.conversation.MessageActionBarLayoutTest"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi;'
+        before, grouped = self.build_group_fixture()
+        before += line
+        for base in (before, before.replace(b' test -s ', previous + b' test -s ', 1)):
+            after = base.replace(b' test -s ', core + b' test -s ', 1)
+            validate_build_validation_changes(base, after)
+            validate_changes(['.github/workflows/build.yml'], build_pair=(base, after))
+            for invalid in (
+                    after.replace(core, core + core),
+                    after.replace(core, core.replace(b'= smoke &&', b'= compile &&')),
+                    after.replace(core, core.replace(b'QuestionBarrierIntegrationTest,', b'UnknownTest,')),
+                    after.replace(core, core.replace(b'.smoke-validation-tools/scripts/smoke_boot.sh', b'scripts/other.sh')),
+                    after.replace(b'code=$?;', b'code=0;'),
+                    after.replace(b'test -s smoke/prelaunch-ready.txt', b'true'),
+                    after.replace(b'SIGNING: fixed', b'SIGNING: changed')):
+                with self.subTest(workflow=invalid), self.assertRaises(ValueError):
+                    validate_build_validation_changes(base, invalid)
+        cumulative = grouped + line.replace(b' test -s ', previous + core + b' test -s ', 1)
+        validate_changes(['.github/workflows/build.yml'], build_pair=(before, cumulative))
+
     def test_build_workflow_accepts_multiple_queue_expression_appends_only(self):
         before, after = self.build_group_fixture()
         tail = b"${{ inputs.mode == 'smoke' && '-timeline-divider' || '' }}"

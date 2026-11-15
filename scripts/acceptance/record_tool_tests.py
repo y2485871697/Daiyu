@@ -719,6 +719,7 @@ PANE_QUESTION_PLATFORM_CLASSES = (
     "app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest",
     "app.daiyu.android.ui.screens.chat.conversation.WorkflowDisclosureDirectionTest",
 )
+PANE_QUESTION_CORE_PLATFORM_CLASSES = PANE_QUESTION_PLATFORM_CLASSES[:3]
 PANE_QUESTION_MODULES = (
     "test_stream_question_projection_contract", "test_sidebar_selection_contract",
     "test_tool_receipt_snapshot_contract", "test_tool_receipt_pause_contract",
@@ -727,12 +728,15 @@ PANE_QUESTION_MODULES = (
     "test_streaming_occlusion_contract", "test_streaming_follow_contract",
     "test_workflow_disclosure_scope", "test_workflow_disclosure_coverage_contract",
     "test_disclosure_consistency_contract", "test_pane_question_smoke_scope",
-    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt", "test_test_refresh_contract",
     "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
 )
 
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PANE_QUESTION_CORE_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *PANE_QUESTION_MODULES, "-v"], "pane-question-core-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PANE_QUESTION_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *PANE_QUESTION_MODULES, "-v"], "pane-question-targeted"
@@ -962,7 +966,7 @@ def record(python):
         child_env = os.environ.copy()
         child_env["PYTHONPATH"] = str(Path("tests").resolve()) + os.pathsep + child_env.get("PYTHONPATH", "")
     validation_cwd = None
-    if scope in ("child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "timeline-divider-targeted", "task-scroll-targeted") or (
+    if scope in ("child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted") or (
             scope == "child-task-cards-targeted" and sorted(os.environ.get("SMOKE_TEST_CLASSES", "").split(","))
             == sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES)):
         validation_cwd = Path(__file__).resolve().parents[2]

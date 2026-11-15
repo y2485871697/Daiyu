@@ -281,10 +281,11 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         awaitTag(tag)
         mainThread { fixture.database.delete(conversation.id) }
         node(tag).performClick()
-        node("search-history-dialog").assertExists()
-        node("chat-draft").assertExists()
+        awaitTag("search-history-dialog")
+        node("search-history-dialog").assertIsDisplayed()
         backToChat(activity)
-        node("chat-draft").assertExists()
+        awaitTag("chat-draft")
+        node("chat-draft").assertIsDisplayed()
         assertEquals(0, fixture.opens.get())
     }
 

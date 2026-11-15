@@ -77,7 +77,7 @@ class RunGenerationToolsDeviceTest : InstrumentationTestCase() {
             }
             bitmap.recycle()
             val inline = Base64.getEncoder().encodeToString(png)
-            val response = if (invalidSibling) """{"data":[{"b64_json":"$inline"},{"bad":true}]}"""
+            val response = if (invalidSibling) """{"data":[{"b64_json":"$inline"},{"url":"http://unsafe.example/image.png"}]}"""
                 else """{"data":[{"b64_json":"$inline"}]}"""
             leaf = RunGenerationTools(config, token, task, "test-account", {
                 // reserve + finish precede registration. Blocking here models a registration worker

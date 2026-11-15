@@ -766,12 +766,12 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
             val raw = broken.toString()
             file.writeText(org.json.JSONObject(text).put("payload", raw)
                 .put("sha256", app.daiyu.android.context.PrivateBlobs.digest(raw.toByteArray(Charsets.UTF_8))).toString())
-            assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("导入失败"))
+            assertEquals("备份格式、校验或身份冲突", dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) })
             assertEquals(0, count("messages")); assertEquals(0, count("neutral_imports"))
             file.writeText(text)
             target.database.writableDatabase.execSQL("CREATE TRIGGER controller_bad_receipt AFTER INSERT ON neutral_imports " +
                 "BEGIN UPDATE generation_attempts SET outcome=X'01'; END")
-            assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("导入失败"))
+            assertEquals("备份格式、校验或身份冲突", dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) })
             for (table in listOf("messages", "generation_attempts", "child_tasks", "child_task_commands", "child_request_usage", "neutral_imports"))
                 assertEquals(table, 0, count(table))
             assertFalse(app.daiyu.android.backup.BackupHistoryRows.exists(
@@ -819,7 +819,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
             val bad = byteArrayOf(9, 8, 7)
             blob.writeBytes(bad)
             val beforeFailure = target.database.exportBackup()
-            assertTrue(dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("导入失败"))
+            assertEquals("备份格式、校验或身份冲突", dataOperation(target.controller) { target.controller.importUserBackup(Uri.fromFile(file), true) })
             assertTrue(bad.contentEquals(blob.readBytes()))
             assertEquals(beforeFailure, target.database.exportBackup())
             assertEquals(1, count("neutral_imports")); assertEquals(0, count("generation_outputs"))
@@ -914,11 +914,11 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
             assertTrue("selected scalar row is never authority", rejected)
             val changed = org.json.JSONObject(originalManifest).put("scope", "generation_" + "f".repeat(32))
             check(preferences.edit().putString(GenerationSettingsStore.KEY, changed.toString()).commit())
-            assertTrue(dataOperation { controller.exportUserBackup(Uri.fromFile(file), true) }.startsWith("导出失败"))
+            assertEquals("备份导出失败", dataOperation { controller.exportUserBackup(Uri.fromFile(file), true) })
             assertEquals(output.owner.accountScope, registered.accountScope)
             // Missing metadata must not adopt the live output row's scope either.
             check(preferences.edit().remove(GenerationSettingsStore.KEY).commit())
-            assertTrue(dataOperation { controller.exportUserBackup(Uri.fromFile(file), true) }.startsWith("导出失败"))
+            assertEquals("备份导出失败", dataOperation { controller.exportUserBackup(Uri.fromFile(file), true) })
             assertSame(output.resources, field(controller, "generationResources"))
             assertEquals(readsBefore, credentialOpens.get()); assertEquals(0, fixture.opens.get())
         } finally {
@@ -987,7 +987,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
             awaitControl("source ready") { source.controller.ready }
             // Failure before parsing; the old cached and uncached owner fences remain usable.
             file.writeBytes(byteArrayOf(0xc3.toByte(), 0x28))
-            assertTrue(dataOperation { controller.importUserBackup(Uri.fromFile(file), true) }.startsWith("导入失败"))
+            assertEquals("备份不是有效 UTF-8 文本", dataOperation { controller.importUserBackup(Uri.fromFile(file), true) })
             assertReadable(output)
 
             // Actual transaction rollback AFTER inserting an unrelated conversation: global
@@ -996,7 +996,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
             fixture.database.draft("keep existing draft")
             source.database.draft("conflicting incoming draft")
             file.writeText(source.database.exportBackup())
-            assertTrue(dataOperation { controller.importUserBackup(Uri.fromFile(file), false) }.startsWith("导入失败"))
+            assertEquals("备份格式、校验或身份冲突", dataOperation { controller.importUserBackup(Uri.fromFile(file), false) })
             assertFalse(fixture.database.conversations().any { it.id == appended.id })
             assertEquals("keep existing draft", fixture.database.draft())
             assertReadable(output)
@@ -1012,7 +1012,7 @@ class ControllerGenerationIntegrationTest : InstrumentationTestCase() {
 
             // The text importer's identity collision is a rollback, not owner replacement.
             file.writeText(source.database.exportBackup())
-            assertTrue(dataOperation { controller.importUserBackup(Uri.fromFile(file), false) }.startsWith("导入失败"))
+            assertEquals("备份格式、校验或身份冲突", dataOperation { controller.importUserBackup(Uri.fromFile(file), false) })
             assertReadable(output)
             assertEquals(oldRows, fixture.database.messages(output.conversation.id))
             val retainedReaders = (field(controller, "generationOutputReaders") as Map<*, *>).values.toList()

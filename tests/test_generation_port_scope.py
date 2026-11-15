@@ -159,3 +159,6 @@ class GenerationPortScopeTest(unittest.TestCase):
         self.assertIn('python3 .smoke-validation-tools/scripts/verify_smoke_source.py', workflow)
         self.assertIn('sha256sum -c SHA256SUMS', workflow)
         self.assertIn('test -s smoke/prelaunch-ready.txt && bash "$smoke_script"', workflow)
+        refresh = (ROOT / ".github/workflows/test-refresh-regression.yml").read_text()
+        self.assertIn("${{ inputs.smoke_classes == '" + ",".join(CLASSES) +
+                      "' && '-generation-port' || '' }}", refresh)

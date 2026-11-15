@@ -244,7 +244,7 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         awaitNodeTouchReady(node("local-model-delete:extra-local"))
         node("local-model-delete:extra-local").performClick()
         awaitUniqueTag("dialog-confirm")
-        awaitDialogTouchReady(node("dialog-confirm"))
+        awaitNodeTouchReady(node("dialog-confirm"))
         node("dialog-confirm").performClick()
         awaitVisualIdle()
         awaitControl("local delete completed") { !fixture.controller.dataBusy }

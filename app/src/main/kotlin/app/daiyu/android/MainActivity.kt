@@ -2355,6 +2355,7 @@ class MainActivity : ComponentActivity() {
                         onConversationSelected = { id -> selectPaneConversation(id) },
                         onConversationRename = { item -> editRetainedConversation(item, false) },
                         onConversationDelete = { item -> confirmDelete(item.id) },
+                        onConversationsDelete = { ids -> confirmDeleteConversations(ids) },
                         onMoveConversationToFolder = { item -> editRetainedConversation(item, true) },
                         onConversationTogglePin = { item -> guard { toggleRetainedPin(item.id) } },
                         onConversationExport = { item -> backupGuard { pickConversationExports(listOf(item.id)) } },
@@ -6620,23 +6621,32 @@ class MainActivity : ComponentActivity() {
         val conversation = retainedConversation(id)
         controller.database.organize(conversation.id, conversation.folder, !conversation.pinned); updatePane()
     }
-    private fun deleteRetainedConversation(id: String) {
-        if (pendingPaneConversationId == id) cancelPaneConversationSelection()
-        if (selected?.id?.value == id && revokeContextManagementEntry()) editorGeneration++
-        val conversation = retainedConversation(id)
-        check(controller.active?.conversationId != conversation.id && !controller.hasLiveChildTasks(conversation.id)) {
-            "请先停止此会话的运行和后台子任务"
+    private fun deleteRetainedConversation(id: String) = deleteRetainedConversations(setOf(id))
+    private fun deleteRetainedConversations(ids: Set<String>) {
+        require(ids.isNotEmpty())
+        val conversations = controller.database.conversations().filter { it.id.value in ids }
+        check(conversations.size == ids.size) { "所选会话已变化，请重新选择" }
+        check(conversations.none { controller.active?.conversationId == it.id || controller.hasLiveChildTasks(it.id) }) {
+            "请先停止所选会话的运行和后台子任务"
         }
-        controller.mutateGenerationOwners(setOf(id), completed = { success ->
+        if (pendingPaneConversationId in ids) cancelPaneConversationSelection()
+        if (selected?.id?.value in ids && revokeContextManagementEntry()) editorGeneration++
+        controller.mutateGenerationOwners(ids, completed = { success ->
             if (activityUsable() && success) {
-                if (selected?.id == conversation.id) select(null)
+                if (selected?.id?.value in ids) select(null)
                 updatePane()
             }
-        }, mutation = { controller.database.delete(conversation.id) })
+        }, mutation = { controller.database.deleteConversations(conversations.map { it.id }.toSet()) })
     }
     private fun confirmDelete(id: String) {
         prompt = ConfirmPrompt("删除会话", "", "删除", true,
             action = { guard { deleteRetainedConversation(id) } }, showCloseButton = false, deletionAppearance = true)
+    }
+    private fun confirmDeleteConversations(ids: List<String>) {
+        val owners = ids.toSet()
+        if (owners.isEmpty()) return
+        prompt = ConfirmPrompt("批量删除", "", "批量删除", true,
+            action = { guard { deleteRetainedConversations(owners) } }, showCloseButton = false, deletionAppearance = true)
     }
     private fun editRetainedConversation(item: ConversationSummaryUi, folder: Boolean) { guard { editConversation(item.id, folder) } }
     private fun editConversation(id: String, folder: Boolean) {

@@ -15,6 +15,18 @@ import subprocess
 import sys
 
 
+BATCH_DELETE_PLATFORM_CLASSES = (
+    "app.daiyu.android.ConversationBatchDeleteActivityTest",
+    "app.daiyu.android.SharedSheetSpacingActivityTest",
+)
+BATCH_DELETE_MODULES = (
+    "test_conversation_batch_delete_contract", "test_conversation_export_selection_contract",
+    "test_conversation_delete_close_contract", "test_shared_sheet_spacing_contract",
+    "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 SPEECH_PLATFORM_CLASS = "app.daiyu.android.voice.SpeechAudioFileAndroidTest"
 SPEECH_MODULES = (
     "test_chat_voice_feedback_contract", "test_toast_concise_copy_contract",
@@ -481,6 +493,9 @@ IME_MODULES = (
 
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(BATCH_DELETE_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *BATCH_DELETE_MODULES, "-v"], "conversation-batch-delete-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PROVIDER_SAVE_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *PROVIDER_SAVE_MODULES, "-v"], "provider-save-targeted"

@@ -16,7 +16,7 @@ class ConversationDeleteCloseContractTest(unittest.TestCase):
                            ("onDeleteTurn = { id ->", "}, onRetryStep =")):
             scoped = main.split(start, 1)[1].split(end, 1)[0]
             self.assertIn("showCloseButton = false", scoped)
-        self.assertEqual(3, main.count("showCloseButton = false"))
+        self.assertEqual(4, main.count("showCloseButton = false"))
 
     def test_prompt_and_preview_forward_close_visibility_without_changing_callbacks(self):
         main = (APP / "MainActivity.kt").read_text()

@@ -22,7 +22,7 @@ class SharedSheetSpacingContractTest(unittest.TestCase):
         self.assertIn('ConfirmPrompt("删除会话", "", "删除", true,', target)
         self.assertIn("showCloseButton = false, deletionAppearance = true", target)
         self.assertIn("action = { guard { deleteRetainedConversation(id) } }", target)
-        self.assertEqual(1, host.count("deletionAppearance = true"))
+        self.assertEqual(2, host.count("deletionAppearance = true"))
         dialog = source("ui/components/DaiyuDialogs.kt")
         self.assertIn("danger = destructive, deletionAppearance = deletionAppearance", dialog)
         self.assertIn("if (message.isNotBlank()) Text(message", dialog)

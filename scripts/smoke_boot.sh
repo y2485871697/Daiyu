@@ -42,6 +42,13 @@ if requested is not None and any(not re.fullmatch(
         r"app\.daiyu\.android\.(?:[A-Za-z_][A-Za-z_0-9]*\.)*[A-Za-z_][A-Za-z_0-9]*", name)
         for name in requested):
     raise ValueError("Expected comma-separated complete instrumentation class names")
+batch_delete_target = {
+    "app.daiyu.android.ConversationBatchDeleteActivityTest",
+    "app.daiyu.android.SharedSheetSpacingActivityTest",
+}
+batch_delete_only = mode == "smoke" and sorted(raw_filter.split(",")) == sorted(batch_delete_target)
+batch_delete_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
+                        for name in batch_delete_target}
 platform_only = mode == "smoke" and raw_filter == "app.daiyu.android.PlatformTest"
 platform_source = Path("app/src/androidTest/kotlin/app/daiyu/android/PlatformTest.kt")
 speech_target = {"app.daiyu.android.voice.SpeechAudioFileAndroidTest"}
@@ -305,7 +312,7 @@ conversation_date_target = "app.daiyu.android.storage.ConversationDateGroupingTe
 conversation_date_only = mode == "smoke" and raw_filter == conversation_date_target
 conversation_date_source = Path("app/src/androidTest/kotlin/app/daiyu/android/storage/ConversationDateGroupingTest.kt")
 classes = {}
-for path in sorted(ime_sources if ime_only else [conversation_date_source] if conversation_date_only else search_history_sources if search_history_only else provider_catalog_sources if provider_catalog_only else doubao_motion_sources if doubao_motion_only else workspace_entry_sources if workspace_entry_only else workflow_body_sources if workflow_body_only else workspace_import_sources if workspace_import_only else scroll_popup_sources if scroll_popup_only else [platform_source] if platform_only else compression_dialog_sources if compression_dialog_only else [assistant_picker_source] if assistant_picker_only else popup_title_sources if popup_title_only else [rename_presentation_source] if rename_presentation_only else [chat_status_bar_source] if chat_status_bar_only else popup_scroll_sources if popup_scroll_only else rendering_sources if rendering_only else Path("app/src/androidTest").rglob("*")):
+for path in sorted(batch_delete_sources if batch_delete_only else ime_sources if ime_only else [conversation_date_source] if conversation_date_only else search_history_sources if search_history_only else provider_catalog_sources if provider_catalog_only else doubao_motion_sources if doubao_motion_only else workspace_entry_sources if workspace_entry_only else workflow_body_sources if workflow_body_only else workspace_import_sources if workspace_import_only else scroll_popup_sources if scroll_popup_only else [platform_source] if platform_only else compression_dialog_sources if compression_dialog_only else [assistant_picker_source] if assistant_picker_only else popup_title_sources if popup_title_only else [rename_presentation_source] if rename_presentation_only else [chat_status_bar_source] if chat_status_bar_only else popup_scroll_sources if popup_scroll_only else rendering_sources if rendering_only else Path("app/src/androidTest").rglob("*")):
     if path.suffix not in {".kt", ".java"} or not path.is_file():
         continue
     if speech_only and path != speech_source:
@@ -385,7 +392,7 @@ if terminal_command_pager_only and (os.environ.get("SMOKE_API") != "all" or shar
     raise ValueError("TerminalCommandPagerTest requires smoke_api=all and its sole shard")
 if mode == "candidate" and shards not in (1, 4):
     raise ValueError("Candidate mode requires one diagnostic or four parallel shards per API")
-if not 1 <= shards <= 16 or not 0 <= shard < shards or (not conversation_date_only and not assistant_picker_only and not provider_catalog_only and not doubao_motion_only and not workflow_body_only and not workspace_import_only and not platform_only and not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pane_receipt_only and not pause_receipt_only and not linux_pin_only and not linux_settings_only and not chat_status_bar_only and not rename_presentation_only and not workspace_entry_only and len(classes) < shards):
+if not 1 <= shards <= 16 or not 0 <= shard < shards or (not batch_delete_only and not conversation_date_only and not assistant_picker_only and not provider_catalog_only and not doubao_motion_only and not workflow_body_only and not workspace_import_only and not platform_only and not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pane_receipt_only and not pause_receipt_only and not linux_pin_only and not linux_settings_only and not chat_status_bar_only and not rename_presentation_only and not workspace_entry_only and len(classes) < shards):
     raise ValueError("Invalid instrumentation shard")
 # Use one shared plan for both APIs, so allocation and completeness stay identical.
 import sys
@@ -405,7 +412,7 @@ Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n"
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,
-                discovery_scope="targeted" if ime_only or conversation_date_only or search_history_only or provider_catalog_only or doubao_motion_only or workspace_entry_only or workflow_body_only or workspace_import_only or scroll_popup_only or platform_only or compression_dialog_only or assistant_picker_only or popup_title_only or rename_presentation_only or chat_status_bar_only or speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or session_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pane_receipt_only or pause_receipt_only or linux_pin_only or linux_settings_only or terminal_screen_only or terminal_command_pager_only or composer_context_only or child_task_card_only or rendering_only or popup_scroll_only else "full",
+                discovery_scope="targeted" if batch_delete_only or ime_only or conversation_date_only or search_history_only or provider_catalog_only or doubao_motion_only or workspace_entry_only or workflow_body_only or workspace_import_only or scroll_popup_only or platform_only or compression_dialog_only or assistant_picker_only or popup_title_only or rename_presentation_only or chat_status_bar_only or speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or session_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pane_receipt_only or pause_receipt_only or linux_pin_only or linux_settings_only or terminal_screen_only or terminal_command_pager_only or composer_context_only or child_task_card_only or rendering_only or popup_scroll_only else "full",
                 total_tests=sum(classes.values()), all_classes=classes,
                 shards=[dict(index=index, expected_tests=sum(group.values()), classes=sorted(group))
                         for index, group in enumerate(groups)])

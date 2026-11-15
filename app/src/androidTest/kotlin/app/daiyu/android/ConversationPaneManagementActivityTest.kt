@@ -181,7 +181,7 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
             awaitUniqueTag("dialog-confirm")
             awaitDialogEnter(node("dialog-confirm"))
             ui.onNodeWithText("删除会话").assertIsDisplayed()
-            ui.onNodeWithText("确认删除此会话及其消息？").assertIsDisplayed()
+            ui.onNodeWithText("确认删除此会话及其消息？").assertDoesNotExist()
             ui.onNodeWithContentDescription("关闭", useUnmergedTree = true).assertDoesNotExist()
             node("dialog-cancel").assertIsDisplayed().assertHasClickAction()
             node("dialog-confirm").assertIsDisplayed().assertHasClickAction()

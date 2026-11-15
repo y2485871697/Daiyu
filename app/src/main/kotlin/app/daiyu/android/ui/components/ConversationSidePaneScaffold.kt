@@ -170,6 +170,7 @@ internal fun ConversationSidePaneScaffold(
     onConversationSelected: (String) -> Unit,
     onConversationRename: (ConversationSummaryUi) -> Unit,
     onConversationDelete: (ConversationSummaryUi) -> Unit,
+    onConversationsDelete: (List<String>) -> Unit = {},
     onMoveConversationToFolder: (ConversationSummaryUi) -> Unit = {},
     onConversationTogglePin: (ConversationSummaryUi) -> Unit = {},
     onConversationExport: (ConversationSummaryUi) -> Unit = {},
@@ -314,6 +315,7 @@ internal fun ConversationSidePaneScaffold(
                     onConversationSelected = onConversationSelected,
                     onConversationRename = onConversationRename,
                     onConversationDelete = onConversationDelete,
+                    onConversationsDelete = onConversationsDelete,
                     onMoveConversationToFolder = onMoveConversationToFolder,
                     onNewConversation = onNewConversation,
                     onConversationTogglePin = onConversationTogglePin,
@@ -363,6 +365,7 @@ private fun ConversationPanePanel(
     onConversationSelected: (String) -> Unit,
     onConversationRename: (ConversationSummaryUi) -> Unit,
     onConversationDelete: (ConversationSummaryUi) -> Unit,
+    onConversationsDelete: (List<String>) -> Unit = {},
     onMoveConversationToFolder: (ConversationSummaryUi) -> Unit = {},
     onConversationTogglePin: (ConversationSummaryUi) -> Unit = {},
     onConversationExport: (ConversationSummaryUi) -> Unit = {},
@@ -389,8 +392,8 @@ private fun ConversationPanePanel(
     LaunchedEffect(state.historyConversations) {
         selectedIds = selectedIds.intersect(state.historyConversations.map { it.id }.toSet())
     }
-    val selectedExportIds = state.historyConversations.filter { it.id in selectedIds }.map { it.id }
-    val batchExport = managing && selectedExportIds.size > 1
+    val selectedConversationIds = state.historyConversations.filter { it.id in selectedIds }.map { it.id }
+    val batchExport = managing && selectedConversationIds.size > 1
     val query = state.searchQuery.trim()
     val filterRunning = controlsState.filterRunning
     val filterCompleted = controlsState.filterCompleted
@@ -520,13 +523,18 @@ private fun ConversationPanePanel(
                                     else onConversationSelected(conversation.id)
                                 },
                                 onRename = { onConversationRename(conversation) },
-                                onDelete = { onConversationDelete(conversation) },
+                                onDelete = {
+                                    if (managing) onConversationsDelete(selectedConversationIds)
+                                    else onConversationDelete(conversation)
+                                },
+                                batchDelete = managing,
+                                deleteEnabled = !managing || selectedConversationIds.isNotEmpty(),
                                 onMoveToFolder = { onMoveConversationToFolder(conversation) },
                                 onTogglePin = { onConversationTogglePin(conversation) },
                                 batchExport = batchExport,
                                 exportEnabled = exportEnabled,
                                 onExport = {
-                                    if (batchExport) onConversationsExport(selectedExportIds)
+                                    if (batchExport) onConversationsExport(selectedConversationIds)
                                     else onConversationExport(conversation)
                                 },
                             )
@@ -935,6 +943,8 @@ private fun ConversationTextRow(
     onClick: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit,
+    batchDelete: Boolean,
+    deleteEnabled: Boolean,
     onMoveToFolder: () -> Unit,
     onTogglePin: () -> Unit,
     batchExport: Boolean,
@@ -1133,7 +1143,9 @@ private fun ConversationTextRow(
             DropdownMenuItem(
                 modifier = DrawerMenuItemModifier,
                 contentPadding = DrawerMenuItemPadding,
-                text = { Text(text = stringResource(R.string.action_delete), color = conversationPanePreviewPalette().danger) },
+                enabled = deleteEnabled,
+                text = { Text(text = stringResource(if (batchDelete) R.string.conversation_batch_delete else R.string.action_delete),
+                    color = conversationPanePreviewPalette().danger) },
                 leadingIcon = {
                     Icon(
                         imageVector = ConversationPanePreviewIcons.Trash,

@@ -368,7 +368,29 @@ class ConversationDatabase internal constructor(context: Context, private val af
     }
     fun draft(id: ConversationId, text: String) {check(writableDatabase.update("conversations",ContentValues().apply {put("draft",text)},"id=?",arrayOf(id.value))==1) {"会话不存在"}}
     fun rename(id: ConversationId, title: String) { require(title.isNotBlank());check(writableDatabase.update("conversations",ContentValues().apply {put("title",title)},"id=?",arrayOf(id.value))==1) {"会话不存在"}}
-    fun delete(id: ConversationId) { transaction { db ->
+    fun delete(id: ConversationId) { transaction { db -> deleteConversation(db, id) } }
+    fun deleteConversations(ids: Set<ConversationId>) {
+        require(ids.isNotEmpty())
+        transaction { db ->
+            ids.forEach { id ->
+                db.rawQuery("SELECT 1 FROM conversations WHERE id=? LIMIT 1", arrayOf(id.value)).use {
+                    check(it.moveToFirst()) { "所选会话已变化，请重新选择" }
+                }
+            }
+            ids.forEach { id ->
+                check(deleteConversation(db, id) == 1) { "会话删除未确认" }
+            }
+            ids.forEach { id ->
+                db.rawQuery("SELECT 1 FROM conversations WHERE id=? LIMIT 1", arrayOf(id.value)).use {
+                    check(!it.moveToFirst()) { "会话删除未确认" }
+                }
+                db.rawQuery("SELECT 1 FROM messages WHERE conversation_id=? LIMIT 1", arrayOf(id.value)).use {
+                    check(!it.moveToFirst()) { "消息删除未确认" }
+                }
+            }
+        }
+    }
+    private fun deleteConversation(db: SQLiteDatabase, id: ConversationId): Int {
         UsageStatisticsStore.retire(db, id.value)
         SQLiteMessageVideoStore.deleteConversation(db, id.value)
         db.delete(SQLiteGenerationOutputStore.TABLE, "conversation_id=?", arrayOf(id.value))
@@ -382,8 +404,8 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.delete("context_usage","branch_id=?",arrayOf(id.value))
         db.delete("messages","conversation_id=?",arrayOf(id.value))
         ConversationModelSelections.delete(db, id)
-        db.delete("conversations","id=?",arrayOf(id.value))
-    } }
+        return db.delete("conversations","id=?",arrayOf(id.value))
+    }
     internal fun storedMessage(db: SQLiteDatabase, conversation: ConversationId, messageId: String,
         verifyVideoWitness: Boolean = true, decodeReuse: CommitMessageDecodeReuse? = null): Message {
         val metadata = db.rawQuery("SELECT run_id,role,status FROM messages WHERE id=? AND conversation_id=?",

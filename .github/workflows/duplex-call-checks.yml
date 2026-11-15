@@ -36,10 +36,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
+          ref: ${{ inputs.expected_sha }}
+          fetch-depth: 0
       - name: 核对检查源码
         run: |
-          test -n "$EXPECTED_SHA"
-          python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+          python3 - <<'PY'
+          import os, re, subprocess
+          expected = os.environ['EXPECTED_SHA']
+          workflow = os.environ['GITHUB_SHA']
+          assert re.fullmatch('[0-9a-f]{40}', expected), 'invalid expected SHA'
+          assert re.fullmatch('[0-9a-f]{40}', workflow), 'invalid workflow SHA'
+          actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert actual == expected, 'checkout SHA mismatch'
+          subprocess.run(['git', 'merge-base', '--is-ancestor', actual, workflow], check=True)
+          with open(os.environ['GITHUB_ENV'], 'a') as env:
+              env.write('CHECK_SOURCE_SHA=' + actual + '\n')
+          PY
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         with:
           distribution: temurin
@@ -161,7 +173,7 @@ jobs:
               assert match and match.group(1) not in ('NO-SOURCE', 'SKIPPED'), task
           packages = [str(p) for p in root.rglob('*') if p.is_file() and p.suffix.lower() in ('.apk', '.aab', '.apks')]
           assert not packages, packages
-          record = dict(check_id=os.environ['CHECK_ID'], source_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
+          record = dict(check_id=os.environ['CHECK_ID'], source_sha=os.environ['CHECK_SOURCE_SHA'], workflow_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
                         attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), tests=sum(int(s.attrib['tests']) for s in suites),
                         scope=os.environ['CHECK_SCOPE'] + '-targeted', classes=sorted(names),
                         core_tests=sum(int(s.attrib['tests']) for s in core_suites), contracts=json.loads(Path('duplex-call-checks/contracts.json').read_text()),

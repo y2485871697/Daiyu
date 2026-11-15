@@ -49,7 +49,7 @@ class ImeFrameContractTest(unittest.TestCase):
         self.assertEqual(1, transfer.count('showSoftInput('))
         self.assertLess(transfer.index('showSoftInput('), transfer.index('hideChatInputIme(focus, keyboard, first)'))
         self.assertNotIn('showSoftInput(', transfer.split('hideChatInputIme(focus, keyboard, first)', 1)[1])
-        pointer = text.split('repeat(2)', 1)[1].split('assertRealApi26ImeBinding()', 1)[0]
+        pointer = text.split('fun testKeyboardKeepsComposerAboveImeAndDoesNotPanHeader()', 1)[1].split('assertRealApi26ImeBinding()', 1)[0]
         self.assertIn('performTouchInput {', pointer)
         self.assertLess(pointer.index('advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)'),
                         pointer.index('click()'))

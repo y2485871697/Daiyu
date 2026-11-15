@@ -64,8 +64,8 @@ class StreamingOcclusionContract(unittest.TestCase):
         follow = source.split("// Keep a single motion", 1)[1].split("// Read confirmation", 1)[0]
         self.assertIn("val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx", follow)
         self.assertIn("val frameVisibleBottom = frameLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx", follow)
-        self.assertIn("val currentFollowClearancePx by rememberUpdatedState(with(density) { 16.dp.roundToPx() })", source)
-        self.assertIn("bottom = composerBottomInset + 24.dp", source)
+        self.assertIn("val currentFollowClearancePx by rememberUpdatedState(with(density) { ChatTailClearance.roundToPx() })", source)
+        self.assertIn("bottom = composerBottomInset + ChatTailClearance", source)
         self.assertIn("val obscuredTail = if (currentOcclusionPx > 0)", follow)
         self.assertIn("(last.offset + last.size - visibleBottom).coerceAtLeast(0)", follow)
         self.assertIn("(frameLast.offset + frameLast.size - frameVisibleBottom).coerceAtLeast(0)", follow)
@@ -82,7 +82,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
         for token in ("maxHeight = Constraints.Infinity", "state.contentHeight = body.height",
                       "minOf(body.height, visibleHeight)", "body.height - height",
-                      "state.bounded && follows()", "maximum.toFloat()",
+                      "state.bounded && following && !state.followCatchup", "maximum.toFloat()",
                       "body.placeRelative(0, -state.scrollOffset.roundToInt())",
                       "layout(viewport.width, state.contentHeight)", "Modifier.onPlaced",
                       "list.localPositionOf(coordinates, Offset.Zero).y",
@@ -91,9 +91,9 @@ class StreamingOcclusionContract(unittest.TestCase):
             self.assertIn(token, viewport)
         self.assertNotIn("BottomFollowMotion()", viewport)
         self.assertNotIn("listState.layoutInfo", viewport)
-        self.assertIn("24.dp.roundToPx()", source)
+        self.assertIn("ChatTailClearance.roundToPx()", source)
         migration = source.split("// Unwrap only after terminal", 1)[1].split("val requestedIndex", 1)[0]
-        for token in ("revealedTurns[tail.listKey] != tail", "while (followBottom && abs(",
+        for token in ("revealedTurns[tail.listKey] != tail", "while (followBottom && (disclosureViewport.active != null || nestedTail.followCatchup ||",
                       "stopScroll(MutatePriority.PreventUserInput)",
                       "nestedTail.scrollOffset.roundToInt() - nestedTail.viewportOffset",
                       "listState.scrollToItem(index, offset + delta)"):
@@ -112,7 +112,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("val followOffset = if (body.height > currentViewportHeight) maximum else 0", measure)
         self.assertLess(measure.index("val currentViewportHeight ="), measure.index("val followOffset ="))
         self.assertNotIn("val followOffset = (body.height - viewportHeight()", viewport)
-        self.assertIn("state.scrollOffset = if (state.bounded && follows()) followOffset.toFloat()", viewport)
+        self.assertIn("state.scrollOffset = if (state.bounded && following && !state.followCatchup) followOffset.toFloat()", viewport)
         self.assertNotIn("if (state.bounded && follows()) maximum.toFloat()", viewport)
         self.assertIn("clipRect(bottom = bottom)", viewport)
         self.assertIn("state.viewportOffset.coerceIn(0, state.maxOffset)", viewport)
@@ -134,7 +134,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         for token in ("height = 120.dp", "height = 900.dp", "tailTop() > 40f * density",
                       "ui.mainClock.autoAdvance = false", "repeat(24)", "frame()",
                       'ui.onNodeWithTag("occlusion-tail").assertIsDisplayed()', "assertTailClearance()",
-                      "24f, (composer.top - bottom) / density", "observedPartialViewport",
+                      "ChatTailClearance.value, (composer.top - bottom) / density", "observedPartialViewport",
                       "finally", "ui.mainClock.autoAdvance = true"):
             self.assertIn(token, case)
 
@@ -142,9 +142,9 @@ class StreamingOcclusionContract(unittest.TestCase):
         source = CHAT.read_text()
         correction = source.split("fun correctFollowClearance() {", 1)[1].split("val requestedIndex", 1)[0]
         for token in ("val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey",
-                      "nestedTail.contentHeight <= layout.viewportSize.height", "11.dp.roundToPx() + 24.dp.roundToPx()",
+                      "nestedTail.contentHeight <= layout.viewportSize.height", "11.dp.roundToPx() + ChatTailClearance.roundToPx()",
                       "if (!shortBoundedTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return",
-                      "val tailClearance = if (shortBoundedTail)", "24.dp.roundToPx()",
+                      "val tailClearance = currentFollowClearancePx",
                       "dispatchRawDelta", "remeasurement.forceRemeasure()", "!canFollowBottom()",
                       "shortBoundedTail && last.size != nestedTail.contentHeight", "layout = listState.layoutInfo"):
             self.assertIn(token, correction)
@@ -152,16 +152,16 @@ class StreamingOcclusionContract(unittest.TestCase):
         case = device.split("fun testShortReplyGrowingPastViewportKeepsTailPinnedDuringOuterCatchup()", 1)[1].split("fun testManualReadingDrawsThrough", 1)[0]
         for token in ("for (shortHeight in listOf(160, 200))", "height = shortHeight.dp",
                       "shortViewport.config[SemanticsProperties.VerticalScrollAxisRange].value()",
-                      "24f, (composer.top - shortBottom) / density"):
+                      "ChatTailClearance.value, (composer.top - shortBottom) / density"):
             self.assertIn(token, case)
 
-    def test_drawing_clip_uses_full_list_not_the_reading_clearance(self):
+    def test_drawing_clip_protects_follow_clearance_but_retains_detached_backdrop(self):
         source = CHAT.read_text()
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
         drawing = viewport.split(".drawWithContent {", 1)[1].split(".scrollable", 1)[0]
         self.assertIn("list.size.height - origin - state.viewportOffset", drawing)
         self.assertIn("clipRect(bottom = bottom)", drawing)
-        self.assertNotIn("clearance()", drawing)
+        self.assertIn("if (protectClearance()) clearance() else 0", drawing)
         self.assertNotIn(".clipToBounds()", viewport)
         device = DEVICE.read_text()
         case = device.split("fun testManualReadingDrawsThroughClearanceInsteadOfExposingPageBackground()", 1)[1].split("fun testContinuousEveryFrameGrowth", 1)[0]
@@ -226,7 +226,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         live = source.split("fun testRealStreamingTextKeepsClearanceDuringIntermediateFrames()", 1)[1].split("fun testShortReply", 1)[0]
         for token in ["ui.mainClock.autoAdvance = false", "ui.runOnUiThread", "SemanticsProperties.Text",
                       "hasAnyAncestor(hasTestTag(\"chat-turn:tail\"))", "useUnmergedTree = true",
-                      "coordinates.positionInRoot().y + coordinates.size.height", "gap >= 24f",
+                      "coordinates.positionInRoot().y + coordinates.size.height", "gap >= ChatTailClearance.value",
                       "ui.mainClock.advanceTimeByFrame()", "sawNewestLine = assertLiveClearance(marker) || sawNewestLine",
                       "Newest streaming line must actually be displayed", "originalComposer.top, composer.top, 2f",
                       "originalComposer.bottom, composer.bottom, 2f", "finally", "ui.mainClock.autoAdvance = true"]:
@@ -253,7 +253,7 @@ class StreamingOcclusionContract(unittest.TestCase):
                       "positionInRoot().y", "coordinates.size.height", "boundsInRoot.top",
                       "testStreamingGrowthKeepsTailAboveComposer", "testComposerAndViewportChangesKeepFollowVisible",
                       "testTouchAndExactNavigationRetainScrollOwnership", "assertEquals(0, fixture.opens.get())",
-                      "val gap = (composerTop - tailBottom) / density", "gap >= 16f - 1f / density",
+                      "val gap = (composerTop - tailBottom) / density", "gap >= ChatTailClearance.value - 1f / density",
                       "repeat(2) { frame() }", "assertTailClearance()"]:
             self.assertIn(token, source)
 

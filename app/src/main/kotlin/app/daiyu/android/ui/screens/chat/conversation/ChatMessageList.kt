@@ -89,6 +89,8 @@ import kotlinx.coroutines.flow.collect
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
+internal val ChatTailClearance = 35.dp
+
 private class FollowClearanceLayout : RemeasurementModifier {
     var remeasurement: Remeasurement? = null
     var correcting = false
@@ -110,6 +112,7 @@ internal class StreamingTailViewport(initiallyBounded: Boolean) {
     var maxOffset by mutableStateOf(0)
     var contentHeight by androidx.compose.runtime.mutableIntStateOf(0)
     var boundaryDelta by mutableStateOf(0f)
+    var followCatchup by mutableStateOf(false)
     var viewportOffset = 0
     var itemOrigin by mutableStateOf<Float?>(null)
     var scroller: ScrollableState? = null
@@ -125,6 +128,7 @@ internal fun StreamingTailContainer(
     clearance: () -> Int,
     viewportHeight: () -> Int,
     onViewportMeasure: (() -> Unit)? = null,
+    protectClearance: () -> Boolean = follows,
     listViewportHeight: () -> Int = {
         listCoordinates()?.size?.height ?: (viewportHeight() + clearance())
     },
@@ -154,11 +158,11 @@ internal fun StreamingTailContainer(
         Layout(content = { Column(content = { content() }) }, modifier = Modifier
             .testTag("chat-stream-viewport:$itemKey")
             .drawWithContent {
-                // The finite reading window must not cut the backdrop above the floating editor.
+                // Following content stops at the safe edge; detached reading retains the editor backdrop.
                 val list = listCoordinates()?.takeIf { it.isAttached }
                 val origin = state.itemOrigin
-                val bottom = if (state.bounded && list != null && origin != null)
-                    (list.size.height - origin - state.viewportOffset).coerceAtLeast(0f)
+                val bottom = if ((state.bounded || protectClearance()) && list != null && origin != null)
+                    (list.size.height - origin - state.viewportOffset - if (protectClearance()) clearance() else 0).coerceAtLeast(0f)
                 else size.height
                 clipRect(bottom = bottom) { this@drawWithContent.drawContent() }
             }
@@ -178,11 +182,17 @@ internal fun StreamingTailContainer(
                 minOf(body.height, visibleHeight)
             } else body.height
             val maximum = (body.height - height).coerceAtLeast(0)
+            val following = follows()
+            if (protectClearance() && !following) state.followCatchup = true
+            if (!protectClearance()) state.followCatchup = false
+            if (following && state.followCatchup && state.itemOrigin?.let {
+                    it + body.height <= listViewportHeight() - clearance() + 1f
+                } == true) state.followCatchup = false
             state.maxOffset = maximum
             // Keep short replies at their top while the outer follower reveals appended rows.
             // Once the body fills a reading viewport, pin its tail to the actual visible slice.
             val followOffset = if (body.height > currentViewportHeight) maximum else 0
-            state.scrollOffset = if (state.bounded && follows()) followOffset.toFloat()
+            state.scrollOffset = if (state.bounded && following && !state.followCatchup) followOffset.toFloat()
                 else Snapshot.withoutReadObservation { state.scrollOffset.coerceIn(0f, maximum.toFloat()) }
             layout(body.width, height) {
                 body.placeRelative(0, -state.scrollOffset.roundToInt())
@@ -196,9 +206,13 @@ internal fun StreamingTailContainer(
             // placement. No assumption about LazyListState publishing a measure.
             val q = if (!state.bounded) 0 else {
                 val origin = state.itemOrigin
-                if (follows() && origin != null)
-                    (currentListHeight - clearance() - origin.roundToInt() - viewport.height).coerceIn(0, state.maxOffset)
-                else state.viewportOffset.coerceIn(0, state.maxOffset)
+                if (follows() && origin != null) {
+                    val desired = (currentListHeight - clearance() - origin.roundToInt() - viewport.height).coerceIn(0, state.maxOffset)
+                    // Let the outer list retire its hidden extent before handing the inner follower back its offset.
+                    if (state.followCatchup) desired.coerceIn(
+                        state.viewportOffset.coerceAtMost(state.scrollOffset.roundToInt()), state.scrollOffset.roundToInt())
+                    else desired
+                } else state.viewportOffset.coerceIn(0, state.maxOffset)
             }
             state.viewportOffset = q
             viewport.placeRelative(0, q)
@@ -307,7 +321,7 @@ internal fun ChatMessageList(
     val occlusionPx = with(density) { composerBottomInset.roundToPx() }
     val currentDensity by rememberUpdatedState(density.density)
     val currentOcclusionPx by rememberUpdatedState(occlusionPx)
-    val currentFollowClearancePx by rememberUpdatedState(with(density) { 16.dp.roundToPx() })
+    val currentFollowClearancePx by rememberUpdatedState(with(density) { ChatTailClearance.roundToPx() })
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
     val assistantTurns = remember(turns) { turns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey } }
@@ -360,15 +374,13 @@ internal fun ChatMessageList(
                 if (clearanceLayout.active && !clearanceLayout.correcting && nestedStates[itemKey]?.migrating != true) {
                     clearanceLayout.correcting = true
                     try {
-                        var remaining = delta
                         val viewport = nestedStates[itemKey]
-                        if (viewport != null && viewport.bounded && !viewport.migrating) {
-                            val before = viewport.scrollOffset
-                            viewport.scrollOffset = (before + remaining).coerceIn(0f, viewport.maxOffset.toFloat())
-                            remaining -= viewport.scrollOffset - before
+                        if (viewport?.bounded == true && listState.layoutInfo.visibleItemsInfo
+                                .any { it.key == itemKey && it.size != viewport.contentHeight }) {
+                            clearanceLayout.remeasurement?.forceRemeasure()
                         }
-                        consumed = delta - remaining
-                        if (abs(remaining) > .5f) consumed += listState.dispatchRawDelta(remaining)
+                        // Move the reading window with its content; an inner offset would clip the headers at its old top.
+                        consumed = listState.dispatchRawDelta(delta)
                         if (abs(consumed) > .5f) clearanceLayout.remeasurement?.forceRemeasure()
                     } finally { clearanceLayout.correcting = false }
                 }
@@ -383,14 +395,14 @@ internal fun ChatMessageList(
     fun correctFollowClearance() {
         synchronousTrace("daiyu.chat.restore-clearance") {
             val activeTail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
-            if (nestedTail.migrating || !clearanceLayout.active || clearanceLayout.correcting ||
+            if (nestedTail.migrating || nestedTail.followCatchup || !clearanceLayout.active || clearanceLayout.correcting ||
                 !canFollowBottom() || currentOcclusionPx <= 0 || !listState.canScrollForward) return
             val remeasurement = clearanceLayout.remeasurement ?: return
             var layout = listState.layoutInfo
             if (layout.viewportSize.height <= 0) return
             val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey &&
                 nestedTail.contentHeight > 0 && nestedTail.contentHeight <= layout.viewportSize.height -
-                currentOcclusionPx - with(density) { 11.dp.roundToPx() + 24.dp.roundToPx() }
+                currentOcclusionPx - with(density) { 11.dp.roundToPx() + ChatTailClearance.roundToPx() }
             if (!shortBoundedTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return
             var last = layout.visibleItemsInfo.lastOrNull {
                 it.index == currentTailIndex && it.key == currentTailKey
@@ -409,7 +421,7 @@ internal fun ChatMessageList(
                     } ?: return
                 }
                 // A short body keeps its header: move the outer list before drawing, not its inner offset.
-                val tailClearance = if (shortBoundedTail) with(density) { 24.dp.roundToPx() } else currentFollowClearancePx
+                val tailClearance = currentFollowClearancePx
                 val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - tailClearance
                 val correction = (last.offset + last.size - visibleBottom).coerceAtLeast(0)
                 if (correction == 0) return
@@ -509,20 +521,26 @@ internal fun ChatMessageList(
         // A following reader keeps the original bounded outer motion until its
         // virtual origin has caught the real content origin. Unwrapping then has
         // no visible jump and cannot pay the outstanding growth in one frame.
-        while (followBottom && abs(nestedTail.scrollOffset - nestedTail.viewportOffset) > 1f) {
+        while (followBottom && (disclosureViewport.active != null || nestedTail.followCatchup ||
+                abs(nestedTail.scrollOffset - nestedTail.viewportOffset) > 1f)) {
             withFrameNanos { }
             if (!ownsMigration()) return@LaunchedEffect
         }
         if (!ownsMigration()) return@LaunchedEffect
+        nestedTail.scroller?.stopScroll(MutatePriority.PreventUserInput)
+        if (!ownsMigration()) return@LaunchedEffect
+        listState.stopScroll(MutatePriority.PreventUserInput)
+        withFrameNanos { }
+        if (!ownsMigration()) return@LaunchedEffect
+        while (followBottom && (disclosureViewport.active != null || nestedTail.followCatchup ||
+                abs(nestedTail.scrollOffset - nestedTail.viewportOffset) > 1f)) {
+            withFrameNanos { }
+            if (!ownsMigration()) return@LaunchedEffect
+        }
         nestedTail.migrating = true
         var unwrapped = false
         var committed = false
         try {
-            nestedTail.scroller?.stopScroll(MutatePriority.PreventUserInput)
-            if (!ownsMigration()) return@LaunchedEffect
-            listState.stopScroll(MutatePriority.PreventUserInput)
-            withFrameNanos { }
-            if (!ownsMigration()) return@LaunchedEffect
             // Before: y + q - a. After: y - delta. Thus delta = a - q.
             val delta = nestedTail.scrollOffset.roundToInt() - nestedTail.viewportOffset
             val index = listState.firstVisibleItemIndex
@@ -830,7 +848,7 @@ internal fun ChatMessageList(
                 do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
             }
         },
-            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 11.dp, bottom = composerBottomInset + 24.dp),
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 11.dp, bottom = composerBottomInset + ChatTailClearance),
             verticalArrangement = Arrangement.spacedBy(26.dp)) {
             items(turns, key = { it.listKey }, contentType = { if (it is ChatTurnUi.User) "user" else "assistant" }) { turn ->
                 val turnContent: @Composable () -> Unit = {
@@ -886,8 +904,9 @@ internal fun ChatMessageList(
                         StreamingTailContainer(viewportState, { clearanceLayout.coordinates }, turn.listKey,
                             userScrollEnabled = pageActive && !initialPositionPending && !retainingRows && presentationActive,
                             follows = { turn.listKey == assistantOwnerKey && followBottom && (initialPositionPending || canFollowBottom()) },
-                            clearance = { currentOcclusionPx + with(density) { 24.dp.roundToPx() } },
-                            viewportHeight = { viewportHeightPx.intValue - currentOcclusionPx - with(density) { 11.dp.roundToPx() + 24.dp.roundToPx() } },
+                            clearance = { currentOcclusionPx + currentFollowClearancePx },
+                            protectClearance = { turn.listKey == assistantOwnerKey && followBottom },
+                            viewportHeight = { viewportHeightPx.intValue - currentOcclusionPx - with(density) { 11.dp.roundToPx() + ChatTailClearance.roundToPx() } },
                             listViewportHeight = { viewportHeightPx.intValue },
                             content = turnContent)
                     } else turnContent()

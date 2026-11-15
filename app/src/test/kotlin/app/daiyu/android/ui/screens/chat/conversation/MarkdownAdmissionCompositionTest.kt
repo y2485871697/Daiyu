@@ -138,7 +138,7 @@ class MarkdownAdmissionCompositionTest {
         val text = prefix + "字".repeat(500)
         fun projection(text: String) = MarkdownProjection(listOf(text), mapOf(text to MarkdownParser.parse(text)), defaultMarkdownParser)
         val sources = mutableStateOf(listOf(MarkdownTypingSource("answer", prefix)))
-        val parsed = mutableStateOf(projection(prefix))
+        val parsed = mutableStateOf(projectMarkdown(listOf(prefix)))
         val complete = mutableStateOf(false)
         var reveal: MarkdownReveal? = null
         var advances = 0
@@ -165,7 +165,8 @@ class MarkdownAdmissionCompositionTest {
             assertEquals(0, advances)
             parsed.value = projection(text)
             repeat(5) { frame() }
-            assertTrue(reveal!!.limit("answer") in prefix.length + 1 until text.length)
+            assertTrue("Accepted projection must advance only part of the suffix: visible=${reveal!!.limit("answer")}",
+                reveal!!.limit("answer") in prefix.length + 1 until text.length)
             assertTrue(advances > 0)
             repeat(25) { frame() }
             assertEquals(text.length, reveal!!.limit("answer"))

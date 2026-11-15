@@ -465,7 +465,8 @@ WORKFLOW_DISCLOSURE_PLATFORM_CLASSES = tuple("app.daiyu.android.ui.screens.chat.
 ))
 WORKFLOW_DISCLOSURE_MODULES = WORKFLOW_BODY_MODULES + (
     "test_reasoning_flow_stability_contract", "test_streaming_occlusion_contract",
-    "test_streaming_follow_contract", "test_workflow_disclosure_scope",
+    "test_streaming_follow_contract", "test_workflow_disclosure_scope", "test_workflow_disclosure_coverage_contract",
+    "test_disclosure_consistency_contract",
 )
 
 

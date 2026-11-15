@@ -59,10 +59,16 @@ internal data class WorkflowDisclosureContext(
 )
 internal val LocalWorkflowDisclosureContext = staticCompositionLocalOf<WorkflowDisclosureContext?> { null }
 
-internal class WorkflowDisclosureMotion(private val context: WorkflowDisclosureContext?) {
+internal class WorkflowDisclosureMotion(
+    private val context: WorkflowDisclosureContext?,
+    private val collapseUp: Boolean = false,
+) {
     var upwards by mutableStateOf(context?.let { it.outputActive() && it.viewport.follows() } == true)
         private set
     val alignment: Alignment.Vertical get() = if (upwards) Alignment.Bottom else Alignment.Top
+    val collapseAlignment: Alignment.Vertical get() = if (collapseUp) Alignment.Top else alignment
+    private var anchorAtTop = false
+    private var anchorTop = 0f
     private var header: LayoutCoordinates? = null
     private var container: LayoutCoordinates? = null
     private var anchorBottom = 0f
@@ -92,13 +98,17 @@ internal class WorkflowDisclosureMotion(private val context: WorkflowDisclosureC
         if (viewport != null && viewport.active === this && anchorGesture == viewport.gesture) {
             if (!viewport.canAnchor()) viewport.active = null
             else {
-                val delta = coordinates.positionInWindow().y + coordinates.size.height - anchorBottom
+                val delta = if (anchorAtTop) coordinates.positionInWindow().y - anchorTop
+                    else coordinates.positionInWindow().y + coordinates.size.height - anchorBottom
                 if (abs(delta) > .5f) context?.let {
                     val consumed = viewport.correctAnchor(it.itemKey, delta)
                     if (abs(delta - consumed) > .5f) {
                         // At a scroll boundary, retain only the edge that the viewport can actually hold.
-                        anchorBottom += delta - consumed
-                        viewport.bounds()?.let { safe -> anchorBottom = minOf(anchorBottom, safe.bottom) }
+                        if (anchorAtTop) anchorTop += delta - consumed
+                        else {
+                            anchorBottom += delta - consumed
+                            viewport.bounds()?.let { safe -> anchorBottom = minOf(anchorBottom, safe.bottom) }
+                        }
                     }
                 }
             }
@@ -128,16 +138,19 @@ internal class WorkflowDisclosureMotion(private val context: WorkflowDisclosureC
         if (viewport != null) {
             viewport.followingOnPress = false
             if (following) viewport.resumeFollow()
-            viewport.active = if (upwards) this else null
+            anchorAtTop = collapseUp && !opening
+            viewport.active = if (upwards || anchorAtTop) this else null
             anchorGesture = viewport.gesture
             container?.takeIf { it.isAttached }?.let {
-                anchorBottom = it.positionInWindow().y + it.size.height
+                anchorTop = it.positionInWindow().y
+                anchorBottom = anchorTop + it.size.height
                 viewport.bounds()?.let { safe -> anchorBottom = minOf(anchorBottom, safe.bottom) }
             } ?: run { viewport.active = null }
         }
     }
 
     fun observeExpanded(value: Boolean) {
+        if (!value && expanded && !manualChange && collapseUp) toggle(opening = false)
         if (value && !expanded && !manualChange && !cycleChosen) {
             cycleChosen = chooseDirection(context?.viewport?.follows?.invoke() == true)
         }
@@ -153,9 +166,13 @@ internal class WorkflowDisclosureMotion(private val context: WorkflowDisclosureC
 }
 
 @Composable
-internal fun rememberWorkflowDisclosureMotion(key: String, visibility: MutableTransitionState<Boolean>): WorkflowDisclosureMotion {
+internal fun rememberWorkflowDisclosureMotion(
+    key: String,
+    visibility: MutableTransitionState<Boolean>,
+    collapseUp: Boolean = false,
+): WorkflowDisclosureMotion {
     val context = LocalWorkflowDisclosureContext.current
-    val motion = remember(key, context) { WorkflowDisclosureMotion(context) }
+    val motion = remember(key, context, collapseUp) { WorkflowDisclosureMotion(context, collapseUp) }
     motion.observeExpanded(visibility.targetState)
     val idle = visibility.isIdle
     val closed = !visibility.currentState

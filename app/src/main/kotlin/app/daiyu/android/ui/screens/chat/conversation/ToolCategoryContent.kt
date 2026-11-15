@@ -1,7 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
-import app.daiyu.android.ui.screens.settings.SettingsExpandableContent
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.foundation.border
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -173,9 +173,14 @@ private fun Document(document: ToolDisclosureUi, showTitle: Boolean = true) {
 @Composable
 private fun Disclosure(title: String, tag: String, body: @Composable () -> Unit) {
     var open by remember(title) { mutableStateOf(false) }
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-        ToolDisclosureHeader(title, open, Modifier.testTag(tag)) { open = !open }
-        SettingsExpandableContent(open) { body() }
+    val visibility = remember(title) { MutableTransitionState(open) }
+    visibility.targetState = open
+    val disclosure = rememberWorkflowDisclosureMotion("$tag:$title", visibility)
+    Column(Modifier.fillMaxWidth().then(disclosure.containerModifier), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        ToolDisclosureHeader(title, open, Modifier.testTag(tag).then(disclosure.headerModifier)) {
+            disclosure.toggle(opening = !open); open = !open
+        }
+        WorkflowExpandableContent(visibility, disclosure) { body() }
     }
 }
 

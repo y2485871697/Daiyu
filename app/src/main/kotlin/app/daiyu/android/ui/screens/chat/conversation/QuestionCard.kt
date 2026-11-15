@@ -1,7 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
-import app.daiyu.android.ui.screens.settings.SettingsExpandableContent
+import androidx.compose.animation.core.MutableTransitionState
 import app.daiyu.android.ui.app.DaiyuPalette
 import app.daiyu.android.ui.components.daiyuInputContainerColor
 import app.daiyu.android.ui.components.imeCursorBrush
@@ -150,6 +150,9 @@ private fun QuestionCardContent(
     var expanded by remember(owner) {
         mutableStateOf(confirmedAnswer == null || draft.reply == Reply.SAVED_REFRESH_FAILED)
     }
+    val visibility = remember(owner) { MutableTransitionState(expanded) }
+    visibility.targetState = expanded
+    val disclosure = rememberWorkflowDisclosureMotion(owner.storageKey, visibility)
     val headingInteraction = remember { MutableInteractionSource() }
     val headingFocused by headingInteraction.collectIsFocusedAsState()
     val headingStatus = when {
@@ -168,7 +171,7 @@ private fun QuestionCardContent(
     }
     val submitEnabled = editable && validSelection
     Column(
-        modifier.testTag("question-card").fillMaxWidth().clip(shape)
+        modifier.testTag("question-card").fillMaxWidth().then(disclosure.containerModifier).clip(shape)
             .background(colors.surface)
             .drawWithContent {
                 drawContent()
@@ -179,8 +182,9 @@ private fun QuestionCardContent(
             .border(1.dp, colors.line, shape).padding(1.dp),
     ) {
         Row(
-            Modifier.fillMaxWidth().testTag("question-toggle").heightIn(min = 40.dp)
+            Modifier.fillMaxWidth().testTag("question-toggle").then(disclosure.headerModifier).heightIn(min = 40.dp)
                 .clickable(interactionSource = headingInteraction, indication = null, role = Role.Button) {
+                    disclosure.toggle(opening = !expanded)
                     expanded = !expanded
                 }
                 .then(if (headingFocused) Modifier.border(1.dp, colors.accent, RoundedCornerShape(12.dp)) else Modifier)
@@ -197,7 +201,7 @@ private fun QuestionCardContent(
             Icon(DaiyuIcons.ChevronDown, null, Modifier.size(10.dp).settingsDisclosureRotation(expanded, expandedDegrees = 180f),
                 tint = colors.muted)
         }
-        SettingsExpandableContent(expanded) {
+        WorkflowExpandableContent(visibility, disclosure) {
             QuestionDivider(colors.line)
             Column(Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 12.dp)) {
                 Text(value.question.question, color = colors.text, style = questionTextStyle(16, 1.6f))

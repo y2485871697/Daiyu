@@ -14,6 +14,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -77,11 +78,16 @@ internal fun ChildTaskReceiptContent(details: ToolCategoryDetailsUi) {
             return@Column
         }
         rich.entries.forEachIndexed { index, entry ->
-            ChildTaskFrame(Modifier.testTag("tool-child-receipt:$index")) {
+            var expanded by rememberSaveable(index, entry.title) { mutableStateOf(false) }
+            val visibility = remember(index, entry.title) { MutableTransitionState(expanded) }
+            visibility.targetState = expanded
+            val disclosure = rememberWorkflowDisclosureMotion("receipt:$index:${entry.title}", visibility)
+            ChildTaskFrame(Modifier.testTag("tool-child-receipt:$index").then(disclosure.containerModifier)) {
                 val status = entry.fields.firstOrNull { it.label == "状态" }?.value ?: "状态未确认"
-                var expanded by rememberSaveable(index, entry.title) { mutableStateOf(false) }
-                Row(Modifier.fillMaxWidth().heightIn(min = 28.dp).testTag("tool-child-receipt-header:$index")
-                    .conversationClickable(onClickLabel = if (expanded) "收起子任务" else "展开子任务") { expanded = !expanded }
+                Row(Modifier.fillMaxWidth().heightIn(min = 28.dp).testTag("tool-child-receipt-header:$index").then(disclosure.headerModifier)
+                    .conversationClickable(onClickLabel = if (expanded) "收起子任务" else "展开子任务") {
+                        disclosure.toggle(opening = !expanded); expanded = !expanded
+                    }
                     .semantics { stateDescription = if (expanded) "已展开" else "已折叠" }, verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(entry.title, Modifier.weight(1f), style = MiuixTheme.textStyles.footnote1,
@@ -92,7 +98,9 @@ internal fun ChildTaskReceiptContent(details: ToolCategoryDetailsUi) {
                         .settingsDisclosureRotation(expanded, expandedDegrees = 180f).testTag("tool-child-receipt-arrow:$index"),
                         tint = conversationColors().muted)
                 }
-                if (expanded) ChildTaskProgressContent(entry.documents.firstOrNull()?.text, status, "receipt-$index", entry.title)
+                WorkflowExpandableContent(visibility, disclosure) {
+                    ChildTaskProgressContent(entry.documents.firstOrNull()?.text, status, "receipt-$index", entry.title)
+                }
             }
         }
         if (rich.entries.isEmpty()) rich.prose?.let { notice ->

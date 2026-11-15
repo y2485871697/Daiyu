@@ -89,8 +89,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         val tailBottom = coordinates.positionInRoot().y + coordinates.size.height
         val composerTop = ui.onNodeWithTag("occlusion-composer").fetchSemanticsNode().boundsInRoot.top
         val gap = (composerTop - tailBottom) / density
-        assertTrue("Streaming tail must keep at least 16dp clear of composer: gap=${gap}dp",
-            gap >= 16f - 1f / density)
+        assertTrue("Streaming tail must retain the fixed composer clearance: gap=${gap}dp",
+            gap >= ChatTailClearance.value - 1f / density)
     }
 
     private fun frame() {
@@ -200,7 +200,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     if (tool != null && tool.boundsInRoot.height >= tool.size.height - 1f) {
                         sawNewTool = true
                         assertTrue("A fully revealed new tool must still clear the composer",
-                            tool.boundsInRoot.bottom <= composer.top - 16f * density + 1f)
+                            tool.boundsInRoot.bottom <= composer.top - ChatTailClearance.value * density + 1f)
                     }
                 }
                 assertTrue("The outer follower must actually reveal each new tool", sawNewTool)
@@ -352,7 +352,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 val shortTail = ui.onNodeWithTag("occlusion-tail").fetchSemanticsNode().layoutInfo.coordinates
                 val shortBottom = shortTail.positionInRoot().y + shortTail.size.height
                 assertEquals("Even short growth stays above the composer on its first drawn frame",
-                    24f, (composer.top - shortBottom) / density, 2f / density)
+                    ChatTailClearance.value, (composer.top - shortBottom) / density, 2f / density)
             }
             ui.runOnUiThread { height = 900.dp }
             var observedPartialViewport = false
@@ -364,7 +364,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 val coordinates = ui.onNodeWithTag("occlusion-tail").fetchSemanticsNode().layoutInfo.coordinates
                 val bottom = coordinates.positionInRoot().y + coordinates.size.height
                 assertEquals("Latest content remains pinned while the outer origin catches up",
-                    24f, (composer.top - bottom) / density, 2f / density)
+                    ChatTailClearance.value, (composer.top - bottom) / density, 2f / density)
             }
             assertTrue("Regression must exercise a positive outer origin", observedPartialViewport)
         } finally { ui.mainClock.autoAdvance = true }
@@ -546,4 +546,86 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         ui.onNodeWithTag("occlusion-tail").assertIsNotDisplayed()
         assertEquals(0, fixture.opens.get())
     }
+
+    fun testFollowGapStaysFixedWhenNewContentArrivesDuringDisclosureAndAfterHandoff() {
+        verifyDisclosureGap(500)
+    }
+
+    fun testShortDisclosureCatchupUsesTheSameFrameBudget() {
+        verifyDisclosureGap(60)
+    }
+
+    private fun verifyDisclosureGap(bodyHeight: Int) {
+        var appended by mutableStateOf(0.dp)
+        var streaming by mutableStateOf(true)
+        val work = WorkProcessUi(emptyList(), "已完成")
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            density = LocalDensity.current.density
+            Box(Modifier.size(320.dp, 420.dp).testTag("gap-host")) {
+                ChatConversationLayers(Modifier.size(320.dp, 420.dp), messages = { inset ->
+                    ChatMessageList(List(6) { ChatTurnUi.User("gap-history-$it", "history $it") } +
+                        ChatTurnUi.Assistant("gap-tail", status = if (streaming) RunStatus.RUNNING else RunStatus.COMPLETED,
+                            isStreaming = streaming),
+                        ChatScreenActions(), scrollRequest = ChatScrollRequest(1), composerBottomInset = inset,
+                        turnExtras = {
+                            WorkProcessCard(work, "gap-work", content = {
+                                Box(Modifier.fillMaxWidth().height(80.dp).background(Color.Magenta))
+                            })
+                            Box(Modifier.fillMaxWidth().height(bodyHeight.dp + appended).background(Color.Magenta))
+                            Box(Modifier.fillMaxWidth().height(8.dp).background(Color.Magenta).testTag("gap-end"))
+                        })
+                }, composer = { Box(Modifier.fillMaxWidth().height(96.dp).testTag("gap-composer")) })
+            }
+        } } }
+        ui.waitForIdle()
+        // Navigate within the bounded tail without a new touch so opening preserves the following intent.
+        // The long fixture's top header may be offscreen; use its semantic action to begin the same disclosure policy.
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.onNodeWithTag("work-process-header").performClick()
+            ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            ui.runOnUiThread { appended = 52.dp }
+            var previous: Float? = null
+            var sawUnbounded = false
+            repeat(90) { index ->
+                if (index == 2) ui.runOnUiThread { streaming = false }
+                if (index == 60) {
+                    val viewport = ui.onNodeWithTag("chat-stream-viewport:gap-tail").fetchSemanticsNode()
+                    assertEquals("Terminal catchup must really unwrap before the next disclosure", 0f,
+                        viewport.config[SemanticsProperties.VerticalScrollAxisRange].maxValue(), 1f)
+                    assertTrue("Unbounded viewport must retain its full content height",
+                        viewport.layoutInfo.coordinates.size.height >= (bodyHeight + 60) * density)
+                    sawUnbounded = true
+                    ui.onNodeWithTag("work-process-header").performClick()
+                    ui.runOnUiThread { appended += 52.dp }
+                }
+                frame()
+                val host = ui.onNodeWithTag("gap-host")
+                val hostBounds = host.fetchSemanticsNode().boundsInRoot
+                val composer = ui.onNodeWithTag("gap-composer").fetchSemanticsNode().boundsInRoot
+                val pixels = host.captureToImage().toPixelMap()
+                val x = (hostBounds.width / 2f).toInt()
+                val gapTop = (composer.top - hostBounds.top - ChatTailClearance.value * density + 2f).toInt()
+                val gapBottom = (composer.top - hostBounds.top - 2f).toInt()
+                for (y in gapTop..gapBottom) {
+                    val sample = pixels[x, y]
+                    assertFalse("Following output cannot paint into any part of the fixed composer gap",
+                        sample.red > .9f && sample.blue > .9f && sample.green < .1f)
+                }
+                val end = ui.onNodeWithTag("gap-end").fetchSemanticsNode().layoutInfo.coordinates
+                val bottom = end.positionInRoot().y + end.size.height
+                previous?.let { before ->
+                    assertTrue("Disclosure handoff cannot snap the appended backlog in one frame", before - bottom <= 14f * density)
+                }
+                previous = bottom
+            }
+            assertTrue("The fixture must exercise terminal unbounded handoff", sawUnbounded)
+        } finally { ui.mainClock.autoAdvance = true }
+        ui.waitForIdle()
+        val end = ui.onNodeWithTag("gap-end").fetchSemanticsNode().layoutInfo.coordinates
+        val composer = ui.onNodeWithTag("gap-composer").fetchSemanticsNode().boundsInRoot
+        assertEquals("The final visible tail uses the same fixed gap", ChatTailClearance.value,
+            (composer.top - end.positionInRoot().y - end.size.height) / density, 2f / density)
+    }
+
 }

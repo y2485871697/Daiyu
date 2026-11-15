@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -128,10 +129,15 @@ internal fun ChildTaskDisclosure(
 ) {
     val colors = MiuixTheme.colorScheme
     var expanded by rememberSaveable(row.owner) { mutableStateOf(false) }
-    ChildTaskFrame(Modifier.testTag("tool-child-frame:${row.owner.childRunId}")) {
+    val visibility = remember(row.owner) { MutableTransitionState(expanded) }
+    visibility.targetState = expanded
+    val disclosure = rememberWorkflowDisclosureMotion(subAgentStatusItemKey(row.owner), visibility)
+    ChildTaskFrame(Modifier.testTag("tool-child-frame:${row.owner.childRunId}").then(disclosure.containerModifier)) {
         Row(Modifier.fillMaxWidth().testTag("tool-child-summary:${row.owner.childRunId}")
-            .heightIn(min = 28.dp)
-            .conversationClickable(onClickLabel = if (expanded) "收起子任务" else "展开子任务") { expanded = !expanded }
+            .then(disclosure.headerModifier).heightIn(min = 28.dp)
+            .conversationClickable(onClickLabel = if (expanded) "收起子任务" else "展开子任务") {
+                disclosure.toggle(opening = !expanded); expanded = !expanded
+            }
             .semantics { stateDescription = if (expanded) "已展开" else "已折叠" },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -147,9 +153,11 @@ internal fun ChildTaskDisclosure(
                 .settingsDisclosureRotation(expanded, expandedDegrees = 180f).testTag("tool-child-arrow:${row.owner.childRunId}"),
                 tint = colors.onSurfaceVariantSummary)
         }
-        if (expanded) {
-            details()
-            controls()
+        WorkflowExpandableContent(visibility, disclosure) {
+            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                details()
+                controls()
+            }
         }
     }
 }

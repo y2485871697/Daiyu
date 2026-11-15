@@ -66,9 +66,9 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     var overrideStopped by rememberSaveable(ownerKey) { mutableStateOf(stopped) }
     val currentOverride = expandedOverride.takeIf { overrideFinished == finishing && overrideStopped == stopped }
     val expanded = currentOverride ?: (!stopped && !finished)
-    val visibility = remember(ownerKey, stopped) { MutableTransitionState(expanded) }
+    val visibility = remember(ownerKey) { MutableTransitionState(expanded) }
     visibility.targetState = expanded
-    val disclosure = rememberWorkflowDisclosureMotion(ownerKey, visibility)
+    val disclosure = rememberWorkflowDisclosureMotion(ownerKey, visibility, collapseUp = true)
     val fullyClosed = visibility.isIdle && !visibility.currentState && !visibility.targetState
     var contentMounted by remember(ownerKey) { mutableStateOf(false) }
     val disclosureHandoffReady = reasoningReady && fullyClosed && !contentMounted
@@ -123,7 +123,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
             }
         }
         AnimatedVisibility(visibility, enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment),
-            exit = fadeOut() + shrinkVertically(shrinkTowards = disclosure.alignment)) {
+            exit = fadeOut() + shrinkVertically(shrinkTowards = disclosure.collapseAlignment)) {
             DisposableEffect(ownerKey) {
                 contentMounted = true
                 onDispose { contentMounted = false }

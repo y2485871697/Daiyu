@@ -171,7 +171,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     }
                     val composer = ui.onNodeWithTag("chat-composer-surface").fetchSemanticsNode().boundsInRoot
                     val gap = (composer.top - lastTextBottom) / density
-                    assertTrue("Live final text must clear the composer: gap=${gap}dp", gap >= 24f)
+                    assertTrue("Live final text must clear the composer: gap=${gap}dp", gap >= ChatTailClearance.value - 1f / density)
                     assertEquals("Text growth must not move composer left", originalComposer.left, composer.left, 2f)
                     assertEquals("Text growth must not move composer top", originalComposer.top, composer.top, 2f)
                     assertEquals("Text growth must not move composer right", originalComposer.right, composer.right, 2f)

@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -14,6 +15,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -71,7 +76,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         mountList(following = true)
         val header = ui.onNodeWithTag("work-process-header").fetchSemanticsNode().boundsInRoot
         val listTop = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot.top
-        val safeBottom = ui.onNodeWithTag("direction-composer").fetchSemanticsNode().boundsInRoot.top - 16f * density
+        val safeBottom = ui.onNodeWithTag("direction-composer").fetchSemanticsNode().boundsInRoot.top - ChatTailClearance.value * density
         assertTrue("Fixture must distinguish follow priority from the upper-half fallback", header.center.y < (listTop + safeBottom) / 2f)
         val anchor = bottom()
         ui.mainClock.autoAdvance = false
@@ -93,7 +98,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
     private fun assertHalf(lower: Boolean) {
         val center = ui.onNodeWithTag("work-process-header").fetchSemanticsNode().boundsInRoot.center.y
         val listTop = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot.top
-        val safeBottom = ui.onNodeWithTag("direction-composer").fetchSemanticsNode().boundsInRoot.top - 16f * density
+        val safeBottom = ui.onNodeWithTag("direction-composer").fetchSemanticsNode().boundsInRoot.top - ChatTailClearance.value * density
         assertEquals("Fixture header must be in the requested safe half", lower, center >= (listTop + safeBottom) / 2f)
     }
 
@@ -140,7 +145,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         ui.onNodeWithTag("direction-body").assertExists()
     }
 
-    fun testDetachedLowerHeaderExpandsUpAndCollapseUsesTheSameEdge() {
+    fun testDetachedLowerHeaderExpandsUpAndWorkflowCollapseShrinksTowardTop() {
         mountList(following = false, lower = true)
         assertHalf(lower = true)
         val anchor = bottom()
@@ -155,11 +160,12 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             repeat(60) {
                 ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
                 assertDirection(true)
-                assertEquals("Collapse must retain the same edge on every frame", anchor, bottom(), 2f)
+                val surface = ui.onNodeWithTag("work-process-surface").fetchSemanticsNode()
+                assertTrue("Workflow collapse must reduce its detail height", surface.size.height > 0)
             }
         } finally { ui.mainClock.autoAdvance = true }
         ui.onNodeWithTag("direction-body").assertDoesNotExist()
-        assertEquals(originalTop, top(), 2f)
+        assertTrue("Workflow remains visible after its fixed upward collapse", bottom() > top())
     }
 
     fun testDirectionStaysFrozenUntilFullyClosedAndNextCycleUsesTheNewState() {
@@ -257,6 +263,195 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         ui.onNodeWithTag("reported-reasoning-content:reasoning").performTouchInput { click() }; ui.waitForIdle()
         assertDirection(true, "reported-reasoning-header:reasoning")
         ui.onNodeWithTag("reported-reasoning-content:reasoning").assertDoesNotExist()
+    }
+
+
+
+    fun testWorkflowManualAndAutomaticCollapseBothKeepTheHeaderAndLiftTheBottom() {
+        for (closing in listOf("manual", "complete", "stop")) {
+            var running by mutableStateOf(true)
+            var stopped by mutableStateOf(false)
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val viewport = remember { WorkflowDisclosureViewport({ true }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { false }, { _, _ -> 0f }) }
+                CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember {
+                    WorkflowDisclosureContext(viewport, "collapse-fixture") { true }
+                }) {
+                    Column { WorkProcessCard(WorkProcessUi(emptyList(), "fixture", running = running), "collapse-fixture", stopped = stopped,
+                        content = { Box(Modifier.height(120.dp).testTag("collapse-body")) }) }
+                }
+            } } }
+            ui.waitForIdle()
+            val fixedTop = top()
+            val originalBottom = bottom()
+            ui.mainClock.autoAdvance = false
+            try {
+                when (closing) {
+                    "complete" -> ui.runOnUiThread { running = false }
+                    "stop" -> ui.runOnUiThread { stopped = true }
+                    else -> touchHeader()
+                }
+                var sawIntermediate = false
+                var previousBottom = originalBottom
+                repeat(40) {
+                    ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                    assertEquals("Closing workflow never pulls its header downward", fixedTop, top(), 1f)
+                    val currentBottom = bottom()
+                    assertTrue("Workflow bottom moves upward while closing: $closing", currentBottom <= previousBottom + 1f)
+                    if (currentBottom < originalBottom - 1f &&
+                        ui.onAllNodesWithTag("collapse-body").fetchSemanticsNodes().isNotEmpty()) sawIntermediate = true
+                    previousBottom = currentBottom
+                }
+            } finally { ui.mainClock.autoAdvance = true }
+            assertTrue("Every closing path must retain real intermediate animation frames: $closing", sawIntermediate)
+            ui.onNodeWithTag("collapse-body").assertDoesNotExist()
+            assertTrue("Fixed upward collapse must remove real height", bottom() < originalBottom - 60f)
+        }
+    }
+
+    fun testWorkflowCollapsePolicyIsAlwaysTopButToolPolicyKeepsItsCycleEdge() {
+        val viewport = WorkflowDisclosureViewport({ true }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { true }, { _, _ -> 0f })
+        val context = WorkflowDisclosureContext(viewport, "collapse") { true }
+        val workflow = WorkflowDisclosureMotion(context, collapseUp = true)
+        val tool = WorkflowDisclosureMotion(context)
+        assertEquals(androidx.compose.ui.Alignment.Bottom, workflow.alignment)
+        assertEquals(androidx.compose.ui.Alignment.Top, workflow.collapseAlignment)
+        assertEquals(androidx.compose.ui.Alignment.Bottom, tool.collapseAlignment)
+    }
+
+    private var supplementalFollowing by mutableStateOf(false)
+    private var supplementalOutputActive by mutableStateOf(false)
+    private val supplementalKinds = listOf("question", "category", "child-live", "child-receipt")
+
+    private fun supplementalHeader(kind: String) = when (kind) {
+        "question" -> "question-toggle"
+        "category" -> "tool-entries"
+        "child-live" -> "tool-child-summary:child"
+        else -> "tool-child-receipt-header:0"
+    }
+
+    private fun mountSupplemental(kind: String, following: Boolean, outputActive: Boolean, lower: Boolean) {
+        supplementalFollowing = following
+        supplementalOutputActive = outputActive
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            var safe by remember { mutableStateOf<Rect?>(null) }
+            val viewport = remember { WorkflowDisclosureViewport({ supplementalFollowing }, { safe }, {}, { false }, { _, _ -> 0f }) }
+            Box(Modifier.size(320.dp, 420.dp).onGloballyPositioned { safe = it.boundsInWindow() }) {
+                CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember {
+                    WorkflowDisclosureContext(viewport, "supplemental") { supplementalOutputActive }
+                }) {
+                    Column {
+                        if (lower) Box(Modifier.height(260.dp))
+                        when (kind) {
+                            "question" -> {
+                                val owner = app.daiyu.android.domain.question.QuestionIdentity("direction", "run", "owner", "call")
+                                val question = app.daiyu.android.domain.question.UserQuestion("direction", "Choose a direction", listOf(
+                                    app.daiyu.android.domain.question.QuestionOption("keep", "Keep"),
+                                    app.daiyu.android.domain.question.QuestionOption("change", "Change")))
+                                QuestionCard(owner, app.daiyu.android.domain.question.QuestionRecord(owner.storageKey, question,
+                                    answer = app.daiyu.android.domain.question.QuestionAnswer.Selected("keep")), false,
+                                    submit = { _, _, _ -> fail("Opening saved question must not submit") })
+                            }
+                            "category" -> ToolCategoryContent("memory", ToolCategoryDetailsUi("fixture", notice = "",
+                                rich = ToolRichDetailsUi(entries = listOf(ToolRichEntryUi("entry",
+                                    listOf(ToolFieldUi("value", "content")))))))
+                            "child-live" -> ChildTaskDisclosure(SubAgentStatusRow(
+                                app.daiyu.android.domain.delegation.ChildRunOwner("chat", "run", "group", 1, "child", "message"),
+                                "worker", "已完成"), details = { Box(Modifier.height(60.dp)) }, controls = {})
+                            else -> ChildTaskReceiptContent(ToolCategoryDetailsUi("fixture", notice = "",
+                                rich = ToolRichDetailsUi(entries = listOf(ToolRichEntryUi("worker",
+                                    listOf(ToolFieldUi("状态", "已完成")), listOf(ToolDisclosureUi("result", "content")))))))
+                        }
+                    }
+                }
+            }
+        } } }
+        ui.waitForIdle()
+    }
+
+    private fun assertSupplementalDirection(following: Boolean, outputActive: Boolean, lower: Boolean, expected: Boolean) {
+        for (kind in supplementalKinds) {
+            mountSupplemental(kind, following, outputActive, lower)
+            val header = supplementalHeader(kind)
+            ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
+            assertDirection(expected, header)
+            ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
+            assertDirection(expected, header)
+        }
+    }
+
+    fun testAllSupplementalDisclosuresUseActiveStreamingFollowPriority() =
+        assertSupplementalDirection(following = true, outputActive = true, lower = false, expected = true)
+
+    fun testAllSupplementalDisclosuresAtIdleBottomUseTheUpperHalf() =
+        assertSupplementalDirection(following = true, outputActive = false, lower = false, expected = false)
+
+    fun testAllSupplementalDisclosuresDetachedInUpperHalfExpandDown() =
+        assertSupplementalDirection(following = false, outputActive = true, lower = false, expected = false)
+
+    fun testAllSupplementalDisclosuresDetachedInLowerHalfExpandUp() =
+        assertSupplementalDirection(following = false, outputActive = true, lower = true, expected = true)
+
+    fun testSupplementalCycleKeepsItsEdgeWhenStreamingEndsAndRechoosesAfterClose() {
+        for (kind in supplementalKinds) {
+            mountSupplemental(kind, following = true, outputActive = true, lower = false)
+            val header = supplementalHeader(kind)
+            ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
+            assertDirection(true, header)
+            mainThread { supplementalFollowing = false; supplementalOutputActive = false }
+            ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
+            assertDirection(true, header)
+            ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
+            assertDirection(false, header)
+        }
+    }
+
+    fun testNestedWorkflowAndToolMoveTheirReadingWindowInsteadOfClippingTheIdentity() {
+        val step = WorkStepUi("nested-tool", "fixture", "", WorkStepState.OK)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            density = LocalDensity.current.density
+            BoxWithConstraints(Modifier.size(320.dp, 420.dp).testTag("nested-host")) {
+                ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { inset ->
+                    ChatMessageList(List(8) { ChatTurnUi.User("u$it", "history $it") } +
+                        ChatTurnUi.Assistant("tail", workProcess = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), "已完成"),
+                            status = RunStatus.RUNNING, isStreaming = true), ChatScreenActions(),
+                        composerBottomInset = inset, scrollRequest = ChatScrollRequest(1),
+                        toolContent = { Box(Modifier.fillMaxWidth().height(80.dp).background(Color.Magenta).testTag("nested-body")) })
+                }, composer = { Box(Modifier.fillMaxWidth().height(96.dp).testTag("nested-composer")) })
+            }
+        } } }
+        ui.waitForIdle()
+        val originalIdentity = ui.onNodeWithTag("reply-identity:tail").fetchSemanticsNode().boundsInRoot.top
+        for (header in listOf("work-process-header", "tool-step-header:nested-tool")) {
+            ui.mainClock.autoAdvance = false
+            try {
+                ui.onNodeWithTag(header).performTouchInput { click() }
+                repeat(40) {
+                    ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                    assertDirection(true, header)
+                    val window = ui.onNodeWithTag("chat-stream-viewport:tail").fetchSemanticsNode()
+                        .layoutInfo.coordinates.positionInRoot().y
+                    val identity = ui.onNodeWithTag("reply-identity:tail").fetchSemanticsNode().boundsInRoot
+                    assertTrue("Short nested disclosure must keep the avatar above its local draw-clip edge", identity.top >= window - 1f)
+                    val safeBottom = ui.onNodeWithTag("nested-composer").fetchSemanticsNode().boundsInRoot.top - ChatTailClearance.value * density
+                    assertTrue("Nested disclosure must remain above the input", bottom() <= safeBottom + 1f)
+                }
+            } finally { ui.mainClock.autoAdvance = true }
+        }
+        val identity = ui.onNodeWithTag("reply-identity:tail").fetchSemanticsNode().boundsInRoot
+        assertTrue("The whole row must move up, not only its contents inside a fixed clip", identity.top < originalIdentity - 40f * density)
+        ui.onNodeWithTag("work-process-header").assertIsDisplayed()
+        ui.onNodeWithTag("tool-step-header:nested-tool").assertIsDisplayed()
+        val host = ui.onNodeWithTag("nested-host")
+        val hostBounds = host.fetchSemanticsNode().boundsInRoot
+        val body = ui.onNodeWithTag("nested-body").fetchSemanticsNode().boundsInRoot
+        val pixels = host.captureToImage().toPixelMap()
+        val pixel = pixels[(body.center.x - hostBounds.left).toInt(), (body.center.y - hostBounds.top).toInt()]
+        assertTrue("The nested details are actually drawn through all ancestors", pixel.red > .9f && pixel.blue > .9f && pixel.green < .1f)
+        ui.onNodeWithTag("tool-step-header:nested-tool").performTouchInput { click() }; ui.waitForIdle()
+        assertDirection(true, "tool-step-header:nested-tool")
+        ui.onNodeWithTag("work-process-header").performTouchInput { click() }; ui.waitForIdle()
+        assertDirection(true)
+        assertEquals(originalIdentity, ui.onNodeWithTag("reply-identity:tail").fetchSemanticsNode().boundsInRoot.top, 2f)
     }
 
 }

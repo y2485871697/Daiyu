@@ -9,22 +9,23 @@ CHAT = UI / 'screens/chat/conversation'
 class DisclosureConsistencyContractTest(unittest.TestCase):
     def test_question_details_keep_their_session_but_use_shared_motion(self):
         source = (CHAT / 'QuestionCard.kt').read_text()
-        self.assertIn('SettingsExpandableContent(expanded) {', source)
+        self.assertIn('WorkflowExpandableContent(visibility, disclosure) {', source)
         self.assertIn('settingsDisclosureRotation(expanded, expandedDegrees = 180f)', source)
         self.assertIn('val session = remember(owner, binding)', source)
         self.assertIn('session.bind(record, value, canAnswer, submit)', source)
         self.assertNotIn('if (expanded) {', source)
 
-    def test_child_controls_remain_outside_animated_details(self):
+    def test_child_controls_remain_inside_collapsible_details(self):
         source = (CHAT / 'ChildTaskToolContent.kt').read_text()
-        self.assertIn('SettingsExpandableContent(expanded) { details() }\n        controls()', source)
+        self.assertIn('WorkflowExpandableContent(visibility, disclosure) {', source)
+        self.assertIn('details()\n                controls()', source)
         self.assertIn('settingsDisclosureRotation(expanded, expandedDegrees = 180f)', source)
-        self.assertIn('var expanded by remember(row.owner)', source)
+        self.assertIn('var expanded by rememberSaveable(row.owner)', source)
         self.assertNotIn('if (expanded) details()', source)
 
     def test_tool_groups_and_both_work_headers_rotate_without_swapping_icons(self):
         source = (CHAT / 'ToolCategoryContent.kt').read_text()
-        self.assertIn('SettingsExpandableContent(open) { body() }', source)
+        self.assertIn('WorkflowExpandableContent(visibility, disclosure) { body() }', source)
         self.assertIn('settingsDisclosureRotation(expanded)', source)
         self.assertNotIn('Icon(if (expanded)', source)
         work = (CHAT / 'WorkProcessCard.kt').read_text()

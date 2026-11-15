@@ -30,7 +30,20 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.expected_sha }}
       - name: 核对准确源码
-        run: python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+        run: |
+          python3 - <<'PY_CHECK'
+          import json, os, re, subprocess
+          from pathlib import Path
+          expected = os.environ['EXPECTED_SHA']
+          assert re.fullmatch(r'[0-9a-f]{40}', expected)
+          actual = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          assert actual == expected, 'checkout_sha_mismatch'
+          Path('generation-port-checks').mkdir(exist_ok=True)
+          Path('generation-port-checks/revision.json').write_text(json.dumps({
+              'check_sha': actual, 'workflow_sha': os.environ['GITHUB_SHA'],
+              'run_id': os.environ['GITHUB_RUN_ID'], 'run_attempt': os.environ['GITHUB_RUN_ATTEMPT']
+          }) + '\n')
+          PY_CHECK
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         with:
           distribution: temurin

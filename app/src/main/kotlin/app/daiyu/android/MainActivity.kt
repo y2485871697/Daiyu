@@ -6028,7 +6028,7 @@ class MainActivity : ComponentActivity() {
             app.daiyu.android.ui.screens.chat.conversation.GenerationToolContent(controller, step, action, active = active)
         }
         if (step.toolName in setOf("run_child_models", "start_child_tasks", "direct_child_task")) {
-            app.daiyu.android.ui.screens.chat.conversation.ChildTaskToolContent(controller, step, action, active = active)
+            app.daiyu.android.ui.screens.chat.conversation.ChildTaskToolContent(controller, step, active = active)
         }
     }
 

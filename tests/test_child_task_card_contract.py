@@ -63,11 +63,10 @@ class ChildTaskCardContractTest(unittest.TestCase):
         self.assertNotIn('Int.MAX_VALUE', source)
         self.assertNotIn('ToolMiniAction', source)
 
-    def test_live_cards_keep_frozen_identity_progress_and_only_exact_resume_control(self):
+    def test_live_cards_keep_frozen_identity_and_read_only_details(self):
         source = (CHAT / 'ChildTaskToolContent.kt').read_text()
         for fragment in ('owners.associateWith(controller::childTaskProgress)', 'live.forEach { merged[it.record.owner] = it.record }',
-                         'ChildTaskFrame(Modifier.testTag("tool-child-frame:', 'ChildTaskProgressContent(',
-                         'ToolCardAction.RESUME_TASK'):
+                         'ChildTaskFrame(Modifier.testTag("tool-child-frame:', 'ChildTaskProgressContent('):
             self.assertIn(fragment, source)
         self.assertNotIn('SettingsExpandableContent', source)
         self.assertNotIn('tool-child-batch-summary', source)
@@ -77,16 +76,62 @@ class ChildTaskCardContractTest(unittest.TestCase):
         self.assertIn('tool-child-arrow:${row.owner.childRunId}', source)
         self.assertIn('WorkflowExpandableContent(visibility, disclosure)', source)
         expanded = source.split('WorkflowExpandableContent(visibility, disclosure) {', 1)[1]
-        self.assertLess(expanded.index('details()'), expanded.index('controls()'))
+        self.assertIn('details()', expanded)
         self.assertNotIn('ToolCardAction.PAUSE_TASK', source)
         self.assertNotIn('ToolCardAction.STOP_TASK', source)
-        self.assertIn('"已暂停", "上下文超限" -> listOf(ToolCardAction.RESUME_TASK)', source)
-        self.assertIn('row.contextLimited && action == ToolCardAction.RESUME_TASK', source)
+        for forbidden in ('ToolCardAction', 'ToolMiniAction', 'onAction:', 'controls:', 'controls()', 'actionRequest(', '压缩并继续'):
+            self.assertNotIn(forbidden, source)
+        activity = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
+        self.assertIn('ChildTaskToolContent(controller, step, active = active)', activity)
+        self.assertIn('if (!active) return@LaunchedEffect', source)
+        self.assertIn('val accepted = if (state.pauseRequested) controller.resume(owner) else controller.pause(owner)', activity)
+        self.assertIn('onPrimaryLongPress = { guard { gestureOwner()?.let { owner -> controller.stopMain(owner); refresh() } } }', activity)
         self.assertNotIn('else preview()', source)
         self.assertNotIn('preview: @Composable', source)
         self.assertIn('settingsDisclosureRotation(expanded, expandedDegrees = 180f)', source)
         for debug in ('READ_TASK_RESULT', 'ToolDisclosureUi("原因"', 'ToolDisclosureUi("任务"', 'scrub(row.model'):
             self.assertNotIn(debug, source)
+
+    def test_read_only_card_scope_is_exact_and_discovers_only_affected_classes(self):
+        import itertools
+        import json
+        import tempfile
+        from test_record_tool_tests_scope import recorder
+        from test_speech_platform_discovery import SpeechPlatformDiscoveryTest
+        classes = (
+            "app.daiyu.android.ui.screens.chat.conversation.ChildTaskListTest",
+            "app.daiyu.android.ChatThemeInteractionActivityTest",
+            "app.daiyu.android.ui.screens.chat.conversation.WorkflowDisclosureDirectionTest",
+        )
+        self.assertEqual(classes, recorder.CHILD_TASK_CARD_READ_ONLY_CLASSES)
+        for ordered in itertools.permutations(classes):
+            command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(ordered)))
+            self.assertEqual("child-task-cards-targeted", scope)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.CHILD_TASK_CARD_MODULES, "-v"], command)
+        raw = ",".join(classes)
+        for invalid in (raw + ",unknown", raw + ",", " " + raw, raw + " ", raw + "," + classes[0], ",".join(classes[:-1])):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=invalid))[1])
+        for mode in ("", "build", "compile", "candidate", "daily", "release", "checks"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
+        helper = SpeechPlatformDiscoveryTest()
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper.fixture(root)
+            for name in classes:
+                relative = Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text((ROOT / relative).read_text())
+            seen = []
+            for shard in range(4):
+                result = helper.select(root, shard, classes=raw)
+                self.assertEqual(0, result.returncode, result.stderr)
+                inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                selection = json.loads((root / "smoke/selection.json").read_text())
+                self.assertEqual("targeted", inventory["discovery_scope"])
+                self.assertCountEqual(classes, inventory["all_classes"])
+                seen.extend(selection["selected_classes"])
+            self.assertCountEqual(classes, seen)
 
     def test_platform_tool_checks_bind_only_the_tool_checkout_sha(self):
         workflow = (ROOT / '.github/workflows/child-task-card-platform.yml').read_text()

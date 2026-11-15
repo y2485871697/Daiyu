@@ -4,7 +4,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
@@ -41,7 +40,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, onAction: (ToolCardActionRequest) -> Unit, active: Boolean = true) {
+internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, active: Boolean = true) {
     val owner = step.owner ?: return
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var records by remember(owner, step.toolCallId) { mutableStateOf(emptyList<ChildTaskRecord>()) }
@@ -81,9 +80,7 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
             loading -> ChildTaskFrame { Text("正在读取任务…", style = MiuixTheme.textStyles.footnote1) }
             failed -> ChildTaskFrame { Text("任务暂时无法读取", color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1) }
             rows.isEmpty() -> ChildTaskFrame { Text("暂无任务记录", style = MiuixTheme.textStyles.footnote1) }
-            else -> ChildTaskList(rows, records, { row, action ->
-                if (active) onAction(step.actionRequest(action, subAgentStatusItemKey(row.owner)))
-            }, progress, showPrompt = true)
+            else -> ChildTaskList(rows, records, progress, showPrompt = true)
         }
     }
 }
@@ -92,7 +89,6 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
 internal fun ChildTaskList(
     rows: List<SubAgentStatusRow>,
     records: List<ChildTaskRecord>,
-    onAction: (SubAgentStatusRow, ToolCardAction) -> Unit,
     progress: Map<ChildRunOwner, String> = emptyMap(),
     showPrompt: Boolean = false,
 ) {
@@ -105,16 +101,6 @@ internal fun ChildTaskList(
                 ?.takeIf { it.isNotBlank() }?.let { ToolRichDetails.scrub(it) }
             ChildTaskDisclosure(row, taskTitle = agentName, details = {
                 ChildTaskProgressContent(text, childTaskStatusText(row.status), row.owner.childRunId, agentName)
-            }, controls = {
-                val actions = when (row.status) {
-                    "已暂停", "上下文超限" -> listOf(ToolCardAction.RESUME_TASK)
-                    else -> emptyList()
-                }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    actions.forEach { action -> ToolMiniAction(
-                        text = if (row.contextLimited && action == ToolCardAction.RESUME_TASK) "压缩并继续" else action.label,
-                        onClick = { onAction(row, action) }) }
-                }
             })
         } }
     }
@@ -124,7 +110,6 @@ internal fun ChildTaskList(
 internal fun ChildTaskDisclosure(
     row: SubAgentStatusRow,
     details: @Composable () -> Unit,
-    controls: @Composable () -> Unit,
     taskTitle: String = row.agent,
 ) {
     val colors = MiuixTheme.colorScheme
@@ -154,10 +139,7 @@ internal fun ChildTaskDisclosure(
                 tint = colors.onSurfaceVariantSummary)
         }
         WorkflowExpandableContent(visibility, disclosure) {
-            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                details()
-                controls()
-            }
+            details()
         }
     }
 }

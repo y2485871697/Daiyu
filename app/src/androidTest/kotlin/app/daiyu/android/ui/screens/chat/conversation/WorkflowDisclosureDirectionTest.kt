@@ -361,7 +361,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                                     listOf(ToolFieldUi("value", "content")))))))
                             "child-live" -> ChildTaskDisclosure(SubAgentStatusRow(
                                 app.daiyu.android.domain.delegation.ChildRunOwner("chat", "run", "group", 1, "child", "message"),
-                                "worker", "已完成"), details = { Box(Modifier.height(60.dp)) }, controls = {})
+                                "worker", "已完成"), details = { Box(Modifier.height(60.dp)) })
                             else -> ChildTaskReceiptContent(ToolCategoryDetailsUi("fixture", notice = "",
                                 rich = ToolRichDetailsUi(entries = listOf(ToolRichEntryUi("worker",
                                     listOf(ToolFieldUi("状态", "已完成")), listOf(ToolDisclosureUi("result", "content")))))))

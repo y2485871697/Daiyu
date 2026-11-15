@@ -111,10 +111,14 @@ class ChatThemeInteractionActivityTest : WiredActivityTestCase() {
         }
     }
 
-    fun testChildDisclosureIsPerOwnerAndKeepsControlsAvailable() {
+    private fun assertNoChildTaskControls() {
+        for (label in listOf("暂停", "停止", "继续", "压缩并继续"))
+            ui.onNodeWithText(label).assertDoesNotExist()
+    }
+
+    fun testChildDisclosureIsPerOwnerAndReadOnly() {
         var first by mutableStateOf(SubAgentStatusRow(ChildRunOwner("chat", "run", "group", 1, "one", "message"), "代理一", "执行中"))
         val second = SubAgentStatusRow(first.owner.copy(childRunId = "two"), "代理二", "已暂停")
-        var actions = 0
         var reversed by mutableStateOf(false)
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), false) {
@@ -123,9 +127,6 @@ class ChatThemeInteractionActivityTest : WiredActivityTestCase() {
                     rows.forEach { row -> key(row.owner) {
                         ChildTaskDisclosure(row, details = {
                             Text(if (row.owner.childRunId == "one") "第一项详情" else "第二项详情")
-                        }, controls = {
-                            if (row.owner.childRunId == "one") TextButton(text = "暂停一",
-                                modifier = Modifier.testTag("child-action"), onClick = { actions++ })
                         })
                     } }
                 }
@@ -133,15 +134,16 @@ class ChatThemeInteractionActivityTest : WiredActivityTestCase() {
         } }
         awaitVisualIdle()
         ui.onNodeWithText("第一项详情").assertDoesNotExist()
-        node("child-action").assertDoesNotExist()
+        assertNoChildTaskControls()
         node("tool-child-summary:one").assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠")).performClick()
         awaitVisualIdle()
         ui.onNodeWithText("第一项详情").assertIsDisplayed()
-        node("child-action").assertIsDisplayed().performClick()
+        assertNoChildTaskControls()
         ui.onNodeWithText("第二项详情").assertDoesNotExist()
         ui.runOnIdle { first = first.copy(status = "已暂停") }
         awaitVisualIdle()
         node("tool-child-summary:one").assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
+        assertNoChildTaskControls()
         ui.runOnIdle { reversed = true }
         awaitVisualIdle()
         node("tool-child-summary:one").assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
@@ -151,7 +153,7 @@ class ChatThemeInteractionActivityTest : WiredActivityTestCase() {
         node("tool-child-summary:one").performClick()
         awaitVisualIdle()
         ui.onNodeWithText("第一项详情").assertDoesNotExist()
-        node("child-action").assertDoesNotExist()
+        assertNoChildTaskControls()
         ui.onNodeWithText("第二项详情").assertIsDisplayed()
         node("tool-child-summary:one").performClick()
         awaitVisualIdle()
@@ -159,6 +161,6 @@ class ChatThemeInteractionActivityTest : WiredActivityTestCase() {
         ui.runOnIdle { first = first.copy(owner = first.owner.copy(taskGroupId = "replacement")) }
         awaitVisualIdle()
         node("tool-child-summary:one").assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠"))
-        ui.runOnIdle { assertEquals(1, actions) }
+        assertNoChildTaskControls()
     }
 }

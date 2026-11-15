@@ -26,13 +26,14 @@ class ChildTaskListTest : WiredActivityTestCase() {
         text = if (status == ChildTaskStatus.COMPLETED) "第 ${index + 1} 项结果" else "",
         display = ChildTaskDisplay("审查", "internal-model", "冻结模型"))
 
-    private fun show(rows: List<SubAgentStatusRow>, records: List<ChildTaskRecord>, onAction: (SubAgentStatusRow, ToolCardAction) -> Unit) {
+    private fun show(rows: List<SubAgentStatusRow>, records: List<ChildTaskRecord>) {
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) { ChildTaskList(rows, records, onAction) }
+                Column(Modifier.verticalScroll(rememberScrollState())) { ChildTaskList(rows, records) }
             }
         } }
         ui.waitForIdle()
+        assertNoTaskControls()
     }
 
     private fun assertPreviewLayout(tag: String, lines: Int, overflow: Boolean) {
@@ -57,7 +58,7 @@ class ChildTaskListTest : WiredActivityTestCase() {
                 AgentAppTheme(AppearanceSettings(themeMode = mode), applyInterfaceScale = false) {
                     expected = conversationColors().muted
                     Column {
-                        ChildTaskList(rows, listOf(record), { _, _ -> })
+                        ChildTaskList(rows, listOf(record))
                         ChildTaskReceiptContent(details)
                     }
                 }
@@ -95,7 +96,7 @@ class ChildTaskListTest : WiredActivityTestCase() {
         val record = task(0).copy(prompt = "主代理下发的任务提示词", text = "子代理返回的结论")
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                ChildTaskList(subAgentStatusRows(listOf(record), emptyList()), listOf(record), { _, _ -> },
+                ChildTaskList(subAgentStatusRows(listOf(record), emptyList()), listOf(record),
                     mapOf(record.owner to "不应出现的实时结果"), showPrompt = true)
             }
         } }
@@ -118,8 +119,7 @@ class ChildTaskListTest : WiredActivityTestCase() {
 
     fun testCompletedBatchStartsWithOnlyNamesStatusesAndIndependentArrows() {
         val records = (0 until 10).map { task(it) }
-        var actions = 0
-        show(subAgentStatusRows(records, emptyList()), records) { _, _ -> actions++ }
+        show(subAgentStatusRows(records, emptyList()), records)
         ui.onNodeWithTag("tool-child-batch-summary").assertDoesNotExist()
         for (index in 0 until 10) {
             ui.onNodeWithTag("tool-child-arrow:internal-child-$index", useUnmergedTree = true).assertExists()
@@ -135,14 +135,12 @@ class ChildTaskListTest : WiredActivityTestCase() {
         ui.onNodeWithText("收起").assertDoesNotExist()
         ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
         ui.onNodeWithText("internal-profile", substring = true).assertDoesNotExist()
-        assertEquals(0, actions)
     }
 
     fun testLiveArrowShowsSixLinePreviewAndDialogWithoutChangingOtherTasks() {
         val body = (1..8).joinToString("\n") { "第${it}段执行结果" }
         val records = listOf(task(0).copy(text = body), task(1))
-        var actions = 0
-        show(subAgentStatusRows(records, emptyList()), records) { _, _ -> actions++ }
+        show(subAgentStatusRows(records, emptyList()), records)
         val header = ui.onNodeWithTag("tool-child-summary:internal-child-0")
         val preview = ui.onNodeWithTag("tool-child-progress:internal-child-0")
         val closed = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠")
@@ -167,7 +165,6 @@ class ChildTaskListTest : WiredActivityTestCase() {
         header.assert(closed)
         preview.assertDoesNotExist()
         ui.onNodeWithTag("tool-output-dialog").assertDoesNotExist()
-        assertEquals(0, actions)
     }
 
     fun testReadReceiptArrowShowsSixLinePreviewAndNamedDialogOnlyWhenExpanded() {
@@ -205,75 +202,76 @@ class ChildTaskListTest : WiredActivityTestCase() {
 
     fun testUnknownTaskCannotBeCollapsedAsACompletedBatch() {
         val records = listOf(task(0), task(1, ChildTaskStatus.UNKNOWN).copy(detail = "transport_lost"))
-        var actions = 0
-        show(subAgentStatusRows(records, emptyList()), records) { _, _ -> actions++ }
+        show(subAgentStatusRows(records, emptyList()), records)
         ui.onNodeWithTag("tool-child-batch-summary").assertDoesNotExist()
         ui.onNodeWithText("已完成 1 项 · 结果未知 1 项").assertDoesNotExist()
         ui.onNodeWithText("状态未确认").assertIsDisplayed()
         ui.onNodeWithTag("tool-child-summary:internal-child-1").scrollToVisible().assertIsDisplayed()
-        assertEquals(0, actions)
     }
 
-    fun testContextLimitedTaskKeepsExactResumeTargetOutsideResultDetails() {
+    private fun assertNoTaskControls() {
+        for (label in listOf(ToolCardAction.PAUSE_TASK.label, ToolCardAction.STOP_TASK.label,
+            ToolCardAction.RESUME_TASK.label, "压缩并继续")) ui.onNodeWithText(label).assertDoesNotExist()
+    }
+
+    fun testContextLimitedTaskOnlyShowsItsStatusAndDetails() {
         val record = task(0, ChildTaskStatus.RUNNING)
         val live = RetainedChildTask(record, false, false, false, ChildTaskPauseState.PAUSED, contextLimited = true)
-        val events = mutableListOf<Pair<ChildRunOwner, ToolCardAction>>()
-        show(subAgentStatusRows(listOf(record), listOf(live)), listOf(record)) { row, action -> events += row.owner to action }
-        ui.onNodeWithTag("tool-child-batch-summary").assertDoesNotExist()
-        ui.onNodeWithText("压缩并继续").assertDoesNotExist()
-        ui.onNodeWithText(ToolCardAction.STOP_TASK.label).assertDoesNotExist()
+        show(subAgentStatusRows(listOf(record), listOf(live)), listOf(record))
+        ui.onNodeWithText("上下文超限").assertIsDisplayed()
+        assertNoTaskControls()
         ui.onNodeWithTag("tool-child-summary:internal-child-0").performClick()
-        ui.onNodeWithText("压缩并继续").scrollToVisible().assertIsDisplayed().performClick()
-        assertEquals(listOf(record.owner to ToolCardAction.RESUME_TASK), events)
-        ui.onNodeWithText(ToolCardAction.PAUSE_TASK.label).assertDoesNotExist()
-        ui.onNodeWithText(ToolCardAction.STOP_TASK.label).assertDoesNotExist()
+        ui.onNodeWithTag("tool-child-progress:internal-child-0").assertIsDisplayed()
+        assertNoTaskControls()
     }
 
-    fun testRunningAndQueuedCardsNeverExposePauseOrStopWhenExpanded() {
+    fun testRunningAndQueuedCardsNeverExposeTaskControlsWhenExpanded() {
         val running = task(0, ChildTaskStatus.RUNNING)
         val queued = task(1, ChildTaskStatus.QUEUED)
         val records = listOf(running, queued)
         val live = listOf(RetainedChildTask(running, false, false, false))
         val rows = subAgentStatusRows(records, live)
         assertEquals(listOf("执行中", "排队中"), rows.map { it.status })
-        var actions = 0
-        show(rows, records) { _, _ -> actions++ }
-        ui.onNodeWithText(ToolCardAction.PAUSE_TASK.label).assertDoesNotExist()
-        ui.onNodeWithText(ToolCardAction.STOP_TASK.label).assertDoesNotExist()
+        show(rows, records)
+        assertNoTaskControls()
         for (record in records) {
             ui.onNodeWithTag("tool-child-summary:${record.owner.childRunId}").scrollToVisible().performClick()
             ui.onNodeWithTag("tool-child-progress:${record.owner.childRunId}").assertIsDisplayed()
-            ui.onNodeWithText(ToolCardAction.PAUSE_TASK.label).assertDoesNotExist()
-            ui.onNodeWithText(ToolCardAction.STOP_TASK.label).assertDoesNotExist()
-            ui.onNodeWithText(ToolCardAction.RESUME_TASK.label).assertDoesNotExist()
+            assertNoTaskControls()
         }
-        assertEquals(0, actions)
     }
 
-    fun testPausedCardOnlyKeepsResumeWithTheExactTaskTarget() {
+    fun testTerminalStatesOnlyShowTheirStatusAndDetails() {
+        val records = listOf(ChildTaskStatus.COMPLETED, ChildTaskStatus.NOT_EXECUTED,
+            ChildTaskStatus.UNKNOWN, ChildTaskStatus.FAILED).mapIndexed { index, status -> task(index, status) }
+        show(subAgentStatusRows(records, emptyList()), records)
+        for (record in records) {
+            ui.onNodeWithTag("tool-child-summary:${record.owner.childRunId}").scrollToVisible().performClick()
+            ui.onNodeWithTag("tool-child-progress:${record.owner.childRunId}").scrollToVisible().assertIsDisplayed()
+            assertNoTaskControls()
+        }
+    }
+
+    fun testPausedCardOnlyShowsItsStatusAndDetails() {
         val record = task(0, ChildTaskStatus.RUNNING)
         val live = RetainedChildTask(record, false, false, false, ChildTaskPauseState.PAUSED)
-        val events = mutableListOf<Pair<ChildRunOwner, ToolCardAction>>()
-        show(subAgentStatusRows(listOf(record), listOf(live)), listOf(record)) { row, action -> events += row.owner to action }
-        ui.onNodeWithText(ToolCardAction.RESUME_TASK.label).assertDoesNotExist()
+        show(subAgentStatusRows(listOf(record), listOf(live)), listOf(record))
+        ui.onNodeWithText("已暂停").assertIsDisplayed()
+        assertNoTaskControls()
         ui.onNodeWithTag("tool-child-summary:internal-child-0").performClick()
-        ui.onNodeWithText(ToolCardAction.PAUSE_TASK.label).assertDoesNotExist()
-        ui.onNodeWithText(ToolCardAction.STOP_TASK.label).assertDoesNotExist()
-        ui.onNodeWithText(ToolCardAction.RESUME_TASK.label).scrollToVisible().assertIsDisplayed().performClick()
-        assertEquals(listOf(record.owner to ToolCardAction.RESUME_TASK), events)
+        ui.onNodeWithTag("tool-child-progress:internal-child-0").assertIsDisplayed()
+        assertNoTaskControls()
     }
 
     fun testUnknownTaskHasOneFrameWithoutDebugDetailsOrResultPageAction() {
         val record = task(1, ChildTaskStatus.UNKNOWN).copy(detail = "child_result_unconfirmed")
-        var actions = 0
-        show(subAgentStatusRows(listOf(record), emptyList()), listOf(record)) { _, _ -> actions++ }
+        show(subAgentStatusRows(listOf(record), emptyList()), listOf(record))
         ui.onNodeWithTag("tool-child-frame:internal-child-1").assertIsDisplayed()
         ui.onNodeWithText("暂时无法确认任务状态").assertDoesNotExist()
         ui.onNodeWithTag("tool-child-summary:internal-child-1").performClick()
         ui.onNodeWithText("暂时无法确认任务状态").assertIsDisplayed()
         for (text in listOf("child_result_unconfirmed", "冻结模型", record.prompt, "查看结果", "原因", "结果未知 1 项"))
             ui.onNodeWithText(text).assertDoesNotExist()
-        assertEquals(0, actions)
     }
 
     fun testReadResultKeepsBoundedPreviewAndOpensNamedFullBodyWithoutNavigation() {
@@ -315,7 +313,7 @@ class ChildTaskListTest : WiredActivityTestCase() {
 
     fun testShortContentDoesNotOpenDialogAndStatusHeaderIsCenteredAndCompact() {
         val record = task(0)
-        show(subAgentStatusRows(listOf(record), emptyList()), listOf(record)) { _, _ -> fail("No tool execution") }
+        show(subAgentStatusRows(listOf(record), emptyList()), listOf(record))
         val preview = ui.onNodeWithTag("tool-child-progress:internal-child-0")
         preview.assertDoesNotExist()
         ui.onNodeWithTag("tool-child-summary:internal-child-0").performClick()
@@ -389,7 +387,7 @@ class ChildTaskListTest : WiredActivityTestCase() {
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    ChildTaskList(subAgentStatusRows(listOf(record), emptyList()), listOf(record), { _, _ -> fail("No execution") })
+                    ChildTaskList(subAgentStatusRows(listOf(record), emptyList()), listOf(record))
                     ToolCategoryContent("child_control", ToolCategoryDetails.project("child_control", "{}", payload, "get_child_task"))
                 }
             }

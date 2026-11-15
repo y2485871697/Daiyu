@@ -82,7 +82,7 @@ class RunChildTaskAccessTest {
         assertTrue(description.contains(initial.single().toJson().toString()))
         current = listOf(initial.single().copy(name = "changed", taskTier = SubAgentTaskTier.SIMPLE))
         val owner = caller("conversation")
-        val outcome = invoke(access, owner, "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed
+        val outcome = invoke(access, owner, "list_subagents", "{}") as DispatchOutcome.Confirmed
         val body = JSONObject(outcome.payload)
         assertTrue(body.getBoolean("current_configuration_available"))
         assertEquals(1, metadataReads)
@@ -90,7 +90,10 @@ class RunChildTaskAccessTest {
         val actual = body.getJSONArray("available_profile_metadata").getJSONObject(0)
         assertEquals("changed", actual.getString("name")); assertEquals("simple", actual.getString("task_tier"))
         assertEquals("implementation", actual.getString("role"))
-        val history = body.getJSONArray("tasks").getJSONObject(0)
+        assertFalse(body.has("tasks")); assertFalse(body.has("total_count"))
+        val overview = JSONObject((invoke(access, owner, "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed).payload)
+        assertEquals(1, metadataReads); assertFalse(overview.has("available_profiles"))
+        val history = overview.getJSONArray("tasks").getJSONObject(0)
         assertEquals(old.profileId, history.getString("profile_id"))
         assertEquals(old.owner.childRunId, history.getString("child_run_id"))
         assertEquals(old.owner.parentRunId, history.getString("parent_run_id"))
@@ -98,12 +101,12 @@ class RunChildTaskAccessTest {
         assertTrue(history.isNull("agent_name"))
         assertEquals(description, access.tools().first().definition.description)
         unavailable = true
-        val failed = JSONObject((invoke(access, owner, "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed).payload)
+        val failed = JSONObject((invoke(access, owner, "list_subagents", "{}") as DispatchOutcome.Confirmed).payload)
         assertEquals(2, metadataReads)
         assertFalse(failed.getBoolean("current_configuration_available"))
         assertEquals(0, failed.getJSONArray("available_profile_metadata").length())
         assertEquals(0, failed.getJSONArray("available_profiles").length())
-        assertEquals(1, failed.getJSONArray("tasks").length())
+        assertFalse(failed.has("tasks"))
     }
 
     @Test fun newParentCanInspectAndContinueOldPausedTaskWhenNewConfigurationIsUnavailable() {
@@ -206,21 +209,24 @@ class RunChildTaskAccessTest {
         remove("parent_message_id"); remove("parent_owner_id"); remove("expected_revision"); remove("action")
     }
 
-    @Test fun overviewReturnsConfigurationAndIdentityWithoutReadingOrExposingTaskContent() {
+    @Test fun overviewReturnsCountsAndIdentityWithoutReadingConfigurationOrTaskContent() {
         val completed = old.copy(status = ChildTaskStatus.COMPLETED, text = "RESULT_BODY_ONLY",
             prompt = "PROMPT_BODY_ONLY", originalRole = ChildModelRole.REVIEW)
         val failed = old.copy(owner = old.owner.copy(childRunId = "failed-child"),
             status = ChildTaskStatus.FAILED, detail = "DETAIL_ONLY")
         val access = RunChildTaskAccess("conversation", { listOf(completed, failed) }, { error("overview must not read source") },
             { emptyList() }, { error("overview must not read progress") },
-            { error("must not resume") }, { error("must not pause") }, { error("must not stop") }, { setOf("current-profile") })
-        val definition = access.tools().first().definition
+            { error("must not resume") }, { error("must not pause") }, { error("must not stop") }, { error("overview must not read configuration") })
+        val definition = access.tools().first { it.definition.name == "inspect_child_tasks" }.definition
         assertTrue(definition.description.contains("get_child_task"))
         assertFalse(definition.description.contains("max_chars"))
         val payload = (invoke(access, caller("conversation"), "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed).payload
         val body = JSONObject(payload)
-        assertTrue(body.getBoolean("current_configuration_available"))
-        assertEquals("current-profile", body.getJSONArray("available_profiles").getString(0))
+        assertFalse(body.has("current_configuration_available")); assertFalse(body.has("available_profiles"))
+        assertFalse(body.has("available_profile_metadata")); assertEquals(2, body.getInt("total_count"))
+        assertEquals(1, body.getJSONObject("status_counts").getInt("COMPLETED"))
+        assertEquals(1, body.getJSONObject("status_counts").getInt("FAILED"))
+        assertFalse(body.getBoolean("task_identities_truncated"))
         val task = body.getJSONArray("tasks").getJSONObject(0)
         assertEquals("COMPLETED", task.getString("status")); assertEquals("REVIEW", task.getString("original_role"))
         assertEquals(old.owner.conversationId, task.getString("conversation_id"))
@@ -248,10 +254,11 @@ class RunChildTaskAccessTest {
             { error("must not read source") }, { error("must not read live state") }, { error("must not read progress") },
             { error("must not resume") }, { error("must not pause") }, { error("must not stop") }, { error("must not read profiles") })
         val owner = caller("conversation")
-        for (args in listOf("""{"offset":0}""", """{"max_chars":12000}""", """{"child_run_id":"child"}""")) {
-            val rejected = invoke(access, owner, "inspect_child_tasks", args) as DispatchOutcome.NotExecuted
-            assertEquals("invalid_arguments", rejected.code)
-        }
+        for (name in listOf("list_subagents", "inspect_child_tasks"))
+            for (args in listOf("""{"offset":0}""", """{"max_chars":12000}""", """{"child_run_id":"child"}""")) {
+                val rejected = invoke(access, owner, name, args) as DispatchOutcome.NotExecuted
+                assertEquals("invalid_arguments", rejected.code)
+            }
     }
 
     @Test fun preciseReadLengthsClampBeforeIntConversionAndKeepDefaultsAndSmallPages() {
@@ -308,12 +315,62 @@ class RunChildTaskAccessTest {
             val rejected = invoke(access, owner, "get_child_task", args) as DispatchOutcome.NotExecuted
             assertEquals("invalid_arguments", rejected.code)
         }
-        for (name in listOf("inspect_child_tasks", "get_child_task")) {
-            val args = if (name == "inspect_child_tasks") "{}" else queryArguments().put("max_chars", Long.MAX_VALUE).toString()
+        for (name in listOf("list_subagents", "inspect_child_tasks", "get_child_task")) {
+            val args = if (name == "get_child_task") queryArguments().put("max_chars", Long.MAX_VALUE).toString() else "{}"
             val foreign = invoke(access, caller("foreign"), name, args) as DispatchOutcome.NotExecuted
             assertEquals("child_conversation_mismatch", foreign.code)
             assertTrue(invoke(access, owner, name, args, capability = false) is DispatchOutcome.NotExecuted)
         }
     }
 
+    @Test fun configurationQueryNeverReadsTasksOrRunsThem() {
+        var profiles = setOf("review", "implementation")
+        val access = RunChildTaskAccess("conversation", { error("no records") }, { error("no source") },
+            { error("no live") }, { error("no progress") }, { error("no resume") }, { error("no pause") },
+            { error("no stop") }, { profiles }, recordedStatuses = { error("no statuses") })
+        val owner = caller("conversation")
+        val first = JSONObject((invoke(access, owner, "list_subagents", "{}") as DispatchOutcome.Confirmed).payload)
+        assertEquals(2, first.getJSONArray("available_profiles").length())
+        assertFalse(first.has("tasks")); assertFalse(first.has("total_count"))
+        profiles = emptySet()
+        val second = JSONObject((invoke(access, owner, "list_subagents", "{}") as DispatchOutcome.Confirmed).payload)
+        assertTrue(second.getBoolean("current_configuration_available"))
+        assertEquals(0, second.getJSONArray("available_profiles").length())
+    }
+
+    @Test fun overviewCountsAllTwentyFiveTasksAndPreservesOffWindowFailures() {
+        val recent = (0 until 20).map { index -> old.copy(owner = old.owner.copy(childRunId = "recent-$index"),
+            status = ChildTaskStatus.COMPLETED, text = "private result") }
+        val statuses = recent.associate { it.owner to it.status }.toMutableMap()
+        repeat(5) { statuses[old.owner.copy(childRunId = "older-$it")] =
+            if (it == 4) ChildTaskStatus.FAILED else ChildTaskStatus.COMPLETED }
+        val foreign = old.copy(owner = old.owner.copy(conversationId = "foreign", childRunId = "private-other"))
+        statuses[foreign.owner] = ChildTaskStatus.FAILED
+        val access = RunChildTaskAccess("conversation", { listOf(foreign) + recent }, { error("no source") },
+            { emptyList() }, { error("no progress") }, { error("no resume") }, { error("no pause") },
+            { error("no stop") }, { error("no configuration") }, recordedStatuses = { statuses })
+        val body = JSONObject((invoke(access, caller("conversation"), "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed).payload)
+        assertEquals(25, body.getInt("total_count")); assertTrue(body.getBoolean("task_identities_truncated"))
+        assertEquals(24, body.getJSONObject("status_counts").getInt("COMPLETED"))
+        assertEquals(1, body.getJSONObject("status_counts").getInt("FAILED"))
+        assertEquals(20, body.getJSONArray("tasks").length())
+        assertFalse(body.toString().contains("private-other")); assertFalse(body.toString().contains("private result"))
+    }
+
+    @Test fun overviewDeduplicatesLiveTasksAndUsesObservedLifecycle() {
+        val recorded = old.copy(status = ChildTaskStatus.COMPLETED, text = "private result")
+        var state = RetainedChildTask(old.copy(status = ChildTaskStatus.RUNNING), false, false, false, ChildTaskPauseState.PAUSED)
+        val access = RunChildTaskAccess("conversation", { listOf(recorded) }, { error("no source") },
+            { listOf(state, state) }, { error("no progress") }, { error("no resume") }, { error("no pause") },
+            { error("no stop") }, { error("no configuration") }, recordedStatuses = { mapOf(recorded.owner to recorded.status) })
+        fun summary() = JSONObject((invoke(access, caller("conversation"), "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed).payload)
+        assertEquals(1, summary().getInt("total_count"))
+        assertEquals(1, summary().getJSONObject("status_counts").getInt("PAUSED"))
+        state = state.copy(pauseState = ChildTaskPauseState.ACTIVE)
+        assertEquals(1, summary().getJSONObject("status_counts").getInt("RUNNING"))
+        state = state.copy(record = recorded, settled = true)
+        assertEquals(1, summary().getJSONObject("status_counts").getInt("COMPLETED"))
+        state = state.copy(journalUnconfirmed = true)
+        assertEquals(1, summary().getJSONObject("status_counts").getInt("UNKNOWN"))
+    }
 }

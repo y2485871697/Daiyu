@@ -153,6 +153,20 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
         }
     }
 
+    override fun statuses(conversationId: String): Map<ChildRunOwner, ChildTaskStatus> {
+        require(conversationId.isNotBlank() && conversationId.length <= 200)
+        val columns = arrayOf("conversation_id", "parent_run_id", "task_group_id", "generation",
+            "task_id", "assistant_message_id", "status")
+        return database.readableDatabase.query(TABLE, columns, "conversation_id=?", arrayOf(conversationId),
+            null, null, null).use { cursor ->
+            buildMap {
+                while (cursor.moveToNext()) put(ChildRunOwner(cursor.getString(0), cursor.getString(1),
+                    cursor.getString(2), cursor.getLong(3), cursor.getString(4), cursor.getString(5)),
+                    ChildTaskStatus.valueOf(cursor.getString(6)))
+            }
+        }
+    }
+
     override fun list(conversationId: String, limit: Int): List<ChildTaskRecord> {
         require(conversationId.isNotBlank() && conversationId.length <= 200 && limit in 1..20)
         return database.readableDatabase.query(TABLE, COLUMNS, "conversation_id=?", arrayOf(conversationId),

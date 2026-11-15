@@ -15,6 +15,7 @@ internal fun toolOperationGlyph(toolName: String, argumentJson: ToolPresentation
         "skills_read_resource" -> "resource"
         "run_child_models" -> "batch"
         "start_child_tasks" -> "launchBackground"
+        "list_subagents" -> "list"
         "inspect_child_tasks" -> "inspect"
         "get_child_task" -> "receive"
         "control_child_task" -> when (args?.optString("action")) {

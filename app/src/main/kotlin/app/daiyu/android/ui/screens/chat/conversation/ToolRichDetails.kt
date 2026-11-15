@@ -301,7 +301,7 @@ internal object ToolRichDetails {
                 list(output, "artifacts", "产物记录", listOf("id" to "标识", "mime" to "格式", "width" to "宽度", "height" to "高度"))
             }
             "delegation", "child_control" -> {
-                if (!launchingDelegation && toolName != "direct_child_task") {
+                if (!launchingDelegation && toolName !in setOf("direct_child_task", "list_subagents", "inspect_child_tasks")) {
                     entries += childTaskReceiptEntries(output) { scrub(it, hidden) }
                 }
             }
@@ -407,7 +407,8 @@ internal object ToolRichDetails {
                 category in setOf("delegation", "child_control") -> when {
                     output == null -> "任务状态暂不可用"
                     entries.isNotEmpty() || toolName == "direct_child_task" -> ""
-                    toolName == "inspect_child_tasks" -> childTaskInspectionSummary(output) { scrub(it, hidden) }
+                    toolName == "list_subagents" -> childTaskConfigurationSummary(output) { scrub(it, hidden) }
+                    toolName == "inspect_child_tasks" -> childTaskInspectionSummary(output)
                     toolName == "control_child_task" -> when (output.optString("outcome")) {
                         "RESUMED" -> "任务已继续"
                         "PAUSED" -> "任务已暂停"

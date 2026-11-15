@@ -11,7 +11,7 @@ internal object ToolCardPresentations {
         group("memory", "assistant_memory_search" to "检索记忆", "assistant_memory_read" to "读取记忆")
         group("skills", "skills_list" to "查找技能", "skills_read" to "读取技能说明", "skills_read_resource" to "读取技能资源")
         group("delegation", "run_child_models" to "批量委派", "start_child_tasks" to "后台委派")
-        group("child_control", "direct_child_task" to "指导子任务", "inspect_child_tasks" to "查看子任务",
+        group("child_control", "direct_child_task" to "指导子任务", "list_subagents" to "查看可用子代理", "inspect_child_tasks" to "查看子任务状态",
             "get_child_task" to "读取子任务结果", "control_child_task" to "控制子任务")
         group("terminal", "terminal_exec" to "执行命令", "terminal_read" to "读取命令输出", "terminal_pty_step" to "执行终端步骤", "terminal_pty_read" to "读取输出", "shizuku_execute" to "执行命令")
         group("background_job", "terminal_job_start" to "启动后台任务", "terminal_job_read" to "读取后台结果")
@@ -79,7 +79,8 @@ internal object ToolCardPresentations {
                 choice(output, "state", terminalStates), choice(output, "mode", mapOf("async" to "异步任务", "daemon" to "守护任务")))
             "run_child_models" -> listOf(arrayCount(output, "results", "返回任务数"))
             "start_child_tasks" -> listOf(arrayCount(output, "tasks", "入队任务数"), flags(output, listOf("accepted", "completed")))
-            "inspect_child_tasks" -> listOf(arrayCount(output, "tasks", "返回任务数"), flags(output, listOf("current_configuration_available")))
+            "list_subagents" -> listOf(arrayCount(output, "available_profiles", "可用子代理数"))
+            "inspect_child_tasks" -> listOf(numbers(output, listOf("total_count")))
             "get_child_task", "control_child_task" -> listOf(flags(output, listOf("new_request", "settled")))
             "direct_child_task" -> listOf(flags(output, listOf("new_request")))
             "screen" -> listOf(arrayCount(output, "nodes", "节点数"), numbers(output, listOf("width", "height", "expires_after_ms")), flags(output, listOf("truncated")))

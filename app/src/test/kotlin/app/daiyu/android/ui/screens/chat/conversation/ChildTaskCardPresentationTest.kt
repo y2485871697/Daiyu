@@ -63,9 +63,9 @@ class ChildTaskCardPresentationTest {
         repeat(2) { tasks.put(JSONObject().put("profile_id", "historical-$it").put("status", "UNKNOWN").put("progress", "同一段进度")) }
         val value = rich(JSONObject().put("tasks", tasks).put("available_profile_metadata",
             JSONArray().put(JSONObject().put("name", "当前改名"))).toString(), "inspect_child_tasks")
-        assertEquals(2, value.entries.size)
-        assertEquals(listOf("子代理", "子代理"), value.entries.map { it.title })
-        assertEquals(listOf("同一段进度", "同一段进度"), value.entries.flatMap { it.documents }.map { it.text })
+        assertTrue(value.entries.isEmpty()); assertTrue(value.documents.isEmpty())
+        assertEquals("2个子任务•状态未确认", value.prose!!.text)
+        assertFalse(visible(value).contains("同一段进度"))
         assertFalse(visible(value).contains("historical-")); assertFalse(visible(value).contains("当前改名"))
     }
 
@@ -98,7 +98,7 @@ class ChildTaskCardPresentationTest {
         assertTrue(launch.rich.entries.isEmpty()); assertTrue(launch.fields.isEmpty())
         assertFalse(visible(launch.rich).contains("伪造"))
         assertEquals("任务状态暂不可用", rich("{broken raw debug").prose!!.text)
-        assertEquals("暂无任务记录", rich("""{"tasks":[]}""", "inspect_child_tasks").prose!!.text)
+        assertEquals("0个子任务•暂无任务", rich("""{"tasks":[]}""", "inspect_child_tasks").prose!!.text)
     }
     private val frozenOwner = ChildRunOwner("conversation", "old-run", "old-group", 2, "old-child", "old-answer")
     private fun identity(owner: ChildRunOwner = frozenOwner) = JSONObject()
@@ -118,10 +118,9 @@ class ChildTaskCardPresentationTest {
         val actual = childTaskNamedPresentation(original, "conversation", "inspect_child_tasks", "{}", payload,
             mapOf(frozenOwner to "历史审查"))
         val details = actual.details.rich
-        assertEquals("历史审查", details.entries.single().title)
-        assertEquals(listOf(ToolFieldUi("状态", "已暂停")), details.entries.single().fields)
-        assertTrue(details.entries.single().documents.isEmpty())
-        assertTrue(details.documents.isEmpty()); assertNull(details.prose)
+        assertTrue(details.entries.isEmpty()); assertTrue(details.documents.isEmpty())
+        assertEquals("1个子任务•已暂停", details.prose!!.text)
+        assertFalse(visible(details).contains("历史审查"))
         assertFalse(visible(details).contains("当前改名"))
     }
 
@@ -184,7 +183,8 @@ class ChildTaskCardPresentationTest {
         val original = ToolCardPresentations.present("inspect_child_tasks", "{}", payload)
         val actual = childTaskNamedPresentation(original, "conversation", "inspect_child_tasks", "{}", payload,
             mapOf(frozenOwner to "历史执行", second to "历史审查"))
-        assertEquals(listOf("历史审查", "历史执行"), actual.details.rich.entries.map { it.title })
+        assertTrue(actual.details.rich.entries.isEmpty())
+        assertEquals("2个子任务•状态未确认", actual.details.rich.prose!!.text)
         val recorded = JSONObject().put("agent_name", "原名").put("status", "COMPLETED").put("text", "body").toString()
         val explicit = ToolCardPresentations.present("get_child_task", identity().toString(), recorded)
         assertSame(explicit, childTaskNamedPresentation(explicit, "conversation", "get_child_task", identity().toString(), recorded,
@@ -200,35 +200,64 @@ class ChildTaskCardPresentationTest {
             mapOf(frozenOwner to "不应展示")))
     }
 
-    @Test fun inspectionShowsRecordedAvailableConfigurationSeparatelyFromMissingTasks() {
+    @Test fun configurationAndTaskStatusAreRenderedByDifferentTools() {
         val payload = JSONObject().put("tasks", JSONArray()).put("current_configuration_available", true)
             .put("available_profiles", JSONArray(listOf("execution", "review")))
             .put("available_profile_metadata", JSONArray().put(JSONObject().put("name", "执行"))
                 .put(JSONObject().put("name", "审查")))
+        val configuration = rich(payload.toString(), "list_subagents")
+        assertEquals("可用子代理：执行、审查", configuration.prose!!.text)
+        assertTrue(configuration.entries.isEmpty()); assertFalse(visible(configuration).contains("子任务"))
         val empty = rich(payload.toString(), "inspect_child_tasks")
-        assertEquals("本次查看时可用子代理：执行、审查\n暂无已派发任务记录", empty.prose!!.text)
-        assertTrue(empty.entries.isEmpty())
+        assertEquals("0个子任务•暂无任务", empty.prose!!.text)
+        assertTrue(empty.entries.isEmpty()); assertFalse(visible(empty).contains("执行、审查"))
         val task = JSONObject().put("agent_name", "历史名称").put("status", "COMPLETED").put("text", "历史结果")
         val existing = rich(JSONObject(payload.toString()).put("tasks", JSONArray().put(task)).toString(), "inspect_child_tasks")
-        assertEquals("历史名称", existing.entries.single().title)
-        assertFalse(visible(existing).contains("执行、审查"))
-        assertEquals("本次查看时没有可用子代理\n暂无已派发任务记录", rich(JSONObject(payload.toString())
-            .put("available_profiles", JSONArray()).put("available_profile_metadata", JSONArray()).toString(), "inspect_child_tasks").prose!!.text)
+        assertEquals("1个子任务•已完成", existing.prose!!.text); assertTrue(existing.entries.isEmpty())
+        assertFalse(visible(existing).contains("历史名称")); assertFalse(visible(existing).contains("历史结果"))
+        assertEquals("没有可用子代理", rich(JSONObject(payload.toString())
+            .put("available_profiles", JSONArray()).put("available_profile_metadata", JSONArray()).toString(), "list_subagents").prose!!.text)
     }
 
-    @Test fun inspectionConfigurationStillRequiresExplicitRecordedEvidenceAndPrivacyPermission() {
+    @Test fun configurationStillRequiresExplicitRecordedEvidenceAndPrivacyPermission() {
         val payload = JSONObject().put("tasks", JSONArray()).put("current_configuration_available", true)
             .put("available_profile_metadata", JSONArray().put(JSONObject().put("name", "PRIVATE_SECRET")))
             .put("token", "PRIVATE_SECRET")
-        val hidden = rich(payload.toString(), "inspect_child_tasks")
-        assertFalse(visible(hidden).contains("PRIVATE_SECRET"))
-        assertTrue(visible(hidden).contains("[已隐藏]"))
-        assertTrue(rich(JSONObject(payload.toString()).put("privacy_redacted", true).toString(), "inspect_child_tasks").bodyRestricted)
-        assertEquals("暂无任务记录", rich(JSONObject(payload.toString()).put("current_configuration_available", "true")
-            .toString(), "inspect_child_tasks").prose!!.text)
-        assertEquals("本次未能读取可用子代理配置\n暂无任务记录", rich(JSONObject(payload.toString())
-            .put("current_configuration_available", false).toString(), "inspect_child_tasks").prose!!.text)
+        val hidden = rich(payload.toString(), "list_subagents")
+        assertFalse(visible(hidden).contains("PRIVATE_SECRET")); assertTrue(visible(hidden).contains("[已隐藏]"))
+        assertTrue(rich(JSONObject(payload.toString()).put("privacy_redacted", true).toString(), "list_subagents").bodyRestricted)
+        for (value in listOf<Any>("true", false)) assertEquals("本次未能读取可用子代理配置",
+            rich(JSONObject(payload.toString()).put("current_configuration_available", value).toString(), "list_subagents").prose!!.text)
         assertFalse(visible(rich(payload.toString(), "get_child_task")).contains("PRIVATE_SECRET"))
+    }
+
+    @Test fun taskSummaryUsesCompleteCountsAndRejectsInconsistentOrUnknownStates() {
+        val cases = listOf(
+            Triple(5, "COMPLETED:5", "5个子任务•已完成"),
+            Triple(25, "COMPLETED:24,FAILED:1", "25个子任务•部分失败"),
+            Triple(5, "COMPLETED:4,RUNNING:1", "5个子任务•进行中"),
+            Triple(5, "COMPLETED:4,PAUSED:1", "5个子任务•已暂停"),
+            Triple(1, "FUTURE_STATE:1", "1个子任务•状态未确认"),
+            Triple(2, "RUNNING:1,UNKNOWN:1", "2个子任务•状态未确认"),
+            Triple(2, "PAUSED:1,FAILED:1", "2个子任务•部分失败"),
+            Triple(2, "PAUSED:1,NOT_EXECUTED:1", "2个子任务•含未执行"),
+            Triple(5, "COMPLETED:4", "任务状态暂不可用"),
+            Triple(1, "COMPLETED:1.5", "任务状态暂不可用"),
+            Triple(1, "COMPLETED:-1", "任务状态暂不可用"),
+        )
+        for ((total, encoded, expected) in cases) {
+            val counts = JSONObject()
+            for (entry in encoded.split(',')) {
+                val (status, count) = entry.split(':')
+                counts.put(status, if (count.contains('.')) count.toDouble() else count.toLong())
+            }
+            val payload = JSONObject().put("total_count", total).put("status_counts", counts)
+                .put("tasks", JSONArray()).put("current_configuration_available", true)
+                .put("available_profile_metadata", JSONArray().put(JSONObject().put("name", "不显示配置")))
+            val value = rich(payload.toString(), "inspect_child_tasks")
+            assertEquals(expected, value.prose!!.text); assertTrue(value.entries.isEmpty())
+            assertFalse(visible(value).contains("不显示配置"))
+        }
     }
 
 }

@@ -111,6 +111,7 @@ internal class SQLiteRuntimeStore private constructor(
             childAccess { childStore.reassigned(task, profileId, display) }
         override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) =
             childAccess { childStore.finished(task, status, text, detail) }
+        override fun statuses(conversationId: String) = childAccess { childStore.statuses(conversationId) }
         override fun list(conversationId: String, limit: Int) = childAccess { childStore.list(conversationId, limit) }
     }
     @Synchronized private fun <T> childAccess(work: () -> T): T {

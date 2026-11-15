@@ -134,6 +134,13 @@ jobs:
               'RunChildTaskAccessTest', 'RunOrdinaryGenerationToolsTest',
               'ChildTaskCardPresentationTest', 'ToolBodyLayoutTest', 'ToolRichDetailsTest', 'ToolCardPresentationTest', 'ChildTaskPresentationTest', 'BatchDelegationPresentationTest', 'ToolCardChildControlTest'}
           suites = domain + app
+          required_methods = {'configurationQueryNeverReadsTasksOrRunsThem',
+              'overviewCountsAllTwentyFiveTasksAndPreservesOffWindowFailures',
+              'overviewDeduplicatesLiveTasksAndUsesObservedLifecycle',
+              'configurationAndTaskStatusAreRenderedByDifferentTools',
+              'taskSummaryUsesCompleteCountsAndRejectsInconsistentOrUnknownStates'}
+          actual_methods = {case.attrib.get('name') for suite in app for case in suite.findall('testcase')}
+          assert required_methods <= actual_methods, required_methods - actual_methods
           assert suites and all(int(s.attrib['tests']) > 0 for s in suites)
           assert all(int(s.attrib.get(k, 0)) == 0 for s in suites for k in ('failures','errors','skipped'))
           assert not [p for p in Path('.').rglob('*') if p.is_file() and p.suffix.lower() in ('.apk','.aab','.apks')]

@@ -353,6 +353,15 @@ class ChildTaskCardScopeTest(unittest.TestCase):
                 self.assertEqual("child-task-cards-targeted", scope)
                 self.assertEqual([python, "-B", "-m", "unittest", *self.MODULES, "-v"], command)
 
+    def test_task_status_scope_adds_storage_and_catalog_without_widening_old_scope(self):
+        classes = (*self.CLASSES, "app.daiyu.android.ControllerChildModelsTest",
+                   "app.daiyu.android.ControllerModelPreparationTest", "app.daiyu.android.storage.SQLiteChildTaskStoreTest")
+        self.assertEqual(classes, recorder.CHILD_TASK_STATUS_PLATFORM_CLASSES)
+        for ordered in (classes, tuple(reversed(classes))):
+            command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(ordered)))
+            self.assertEqual("child-task-cards-targeted", scope)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *self.MODULES, "-v"], command)
+
     def test_exact_cards_plus_controller_keep_targeted_checks_and_reject_bad_filters(self):
         classes = (*self.CLASSES, "app.daiyu.android.ControllerChildModelsTest")
         self.assertEqual(classes, recorder.CHILD_DELEGATION_PLATFORM_CLASSES)

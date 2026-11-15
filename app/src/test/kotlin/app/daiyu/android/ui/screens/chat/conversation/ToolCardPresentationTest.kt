@@ -6,7 +6,7 @@ import org.junit.Test
 
 class ToolCardPresentationTest {
     @Test fun retainedChildAndLiveMcpToolsDoNotUseUnknownFallback() {
-        listOf("inspect_child_tasks", "get_child_task").forEach { name ->
+        listOf("list_subagents", "inspect_child_tasks", "get_child_task").forEach { name ->
             assertEquals("child_control", ToolCardPresentations.present(name, "{}", "{\"tasks\":[]}").category)
             assertNotEquals("generic", toolOperationGlyph(name, "{}"))
         }
@@ -26,6 +26,8 @@ class ToolCardPresentationTest {
             "{\"tasks\":[],\"current_configuration_available\":true}")
         assertTrue(card.details.fields.isEmpty())
         assertEquals("child_control", card.category)
+        assertEquals("查看子任务状态", card.title)
+        assertEquals("查看可用子代理", ToolCardPresentations.present("list_subagents", "{}", "{}").title)
     }
 
     @Test fun launchAndPermissionCardsStateTheExactUnverifiedScope() {

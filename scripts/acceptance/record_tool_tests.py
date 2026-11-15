@@ -358,6 +358,10 @@ CHILD_TASK_CARD_PLATFORM_CLASSES = tuple("app.daiyu.android.ui.screens.chat.conv
 CHILD_DELEGATION_PLATFORM_CLASSES = CHILD_TASK_CARD_PLATFORM_CLASSES + (
     "app.daiyu.android.ControllerChildModelsTest",
 )
+CHILD_TASK_STATUS_PLATFORM_CLASSES = CHILD_DELEGATION_PLATFORM_CLASSES + (
+    "app.daiyu.android.ControllerModelPreparationTest",
+    "app.daiyu.android.storage.SQLiteChildTaskStoreTest",
+)
 CHILD_TASK_CARD_INHERITANCE_CLASSES = CHILD_TASK_CARD_PLATFORM_CLASSES + (
     "app.daiyu.android.ConversationSelectionInheritanceActivityTest",
 )
@@ -882,7 +886,7 @@ def command_for(python, env):
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (
                 sorted(CHILD_TASK_CARD_PLATFORM_CLASSES), sorted(CHILD_TASK_CARD_INHERITANCE_CLASSES),
                 sorted(CHILD_TASK_CARD_THEME_CLASSES), sorted(CHILD_DELEGATION_PLATFORM_CLASSES),
-                sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES))):
+                sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES), sorted(CHILD_TASK_STATUS_PLATFORM_CLASSES))):
         return [python, "-B", "-m", "unittest", *CHILD_TASK_CARD_MODULES, "-v"], "child-task-cards-targeted"
     return [python, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"
 

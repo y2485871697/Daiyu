@@ -42,7 +42,7 @@ class SubAgentDescriptorTest {
         assertEquals(profile.name, JSONArray(json).getJSONObject(0).getString("name"))
         val description = SubAgentDescriptor.initialDescription(listOf(profile))
         assertTrue(description.contains(json))
-        assertTrue(description.contains("inspect_child_tasks仅查看当前可用子代理配置和任务总览"))
+        assertTrue(description.contains("list_subagents仅查询当前可用子代理配置，inspect_child_tasks仅查询任务总数和状态汇总"))
         assertTrue(description.contains("具体任务的进度、结果和诊断详情使用get_child_task"))
         assertTrue(description.contains("当前配置不能回填旧任务"))
     }

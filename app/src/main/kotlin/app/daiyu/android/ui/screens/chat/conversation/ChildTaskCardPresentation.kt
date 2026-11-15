@@ -48,11 +48,59 @@ internal fun childTaskReceiptEntries(output: JSONObject?, clean: (String) -> Str
     return if (listOf("child_run_id", "status", "text", "result", "progress", "partial_result", "partial", "checkpoint").any(output::has)) listOf(entry(output)) else emptyList()
 }
 
-/** Configuration describes this inspection, never tasks created after it. */
-internal fun childTaskInspectionSummary(output: JSONObject, clean: (String) -> String): String {
-    val tasks = output.optJSONArray("tasks") ?: return "暂无任务记录"
-    if (tasks.length() != 0 || output.opt("current_configuration_available") !is Boolean) return "暂无任务记录"
-    if (output.opt("current_configuration_available") != true) return "本次未能读取可用子代理配置\n暂无任务记录"
+internal fun childTaskInspectionSummary(output: JSONObject): String {
+    val counts = output.optJSONObject("status_counts")
+    val total: Int
+    val statuses: Set<String>
+    if (counts != null) {
+        val value = output.opt("total_count") as? Number ?: return "任务状态暂不可用"
+        if (value.toString() != value.toLong().toString() || value.toLong() !in 0L..Int.MAX_VALUE.toLong())
+            return "任务状态暂不可用"
+        total = value.toInt()
+        val entries = counts.keys().asSequence().map { key -> key to (counts.opt(key) as? Number) }.toList()
+        if (entries.any { (_, number) -> number == null || number.toString() != number.toLong().toString() || number.toLong() <= 0 || number.toLong() > total.toLong() } ||
+            entries.sumOf { it.second!!.toLong() } != total.toLong()) return "任务状态暂不可用"
+        statuses = entries.map { it.first }.toSet()
+    } else {
+        val tasks = output.optJSONArray("tasks") ?: return "任务状态暂不可用"
+        total = tasks.length()
+        statuses = (0 until total).map { index ->
+            val row = tasks.optJSONObject(index) ?: return "任务状态暂不可用"
+            val recorded = row.optString("status").uppercase(Locale.ROOT)
+            when {
+                row.opt("journal_unconfirmed") == true || row.optString("detail") == "child_result_unconfirmed" -> "UNKNOWN"
+                recorded in setOf("UNKNOWN", "COMPLETED", "FAILED", "NOT_EXECUTED") -> recorded
+                recorded !in setOf("RUNNING", "QUEUED") -> "UNKNOWN"
+                row.opt("live_state_available") == true && row.opt("settled") == false -> when {
+                    row.opt("stop_requested") == true -> "STOPPING"
+                    row.optString("pause_state") == "PAUSED" -> "PAUSED"
+                    row.optString("pause_state") == "PENDING" -> "PAUSING"
+                    row.optString("queue_state") == "PENDING" || row.optString("status") == "QUEUED" -> "QUEUED"
+                    else -> "RUNNING"
+                }
+                else -> "UNKNOWN"
+            }
+        }.toSet()
+    }
+    val status = when {
+        total == 0 -> "暂无任务"
+        statuses == setOf("COMPLETED") -> "已完成"
+        statuses == setOf("QUEUED") -> "排队中"
+        statuses == setOf("STOPPING") -> "停止中"
+        statuses == setOf("PAUSING") -> "暂停中"
+        statuses.any { it !in setOf("COMPLETED", "PAUSED", "FAILED", "NOT_EXECUTED", "RUNNING", "QUEUED", "STOPPING", "PAUSING") } -> "状态未确认"
+        statuses.any { it in setOf("RUNNING", "QUEUED", "STOPPING", "PAUSING") } -> "进行中"
+        "FAILED" in statuses -> if (statuses.size == 1) "失败" else "部分失败"
+        "NOT_EXECUTED" in statuses -> if (statuses.size == 1) "未执行" else "含未执行"
+        "PAUSED" in statuses -> "已暂停"
+        else -> "状态未确认"
+    }
+    return "${total}个子任务•$status"
+}
+
+/** Configuration belongs only to the configuration-query tool, not task history. */
+internal fun childTaskConfigurationSummary(output: JSONObject, clean: (String) -> String): String {
+    if (output.opt("current_configuration_available") != true) return "本次未能读取可用子代理配置"
     val metadata = output.optJSONArray("available_profile_metadata")
     val names = (0 until minOf(metadata?.length() ?: 0, 32)).mapNotNull { index ->
         (metadata?.optJSONObject(index)?.opt("name") as? String)?.takeIf { it.isNotBlank() }
@@ -62,11 +110,10 @@ internal fun childTaskInspectionSummary(output: JSONObject, clean: (String) -> S
     val count = (0 until minOf(profiles?.length() ?: 0, 32)).mapNotNull { index ->
         (profiles?.opt(index) as? String)?.takeIf { it.isNotBlank() }
     }.distinct().size
-    val configuration = when {
+    return when {
         names.isNotEmpty() -> "可用子代理：" + names.take(4).joinToString("、") + if (names.size > 4) "等${names.size}个" else ""
-        count > 0 -> "有${count}个可用子代理"
+        count > 0 -> "${count}个可用子代理"
         metadata != null || profiles != null -> "没有可用子代理"
-        else -> return "暂无任务记录"
+        else -> "本次未能读取可用子代理配置"
     }
-    return "本次查看时${configuration}\n暂无已派发任务记录"
 }

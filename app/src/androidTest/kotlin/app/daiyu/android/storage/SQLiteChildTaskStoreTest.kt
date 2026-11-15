@@ -55,6 +55,23 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
         } finally { super.tearDown() }
     }
 
+    fun testCompleteStatusProjectionIncludesOlderTasksAndKeepsConversationsIsolated() {
+        val db = fresh(); val runtime = lease(db); val owner = parent(db)
+        val records = tasks(owner, 25)
+        runtime.childTasks.enqueue(owner, records)
+        val otherOwner = parent(db)
+        val otherRecords = tasks(otherOwner, 2)
+        runtime.childTasks.enqueue(otherOwner, otherRecords)
+        val expected = records.associate { it.owner to it.status }
+        assertEquals(20, runtime.childTasks.list(owner.conversationId.value, 20).size)
+        assertEquals(25, runtime.childTasks.statuses(owner.conversationId.value).size)
+        assertEquals(expected, runtime.childTasks.statuses(owner.conversationId.value))
+        assertEquals(expected, SQLiteChildTaskStore(db).statuses(owner.conversationId.value))
+        assertEquals(otherRecords.associate { it.owner to it.status }, runtime.childTasks.statuses(otherOwner.conversationId.value))
+        assertTrue(runtime.childTasks.statuses("missing-conversation").isEmpty())
+        assertEquals(records, records.map { SQLiteChildTaskStore(db).get(it.owner) })
+    }
+
     fun testLargeCallGroupPersistsAndReadsEveryIndexBeyondTheRecentTwentyWindow() {
         val db = fresh(); val runtime = lease(db); val parent = parent(db)
         val store = runtime.childTasks

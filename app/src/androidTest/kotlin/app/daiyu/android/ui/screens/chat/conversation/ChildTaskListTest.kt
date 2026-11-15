@@ -407,7 +407,7 @@ class ChildTaskListTest : WiredActivityTestCase() {
 
     fun testTaskToolReceiptsShareHeaderOnlyStateAndIndependentSixLinePreviews() {
         val body = (1..9).joinToString("\n") { "第${it}行批量任务结果" }
-        for (tool in listOf("inspect_child_tasks", "get_child_task", "control_child_task")) {
+        for (tool in listOf("get_child_task", "control_child_task")) {
             val entries = org.json.JSONArray()
                 .put(org.json.JSONObject().put("agent_name", "历史执行").put("status", "COMPLETED").put("text", body))
                 .put(org.json.JSONObject().put("agent_name", "历史审查").put("status", "FAILED").put("text", "未完成"))
@@ -441,6 +441,32 @@ class ChildTaskListTest : WiredActivityTestCase() {
             ui.onNodeWithTag("tool-child-progress:receipt-0").assertDoesNotExist()
             ui.onNodeWithTag("tool-child-receipt-header:1").performClick()
             ui.onNodeWithTag("tool-child-progress:receipt-1").assertTextEquals("未完成").assertHasNoClickAction()
+        }
+    }
+
+    fun testConfigurationAndTaskStatusReceiptsDoNotShareContent() {
+        val payload = org.json.JSONObject().put("current_configuration_available", true)
+            .put("available_profiles", org.json.JSONArray(listOf("execution", "review")))
+            .put("available_profile_metadata", org.json.JSONArray()
+                .put(org.json.JSONObject().put("name", "执行"))
+                .put(org.json.JSONObject().put("name", "审查")))
+            .put("total_count", 25).put("status_counts", org.json.JSONObject().put("COMPLETED", 25))
+            .put("tasks", org.json.JSONArray().put(org.json.JSONObject()
+                .put("agent_name", "历史任务名称").put("status", "COMPLETED").put("text", "历史任务正文"))).toString()
+        for (tool in listOf("list_subagents", "inspect_child_tasks")) {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    androidx.compose.runtime.key(tool) {
+                        ToolCategoryContent("child_control", ToolCategoryDetails.project("child_control", "{}", payload, tool))
+                    }
+                }
+            } }
+            ui.waitForIdle()
+            ui.onNodeWithText(if (tool == "list_subagents") "可用子代理：执行、审查" else "25个子任务•已完成").assertIsDisplayed()
+            ui.onNodeWithText(if (tool == "list_subagents") "25个子任务•已完成" else "可用子代理：执行、审查").assertDoesNotExist()
+            ui.onNodeWithText("历史任务名称").assertDoesNotExist()
+            ui.onNodeWithText("历史任务正文").assertDoesNotExist()
+            ui.onNodeWithTag("tool-child-receipt-header:0").assertDoesNotExist()
         }
     }
 

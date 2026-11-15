@@ -145,7 +145,7 @@ class ChildTaskCardContractTest(unittest.TestCase):
         root_env = workflow.split('\nenv:\n', 1)[1].split('\njobs:', 1)[0]
         self.assertIn('EXPECTED_SHA: ${{ inputs.expected_sha }}', root_env)
         self.assertIn('SOURCE_SHA: ${{ inputs.source_sha }}', root_env)
-        check = workflow.split('      - name: 执行本次五类定向库存与工具契约\n', 1)[1].split('      - name:', 1)[0]
+        check = workflow.split('      - name: 执行本次子任务定向库存与工具契约\n', 1)[1].split('      - name:', 1)[0]
         self.assertIn('working-directory: validation-tools', check)
         self.assertIn('EXPECTED_SHA: ${{ github.sha }}', check)
         self.assertNotIn('SOURCE_SHA:', check)

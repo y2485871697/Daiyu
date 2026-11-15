@@ -19,16 +19,52 @@ internal class RunChildTaskAccess(
     private val currentProfileMetadata: (() -> List<SubAgentDescriptor>)? = null,
     private val initialProfiles: List<SubAgentDescriptor> = emptyList(),
     private val takeOver: ((ChildTaskRecord, String) -> ChildTaskControlReceipt)? = null,
+    private val recordedStatuses: () -> Map<ChildRunOwner, ChildTaskStatus> = {
+        records().associate { it.owner to it.status }
+    },
 ) {
     fun tools(): List<RegisteredTool> = listOf(object : RegisteredTool {
-        override val definition = ToolDefinition("inspect_child_tasks", 1,
-            "查看新委派可用的当前子代理配置，以及本会话最多20条已有子任务的身份和状态总览（包括旧配置、暂停或停止的任务）。不读取单任务进度、结果正文或诊断详情；需要这些内容时按返回的完整身份调用get_child_task。无参数，只读，不自动继续或重派。" + SubAgentDescriptor.initialDescription(initialProfiles),
+        override val definition = ToolDefinition("list_subagents", 1,
+            "查询新委派可用的当前子代理配置，仅返回配置及可用性，不查询已有任务。任务总数和状态汇总使用inspect_child_tasks，具体进度和结果使用get_child_task。无参数，只读，不委派、继续或重派任务。" + SubAgentDescriptor.initialDescription(initialProfiles),
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(emptyList()))
         override fun prepare(arguments: ToolArguments) = PreparedTool.contextual { context ->
             if (context.owner.conversationId.value != conversationId || context.cancelled())
                 return@contextual ExecutionReceipt.NotExecuted("child_conversation_mismatch")
-            val active = live().associateBy { it.record.owner }
-            val rows = (active.values.map { it.record } + records()).distinctBy { it.owner }.take(20)
+            val metadata = runCatching { currentProfileMetadata?.invoke() }.getOrNull()
+            val profiles = if (currentProfileMetadata != null) metadata?.map { it.profileId }?.toSet()
+                else runCatching { currentProfiles() }.getOrNull()
+            ExecutionReceipt.Confirmed(JSONObject()
+                .put("current_configuration_available", profiles != null)
+                .put("configuration_scope", "current_new_text_requests")
+                .put("available_profiles", JSONArray(profiles?.toList() ?: emptyList<String>()))
+                .put("available_profile_metadata", JSONArray(metadata.orEmpty().map { it.toJson() }))
+                .toString())
+        }
+    }, object : RegisteredTool {
+        override val definition = ToolDefinition("inspect_child_tasks", 1,
+            "查询本会话已有子任务的总数和状态汇总，附近期任务的完整身份供定向读取或控制。总数与状态覆盖完整会话，不限身份列表的近期窗口。不返回子代理配置，配置使用list_subagents；不读取单任务进度、结果正文或诊断详情，这些内容使用get_child_task。无参数，只读，不自动继续或重派。",
+            CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(emptyList()))
+        override fun prepare(arguments: ToolArguments) = PreparedTool.contextual { context ->
+            if (context.owner.conversationId.value != conversationId || context.cancelled())
+                return@contextual ExecutionReceipt.NotExecuted("child_conversation_mismatch")
+            val active = live().filter { it.record.owner.conversationId == conversationId }.associateBy { it.record.owner }
+            val statuses = recordedStatuses().filterKeys { it.conversationId == conversationId }
+                .mapValues { it.value.name }.toMutableMap()
+            active.forEach { (owner, state) ->
+                statuses[owner] = when {
+                    state.journalUnconfirmed -> "UNKNOWN"
+                    state.record.status in setOf(ChildTaskStatus.UNKNOWN, ChildTaskStatus.COMPLETED,
+                        ChildTaskStatus.FAILED, ChildTaskStatus.NOT_EXECUTED) -> state.record.status.name
+                    state.settled -> state.record.status.name
+                    state.stopRequested -> "STOPPING"
+                    state.pauseState == ChildTaskPauseState.PAUSED -> "PAUSED"
+                    state.pauseState == ChildTaskPauseState.PENDING -> "PAUSING"
+                    state.queueState == ChildTaskQueueState.PENDING || state.record.status == ChildTaskStatus.QUEUED -> "QUEUED"
+                    else -> "RUNNING"
+                }
+            }
+            val rows = (active.values.map { it.record } + records()).filter { it.owner.conversationId == conversationId }
+                .distinctBy { it.owner }.take(20)
             val result = JSONArray()
             rows.forEach { row ->
                 val state = active[row.owner]
@@ -44,14 +80,10 @@ internal class RunChildTaskAccess(
                     .put("journal_unconfirmed", state?.journalUnconfirmed ?: JSONObject.NULL)
                     .put("settled", state?.settled ?: JSONObject.NULL))
             }
-            val metadata = runCatching { currentProfileMetadata?.invoke() }.getOrNull()
-            val profiles = if (currentProfileMetadata != null) metadata?.map { it.profileId }?.toSet()
-                else runCatching { currentProfiles() }.getOrNull()
             ExecutionReceipt.Confirmed(JSONObject().put("tasks", result)
-                .put("current_configuration_available", profiles != null)
-                .put("configuration_scope", "current_new_text_requests")
-                .put("available_profiles", JSONArray(profiles?.toList() ?: emptyList<String>()))
-                .put("available_profile_metadata", JSONArray(metadata.orEmpty().map { it.toJson() }))
+                .put("total_count", statuses.size)
+                .put("status_counts", JSONObject(statuses.values.groupingBy { it }.eachCount()))
+                .put("task_identities_truncated", statuses.size > rows.size)
                 .put("historical_metadata_policy", "Existing tasks keep their own snapshots. original_role is recorded for new tasks; null means unknown. Historical tier is unavailable. Do not infer missing metadata from current profiles.")
                 .toString())
         }
@@ -108,7 +140,7 @@ internal class RunChildTaskAccess(
         }
     }, object : RegisteredTool {
         override val definition = ToolDefinition("get_child_task", 1,
-            "按完整身份精确读取本会话任意已有子任务的具体进度、结果正文和诊断详情（不限总览20条）。当前可用子代理配置和任务总览使用inspect_child_tasks。配置变更、暂停或停止不影响读取；offset为字符偏移，可分页读取结果和当前进程保留的进度。max_chars为可选正整数，默认结果和进度各4096字符；超过4096时按4096读取，使用返回的next偏移继续分页。",
+            "按完整身份精确读取本会话任意已有子任务的具体进度、结果正文和诊断详情（不限总览20条）。当前可用子代理配置使用list_subagents，任务总数和状态汇总使用inspect_child_tasks。配置变更、暂停或停止不影响读取；offset为字符偏移，可分页读取结果和当前进程保留的进度。max_chars为可选正整数，默认结果和进度各4096字符；超过4096时按4096读取，使用返回的next偏移继续分页。",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("parent_run_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("task_group_id", ArgumentType.Text(200, minimumLength = 1)),

@@ -63,5 +63,8 @@ interface ChildTaskStore {
     /** CAS a live assignment without creating a task or changing its original authority. */
     fun reassigned(task: ChildTaskRecord, profileId: String, display: ChildTaskDisplay?): ChildTaskRecord? = null
     fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String = "", detail: String? = null)
+    /** Complete conversation status projection, without loading task documents. */
+    fun statuses(conversationId: String): Map<ChildRunOwner, ChildTaskStatus> =
+        throw UnsupportedOperationException("child_task_statuses_unsupported")
     fun list(conversationId: String, limit: Int = 20): List<ChildTaskRecord>
 }

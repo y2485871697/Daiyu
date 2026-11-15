@@ -2180,6 +2180,10 @@ class ChatController internal constructor(private val application:Application,
         check(!closed && ready && !recoveryFailed) { "child_tasks_unavailable" }
         return checkNotNull(runtimeStore).childTasks.list(conversationId.value, limit)
     }
+    @Synchronized internal fun childTaskStatuses(conversationId: ConversationId): Map<ChildRunOwner, ChildTaskStatus> {
+        check(!closed && ready && !recoveryFailed) { "child_tasks_unavailable" }
+        return checkNotNull(runtimeStore).childTasks.statuses(conversationId.value)
+    }
     /** Read on a worker thread; no runtime acquisition, recovery or provider request. */
     internal fun recordedRequestUsage(conversationId: ConversationId? = null): app.daiyu.android.model.usage.AttributedUsageStats {
         synchronized(this) { check(!closed && ready && !recoveryFailed) { "recorded_usage_unavailable" } }
@@ -4380,6 +4384,7 @@ class ChatController internal constructor(private val application:Application,
                 run, preparedContext.archiveId) + referenceReader.tools()
             val childTaskAccess = app.daiyu.android.integration.tools.RunChildTaskAccess(conversationId.value,
                 records = { childTasks(conversationId) },
+                recordedStatuses = { childTaskStatuses(conversationId) },
                 source = { owner -> checkNotNull(childSupervisor).source(owner) },
                 live = { liveChildTasks(conversationId) },
                 progress = ::childTaskProgress,

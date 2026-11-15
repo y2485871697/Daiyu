@@ -170,3 +170,19 @@ class MarkdownEntrySmokeScopeTests(unittest.TestCase):
             self.assertEqual(0, result.returncode, result.stderr)
             inventory = json.loads((root / 'smoke/instrumentation-shards.json').read_text())
             self.assertEqual(2, inventory['all_classes'][CLASSES[0]])
+
+    def test_session_entry_workflow_has_exact_independent_concurrency_suffix(self):
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/build.yml').read_text(encoding='utf-8')
+        group = next(line.strip() for line in workflow.splitlines() if line.startswith('  group:'))
+        canonical = ','.join(recorder.SESSION_ENTRY_PLATFORM_CLASSES)
+        suffix = (
+            "${{ inputs.mode == 'smoke' && inputs.smoke_classes == '"
+            + canonical + "' && '-session-entry' || '' }}"
+        )
+        self.assertTrue(group.endswith(suffix), group)
+        self.assertEqual(1, group.count(suffix))
+        self.assertIn('\n  cancel-in-progress: false\n', workflow)
+        fragments = group.split('${{')
+        self.assertNotIn('}}', fragments[0])
+        for fragment in fragments[1:]:
+            self.assertEqual(1, fragment.count('}}'), group)

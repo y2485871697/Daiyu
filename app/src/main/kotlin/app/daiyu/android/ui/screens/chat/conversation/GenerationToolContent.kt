@@ -32,7 +32,7 @@ internal data class TrustedToolMediaUi(val key: String,
     val metadata: ControllerGenerationOutputMetadata, val thumbnail: Bitmap?)
 
 @Composable
-internal fun GenerationToolContent(controller: ChatController, step: WorkStepUi, onAction: (ToolCardActionRequest) -> Unit) {
+internal fun GenerationToolContent(controller: ChatController, step: WorkStepUi, onAction: (ToolCardActionRequest) -> Unit, active: Boolean = true) {
     val owner = step.owner ?: return
     val binding = remember(owner, step.toolCallId, step.toolName) {
         GenerationAttemptBinding(owner.conversationId, owner.messageId, owner.runId, step.toolCallId, step.toolName)
@@ -41,15 +41,20 @@ internal fun GenerationToolContent(controller: ChatController, step: WorkStepUi,
     var pending by remember(binding) { mutableStateOf(3) }
     var failed by remember(binding) { mutableStateOf(false) }
     var readRevision by remember(binding) { mutableStateOf(0) }
-    DisposableEffect(controller, binding, step.activity, readRevision, controller.ready, controller.dataBusy) {
+    DisposableEffect(controller, binding, step.activity, readRevision, controller.ready, controller.dataBusy, active) {
+        if (!active || !controller.ready || controller.dataBusy) return@DisposableEffect onDispose { }
         var visible = true
         val gathered = linkedMapOf<String, TrustedToolMediaUi>()
-        items = emptyList(); pending = 3; failed = false
+        var remaining = 3
+        var readFailed = false
         fun complete(values: List<TrustedToolMediaUi>?) {
             if (!visible) return
-            if (values == null) failed = true else values.forEach { gathered[it.key] = it }
-            items = gathered.values.toList()
-            pending--
+            if (values == null) readFailed = true else values.forEach { gathered[it.key] = it }
+            if (--remaining == 0) {
+                items = gathered.values.toList()
+                failed = readFailed
+                pending = 0
+            }
         }
         val conversation = ConversationId(owner.conversationId)
         if (!controller.loadGenerationOutputs(conversation, binding) { outputs ->
@@ -78,21 +83,21 @@ internal fun GenerationToolContent(controller: ChatController, step: WorkStepUi,
             items.isEmpty() && failed -> Text("读取失败", color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1)
             items.isEmpty() -> Text("暂无产物", style = MiuixTheme.textStyles.footnote1)
         }
-        if (pending == 0) TextButton(text = "刷新产物", onClick = { readRevision++ })
-        items.forEach { item -> key(item.key) { TrustedMediaItem(item, step, onAction) } }
+        if (pending == 0) TextButton(text = "刷新产物", onClick = { if (active) readRevision++ })
+        items.forEach { item -> key(item.key) { TrustedMediaItem(item, step, onAction, active) } }
         TextButton(text = "查看全部产物", onClick = { onAction(step.actionRequest(ToolCardAction.VIEW_ASSETS)) })
     }
 }
 
 @Composable
-private fun TrustedMediaItem(item: TrustedToolMediaUi, step: WorkStepUi, onAction: (ToolCardActionRequest) -> Unit) {
+private fun TrustedMediaItem(item: TrustedToolMediaUi, step: WorkStepUi, onAction: (ToolCardActionRequest) -> Unit, active: Boolean) {
     var expanded by remember(item.key) { mutableStateOf(false) }
     val meta = item.metadata
     val video = meta.kind == GenerationKind.VIDEO
     Text("${meta.mimeType} · ${meta.width}×${meta.height} · ${meta.bytes} B", style = MiuixTheme.textStyles.footnote1)
     ToolMediaSurface(step, item.thumbnail, video, meta.durationMs, item.key, onAction = onAction,
-        onPreview = if (!video && item.thumbnail != null) ({ expanded = true }) else null)
-    if (expanded) WindowDialog(show = true, title = "图片", onDismissRequest = { expanded = false }) {
+        onPreview = if (!video && item.thumbnail != null) ({ if (active) expanded = true }) else null)
+    if (expanded && active) WindowDialog(show = true, title = "图片", onDismissRequest = { expanded = false }) {
         app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             item.thumbnail?.let { Image(it.asImageBitmap(), "图片", Modifier.fillMaxWidth().heightIn(max = 520.dp), contentScale = ContentScale.Fit) }

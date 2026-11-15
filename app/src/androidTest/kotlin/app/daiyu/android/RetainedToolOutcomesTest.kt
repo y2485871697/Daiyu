@@ -94,7 +94,8 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
         assertNull(reader(owner.copy(messageId = "other"), first))
         assertNull(reader(owner, first.copy(result = "changed")))
         assertNull(snapshot.displayRowReader(key, key.copy(generation = 5))(owner, first))
-        assertNull(snapshot.displayRowReader(key, key.copy(data = 5))(owner, first))
+        assertEquals(WorkStepState.OK, snapshot.displayRowReader(key, key.copy(data = 5))(owner, first)?.state)
+        assertNull(snapshot.displayRowReader(key, key.copy(data = 2))(owner, first))
         assertNull(snapshot.displayRowReader(key, key.copy(conversation = ConversationId("other")))(owner, first))
         val changedSource = source.copy(tools = source.tools.mapIndexed { index, block ->
             if (index == 0) block.copy(result = "changed") else block })
@@ -219,9 +220,10 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
                 retained(message, block) ?: RetainedToolOutcomes.pendingProjection(message, block)
             }).single() as ChatTurnUi.Assistant
             val steps = turn.workProcess!!.segments.flatMap { it.steps }
-            assertEquals(List(33) { WorkStepState.OK } + WorkStepState.PENDING, steps.map { it.state })
-            assertEquals(List(33) { ToolActivityUi.SUCCESS } + ToolActivityUi.RUNNING, steps.map { it.activity })
-            assertNull(snapshot.displayReader(loaded, current.copy(data = 5))(next, next.blocks.first() as MessageBlock.Tool))
+            assertEquals(List(33) { WorkStepState.OK } + WorkStepState.UNKNOWN, steps.map { it.state })
+            assertEquals(List(33) { ToolActivityUi.SUCCESS } + ToolActivityUi.UNKNOWN, steps.map { it.activity })
+            assertEquals(WorkStepState.OK, snapshot.displayReader(loaded, current.copy(data = 5))(next, next.blocks.first() as MessageBlock.Tool)?.state)
+            assertNull(snapshot.displayReader(loaded, current.copy(data = 2))(next, next.blocks.first() as MessageBlock.Tool))
             val changed = next.copy(blocks = listOf((next.blocks.first() as MessageBlock.Tool).copy(result = "changed")))
             assertNull(snapshot.displayReader(loaded, current.copy(sources = RetainedToolOutcomes.sources(listOf(changed))))(
                 changed, changed.blocks.single() as MessageBlock.Tool))

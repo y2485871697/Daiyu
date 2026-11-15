@@ -71,7 +71,6 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
     private fun pendingFrame(key: RetainedToolOutcomes.ReadKey, snapshot: Any, states: List<WorkStepState>) {
         val pending = Job()
         assertFalse(key == currentKey())
-        assertEquals(states == expected, key.canDisplayFor(currentKey()))
         try {
             field("toolReceiptKey").set(activity, key)
             field("toolReceiptSnapshot").set(activity, snapshot)
@@ -84,7 +83,8 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                 assertEquals(states, steps().map { it.state })
             }
             assertEquals(if (states == expected) listOf(ToolActivityUi.SUCCESS, ToolActivityUi.FAILED,
-                ToolActivityUi.NOT_EXECUTED, ToolActivityUi.INTERRUPTED) else List(4) { ToolActivityUi.UNKNOWN },
+                ToolActivityUi.NOT_EXECUTED, if (key.canDisplayFor(currentKey())) ToolActivityUi.INTERRUPTED else ToolActivityUi.UNKNOWN)
+                else List(4) { ToolActivityUi.UNKNOWN },
                 steps().map { it.activity })
             assertEquals(currentKey(), field("toolReceiptRequested").get(activity))
             assertSame(pending, field("toolReceiptRead").get(activity))
@@ -322,6 +322,20 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
             ToolDisposition.NOT_EXECUTED, ToolDisposition.UNKNOWN), persisted.tools.map { it.disposition })
     }
 
+    fun testNewerDataRevisionKeepsOnlyConfirmedReceiptsWhileTheRealHostReadIsPending() {
+        mainThread { activity.select(fixture.database.conversations().single()) }
+        awaitReceipts()
+        mainThread {
+            val current = currentKey()
+            val snapshot = checkNotNull(field("toolReceiptSnapshot").get(activity))
+            val loaded = current.copy(data = current.data - 1)
+            assertFalse("new evidence is still required", loaded.canDisplayFor(current))
+            pendingFrame(loaded, snapshot, expected)
+            assertEquals("display retention never opens a model session", 0, fixture.opens.get())
+        }
+        awaitReceipts()
+    }
+
     fun testPendingReadNeverBorrowsEvidenceFromAnotherOwnerOrSourceRevision() {
         mainThread { activity.select(fixture.database.conversations().single()) }
         awaitReceipts()
@@ -329,7 +343,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
             val key = checkNotNull(loadedKey())
             val snapshot = checkNotNull(field("toolReceiptSnapshot").get(activity))
             for (stale in listOf(key.copy(conversation = ConversationId("other")),
-                key.copy(data = key.data - 1), key.copy(generation = key.generation - 1),
+                key.copy(data = key.data + 1), key.copy(generation = key.generation - 1),
                 key.copy(sources = emptyList()))) {
                 pendingFrame(stale, snapshot, List(4) { WorkStepState.UNKNOWN })
             }

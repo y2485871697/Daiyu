@@ -583,6 +583,96 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testRealMainChatReturnKeepsExpandedTrustedToolHeightAndLocalState() {
+        val db = fixture.database
+        val conversation = db.create("default")
+        val user = app.daiyu.android.domain.Message(app.daiyu.android.domain.MessageId("handoff-user"),
+            conversation.id, app.daiyu.android.domain.RunId("handoff-run"), "user",
+            listOf(app.daiyu.android.domain.MessageBlock.Text("question", "检查返回时的工具卡片")),
+            app.daiyu.android.domain.RunStatus.COMPLETED)
+        val call = app.daiyu.android.domain.ToolInvocation(app.daiyu.android.domain.ToolCallId("handoff-call"),
+            "start_child_tasks", """{"tasks":[{"profile_id":"review","prompt":"保留这段下发提示词"}]}""")
+        val assistant = user.copy(id = app.daiyu.android.domain.MessageId("handoff-assistant"), role = "assistant",
+            blocks = listOf(app.daiyu.android.domain.MessageBlock.Tool(call, """{"accepted":true}""")),
+            status = app.daiyu.android.domain.RunStatus.RUNNING)
+        db.send(user, assistant)
+        var execution: app.daiyu.android.domain.runtime.RunExecutionOwner? = null
+        val receiver = object : app.daiyu.android.domain.runtime.ReceiptBatchToolExecutor {
+            override fun bindOwner(owner: app.daiyu.android.domain.runtime.RunExecutionOwner) { execution = owner }
+            override fun execute(message: app.daiyu.android.domain.Message,
+                invocations: List<app.daiyu.android.domain.ToolInvocation>, cancelled: () -> Boolean):
+                List<app.daiyu.android.domain.tools.ToolDispatchResult> = error("no tool execution")
+        }
+        val runner = app.daiyu.android.domain.ChatRunner(app.daiyu.android.domain.ModelPort {
+            object : app.daiyu.android.domain.ModelSession {
+                override fun next(outputs: List<app.daiyu.android.domain.ToolOutput>,
+                    sink: (app.daiyu.android.domain.ModelEvent) -> Unit) { }
+                override fun cancel() { }
+            }
+        }, object : app.daiyu.android.domain.ConversationStore {
+            override fun save(message: app.daiyu.android.domain.Message) { }
+        }, app.daiyu.android.domain.BatteryTool { error("no legacy tool") },
+            app.daiyu.android.domain.runtime.RunnerOptions(receiptBatchExecutor = receiver)) { }
+        runner.run(assistant, emptyList())
+        val parent = checkNotNull(execution)
+        val group = app.daiyu.android.domain.delegation.childTaskCallGroup(conversation.id.value,
+            assistant.runId.value, assistant.id.value, call.name, call.id.value)
+        val record = app.daiyu.android.domain.delegation.ChildTaskRecord(
+            app.daiyu.android.domain.delegation.ChildRunOwner(conversation.id.value, assistant.runId.value,
+                group, 1, "handoff-child", "handoff-child-answer"), assistant.id.value, parent.ownerId, 0,
+            "review", "保留这段下发提示词", display = app.daiyu.android.domain.delegation.ChildTaskDisplay(
+                "审查", "review-model", "冻结模型"))
+        val store = app.daiyu.android.storage.SQLiteChildTaskStore(db)
+        store.enqueue(parent, listOf(record)); store.started(record)
+        store.finished(record, app.daiyu.android.domain.delegation.ChildTaskStatus.COMPLETED, "不能替代提示词的结果", null)
+        db.save(assistant.copy(status = app.daiyu.android.domain.RunStatus.COMPLETED))
+        mainThread { activity.select(conversation) }
+        awaitUniqueTag("work-process-header")
+        fun node(tag: String) = ui.onNodeWithTag(tag, useUnmergedTree = true)
+        node("work-process-header").performClick()
+        awaitUniqueTag("tool-step-header:handoff-call")
+        node("tool-step-header:handoff-call").performClick()
+        awaitUniqueTag("tool-child-summary:handoff-child")
+        node("tool-child-summary:handoff-child").performClick()
+        ui.waitForIdle()
+        node("tool-child-progress:handoff-child").assertTextEquals(record.prompt)
+        val tags = listOf("tool-children:handoff-call", "tool-child-frame:handoff-child",
+            "tool-child-summary:handoff-child", "tool-child-progress:handoff-child")
+        val before = tags.associateWith { tag -> node(tag).fetchSemanticsNode().let {
+            Triple(it.id, it.layoutInfo.coordinates.size.height, it.layoutInfo.coordinates.positionInRoot().y)
+        } }
+        fun assertRetained() {
+            node("tool-child-progress:handoff-child").assertTextEquals(record.prompt)
+            node("tool-child-summary:handoff-child").assert(SemanticsMatcher.expectValue(
+                SemanticsProperties.StateDescription, "已展开"))
+            tags.forEach { tag ->
+                val current = node(tag).fetchSemanticsNode()
+                val original = before.getValue(tag)
+                assertEquals("$tag retains its composition", original.first, current.id)
+                assertEquals("$tag retains measured height", original.second, current.layoutInfo.coordinates.size.height)
+                assertEquals("$tag has no vertical handoff jump", original.third,
+                    current.layoutInfo.coordinates.positionInRoot().y, 1f)
+            }
+        }
+        openSettings()
+        ui.waitForIdle()
+        node("tool-children:handoff-call").assertDoesNotExist()
+        val advancing = ui.mainClock.autoAdvance
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread { activity.onBackPressedDispatcher.onBackPressed() }
+            awaitOrdinaryReturnCommit { invokeHost(activity, "getRetainedPage") == "chat" }
+            repeat(4) {
+                ui.mainClock.advanceTimeByFrame()
+                assertRetained()
+            }
+        } finally { ui.mainClock.autoAdvance = advancing }
+        ui.waitForIdle()
+        awaitControl("return refresh consumed") { invokeHost(activity, "getChatReturnRefresh") == null }
+        assertRetained()
+        assertEquals("return and retained reads do not open a model session", 0, fixture.opens.get())
+    }
+
     fun testRealChatOrdinaryReturnDrawsLiveContentWithoutRemount() = assertRealChatReturn(swipe = false)
 
     fun testRealChatSwipeReturnDrawsLiveContentWithoutRemount() = assertRealChatReturn(swipe = true)

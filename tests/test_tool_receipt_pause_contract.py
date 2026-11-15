@@ -50,7 +50,7 @@ class ToolReceiptPauseContract(unittest.TestCase):
     def test_partial_reuse_keeps_owner_revision_and_current_absolute_position_fences(self):
         source = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/RetainedToolOutcomes.kt').read_text()
         partial = source.split('fun retainedPositions(', 1)[1].split('private fun positions(', 1)[0]
-        for fence in ('conversation != current.conversation', 'data != current.data', 'generation != current.generation',
+        for fence in ('conversation != current.conversation', 'data > current.data', 'generation != current.generation',
                       'positions(current.sources)', 'positions[owner]?.get(block)', 'tools?.getOrNull(index) == block'):
             self.assertIn(fence, partial)
         reuse = source.split('fun displayReader(', 1)[1].split('fun projectionReader(', 1)[0]
@@ -79,5 +79,5 @@ class ToolReceiptPauseContract(unittest.TestCase):
                       'fixture.controller.pause(owner)', 'fixture.controller.resume(owner)',
                       'ExecutionPhase.PAUSED', 'pendingFrame(key, snapshot, expected)',
                       'WorkStepState.UNKNOWN', 'assertTrue("fresh read remains pending", pending.isActive)',
-                      'key.copy(data = key.data - 1)', 'key.copy(generation = key.generation - 1)'):
+                      'key.copy(data = key.data + 1)', 'key.copy(generation = key.generation - 1)'):
             self.assertIn(token, test)

@@ -41,7 +41,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, onAction: (ToolCardActionRequest) -> Unit) {
+internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, onAction: (ToolCardActionRequest) -> Unit, active: Boolean = true) {
     val owner = step.owner ?: return
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var records by remember(owner, step.toolCallId) { mutableStateOf(emptyList<ChildTaskRecord>()) }
@@ -49,7 +49,8 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
     var progress by remember(owner, step.toolCallId) { mutableStateOf(emptyMap<ChildRunOwner, String>()) }
     var loading by remember(owner, step.toolCallId) { mutableStateOf(true) }
     var failed by remember(owner, step.toolCallId) { mutableStateOf(false) }
-    LaunchedEffect(controller, owner, step.toolCallId, lifecycle) {
+    LaunchedEffect(controller, owner, step.toolCallId, lifecycle, active) {
+        if (!active) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
             val changed = Channel<Unit>(Channel.CONFLATED)
             val observer: () -> Unit = { changed.trySend(Unit); Unit }
@@ -81,7 +82,7 @@ internal fun ChildTaskToolContent(controller: ChatController, step: WorkStepUi, 
             failed -> ChildTaskFrame { Text("任务暂时无法读取", color = MiuixTheme.colorScheme.error, style = MiuixTheme.textStyles.footnote1) }
             rows.isEmpty() -> ChildTaskFrame { Text("暂无任务记录", style = MiuixTheme.textStyles.footnote1) }
             else -> ChildTaskList(rows, records, { row, action ->
-                onAction(step.actionRequest(action, subAgentStatusItemKey(row.owner)))
+                if (active) onAction(step.actionRequest(action, subAgentStatusItemKey(row.owner)))
             }, progress, showPrompt = true)
         }
     }

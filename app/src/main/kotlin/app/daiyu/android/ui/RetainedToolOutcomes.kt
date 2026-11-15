@@ -49,8 +49,9 @@ internal object RetainedToolOutcomes {
         // Live activity is reprojected; the durable evidence remains valid for exactly the same source.
         fun canDisplayFor(current: ReadKey): Boolean = copy(execution = current.execution) == current
 
+        // A newer data revision requests fresh evidence; it does not revoke an identical terminal receipt.
         fun retainedPositions(current: ReadKey): (Message, MessageBlock.Tool) -> Int? {
-            if (conversation != current.conversation || data != current.data || generation != current.generation)
+            if (conversation != current.conversation || data > current.data || generation != current.generation)
                 return { _, _ -> null }
             val loaded = sources.associateBy { Owner(it.conversation, it.run, it.message) }
             val positions = positions(current.sources)
@@ -104,7 +105,7 @@ internal object RetainedToolOutcomes {
             stopping: (WorkStepOwnerUi) -> Boolean = { false }):
             (WorkStepOwnerUi, MessageBlock.Tool) -> ToolReceiptUi? {
             val compatible = loaded.canDisplayFor(current)
-            if (!compatible && (loaded.conversation != current.conversation || loaded.data != current.data ||
+            if (!compatible && (loaded.conversation != current.conversation || loaded.data > current.data ||
                     loaded.generation != current.generation)) return { _, _ -> null }
             val loadedSources = loaded.sources.associateBy { Owner(it.conversation, it.run, it.message) }
             val currentSources = current.sources.associateBy { Owner(it.conversation, it.run, it.message) }

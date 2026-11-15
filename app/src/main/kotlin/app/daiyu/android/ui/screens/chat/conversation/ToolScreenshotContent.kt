@@ -27,25 +27,25 @@ import app.daiyu.android.ui.media.LocalOpenChatMediaPreview
 
 /** Reads the already committed screenshot; never captures a new screen. */
 @Composable
-internal fun ToolScreenshotContent(controller: ChatController, step: WorkStepUi) {
+internal fun ToolScreenshotContent(controller: ChatController, step: WorkStepUi, active: Boolean = true) {
     val owner = step.owner ?: return
-    if (!controller.ready || controller.dataBusy) return
     val dataRevision = controller.dataRevision
     val screenshotRevision = controller.screenScreenshotRevision
-    val initial = remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision) {
+    val initial = remember(controller, owner, step.toolCallId, step.hasScreenScreenshot, step.hasBrowserScreenshot, screenshotRevision) {
         controller.cachedToolScreenshot(owner, step.toolCallId)
     }
-    var image by remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision) {
+    var image by remember(controller, owner, step.toolCallId, step.hasScreenScreenshot, step.hasBrowserScreenshot, screenshotRevision) {
         mutableStateOf(initial?.image)
     }
-    var cleared by remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision) { mutableStateOf(initial?.cleared == true) }
-    var loading by remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision) { mutableStateOf(initial == null) }
+    var cleared by remember(controller, owner, step.toolCallId, step.hasScreenScreenshot, step.hasBrowserScreenshot, screenshotRevision) { mutableStateOf(initial?.cleared == true) }
+    var loading by remember(controller, owner, step.toolCallId, step.hasScreenScreenshot, step.hasBrowserScreenshot, screenshotRevision) { mutableStateOf(initial == null) }
     var revision by remember(owner, step.toolCallId) { mutableStateOf(0) }
     DisposableEffect(controller, owner, step.toolCallId, step.state, controller.ready, controller.dataBusy,
-        dataRevision, screenshotRevision, revision) {
+        dataRevision, screenshotRevision, revision, active) {
+        if (!active || !controller.ready || controller.dataBusy) return@DisposableEffect onDispose { }
         var visible = true
         val cached = controller.cachedToolScreenshot(owner, step.toolCallId)
-        image = cached?.image; loading = cached == null; cleared = cached?.cleared == true
+        if (cached != null) { image = cached.image; loading = false; cleared = cached.cleared }
         if (cached == null && !controller.loadToolScreenshot(owner, step.toolCallId) { bitmap, cleaned ->
             if (visible) { image = bitmap; loading = false; cleared = cleaned }
         }) loading = false
@@ -54,7 +54,7 @@ internal fun ToolScreenshotContent(controller: ChatController, step: WorkStepUi)
     if (image == null) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(if (cleared) "临时截图已清理" else if (loading) "正在加载…" else "读取失败", color = conversationColors().muted,
             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 21.sp))
-        if (!loading && !cleared) TextButton(text = "重新读取", modifier = Modifier.widthIn(min = 48.dp).heightIn(min = 48.dp), onClick = { revision++ })
+        if (!loading && !cleared) TextButton(text = "重新读取", modifier = Modifier.widthIn(min = 48.dp).heightIn(min = 48.dp), onClick = { if (active) revision++ })
     }
     image?.let { bitmap ->
         val preview = remember(controller, owner, step.toolCallId, dataRevision, screenshotRevision, bitmap) {
@@ -75,7 +75,7 @@ internal fun ToolScreenshotContent(controller: ChatController, step: WorkStepUi)
                     val shape = RoundedCornerShape(8.dp)
                     Image(bitmap.asImageBitmap(), "该调用已确认的屏幕截图", Modifier.fillMaxWidth().heightIn(min = 48.dp, max = 140.dp)
                         .clip(shape).border(1.dp, conversationColors().line, shape)
-                        .conversationClickable(onClickLabel = "查看截图原图") { openPreview(preview.item.key) }, contentScale = ContentScale.Crop)
+                        .conversationClickable(onClickLabel = "查看截图原图") { if (active) openPreview(preview.item.key) }, contentScale = ContentScale.Crop)
                 }
             }
         }

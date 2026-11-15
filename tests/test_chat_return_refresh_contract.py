@@ -102,6 +102,36 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         self.assertIn('first drawer swipe opens the sidebar', regression)
         self.assertIn('fun testReturnAdmissionKeepsUnsynchronizedDataAndEditorDisabled()', source)
 
+    def test_retained_tools_keep_display_structure_and_gate_only_actions_and_reads(self):
+        self.assertIn('dedicatedTool = { step -> DedicatedQuestion(step, routeActive && pageCurrent && presented) }', self.main)
+        self.assertIn('toolContent = { step -> ToolTrustedContent(step, routeActive && pageCurrent && presented) }', self.main)
+        self.assertNotIn('routeActive && DedicatedQuestion(step)', self.main)
+        self.assertNotIn('if (routeActive) ToolTrustedContent(step)', self.main)
+        trusted = body(self.main, 'private fun ToolTrustedContent(')
+        self.assertIn('val currentActive by rememberUpdatedState(active)', trusted)
+        self.assertIn('if (currentActive && editorGeneration == editor', trusted)
+        self.assertNotIn('retainedPage == "chat"', trusted)
+        question = body(self.main, 'private fun DedicatedQuestion(')
+        self.assertIn('active && question.canAnswer', question)
+        folder = APP / 'ui/screens/chat/conversation'
+        child = (folder / 'ChildTaskToolContent.kt').read_text()
+        self.assertIn('if (!active) return@LaunchedEffect', child)
+        self.assertIn('repeatOnLifecycle(Lifecycle.State.STARTED)', child)
+        self.assertIn('finally { controller.unobserve(observer); changed.close() }', child)
+        generation = (folder / 'GenerationToolContent.kt').read_text()
+        self.assertIn('if (!active || !controller.ready || controller.dataBusy) return@DisposableEffect', generation)
+        self.assertNotIn('items = emptyList();', generation)
+        self.assertIn('if (--remaining == 0)', generation)
+        screenshot = (folder / 'ToolScreenshotContent.kt').read_text()
+        self.assertIn('if (!active || !controller.ready || controller.dataBusy) return@DisposableEffect', screenshot)
+        self.assertIn('if (cached != null) { image = cached.image;', screenshot)
+        regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageRetainedContentActivityTest.kt').read_text()
+        test = body(regression, 'fun testRealMainChatReturnKeepsExpandedTrustedToolHeightAndLocalState()')
+        for token in ('activity.select(conversation)', 'openSettings()', 'repeat(4)', 'assertRetained()',
+                      'retains its composition', 'retains measured height', 'no vertical handoff jump'):
+            self.assertIn(token, test)
+        self.assertNotIn('activity.setContent', test)
+
     def test_custom_subagent_toolbars_share_the_final_copy_entry(self):
         source = (APP / 'ui/SubAgentSettingsScreen.kt').read_text()
         self.assertEqual(2, source.count('LocalPageBackToolbarReturn.current'))

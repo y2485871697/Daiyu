@@ -2544,8 +2544,8 @@ class MainActivity : ComponentActivity() {
                                         menuAvailable = retainedPage == "chat" && !sidebarVisible,
                                         readAutomaticCompression = { pageCompression },
                                         callUi = pageCallUi,
-                                        callActions = pageCallActions, dedicatedTool = { step -> routeActive && DedicatedQuestion(step) },
-                                        toolContent = { step -> if (routeActive) ToolTrustedContent(step) },
+                                        callActions = pageCallActions, dedicatedTool = { step -> DedicatedQuestion(step, routeActive && pageCurrent && presented) },
+                                        toolContent = { step -> ToolTrustedContent(step, routeActive && pageCurrent && presented) },
                                         imageLoader = pageImageLoader,
                                         assistant = pageAssistant,
                                         composerAttachments = { if (routeActive && !sidebarVisible) key(editorGeneration) {
@@ -6010,28 +6010,29 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable private fun ToolTrustedContent(step: WorkStepUi) {
+    @Composable private fun ToolTrustedContent(step: WorkStepUi, active: Boolean) {
         if (displayWindow != null) return
         val editor = editorGeneration
         val visit = contextManagementEntryEpoch
+        val currentActive by rememberUpdatedState(active)
         val action: (ToolCardActionRequest) -> Unit = remember(editor, visit) {
             { request ->
-                if (editorGeneration == editor && contextManagementEntryEpoch == visit) handleToolCardAction(request)
+                if (currentActive && editorGeneration == editor && contextManagementEntryEpoch == visit) handleToolCardAction(request)
             }
         }
-        if ((step.hasScreenScreenshot || step.hasBrowserScreenshot) && step.state == WorkStepState.OK && activityUsable() && voiceForeground &&
-            retainedPage == "chat" && step.owner?.conversationId == selected?.id?.value) {
-            app.daiyu.android.ui.screens.chat.conversation.ToolScreenshotContent(controller, step)
+        if ((step.hasScreenScreenshot || step.hasBrowserScreenshot) && step.state == WorkStepState.OK &&
+            step.owner?.conversationId == selected?.id?.value) {
+            app.daiyu.android.ui.screens.chat.conversation.ToolScreenshotContent(controller, step, active = active && activityUsable() && voiceForeground)
         }
         if (step.category == "generation") {
-            app.daiyu.android.ui.screens.chat.conversation.GenerationToolContent(controller, step, action)
+            app.daiyu.android.ui.screens.chat.conversation.GenerationToolContent(controller, step, action, active = active)
         }
         if (step.toolName in setOf("run_child_models", "start_child_tasks", "direct_child_task")) {
-            app.daiyu.android.ui.screens.chat.conversation.ChildTaskToolContent(controller, step, action)
+            app.daiyu.android.ui.screens.chat.conversation.ChildTaskToolContent(controller, step, action, active = active)
         }
     }
 
-    @Composable private fun DedicatedQuestion(step: WorkStepUi): Boolean {
+    @Composable private fun DedicatedQuestion(step: WorkStepUi, active: Boolean): Boolean {
         if (step.toolName != "ask_user") return false
         val owner = step.owner ?: return false
         val question = questionCards[owner to step.toolCallId] ?: return false
@@ -6039,7 +6040,7 @@ class MainActivity : ComponentActivity() {
         key(question.identity) {
             val binding = question.binding
             if (binding != null) {
-                QuestionCard(question.identity, question.record, question.canAnswer, binding)
+                QuestionCard(question.identity, question.record, active && question.canAnswer, binding)
             } else {
                 QuestionCard(question.identity, question.record, canAnswer = false,
                     submit = { _, _, complete ->

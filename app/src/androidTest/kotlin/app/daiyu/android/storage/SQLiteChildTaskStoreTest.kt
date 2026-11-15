@@ -391,11 +391,34 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
     }
 
     fun testVersionSevenUpgradeKeepsHistoryAndCreatesTaskSchema() {
-        val db = fresh(); val owner = parent(db); val before = db.messages(owner.conversationId)
-        db.writableDatabase.execSQL("DROP TABLE child_tasks"); app.daiyu.android.removeAssistantSchemaForLegacyFixture(db.writableDatabase); db.writableDatabase.version = 7; db.close()
-        assertEquals(34, db.readableDatabase.version); assertEquals(before, db.messages(owner.conversationId))
-        assertTrue(SQLiteChildTaskStore(db).list(owner.conversationId.value, 20).isEmpty())
-        val runtime = lease(db); val newOwner = parent(db); val rows = tasks(newOwner, 1)
+        val context = testContext(instrumentation.targetContext, "child-v7-${UUID.randomUUID()}-")
+        contexts.add(context)
+        val conversation = ConversationId("legacy")
+        val user = Message(MessageId("legacy-user"), conversation, RunId("legacy-run"), "user",
+            listOf(MessageBlock.Text("u", "legacy question")), RunStatus.COMPLETED)
+        val answer = user.copy(id = MessageId("legacy-answer"), role = "assistant",
+            blocks = listOf(MessageBlock.Text("a", "legacy answer")))
+        val before = listOf(1L to user, 2L to answer)
+        context.openOrCreateDatabase("conversations.db", android.content.Context.MODE_PRIVATE, null).use { old ->
+            old.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0)")
+            old.execSQL("CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL," +
+                "conversation_id TEXT NOT NULL,run_id TEXT NOT NULL,role TEXT NOT NULL,blocks TEXT NOT NULL," +
+                "status TEXT NOT NULL,error TEXT,protocol TEXT NOT NULL,history_segments TEXT NOT NULL DEFAULT '[]')")
+            old.execSQL("CREATE INDEX messages_tail ON messages(conversation_id,seq)")
+            old.execSQL("CREATE TABLE composer(id INTEGER PRIMARY KEY CHECK(id=1),draft TEXT NOT NULL)")
+            old.execSQL("INSERT INTO composer VALUES(1,'legacy draft')")
+            old.execSQL("INSERT INTO conversations VALUES('legacy','legacy title','',123,'',0)")
+            old.execSQL("INSERT INTO messages(id,conversation_id,run_id,role,blocks,status,protocol) VALUES" +
+                "('legacy-user','legacy','legacy-run','user','[{\"type\":\"text\",\"item\":\"u\",\"text\":\"legacy question\"}]','COMPLETED','[]')," +
+                "('legacy-answer','legacy','legacy-run','assistant','[{\"type\":\"text\",\"item\":\"a\",\"text\":\"legacy answer\"}]','COMPLETED','[]')")
+            old.version = 7
+        }
+        val db = ConversationDatabase(context).also { databases.add(it) }
+        assertEquals(34, db.readableDatabase.version); assertEquals(before, db.messages(conversation))
+        assertTrue(SQLiteChildTaskStore(db).list(conversation.value, 20).isEmpty())
+        val runtime = lease(db)
+        assertEquals(before, db.messages(conversation))
+        val newOwner = parent(db); val rows = tasks(newOwner, 1)
         runtime.childTasks.enqueue(newOwner, rows)
         assertEquals(rows, runtime.childTasks.list(newOwner.conversationId.value))
     }

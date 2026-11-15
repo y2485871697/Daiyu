@@ -172,14 +172,23 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         try {
             assertNotNull(f.controller.sendWithChildren(f.conversation, "add during parent run"))
             assertTrue(entered.await(10, TimeUnit.SECONDS))
+            assertTrue("first accepted child actually started before configuration changes",
+                f.entered.await(10, TimeUnit.SECONDS))
             val key = SubAgentConfigKey.Conversation(f.conversation.id.value)
             assertTrue(f.preferences.update(key) { it.copy(profiles = it.profiles + f.profile.copy(id = "added", name = "Added")) }
                 is ConversationSubAgentPreferences.WriteResult.Saved)
             release.countDown()
-            awaitControl("both hot-configured child tasks complete") {
-                f.childOpened.get() == 2 && f.controller.childTasks(f.conversation.id).let { records ->
-                    records.size == 2 && records.all { it.status == ChildTaskStatus.COMPLETED }
+            try {
+                awaitControl("both hot-configured child tasks complete") {
+                    f.childOpened.get() == 2 && f.controller.childTasks(f.conversation.id).let { records ->
+                        records.size == 2 && records.all { it.status == ChildTaskStatus.COMPLETED }
+                    }
                 }
+            } catch (failure: AssertionError) {
+                throw AssertionError("hot configuration: parent=${f.parentOpened.get()}, children=${f.childOpened.get()}, " +
+                    "problem=${f.controller.problem}, tasks=" + f.controller.childTasks(f.conversation.id).map {
+                        "${it.profileId}:${it.status}:${it.detail}"
+                    }, failure)
             }
             finishParent(f)
             assertEquals(1, f.parentOpened.get()); assertEquals(2, f.childOpened.get())

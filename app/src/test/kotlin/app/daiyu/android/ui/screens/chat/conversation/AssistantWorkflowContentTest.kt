@@ -210,4 +210,23 @@ class AssistantWorkflowContentTest {
         assertEquals("checking", displayedSlice.workflowContent().pending.filterIsInstance<MessageContentUi.Text>().single().text)
     }
 
+    @Test fun bodyActionsRequireRealTextAcrossLegacyAndMixedProjections() {
+        for (status in RunStatus.entries.filter { it != RunStatus.RUNNING }) {
+            val toolOnly = map(source(listOf(tool("call")), status = status))
+            assertFalse(toolOnly.hasBodyTextActions())
+            assertFalse(toolOnly.copy(error = "interrupted").hasBodyTextActions())
+            assertFalse(map(source(reasoning = listOf(thought), status = status)).hasBodyTextActions())
+            assertFalse(toolOnly.copy(finalText = " \n ").hasBodyTextActions())
+            assertTrue(toolOnly.copy(finalText = "real answer").hasBodyTextActions())
+            assertFalse(toolOnly.copy(finalContent = listOf(MessageContentUi.Text("blank", " ")),
+                finalText = "stale legacy fallback").hasBodyTextActions())
+            assertTrue(toolOnly.copy(leadingContent = listOf(MessageContentUi.Text("intro", "before tool"))).hasBodyTextActions())
+            assertTrue(toolOnly.copy(finalContent = listOf(MessageContentUi.Text("answer", "after tool"))).hasBodyTextActions())
+            val mixedTool = toolOnly.copy(content = listOf(MessageContentUi.Tool(toolOnly.workProcess!!.segments.single().steps.single())))
+            assertFalse(mixedTool.copy(finalText = "stale legacy fallback").hasBodyTextActions())
+            assertFalse(mixedTool.copy(content = mixedTool.content + MessageContentUi.Text("blank", " ")).hasBodyTextActions())
+            assertTrue(mixedTool.copy(content = mixedTool.content + MessageContentUi.Text("body", "real answer")).hasBodyTextActions())
+        }
+    }
+
 }

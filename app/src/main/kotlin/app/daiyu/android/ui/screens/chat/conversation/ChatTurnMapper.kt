@@ -85,6 +85,7 @@ object ChatTurnMapper {
         boundariesAfter: Set<String> = emptySet(),
         reconnects: List<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect> = emptyList(),
         childTaskNames: Map<ChildRunOwner, String> = emptyMap(),
+        dedicatedTool: (WorkStepOwnerUi, MessageBlock.Tool) -> String? = { _, _ -> null },
     ): List<ChatTurnUi> {
         val rows = window.rows.map { it.second }
         val supplements = rows.flatMap { owner -> owner.segments.filter { it.role == Message.USER_ROLE }.map {
@@ -107,7 +108,8 @@ object ChatTurnMapper {
         presentations?.retainBlocks(history.flatMap { it.blocks })
         fun receipt(message: RenderMessage, block: MessageBlock.Tool) = toolReceipt(
             WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value), block)
-        return mapRows(history, owners, { _, _ -> null }, { message, block -> receipt(message, block)?.state }, { _, _ -> null },
+        return mapRows(history, owners, { _, _ -> null }, { message, block -> receipt(message, block)?.state },
+            { message, block -> dedicatedTool(WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value), block) },
             { message, block -> receipt(message, block)?.activity }, { timestamp(it.createdAt) }, boundariesAfter, { _, _ -> null }, presentations,
             { emptyList() }, reconnects, childTaskNames)
     }

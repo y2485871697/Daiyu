@@ -254,6 +254,10 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             val shown = f.db.messages(owner.conversationId).last().second
             val call = shown.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation
             assertNotNull(f.c.questionProjection(shown, call, evidence))
+            assertEquals(f.c.questionProjection(shown, call, evidence), f.c.questionProjection(
+                shown.conversationId, shown.runId, shown.id, shown.role, call, evidence))
+            assertNull(f.c.questionProjection(ConversationId("other"), shown.runId, shown.id, shown.role, call, evidence))
+            assertNull(f.c.questionProjection(shown.conversationId, shown.runId, shown.id, Message.USER_ROLE, call, evidence))
             assertTrue(f.c.questionWaiting(shown))
             assertFalse(f.c.questionWaiting(shown.copy(id = MessageId("other"))))
             repeat(100) { index ->
@@ -374,7 +378,72 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         header.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
         waitForCard(readOnly=true)
     }
-    private fun recovery(answer:QuestionAnswer?) {
+    private fun assertRecoveredQuestionSurvivesDrawerHandoff(f:Fixture, target:ConversationId) {
+        val current = checkNotNull(activity)
+        val displayField = MainActivity::class.java.getDeclaredField("displayWindow\$delegate").apply { isAccessible = true }
+        fun displayPending() = (displayField.get(current) as androidx.compose.runtime.MutableState<*>).value != null
+        fun selectFromDrawer(id:ConversationId) {
+            ui.waitUntil(timeoutMillis=8_000) {
+                ui.onAllNodesWithTag("drawer-conversation:${id.value}").fetchSemanticsNodes().size == 1
+            }
+            node("drawer-conversation:${id.value}").performClick()
+            await(f,"display source selected") {
+                val selected = MainActivity::class.java.getDeclaredField("selected").apply { isAccessible = true }.get(current) as Conversation?
+                selected?.id == id && displayPending()
+            }
+        }
+        val assistantActions = hasAnyAncestor(hasTestTag("chat-turn:lost-assistant"))
+        fun assertThreeActions() {
+            for (label in listOf("复制回答", "编辑", "朗读")) {
+                ui.onAllNodes(hasContentDescription(label) and assistantActions).assertCountEquals(0)
+            }
+            for (label in listOf("分支", "重新生成", "删除")) {
+                ui.onAllNodes(hasContentDescription(label) and assistantActions).assertCountEquals(1)
+                    .onFirst().assertIsDisplayed()
+            }
+        }
+        fun assertUnclipped() {
+            for (tag in listOf("question-card", "question-toggle")) {
+                val value = node(tag).fetchSemanticsNode()
+                assertEquals("drawer handoff clipped top: $tag", value.positionInRoot.y, value.boundsInRoot.top, 1f)
+                assertEquals("drawer handoff clipped card: $tag", value.size.height.toFloat(), value.boundsInRoot.height, 1f)
+            }
+            node("question-toggle").assertTextContains("提问已中断 · Route choice")
+            val title = ui.onNode(hasText("提问已中断 · Route choice", substring = true) and
+                hasAnyAncestor(hasTestTag("question-card")), useUnmergedTree = true).fetchSemanticsNode()
+            assertEquals("drawer handoff clipped title top", title.positionInRoot.y, title.boundsInRoot.top, 1f)
+            assertEquals("drawer handoff clipped title height", title.size.height.toFloat(), title.boundsInRoot.height, 1f)
+            ui.onNodeWithText("Which route?").assertExists()
+            node("question-submit").assertDoesNotExist()
+            assertThreeActions()
+        }
+        lateinit var other:Conversation
+        main { other = f.db.create("default") }
+        repeat(2) {
+            ui.onNodeWithContentDescription("打开侧边栏").performClick()
+            selectFromDrawer(other.id)
+            selectFromDrawer(target)
+            openRecoveredWorkflow()
+            assertUnclipped()
+            ui.mainClock.autoAdvance = false
+            try {
+                node("conversation-drawer").performTouchInput { swipeLeft() }
+                repeat(90) {
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.waitForIdle()
+                    assertUnclipped()
+                }
+            } finally { ui.mainClock.autoAdvance = true }
+            await(f,"swiped drawer settled and authority installed") {
+                val visible = MainActivity::class.java.getDeclaredMethod("getSidebarVisible").apply { isAccessible = true }.invoke(current) as Boolean
+                !visible && !displayPending()
+            }
+            ui.waitForIdle()
+            assertUnclipped()
+        }
+        assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())
+    }
+    private fun recovery(answer:QuestionAnswer?, switchThroughDrawer:Boolean = false) {
         lateinit var old:RunCheckpoint;lateinit var id:QuestionIdentity
         val f=fresh {f ->
             val runtime=SQLiteRuntimeStore.acquire(f.db)
@@ -413,6 +482,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             node("question-option:1").assertDoesNotExist()
             node("question-submit").assertDoesNotExist()
         }
+        if (switchThroughDrawer) assertRecoveredQuestionSurvivesDrawerHandoff(f, old.message.conversationId)
         drainWorker(f);assertNull(f.c.active);assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())
         val saved=checkpoint(f,old.message);assertEquals(RunStatus.INTERRUPTED,saved.message.status);assertEquals(ExecutionPhase.TERMINAL,saved.phase);assertNull(saved.pending)
         assertTrue(saved.owner!=old.owner);assertEquals(ToolDisposition.UNKNOWN,saved.tools.single().disposition)
@@ -427,6 +497,7 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
         recreate();openRecoveredWorkflow()
         drainWorker(f);assertEquals(0,f.probe.opens.get());assertEquals(0,f.probe.nexts.get())
     }
+    fun testRecoveredQuestionKeepsThreeActionsAndFullCardAfterDrawerSwipe()=recovery(null, switchThroughDrawer=true)
     fun testRecoveryOfPendingQuestionOnlyDisplaysAndDoesNotResend()=recovery(null)
     fun testRecoveryOfSavedAnswerOnlyDisplaysAndDoesNotAuthorizeContinuation()=recovery(QuestionAnswer.Selected("two"))
 }

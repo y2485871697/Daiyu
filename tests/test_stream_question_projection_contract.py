@@ -8,7 +8,8 @@ class StreamQuestionProjectionContract(unittest.TestCase):
         projection = text.split('@Synchronized internal fun questionProjection(', 1)[1].split('private val toolLedger', 1)[0]
         self.assertNotIn('SQLiteRuntimeStore', projection)
         self.assertNotIn('database.', projection)
-        self.assertIn('evidence?.matches(message, call)', projection)
+        self.assertIn('questionProjection(message.conversationId, message.runId, message.id, message.role, call, evidence)', projection)
+        self.assertIn('evidence?.matches(conversation, run, message, role, call)', projection)
         self.assertIn('recoveryOwner == null', projection)
         self.assertIn('current.offer?.pending?.callId==call.id', projection)
     def test_worker_snapshot_shares_one_checkpoint_decode_for_receipts_and_questions(self):
@@ -17,11 +18,26 @@ class StreamQuestionProjectionContract(unittest.TestCase):
         self.assertIn('QuestionCheckpointEvidence.from(snapshot, recoveryOwner)', text)
         host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         self.assertIn('controller.questionWaiting(message)', host)
-        self.assertIn('toolReceiptSnapshot?.questionEvidence(message)', host)
+        self.assertIn('toolReceiptSnapshot?.questionEvidence(conversation.value, run.value, message.value)', host)
         self.assertIn('question.copy(binding = null, canAnswer = false)', host)
+    def test_display_and_authority_share_exact_question_identity_without_write_capability(self):
+        host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
+        collect = host.split('if (receiptsReady) questionCards = buildMap {', 1)[1].split('else questionCards =', 1)[0]
+        self.assertIn('val display = displayWindow', collect)
+        self.assertIn('else display.rows.forEach', collect)
+        self.assertIn('collect(row.conversationId, row.runId, segment.messageId, segment.role, segment.blocks)', collect)
+        self.assertIn('controller.questionProjection(conversation, run, message, role, block.invocation, evidence)', collect)
+        self.assertIn('put(owner to block.invocation, question)', collect)
+        self.assertNotIn('database.', collect)
+        self.assertEqual(2, host.count('questionCards[owner to block.invocation]?.identity?.storageKey'))
+        dedicated = host.split('private fun DedicatedQuestion(', 1)[1].split('private fun ', 1)[0]
+        self.assertIn('val dedicatedKey = step.dedicatedKey ?: return false', dedicated)
+        self.assertIn('value.identity.storageKey == dedicatedKey', dedicated)
+        self.assertIn('active && !sidebarVisible && displayWindow == null && question.canAnswer', dedicated)
+
     def test_recovered_question_is_validated_before_explicit_terminal_workflow_disclosure(self):
         text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/QuestionBarrierIntegrationTest.kt').read_text()
-        recovery = text.split('private fun recovery(answer:QuestionAnswer?)', 1)[1]
+        recovery = text.split('private fun recovery(answer:QuestionAnswer?', 1)[1]
         self.assertLess(recovery.index('assertNotNull(projection)'), recovery.index('launch(f,'))
         disclosure = text.split('private fun openRecoveredWorkflow()', 1)[1].split('private fun recovery(', 1)[0]
         self.assertIn('when (header.fetchSemanticsNode().config[SemanticsProperties.StateDescription])', disclosure)

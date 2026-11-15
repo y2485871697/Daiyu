@@ -119,7 +119,11 @@ internal fun DaiyuChatScreen(
     val presentationActive = LocalChatPresentationActive.current &&
         app.daiyu.android.ui.navigation.LocalPageContentActive.current
     val suppliedActions = actions
-    val actions = if (presentationActive) suppliedActions else ChatScreenActions(editingMessageKey = suppliedActions.editingMessageKey)
+    val actions = if (presentationActive) suppliedActions else ChatScreenActions(
+        editingMessageKey = suppliedActions.editingMessageKey,
+        messageActionsEnabled = suppliedActions.messageActionsEnabled,
+        messageBranchEnabled = suppliedActions.messageBranchEnabled,
+    )
     val suppliedCallActions = callActions
     val callActions = if (presentationActive) suppliedCallActions else DoubaoCallActions()
     val drawerBlocksIme = app.daiyu.android.ui.components.LocalConversationDrawerBlocksIme.current

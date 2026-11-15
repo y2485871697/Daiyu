@@ -18,9 +18,12 @@ internal class QuestionCheckpointEvidence private constructor(
     private val calls: Set<ToolInvocation>,
 ) {
     fun matches(message: Message, call: ToolInvocation): Boolean =
-        message.role == Message.ASSISTANT_ROLE && call.name == ASK_USER_TOOL_NAME &&
-            messageId == message.id && conversationId == message.conversationId &&
-            runId == message.runId && call in calls
+        matches(message.conversationId, message.runId, message.id, message.role, call)
+
+    fun matches(conversation: ConversationId, run: RunId, message: MessageId, role: String,
+        call: ToolInvocation): Boolean =
+        role == Message.ASSISTANT_ROLE && call.name == ASK_USER_TOOL_NAME &&
+            conversationId == conversation && runId == run && messageId == message && call in calls
 
     companion object {
         fun from(snapshot: RunCheckpoint, recoveryOwner: String?): QuestionCheckpointEvidence =

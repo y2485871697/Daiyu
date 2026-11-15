@@ -75,7 +75,10 @@ internal object RetainedToolOutcomes {
         private val blockPositions: Map<Owner, IdentityHashMap<MessageBlock.Tool, Int>>,
         val childAgentNames: Map<ChildRunOwner, String>) {
         fun questionEvidence(message: Message): QuestionCheckpointEvidence? =
-            questions[Owner(message.conversationId.value, message.runId.value, message.id.value)]
+            questionEvidence(message.conversationId.value, message.runId.value, message.id.value)
+
+        fun questionEvidence(conversation: String, run: String, message: String): QuestionCheckpointEvidence? =
+            questions[Owner(conversation, run, message)]
 
         private fun position(message: Message, block: MessageBlock.Tool): Int {
             val tools = sourceBlocks(message).filterIsInstance<MessageBlock.Tool>()

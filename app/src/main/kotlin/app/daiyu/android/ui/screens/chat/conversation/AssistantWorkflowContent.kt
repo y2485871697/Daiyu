@@ -56,6 +56,12 @@ internal fun ChatTurnUi.Assistant.workflowContent(): AssistantWorkflowContent {
     else AssistantWorkflowContent(work, steps, body, narration, leading = leadingContent)
 }
 
+/** Mixed content is authoritative; an empty legacy list is not evidence of body text. */
+internal fun ChatTurnUi.Assistant.hasBodyTextActions(): Boolean =
+    if (content.isNotEmpty()) content.any { it is MessageContentUi.Text && it.text.isNotBlank() }
+    else leadingContent.any { it.text.isNotBlank() } ||
+        if (finalContent.isNotEmpty()) finalContent.any { it.text.isNotBlank() } else finalText.isNotBlank()
+
 internal fun MessageContentUi.workflowKey(index: Int): String = when (this) {
     is MessageContentUi.Reasoning -> "reasoning:${reported.itemId}"
     is MessageContentUi.Tool -> "tool:${step.renderKey}"

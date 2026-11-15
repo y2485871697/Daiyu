@@ -35,4 +35,15 @@ class QuestionCheckpointEvidenceTest {
         assertTrue(recovered.matches(message, call))
         assertFalse(QuestionCheckpointEvidence.from(checkpoint.copy(tools = emptyList()), null).matches(message, call))
     }
+    @Test fun displayIdentityMatchesTheSameEvidenceWithoutAnAuthoritativeMessage() {
+        val evidence = QuestionCheckpointEvidence.from(checkpoint, null)
+        assertTrue(evidence.matches(message.conversationId, message.runId, message.id, message.role, call))
+        assertFalse(evidence.matches(ConversationId("other"), message.runId, message.id, message.role, call))
+        assertFalse(evidence.matches(message.conversationId, RunId("other"), message.id, message.role, call))
+        assertFalse(evidence.matches(message.conversationId, message.runId, MessageId("other"), message.role, call))
+        assertFalse(evidence.matches(message.conversationId, message.runId, message.id, Message.USER_ROLE, call))
+        assertFalse(evidence.matches(message.conversationId, message.runId, message.id, message.role,
+            call.copy(arguments = "{\"changed\":true}")))
+    }
+
 }

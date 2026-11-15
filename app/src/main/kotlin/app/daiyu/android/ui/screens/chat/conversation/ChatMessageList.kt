@@ -1058,11 +1058,7 @@ internal fun AssistantTurn(
                 maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
         if (showActions && actionTurn.status != RunStatus.RUNNING && generationComplete && revealSettled) {
-            // Preserve legacy text/tool actions. Mixed content is authoritative, so images
-            // (or their metadata) alone must not offer body-text copy or speech actions.
-            val hasTextActions = actionTurn.content.isEmpty() || actionTurn.content.any {
-                it is MessageContentUi.Text && it.text.isNotBlank()
-            }
+            val hasTextActions = actionTurn.hasBodyTextActions()
             MessageActionBar(actionTurn.actionKey, actions, timestamp = actionTurn.timestamp,
                 modifier = Modifier.onSizeChanged { actionSlotHeightPx = it.height },
                 allowSpeech = hasTextActions, showCopyAction = hasTextActions, speaking = speaking, preparing = preparing)

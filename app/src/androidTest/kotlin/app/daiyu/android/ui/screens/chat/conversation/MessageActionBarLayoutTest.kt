@@ -140,4 +140,34 @@ class MessageActionBarLayoutTest : WiredActivityTestCase() {
         ui.onNodeWithText(timestamp).assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
+    fun testToolOnlyActionsStayThreeAcrossLocalContentProjectionChanges() {
+        var turn by mutableStateOf(ChatTurnUi.Assistant("tool-only", workProcess = WorkProcessUi(
+            listOf(WorkSegmentUi(steps = listOf(WorkStepUi("call", "提问", "", state = WorkStepState.UNKNOWN)))), "已中断"),
+            status = app.daiyu.android.domain.RunStatus.STOPPED, error = "上次运行中断"))
+        var active by mutableStateOf(false)
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                CompositionLocalProvider(LocalChatPresentationActive provides active) {
+                    Box(Modifier.width(320.dp)) { AssistantTurn(turn, ChatScreenActions()) }
+                }
+            }
+        } }
+        fun assertThree() {
+            for (label in listOf("复制回答", "编辑", "朗读")) ui.onNodeWithContentDescription(label).assertDoesNotExist()
+            for (label in listOf("分支", "重新生成", "删除")) ui.onNodeWithContentDescription(label).assertExists()
+        }
+        assertThree()
+        val step = turn.workProcess!!.segments.single().steps.single()
+        mainThread { turn = turn.copy(content = listOf(MessageContentUi.Tool(step))) }
+        assertThree()
+        mainThread { active = true }
+        assertThree()
+        mainThread { active = false; turn = turn.copy(content = emptyList()) }
+        assertThree()
+        mainThread { active = true; turn = turn.copy(finalText = "真实正文") }
+        ui.onNodeWithContentDescription("复制回答").assertExists()
+        ui.onNodeWithContentDescription("朗读").assertExists()
+        assertEquals(0, fixture.opens.get())
+    }
+
 }

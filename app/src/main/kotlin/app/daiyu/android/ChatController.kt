@@ -1824,17 +1824,21 @@ class ChatController internal constructor(private val application:Application,
         records.forEach { record -> questionIdentity(record.callId)?.let {questionHistory[record.callId]=it to record} }
     }
     @Synchronized internal fun questionProjection(message:Message,call:ToolInvocation,
-        evidence:QuestionCheckpointEvidence?):QuestionProjection? {
-        if (evidence?.matches(message, call) != true) return null
+        evidence:QuestionCheckpointEvidence?):QuestionProjection? =
+        questionProjection(message.conversationId, message.runId, message.id, message.role, call, evidence)
+
+    @Synchronized internal fun questionProjection(conversation:ConversationId, run:RunId, message:MessageId,
+        role:String, call:ToolInvocation, evidence:QuestionCheckpointEvidence?):QuestionProjection? {
+        if (evidence?.matches(conversation, run, message, role, call) != true) return null
         val recoveryOwner = evidence.recoveryOwner
         val expectedOwner = recoveryOwner ?: evidence.owner
         val (identity, record) = questionHistory.values.singleOrNull {
-            it.first.conversationId == message.conversationId.value && it.first.runId == message.runId.value &&
+            it.first.conversationId == conversation.value && it.first.runId == run.value &&
                 it.first.callId == call.id.value && it.first.ownerId == expectedOwner
         } ?: return null
         if (runCatching { app.daiyu.android.domain.question.AskUserContract.parse(call.arguments) }.getOrNull() != record.question) return null
-        val current=resources?.takeIf {it.initial.id==message.id && it.initial.runId==message.runId &&
-            it.initial.conversationId==message.conversationId}
+        val current=resources?.takeIf {it.initial.id==message && it.initial.runId==run &&
+            it.initial.conversationId==conversation}
         val session=current?.question
         val writable=recoveryOwner == null && !closed && current!=null && !current.fenced && current.waiting &&
             current.offer?.context?.owner?.ownerId==identity.ownerId &&

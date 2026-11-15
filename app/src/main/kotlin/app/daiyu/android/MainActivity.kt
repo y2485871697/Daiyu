@@ -1887,7 +1887,7 @@ class MainActivity : ComponentActivity() {
     }
     private data class QuestionRowUi(val message: Message, val retryCleanup: Boolean)
     private var questionRows by mutableStateOf<Map<String, QuestionRowUi>>(emptyMap())
-    private var questionCards by mutableStateOf<Map<Pair<WorkStepOwnerUi, String>, ChatController.QuestionProjection>>(emptyMap())
+    private var questionCards by mutableStateOf<Map<Pair<WorkStepOwnerUi, ToolInvocation>, ChatController.QuestionProjection>>(emptyMap())
     private var titleRevision = -1L
     private var modelDeletionRevision = -1L
     private var dataRevision = -1L
@@ -6027,12 +6027,15 @@ class MainActivity : ComponentActivity() {
     @Composable private fun DedicatedQuestion(step: WorkStepUi, active: Boolean): Boolean {
         if (step.toolName != "ask_user") return false
         val owner = step.owner ?: return false
-        val question = questionCards[owner to step.toolCallId] ?: return false
-        if (step.dedicatedKey != question.identity.storageKey) return false
+        val dedicatedKey = step.dedicatedKey ?: return false
+        val question = questionCards.entries.firstOrNull { (key, value) ->
+            key.first == owner && key.second.id.value == step.toolCallId && value.identity.storageKey == dedicatedKey
+        }?.value ?: return false
+        val canAnswer = active && !sidebarVisible && displayWindow == null && question.canAnswer
         key(question.identity) {
             val binding = question.binding
             if (binding != null) {
-                QuestionCard(question.identity, question.record, active && question.canAnswer, binding)
+                QuestionCard(question.identity, question.record, canAnswer, binding)
             } else {
                 QuestionCard(question.identity, question.record, canAnswer = false,
                     submit = { _, _, complete ->
@@ -7613,12 +7616,23 @@ class MainActivity : ComponentActivity() {
             val receiptsReady = prepareToolReceipts()
             prepareMessageMedia()
             if (receiptsReady) questionCards = buildMap {
-                MessageHistory.expand(shown.map { it.second }).forEach { message ->
-                    val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
-                    message.blocks.filterIsInstance<MessageBlock.Tool>().forEach { block ->
-                        controller.questionProjection(message, block.invocation, toolReceiptSnapshot?.questionEvidence(message))?.let { question ->
-                            put(owner to block.invocation.id.value, question)
+                fun collect(conversation: ConversationId, run: RunId, message: MessageId, role: String,
+                    blocks: List<MessageBlock>) {
+                    val owner = WorkStepOwnerUi(conversation.value, run.value, message.value)
+                    val evidence = toolReceiptSnapshot?.questionEvidence(conversation.value, run.value, message.value)
+                    blocks.filterIsInstance<MessageBlock.Tool>().forEach { block ->
+                        controller.questionProjection(conversation, run, message, role, block.invocation, evidence)?.let { question ->
+                            put(owner to block.invocation, question)
                         }
+                    }
+                }
+                val display = displayWindow
+                if (display == null) MessageHistory.expand(shown.map { it.second }).forEach { message ->
+                    collect(message.conversationId, message.runId, message.id, message.role, message.blocks)
+                } else display.rows.forEach { (_, row) ->
+                    if (row.segments.isEmpty()) collect(row.conversationId, row.runId, row.id, row.role, row.blocks)
+                    else row.segments.forEach { segment ->
+                        collect(row.conversationId, row.runId, segment.messageId, segment.role, segment.blocks)
                     }
                 }
             }
@@ -7671,12 +7685,13 @@ class MainActivity : ComponentActivity() {
                 compressionActivities = visibleCompressions,
                 turns = ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns.takeIf { chatState.conversationKey == selected?.id?.value }.orEmpty() else displayWindow?.let { window -> ChatTurnMapper.mapDisplay(window,
                     toolReceipt = visibleDisplayReceipts, presentations = toolPresentations,
+                    dedicatedTool = { owner, block -> questionCards[owner to block.invocation]?.identity?.storageKey },
                     timestamp = { time -> MessageTimestampFormatter.timestamp(time, appearance.messageTimestampsEnabled) },
                     reconnects = reconnects, boundariesAfter = workflowBoundaries, childTaskNames = visibleChildNames) } ?: ChatTurnMapper.map(shown.map { it.second },
                     messageVideos = { message -> messageMediaSnapshot?.videos(message).orEmpty() },
                     reconnects = reconnects, boundariesAfter = workflowBoundaries, assistantIdentity = { _, owner -> replyIdentities[owner] }, dedicatedTool = { message, block ->
                     val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
-                    questionCards[owner to block.invocation.id.value]?.identity?.storageKey
+                    questionCards[owner to block.invocation]?.identity?.storageKey
                 }, timestamp = { message ->
                     MessageTimestampFormatter.timestamp(message, enabled = appearance.messageTimestampsEnabled)
                 }, presentations = toolPresentations, toolReceipt = visibleToolReceipts,

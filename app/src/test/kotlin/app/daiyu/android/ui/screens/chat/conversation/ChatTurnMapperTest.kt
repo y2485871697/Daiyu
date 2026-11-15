@@ -446,4 +446,43 @@ class ChatTurnMapperTest {
         assertEquals(WorkStepState.NOT_EXECUTED, ready.workProcess!!.segments.flatMap { it.steps }.first().state)
     }
 
+    @Test fun displayQuestionAndFullMessageKeepDedicatedReceiptAndBodyActionsEquivalent() {
+        val call = MessageBlock.Tool(ToolInvocation(ToolCallId("question"), "ask_user", "{}"), null)
+        val original = message(call, status = RunStatus.STOPPED).copy(error = "interrupted")
+        val row = app.daiyu.android.storage.MessageDisplayRow(original.id, original.conversationId, original.runId,
+            original.role, original.blocks, original.status, original.error, null, emptyList())
+        val window = app.daiyu.android.storage.MessageDisplayWindow(listOf(1L to row))
+        val owner = WorkStepOwnerUi("conversation", "run", "assistant")
+        val receipt = ToolReceiptUi(WorkStepState.UNKNOWN)
+        val expected = ChatTurnMapper.map(listOf(original), dedicatedTool = { _, _ -> "exact-question" },
+            toolReceipt = { _, _ -> receipt }).single() as ChatTurnUi.Assistant
+        val actual = ChatTurnMapper.mapDisplay(window, dedicatedTool = { identity, block ->
+            assertEquals(owner, identity); assertSame(call, block); "exact-question"
+        }, toolReceipt = { identity, _ -> assertEquals(owner, identity); receipt }).single() as ChatTurnUi.Assistant
+        assertEquals(expected, actual)
+        assertFalse(actual.hasBodyTextActions())
+        assertEquals("exact-question", actual.workProcess!!.segments.single().steps.single().dedicatedKey)
+        assertEquals(WorkStepState.UNKNOWN, actual.workProcess!!.segments.single().steps.single().state)
+    }
+
+    @Test fun displayDedicatedKeysDoNotBorrowEvidenceFromRepeatedCallIds() {
+        val oldCall = MessageBlock.Tool(ToolInvocation(ToolCallId("same-call"), "ask_user", "{\"old\":true}"), null)
+        val provenCall = MessageBlock.Tool(oldCall.invocation.copy(arguments = "{}"), null)
+        val id = MessageId("assistant")
+        val row = app.daiyu.android.storage.MessageDisplayRow(id, ConversationId("conversation"),
+            RunId("run"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.STOPPED, null, null,
+            listOf(app.daiyu.android.storage.MessageDisplaySegment(id, Message.ASSISTANT_ROLE, listOf(oldCall), null, emptyList()),
+                app.daiyu.android.storage.MessageDisplaySegment(MessageId("supplement"), Message.USER_ROLE,
+                    listOf(text("supplement", "follow up")), null, emptyList()),
+                app.daiyu.android.storage.MessageDisplaySegment(id, Message.ASSISTANT_ROLE, listOf(provenCall), null, emptyList())))
+        val owner = WorkStepOwnerUi("conversation", "run", id.value)
+        val proven = mapOf((owner to provenCall.invocation) to "exact-question")
+        val turns = ChatTurnMapper.mapDisplay(app.daiyu.android.storage.MessageDisplayWindow(listOf(1L to row)),
+            dedicatedTool = { identity, block -> proven[identity to block.invocation] }).filterIsInstance<ChatTurnUi.Assistant>()
+        assertEquals(listOf(null, "exact-question"), turns.map {
+            it.workProcess!!.segments.single().steps.single().dedicatedKey
+        })
+        assertTrue(turns.all { !it.hasBodyTextActions() })
+    }
+
 }

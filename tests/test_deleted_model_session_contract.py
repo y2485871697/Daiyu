@@ -34,7 +34,7 @@ class DeletedModelSessionContract(unittest.TestCase):
         batch=(DOMAIN/'ChildModelBatch.kt').read_text();retained=(DOMAIN/'RetainedChildTasks.kt').read_text()
         self.assertIn('queued == null && snapshot.any { !models.getValue(it.profileId).acceptsNewTask() }',batch)
         self.assertIn('profileReservations.remove(reservations[index])',batch)
-        self.assertIn('!workerFinished || !cleanupFinished || itemReleased',batch)
+        self.assertIn('!workerFinished || !cleanupFinished || !toolsDrained || itemReleased',batch)
         self.assertIn('if (!definition.acceptsNewTask()) return ChildTaskCommandReceipt.Rejected("child_model_deleted")',retained)
         frozen=(APP/'delegation/SavedSubAgentRuntimeBindings.kt').read_text()
         self.assertIn('AtomicReference(binding.profile to original)',frozen)

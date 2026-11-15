@@ -209,6 +209,52 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
         assertEquals(1, submissions)
     }
 
+    fun testBlankArchivedInputsAreHiddenWhilePendingInputsRemainAvailable() {
+        show(dark = false, fontScale = 1f)
+        scrollTo("question-note").assertExists()
+        ui.onAllNodes(hasSetTextAction()).assertCountEquals(1)
+        scrollTo("question-option:2").performClick()
+        scrollTo("question-other").assertExists()
+        node("question-note").assertDoesNotExist()
+        for (blank in listOf<String?>(null, "", " \n\t")) {
+            for (answer in listOf(QuestionAnswer.Selected("keep", blank), QuestionAnswer.Delegate(blank))) {
+                show(dark = true, fontScale = 1.3f, answer = answer)
+                assertArchived(if (answer is QuestionAnswer.Selected) 0 else 3)
+                node("question-note").assertDoesNotExist()
+                node("question-other").assertDoesNotExist()
+                ui.onNodeWithText("补充说明（可选）").assertDoesNotExist()
+            }
+            show(dark = true, fontScale = 1.3f, answer = QuestionAnswer.Other(blank.orEmpty()))
+            assertArchived(2)
+            node("question-other").assertDoesNotExist()
+            node("question-note").assertDoesNotExist()
+            ui.onNodeWithText("填写你的选择").assertDoesNotExist()
+        }
+        assertEquals(0, submissions)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testBlankNoteDisappearsAfterLiveSubmissionAndStaysHiddenOnRemount() {
+        for (index in listOf(0, 3)) for (blank in listOf("", " \n\t")) {
+            show(dark = false, fontScale = 1f)
+            scrollTo("question-option:$index").performClick()
+            scrollTo("question-note").performTextReplacement(blank)
+            scrollTo("question-submit").performClick()
+            ui.waitForIdle()
+            val expectedNote = blank.takeIf { it.isNotEmpty() }
+            val expected = if (index == 0) QuestionAnswer.Selected("keep", expectedNote)
+                else QuestionAnswer.Delegate(expectedNote)
+            assertEquals(expected, submitted)
+            assertArchived(index)
+            node("question-note").assertDoesNotExist()
+            show(dark = true, fontScale = 1.3f, answer = submitted)
+            assertArchived(index)
+            node("question-note").assertDoesNotExist()
+        }
+        assertEquals(4, submissions)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testDelegateAndLongArchivedInputsRemainFullyReadable() {
         val longText = (1..10).joinToString("\n") { "第${it}行：保留完整输入内容" }
         for (answer in listOf(QuestionAnswer.Delegate(longText), QuestionAnswer.Other(longText))) {

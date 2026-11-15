@@ -52,6 +52,23 @@ class QuestionCardReadabilityContractTest(unittest.TestCase):
             self.assertNotIn(token, archived)
         self.assertEqual(2, text.count('archived = archived)'))
 
+    def test_blank_archived_inputs_and_their_spacing_are_omitted_only_after_confirmation(self):
+        text = CARD.read_text()
+        normalized = ' '.join(text.split())
+        self.assertIn('if (selection is QuestionAnswer.Other && (!archived || otherText.isNotBlank())) {', normalized)
+        note_guard = 'if (value.question.allowNote && selection !is QuestionAnswer.Other && (!archived || noteText.isNotBlank())) {'
+        self.assertIn(note_guard, normalized)
+        note_block = normalized.split(note_guard, 1)[1].split('if (!archived)', 1)[0]
+        self.assertIn('Spacer(Modifier.height(9.dp))', note_block)
+        self.assertIn('QuestionInput(noteText,', note_block)
+        self.assertEqual(1, text.count('Spacer(Modifier.height(9.dp))'))
+        for token in ('testBlankArchivedInputsAreHiddenWhilePendingInputsRemainAvailable',
+                      'testBlankNoteDisappearsAfterLiveSubmissionAndStaysHiddenOnRemount',
+                      'for (blank in listOf<String?>(null, "",',
+                      'QuestionAnswer.Other(blank.orEmpty())', 'assertEquals(expected, submitted)',
+                      'node("question-note").assertDoesNotExist()'):
+            self.assertIn(token, DEVICE.read_text())
+
     def test_other_hides_note_without_clearing_its_draft_or_submitting_it(self):
         text = CARD.read_text()
         self.assertIn('value.question.allowNote && selection !is QuestionAnswer.Other', text)

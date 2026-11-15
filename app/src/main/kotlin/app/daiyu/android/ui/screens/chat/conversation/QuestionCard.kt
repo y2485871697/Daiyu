@@ -229,7 +229,7 @@ private fun QuestionCardContent(
                         if (value.question.allowOther) {
                             QuestionOptionRow("其他…", "", false, selection is QuestionAnswer.Other, editable,
                                 { session.select(QuestionAnswer.Other("")) }, Modifier.testTag("question-option:$index"))
-                            if (selection is QuestionAnswer.Other) {
+                            if (selection is QuestionAnswer.Other && (!archived || otherText.isNotBlank())) {
                                 QuestionInput(otherText, "填写你的选择", editable, { session.editOther(it) },
                                     Modifier.padding(top = 4.dp, bottom = 5.dp)
                                         .testTag("question-other"), fadeDisabled = false, archived = archived)
@@ -242,7 +242,8 @@ private fun QuestionCardContent(
                                 { session.select(QuestionAnswer.Delegate()) }, Modifier.testTag("question-option:$index"))
                         }
                     }
-                    if (value.question.allowNote && selection !is QuestionAnswer.Other) {
+                    if (value.question.allowNote && selection !is QuestionAnswer.Other &&
+                        (!archived || noteText.isNotBlank())) {
                         Spacer(Modifier.height(9.dp))
                         QuestionInput(noteText, "补充说明（可选）", editable, { session.editNote(it) },
                             Modifier.testTag("question-note"), archived = archived)

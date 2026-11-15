@@ -15,10 +15,14 @@ class DisclosureConsistencyContractTest(unittest.TestCase):
         self.assertIn('session.bind(record, value, canAnswer, submit)', source)
         self.assertNotIn('if (expanded) {', source)
 
-    def test_child_controls_remain_inside_collapsible_details(self):
+    def test_readonly_child_details_remain_inside_shared_disclosure(self):
         source = (CHAT / 'ChildTaskToolContent.kt').read_text()
         self.assertIn('WorkflowExpandableContent(visibility, disclosure) {', source)
-        self.assertIn('details()\n                controls()', source)
+        child = source.split('internal fun ChildTaskDisclosure(', 1)[1]
+        child_contract = child.split('\n}', 1)[0]
+        self.assertNotIn('controls:', child_contract)
+        self.assertNotIn('controls()', source)
+        self.assertIn('WorkflowExpandableContent(visibility, disclosure) {\n            details()\n        }', source)
         self.assertIn('settingsDisclosureRotation(expanded, expandedDegrees = 180f)', source)
         self.assertIn('var expanded by rememberSaveable(row.owner)', source)
         self.assertNotIn('if (expanded) details()', source)

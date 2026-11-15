@@ -74,7 +74,9 @@ class ChatTimelineContractTest(unittest.TestCase):
         self.assertNotIn('val line = MiuixTheme.colorScheme.outline', divider)
         self.assertEqual(2, divider.count('Modifier.weight(1f).height(.5.dp).background(line)'))
         self.assertIn('val color = MiuixTheme.colorScheme.onSurfaceVariantSummary', divider)
-        self.assertIn('.padding(horizontal = 20.dp, vertical = 10.dp)', divider)
+        status_divider = divider.split('internal fun ChatTimelineDivider(', 1)[1]
+        self.assertIn('.testTag("timeline:${entry.id}").padding(vertical = 10.dp)', status_divider)
+        self.assertNotIn('.padding(horizontal = 20.dp', status_divider)
         self.assertIn('style = MiuixTheme.textStyles.footnote2, color = color', divider)
 
     def test_reconnect_notice_is_run_owned_and_cleared_when_that_owner_is_fenced(self):

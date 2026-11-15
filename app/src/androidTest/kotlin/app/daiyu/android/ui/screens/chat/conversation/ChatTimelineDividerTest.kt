@@ -4,6 +4,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -29,6 +31,48 @@ import kotlin.math.abs
 
 class ChatTimelineDividerTest : WiredActivityTestCase() {
     private val anchor = TimelineAnchor("conversation", "run", "message", 0)
+    fun testStatusDividerEndpointsMatchTheToolCardAtNarrowAndWideWidths() {
+        val entries = listOf(
+            ChatTimelineEntry.Stopped("width-stop", anchor, 1L),
+            ChatTimelineEntry.Compression("width-compression", anchor, 1L, "summary", null, 4, null, null),
+            ChatTimelineEntry.Compression("width-compression-failed", anchor, 1L, "", null, 0, null, null, failure = "failure"),
+            ChatTimelineEntry.ContextLimit("width-context", anchor, 1L, 280_000L, 272_000L, 270_000L),
+        ) + listOf("running", "succeeded", "stopped", "failed").map { status ->
+            ChatTimelineEntry.Reconnect("width-reconnect-$status", anchor, 1L, status, 0L, "NETWORK", 0, "model")
+        }
+        for (width in listOf(280.dp, 360.dp)) {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                BoxWithConstraints(Modifier.fillMaxWidth().statusBarsPadding()) {
+                    Column(Modifier.width(minOf(maxWidth, width)).padding(horizontal = 14.dp)) {
+                        WorkProcessCard(
+                            work = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(
+                                WorkStepUi("width-tool", "读取设备", "", WorkStepState.OK)
+                            ))), summary = "已完成"),
+                            ownerKey = "divider-width",
+                        )
+                        entries.forEach { ChatTimelineDivider(it) }
+                    }
+                }
+            } } }
+            awaitUniqueTag("timeline:width-stop")
+            awaitVisualIdle()
+            val card = ui.onNodeWithTag("work-process-surface", useUnmergedTree = true)
+                .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            for (entry in entries) {
+                val left = ui.onNodeWithTag("timeline-line-left:${entry.id}")
+                    .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                val right = ui.onNodeWithTag("timeline-line-right:${entry.id}")
+                    .assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+                assertTrue("left line must remain visible: ${entry.id} at $width", left.width > 0f)
+                assertTrue("right line must remain visible: ${entry.id} at $width", right.width > 0f)
+                assertEquals("divider left must match tool card: ${entry.id} at $width", card.left, left.left, 1f)
+                assertEquals("divider right must match tool card: ${entry.id} at $width", card.right, right.right, 1f)
+                assertEquals("label gap must remain centered: ${entry.id} at $width",
+                    card.center.x, (left.right + right.left) / 2f, 1f)
+            }
+        }
+    }
+
     fun testHistoricalDividersAreOpaqueOnTheirFirstFrameWithoutAdvancingEntranceTime() {
         var expected = Color.Unspecified
         ui.mainClock.autoAdvance = false

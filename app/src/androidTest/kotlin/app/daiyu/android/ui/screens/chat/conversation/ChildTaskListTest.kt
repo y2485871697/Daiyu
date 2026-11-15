@@ -24,6 +24,7 @@ class ChildTaskListTest : WiredActivityTestCase() {
         ChildRunOwner("conversation", "run", "group", 1, "internal-child-$index", "answer"),
         "message", "owner", index, "internal-profile", "检查第 ${index + 1} 项布局", status,
         text = if (status == ChildTaskStatus.COMPLETED) "第 ${index + 1} 项结果" else "",
+        detail = if (status == ChildTaskStatus.FAILED) "test_failure" else null,
         display = ChildTaskDisplay("审查", "internal-model", "冻结模型"))
 
     private fun show(rows: List<SubAgentStatusRow>, records: List<ChildTaskRecord>) {
@@ -223,6 +224,9 @@ class ChildTaskListTest : WiredActivityTestCase() {
         ui.onNodeWithTag("tool-child-summary:internal-child-0").performClick()
         ui.onNodeWithTag("tool-child-progress:internal-child-0").assertIsDisplayed()
         assertNoTaskControls()
+        ui.onNodeWithTag("tool-child-summary:internal-child-0").scrollToVisible().performClick()
+        ui.onNodeWithTag("tool-child-progress:internal-child-0").assertDoesNotExist()
+        assertNoTaskControls()
     }
 
     fun testRunningAndQueuedCardsNeverExposeTaskControlsWhenExpanded() {
@@ -238,6 +242,9 @@ class ChildTaskListTest : WiredActivityTestCase() {
             ui.onNodeWithTag("tool-child-summary:${record.owner.childRunId}").scrollToVisible().performClick()
             ui.onNodeWithTag("tool-child-progress:${record.owner.childRunId}").assertIsDisplayed()
             assertNoTaskControls()
+            ui.onNodeWithTag("tool-child-summary:${record.owner.childRunId}").scrollToVisible().performClick()
+            ui.onNodeWithTag("tool-child-progress:${record.owner.childRunId}").assertDoesNotExist()
+            assertNoTaskControls()
         }
     }
 
@@ -248,6 +255,9 @@ class ChildTaskListTest : WiredActivityTestCase() {
         for (record in records) {
             ui.onNodeWithTag("tool-child-summary:${record.owner.childRunId}").scrollToVisible().performClick()
             ui.onNodeWithTag("tool-child-progress:${record.owner.childRunId}").scrollToVisible().assertIsDisplayed()
+            assertNoTaskControls()
+            ui.onNodeWithTag("tool-child-summary:${record.owner.childRunId}").scrollToVisible().performClick()
+            ui.onNodeWithTag("tool-child-progress:${record.owner.childRunId}").assertDoesNotExist()
             assertNoTaskControls()
         }
     }
@@ -260,6 +270,9 @@ class ChildTaskListTest : WiredActivityTestCase() {
         assertNoTaskControls()
         ui.onNodeWithTag("tool-child-summary:internal-child-0").performClick()
         ui.onNodeWithTag("tool-child-progress:internal-child-0").assertIsDisplayed()
+        assertNoTaskControls()
+        ui.onNodeWithTag("tool-child-summary:internal-child-0").scrollToVisible().performClick()
+        ui.onNodeWithTag("tool-child-progress:internal-child-0").assertDoesNotExist()
         assertNoTaskControls()
     }
 

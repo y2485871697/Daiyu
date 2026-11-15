@@ -70,6 +70,9 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         ui.onNodeWithTag(tag).assert(SemanticsMatcher.expectValue(WorkflowDisclosureUp, up))
     }
 
+    private fun geometry(tag: String = "work-process-header"): String = ui.onNodeWithTag(tag)
+        .fetchSemanticsNode().config[WorkflowDisclosureGeometry].invoke()
+
     private fun touchHeader() { ui.onNodeWithTag("work-process-header").performTouchInput { click() } }
 
     fun testFollowingUpperHeaderStillExpandsUpAndNeverGrowsBehindComposer() {
@@ -86,7 +89,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                 ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
                 assertDirection(true)
                 assertTrue("No disclosure frame may reach behind the composer", bottom() <= safeBottom + 1f)
-                assertEquals("Upward disclosure holds its lower edge", anchor, bottom(), 2f)
+                assertEquals("Upward disclosure holds its lower edge: ${geometry()}", anchor, bottom(), 2f)
             }
         } finally { ui.mainClock.autoAdvance = true }
         ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(
@@ -338,6 +341,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         supplementalFollowing = following
         supplementalOutputActive = outputActive
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            androidx.compose.runtime.key(kind) {
             var safe by remember { mutableStateOf<Rect?>(null) }
             val viewport = remember { WorkflowDisclosureViewport({ supplementalFollowing }, { safe }, {}, { false }, { _, _ -> 0f }) }
             Box(Modifier.size(320.dp, 420.dp).onGloballyPositioned { safe = it.boundsInWindow() }) {
@@ -368,6 +372,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                         }
                     }
                 }
+            }
             }
         } } }
         ui.waitForIdle()
@@ -400,6 +405,13 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         for (kind in supplementalKinds) {
             mountSupplemental(kind, following = true, outputActive = true, lower = false)
             val header = supplementalHeader(kind)
+            if (kind == "question") {
+                ui.onNodeWithTag(header).assert(SemanticsMatcher.expectValue(
+                    androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
+                ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
+                ui.onNodeWithTag(header).assert(SemanticsMatcher.expectValue(
+                    androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠"))
+            }
             ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
             assertDirection(true, header)
             mainThread { supplementalFollowing = false; supplementalOutputActive = false }
@@ -437,7 +449,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             assertEquals("Identity top must never be partially clipped", node.positionInRoot.y, identity.top, 1f)
             assertEquals("Identity retains its complete tagged height in every frame", node.size.height.toFloat(), identity.height, 1f)
             val safeBottom = ui.onNodeWithTag("nested-composer").fetchSemanticsNode().boundsInRoot.top - ChatTailClearance.value * density
-            assertTrue("Nested disclosure must remain above the input", bottom() <= safeBottom + 1f)
+            assertTrue("Nested disclosure must remain above the input: bottom=${bottom()} safe=$safeBottom ${geometry()}", bottom() <= safeBottom + 1f)
             val surface = ui.onNodeWithTag("work-process-surface").fetchSemanticsNode().layoutInfo.coordinates
             return fullTop to surface.size.height.toFloat()
         }

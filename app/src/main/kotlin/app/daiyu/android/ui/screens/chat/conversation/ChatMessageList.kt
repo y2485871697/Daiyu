@@ -50,6 +50,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.neverEqualPolicy
 import androidx.compose.runtime.produceState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -114,6 +115,9 @@ internal class StreamingTailViewport(initiallyBounded: Boolean) {
     var followCatchup by mutableStateOf(false)
     var viewportOffset by mutableIntStateOf(0)
     var itemOrigin by mutableStateOf<Float?>(null)
+    // Re-publish placement even when Compose reuses the coordinates object.
+    var viewportCoordinates by mutableStateOf<LayoutCoordinates?>(null, neverEqualPolicy())
+    var anchorCorrection = ""
     var scroller: ScrollableState? = null
 }
 
@@ -156,13 +160,16 @@ internal fun StreamingTailContainer(
     }, content = {
         Layout(content = { Column(content = { content() }) }, modifier = Modifier
             .testTag("chat-stream-viewport:$itemKey")
+            .onPlaced { state.viewportCoordinates = it }
             .drawWithContent {
                 // Following content stops at the safe edge; detached reading retains the editor backdrop.
+                val protect = protectClearance()
                 val list = listCoordinates()?.takeIf { it.isAttached }
-                val origin = state.itemOrigin
-                val bottom = if ((state.bounded || protectClearance()) && list != null && origin != null)
-                    (list.size.height - origin - state.viewportOffset - if (protectClearance()) clearance() else 0).coerceAtLeast(0f)
-                else size.height
+                val viewport = state.viewportCoordinates?.takeIf { it.isAttached }
+                val bottom = if ((state.bounded || protect) && list != null && viewport != null) {
+                    val actualTop = list.localPositionOf(viewport, Offset.Zero).y
+                    (list.size.height - actualTop - if (protect) clearance() else 0).coerceAtLeast(0f)
+                } else size.height
                 clipRect(bottom = bottom) { this@drawWithContent.drawContent() }
             }
             .scrollable(innerScroll, Orientation.Vertical, enabled = userScrollEnabled && state.bounded)
@@ -192,11 +199,11 @@ internal fun StreamingTailContainer(
             val visibleHeight = if (state.bounded) {
                 minOf(viewport.height, (safeBottom - (origin?.roundToInt() ?: 0).coerceAtLeast(0)).coerceAtLeast(1))
             } else viewport.height
-            val maximum = (state.contentHeight - visibleHeight).coerceAtLeast(0)
+            val maximum = if (state.bounded) (state.contentHeight - visibleHeight).coerceAtLeast(0) else 0
             state.maxOffset = maximum
             val protect = protectClearance()
-            if (protect && !following) state.followCatchup = true
-            if (!protect) state.followCatchup = false
+            if (!state.bounded || !protect) state.followCatchup = false
+            else if (!following) state.followCatchup = true
             val q = if (!state.bounded) {
                 state.scrollOffset = 0f
                 0
@@ -381,8 +388,11 @@ internal fun ChatMessageList(
                             clearanceLayout.remeasurement?.forceRemeasure()
                         }
                         // Move the reading window with its content; an inner offset would clip the headers at its old top.
+                        val before = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == itemKey }
                         consumed = listState.dispatchRawDelta(delta)
                         if (abs(consumed) > .5f) clearanceLayout.remeasurement?.forceRemeasure()
+                        val after = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == itemKey }
+                        viewport?.anchorCorrection = "delta=$delta consumed=$consumed before=${before?.offset}/${before?.size} after=${after?.offset}/${after?.size}"
                     } finally { clearanceLayout.correcting = false }
                 }
                 consumed
@@ -393,6 +403,25 @@ internal fun ChatMessageList(
         !currentRetainingRows && !initialPositionPending && pageActive && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0 &&
             (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial) && !currentNestedTail.migrating && disclosureViewport.active == null
 
+    SideEffect {
+        disclosureViewport.diagnostics = {
+            val layout = listState.layoutInfo
+            val state = currentNestedTail
+            val item = layout.visibleItemsInfo.firstOrNull { it.key == currentTailKey }
+            val viewport = state.viewportCoordinates?.takeIf { it.isAttached }
+            val list = clearanceLayout.coordinates?.takeIf { it.isAttached }
+            val actual = if (viewport != null && list != null) list.localPositionOf(viewport, Offset.Zero).y else null
+            val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
+            "follow=$followBottom canFollow=${canFollowBottom()} dragging=$currentDragging initial=$initialPositionPending" +
+                " retained=$currentRetainingRows resumed=$scrollResumed page=$pageActive exact=$exactNavigationOwnsScroll" +
+                " bounded=${state.bounded} migrating=${state.migrating} catchup=${state.followCatchup}" +
+                " a=${state.scrollOffset} q=${state.viewportOffset} H=${state.contentHeight} max=${state.maxOffset}" +
+                " item=${item?.offset}/${item?.size} origin=${state.itemOrigin} actual=$actual viewport=${viewport?.size?.height}" +
+                " list=${layout.viewportStartOffset}/${layout.viewportEndOffset} size=${layout.viewportSize.height} padding=${layout.afterContentPadding}" +
+                " occlusion=$currentOcclusionPx clearance=$currentFollowClearancePx ready=${tail == null || readyTurns[tail.listKey] == tail}" +
+                " revealed=${tail == null || revealedTurns[tail.listKey] == tail} correction=${state.anchorCorrection}"
+        }
+    }
     fun correctFollowClearance() {
         synchronousTrace("daiyu.chat.restore-clearance") {
             val activeTail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant

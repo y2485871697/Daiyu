@@ -28,6 +28,7 @@ internal fun workflowDisclosureExpandsUp(followingBottom: Boolean, outputActive:
     followingBottom && outputActive || headerCenter >= viewport.center.y
 
 internal val WorkflowDisclosureUp = SemanticsPropertyKey<Boolean>("WorkflowDisclosureUp")
+internal val WorkflowDisclosureGeometry = SemanticsPropertyKey<() -> String>("WorkflowDisclosureGeometry")
 
 internal class WorkflowDisclosureViewport(
     val follows: () -> Boolean,
@@ -37,6 +38,7 @@ internal class WorkflowDisclosureViewport(
     val correctAnchor: (String, Float) -> Float,
 ) {
     var followingOnPress = false
+    var diagnostics: () -> String = { "" }
     var gesture = 0L
     var active by mutableStateOf<WorkflowDisclosureMotion?>(null)
 
@@ -75,6 +77,8 @@ internal class WorkflowDisclosureMotion(
     private var anchorGesture = -1L
     private var manualChange = false
     private var correctingAnchor = false
+    private var lastRequested = 0f
+    private var lastConsumed = 0f
     private var expanded = false
     private var cycleChosen = false
     private var followingOnPress = false
@@ -84,7 +88,15 @@ internal class WorkflowDisclosureMotion(
         header = it
         if (expanded && !cycleChosen) cycleChosen = chooseDirection(context?.viewport?.follows?.invoke() == true)
     }
-        .semantics { this[WorkflowDisclosureUp] = upwards }
+        .semantics {
+            this[WorkflowDisclosureUp] = upwards
+            this[WorkflowDisclosureGeometry] = {
+                "up=$upwards expanded=$expanded chosen=$cycleChosen active=${context?.viewport?.active === this@WorkflowDisclosureMotion}" +
+                    " gesture=$anchorGesture/${context?.viewport?.gesture} topAnchor=$anchorAtTop saved=$anchorTop/$anchorBottom" +
+                    " requested=$lastRequested consumed=$lastConsumed container=${container?.takeIf { it.isAttached }?.let { c -> c.positionInWindow().y to c.size.height }} " +
+                    context?.viewport?.diagnostics?.invoke().orEmpty()
+            }
+        }
     val containerModifier: Modifier get() = Modifier.pointerInput(this@WorkflowDisclosureMotion) {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -104,7 +116,9 @@ internal class WorkflowDisclosureMotion(
                 if (abs(delta) > .5f) context?.let {
                     correctingAnchor = true
                     try {
+                        lastRequested = delta
                         val consumed = viewport.correctAnchor(it.itemKey, delta)
+                        lastConsumed = consumed
                         if (abs(delta - consumed) > .5f) {
                             // At a scroll boundary, retain only the edge that the viewport can actually hold.
                             if (anchorAtTop) anchorTop += delta - consumed

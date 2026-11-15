@@ -113,7 +113,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertNotIn("state.scrollOffset =", measure)
         self.assertEqual(1, placement.count("val following = follows()"))
         self.assertIn("val followOffset = if (state.contentHeight > viewport.height) maximum else 0", placement)
-        self.assertIn("val maximum = (state.contentHeight - visibleHeight).coerceAtLeast(0)", placement)
+        self.assertIn("val maximum = if (state.bounded) (state.contentHeight - visibleHeight).coerceAtLeast(0) else 0", placement)
         self.assertLess(placement.index("val origin ="), placement.index("val maximum ="))
         self.assertNotIn("if (follows()", placement)
         self.assertIn("state.scrollOffset = if (state.bounded && following && !state.followCatchup) followOffset.toFloat()", placement)
@@ -165,9 +165,17 @@ class StreamingOcclusionContract(unittest.TestCase):
         source = CHAT.read_text()
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
         drawing = viewport.split(".drawWithContent {", 1)[1].split(".scrollable", 1)[0]
-        self.assertIn("list.size.height - origin - state.viewportOffset", drawing)
+        self.assertIn("import androidx.compose.runtime.neverEqualPolicy", source)
+        self.assertIn("var viewportCoordinates by mutableStateOf<LayoutCoordinates?>(null, neverEqualPolicy())", source)
+        self.assertIn(".onPlaced { state.viewportCoordinates = it }", viewport)
+        self.assertIn("val viewport = state.viewportCoordinates?.takeIf { it.isAttached }", drawing)
+        geometry = drawing.split("val actualTop = ", 1)[1].split("} else size.height", 1)[0]
+        self.assertEqual(
+            "list.localPositionOf(viewport, Offset.Zero).y "
+            "(list.size.height - actualTop - if (protect) clearance() else 0).coerceAtLeast(0f)",
+            " ".join(geometry.split()),
+        )
         self.assertIn("clipRect(bottom = bottom)", drawing)
-        self.assertIn("if (protectClearance()) clearance() else 0", drawing)
         self.assertNotIn(".clipToBounds()", viewport)
         device = DEVICE.read_text()
         case = device.split("fun testManualReadingDrawsThroughClearanceInsteadOfExposingPageBackground()", 1)[1].split("fun testContinuousEveryFrameGrowth", 1)[0]

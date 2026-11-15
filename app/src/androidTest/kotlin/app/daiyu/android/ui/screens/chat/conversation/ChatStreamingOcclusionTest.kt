@@ -591,7 +591,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 if (index == 2) ui.runOnUiThread { streaming = false }
                 if (index == 60) {
                     val viewport = ui.onNodeWithTag("chat-stream-viewport:gap-tail").fetchSemanticsNode()
-                    assertEquals("Terminal catchup must really unwrap before the next disclosure", 0f,
+                    assertEquals("Terminal catchup must really unwrap before the next disclosure: " +
+                        ui.onNodeWithTag("work-process-header").fetchSemanticsNode().config[WorkflowDisclosureGeometry].invoke(), 0f,
                         viewport.config[SemanticsProperties.VerticalScrollAxisRange].maxValue(), 1f)
                     assertTrue("Unbounded viewport must retain its full content height",
                         viewport.layoutInfo.coordinates.size.height >= (bodyHeight + 60) * density)
@@ -609,8 +610,10 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 val gapBottom = (composer.top - hostBounds.top - 2f).toInt()
                 for (y in gapTop..gapBottom) {
                     val sample = pixels[x, y]
-                    assertFalse("Following output cannot paint into any part of the fixed composer gap",
-                        sample.red > .9f && sample.blue > .9f && sample.green < .1f)
+                    if (sample.red > .9f && sample.blue > .9f && sample.green < .1f) {
+                        fail("Following output cannot paint into any part of the fixed composer gap: frame=$index y=$y body=$bodyHeight " +
+                            ui.onNodeWithTag("work-process-header").fetchSemanticsNode().config[WorkflowDisclosureGeometry].invoke())
+                    }
                 }
                 val end = ui.onNodeWithTag("gap-end").fetchSemanticsNode().layoutInfo.coordinates
                 val bottom = end.positionInRoot().y + end.size.height

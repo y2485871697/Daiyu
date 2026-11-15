@@ -54,6 +54,8 @@ class TestRefreshContract(unittest.TestCase):
                     with self.subTest(pair=pair), self.assertRaises(ValueError):
                         validate_build_group_only(*pair)
         for damaged in (after.replace(b'daiyu-', b'other-'), before,
+                        before.replace(b'${{ github.ref }}\n',
+                                       b'${{ github.ref }}${{ true }}UNREVIEWED${{ false }}\n'),
                         after.replace(b" && '-conversation-date' || '' }}", b' invalid-suffix')):
             with self.subTest(damaged=damaged), self.assertRaises(ValueError):
                 validate_build_group_only(before, damaged)

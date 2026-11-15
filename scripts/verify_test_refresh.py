@@ -53,7 +53,7 @@ def validate_build_group_only(before, after):
     old, i = locate(before)
     new, j = locate(after)
     suffix = new[j][len(old[i]) - 1:-1] if new[j].startswith(old[i][:-1]) else b''
-    if i != j or not re.fullmatch(rb'\$\{\{[^\r\n]+\}\}', suffix):
+    if i != j or not re.fullmatch(rb'\$\{\{[^{}\r\n]+\}\}', suffix):
         raise ValueError('Only an appended concurrency expression is allowed')
     new[j] = old[i]
     if old != new:

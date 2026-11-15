@@ -55,6 +55,28 @@ class RunOrdinaryGenerationToolsTest {
         } finally { scope.close() }
     }
 
+    @Test fun configurationGuardIsCapturedPerExplicitMediaDelegation() {
+        var epoch = 0
+        val guards = mutableListOf<() -> Boolean>()
+        val scope = RunOrdinaryGenerationTools(owner, auth, settings(GenerationProtocol.OPENAI_IMAGES_JSON),
+            ControllerGenerationResources("account", { error("prepare opened DB") }, { "account" }, File("/unused")),
+            captureAdmission = {
+                val captured = epoch
+                val guard = { epoch == captured }
+                guards += guard
+                guard
+            }) { true }
+        try {
+            prepare(scope, """{"prompt":"first"}""")
+            assertTrue(guards.single().invoke())
+            epoch++
+            assertFalse(guards.single().invoke())
+            prepare(scope, """{"prompt":"explicit new delegation"}""")
+            assertEquals(2, guards.size)
+            assertFalse(guards.first().invoke()); assertTrue(guards.last().invoke())
+        } finally { scope.close() }
+    }
+
     @Test fun editProfileIsAdvertisedOnlyWithAllowedPngSource() {
         val settings = settings(GenerationProtocol.OPENAI_IMAGE_EDIT_MULTIPART)
         assertEquals(1, leaf(settings).tools.size)

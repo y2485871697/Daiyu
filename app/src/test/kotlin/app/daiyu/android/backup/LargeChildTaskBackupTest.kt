@@ -38,4 +38,28 @@ class LargeChildTaskBackupTest {
         assertEquals("UNKNOWN", BackupChildTaskCodec.terminal(task(1).put("status", "RUNNING").put("text", "")).getString("status"))
     }
 
+    @Test fun requestRoutingAndUnreportedMainRequestSurviveVersionSevenValidation() {
+        val task = task(0).put("tool_access_json", JSONObject.NULL).put("original_role", "REVIEW")
+            .put("assigned_profile_id", "replacement")
+        val usage = JSONObject().apply {
+            put("task_id", "child-0"); put("request_id", "request"); put("request_owner", "owner")
+            put("attempt_id", "attempt"); put("operation", "NEXT"); put("checkpoint_revision", 1)
+            put("usage_source", "MAIN"); put("has_usage", 0)
+            for (key in listOf("input_tokens", "output_tokens", "cached_tokens", "cache_creation_tokens")) put(key, JSONObject.NULL)
+            put("provider_id_snapshot", "provider"); put("api_model_snapshot", "actual-model")
+            put("requested_at_ms", 123); put("request_sequence", 1)
+            put("assigned_profile_snapshot", "replacement"); put("original_role_snapshot", "REVIEW")
+        }
+        fun validateRouting() = BackupChildTaskCodec.validate(JSONObject().put("version", 7)
+            .put("tasks", JSONArray().put(task)).put("commands", JSONArray()).put("usage", JSONArray().put(usage)),
+            JSONArray().put(JSONObject().put("id", "parent").put("conversation_id", "conversation")
+                .put("run_id", "run").put("role", "assistant")))
+        val saved = validateRouting().usage.single()
+        assertEquals("actual-model", saved.getString("api_model_snapshot"))
+        assertEquals("replacement", saved.getString("assigned_profile_snapshot"))
+        assertEquals(0, saved.getInt("has_usage"))
+        usage.put("api_model_snapshot", JSONObject.NULL)
+        assertThrows(IllegalArgumentException::class.java) { validateRouting() }
+    }
+
 }

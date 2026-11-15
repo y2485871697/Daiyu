@@ -120,7 +120,8 @@ internal class DiagnosticLogStore(
             .put("enabled", mutableState.value.enabled).put("events", encodeEntries(entries))
             .put("frame_performance", frames.export())
             .put("runtime_trace", RuntimeDiagnostics.export())
-            .put("privacy", "Only fixed stages, outcomes, numeric timings/sizes/memory and code stack locations; no chat, keys, paths or device identifiers.")
+            .put("child_task_trace", RuntimeDiagnostics.exportChildTasks())
+            .put("privacy", "Fixed stages, outcomes, numeric timings/sizes/memory, code stack locations and child request routing identities; no chat, keys, endpoint, headers, tool arguments, paths or device identifiers.")
             .toString().toByteArray(Charsets.UTF_8)
     }
 

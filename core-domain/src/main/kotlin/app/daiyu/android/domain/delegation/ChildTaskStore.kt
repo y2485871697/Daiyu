@@ -27,7 +27,9 @@ data class ChildTaskRecord(
     val sourceTaskId: String? = null,
     val commandKind: ChildTaskCommandKind? = null,
     val display: ChildTaskDisplay? = null,
-    val access: ChildToolAccess = ChildToolAccess.NONE
+    val access: ChildToolAccess = ChildToolAccess.NONE,
+    val originalRole: ChildModelRole? = null,
+    val assignedProfileId: String = profileId
 ) {
     init {
         require(revision >= 0)
@@ -36,6 +38,7 @@ data class ChildTaskRecord(
         require(parentMessageId.isNotBlank() && parentMessageId.length <= 200)
         require(parentOwnerId.isNotBlank() && parentOwnerId.length <= 200)
         require(index >= 0 && profileId.isNotBlank() && profileId.length <= 200)
+        require(assignedProfileId.isNotBlank() && assignedProfileId.length <= 200)
         require(prompt.isNotBlank() && prompt.length <= 4096 && prompt.toByteArray(Charsets.UTF_8).size <= 16 * 1024)
         require(text.toByteArray(Charsets.UTF_8).size <= 64 * 1024)
         require(detail == null || (detail.isNotBlank() && detail.length <= 200))
@@ -57,6 +60,8 @@ interface ChildTaskStore {
     fun started(task: ChildTaskRecord)
     /** Actual request selection; never overwrites identity or grants replay permission. */
     fun selected(task: ChildTaskRecord, display: ChildTaskDisplay?) {}
+    /** CAS a live assignment without creating a task or changing its original authority. */
+    fun reassigned(task: ChildTaskRecord, profileId: String, display: ChildTaskDisplay?): ChildTaskRecord? = null
     fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String = "", detail: String? = null)
     fun list(conversationId: String, limit: Int = 20): List<ChildTaskRecord>
 }

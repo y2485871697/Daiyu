@@ -41,6 +41,34 @@ class RunChildTaskAccessTest {
         return ToolDispatcher(registry.snapshot(), caps, ToolLedger(InMemoryToolLedgerStore())).dispatchOwned(
             TaskAuthorization("session", owner.runId.value), listOf(ToolInvocation(ToolCallId("call"), name, body)), owner).single().outcome
     }
+    @Test fun takeoverUsesTargetAndReturnsOneUpdatedSnapshotWithoutReadmission() {
+        val task = old.copy(originalRole = ChildModelRole.REVIEW)
+        var saved = task; var takeovers = 0; var resumes = 0
+        val access = RunChildTaskAccess("conversation", { listOf(saved) }, { saved }, { emptyList() }, { "partial" },
+            { resumes++; ChildTaskControlReceipt.STALE }, { error("no pause") }, { error("no stop") }, { setOf("next") },
+            takeOver = { source, target ->
+                assertEquals(task, source); takeovers++
+                saved = saved.copy(assignedProfileId = target, revision = saved.revision + 1)
+                ChildTaskControlReceipt.RESUMED
+            })
+        val result = invoke(access, caller("conversation"), "control_child_task", arguments().put("target_profile_id", "next").toString()) as DispatchOutcome.Confirmed
+        val body = JSONObject(result.payload)
+        assertEquals("next", body.getString("assigned_profile_id")); assertEquals(1L, body.getLong("expected_revision"))
+        assertFalse(body.getBoolean("new_request")); assertEquals(1, takeovers); assertEquals(0, resumes)
+        assertEquals(task.profileId, saved.profileId); assertEquals(task.originalRole, saved.originalRole)
+    }
+    @Test fun takeoverOnlyAcceptsContinueAndMapsRoleAndConfigurationFailures() {
+        for ((receipt, expected) in listOf(ChildTaskControlReceipt.ROLE_MISMATCH to "child_takeover_role_mismatch",
+            ChildTaskControlReceipt.CONFIGURATION_REQUIRED to "child_matching_profile_required")) {
+            var called = 0
+            val access = RunChildTaskAccess("conversation", { listOf(old) }, { old }, { emptyList() }, { "" },
+                { error("no resume") }, { error("no pause") }, { error("no stop") }, { setOf("next") },
+                takeOver = { _, _ -> called++; receipt })
+            val result = invoke(access, caller("conversation"), "control_child_task", arguments().put("target_profile_id", "next").toString())
+            assertEquals(expected, (result as DispatchOutcome.NotExecuted).code); assertEquals(1, called)
+        }
+    }
+
     @Test fun currentMetadataIsAtomicFreshAndNeverBackfillsHistoricalTasks() {
         val initial = listOf(SubAgentDescriptor(old.profileId, "审查", "implementation", SubAgentTaskTier.COMPLEX, "model", "model"))
         var current = initial

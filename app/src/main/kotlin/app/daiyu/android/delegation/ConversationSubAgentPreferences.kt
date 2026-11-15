@@ -96,10 +96,38 @@ internal class ConversationSubAgentPreferences(
             val owners = mutableMapOf<SubAgentConfigKey, MutableStateFlow<Long>>()
             var pending: Map<String, Any?>? = null
             val lifetimes = mutableMapOf<Pair<SubAgentConfigKey, String>, Long>()
+            val journals = mutableMapOf<SubAgentConfigKey, OwnerJournal>()
             val observers = linkedSetOf<(SubAgentConfigKey, ConversationSubAgentConfig?) -> Unit>()
         }
         private val states = java.util.WeakHashMap<SharedPreferences, SharedState>()
         private fun stateFor(preferences: SharedPreferences): SharedState = synchronized(lock) { states.getOrPut(preferences) { SharedState() } }
+    }
+    enum class CommitKind { EDIT, APPLY_PRESET, RESET }
+    data class CommittedTransition(val revision: Long, val kind: CommitKind, val after: ConversationSubAgentConfig?)
+    class CommitNode(val transition: CommittedTransition) { @Volatile var next: CommitNode? = null }
+    class OwnerJournal(@Volatile var tail: CommitNode)
+    class RuntimeCursor(private val journal: OwnerJournal, private var position: CommitNode) {
+        fun drain(consume: (CommittedTransition) -> Unit) {
+            val end = journal.tail
+            while (position !== end) { val next = checkNotNull(position.next); consume(next.transition); position = next }
+        }
+    }
+    class RuntimeStart(val revision: Long, val config: ConversationSubAgentConfig,
+        private val journal: OwnerJournal, private val position: CommitNode) {
+        fun cursor() = RuntimeCursor(journal, position)
+    }
+    fun openRuntime(owner: SubAgentConfigKey.Conversation): RuntimeStart = synchronized(lock) {
+        ensureClean()
+        val config = read(owner).detached()
+        val journal = state.journals.getOrPut(owner) {
+            OwnerJournal(CommitNode(CommittedTransition(revision(owner).value, CommitKind.EDIT, config)))
+        }
+        RuntimeStart(journal.tail.transition.revision, config, journal, journal.tail)
+    }
+    private fun publishCommitted(owner: SubAgentConfigKey, revision: Long, kind: CommitKind, config: ConversationSubAgentConfig?) {
+        val journal = state.journals[owner] ?: return
+        val next = CommitNode(CommittedTransition(revision, kind, config))
+        journal.tail.next = next; journal.tail = next
     }
     sealed class WriteResult {
         data class Saved(val revision: Long, val config: ConversationSubAgentConfig) : WriteResult()
@@ -155,11 +183,14 @@ internal class ConversationSubAgentPreferences(
             else -> error("Unsupported preference type: $name")
         }
     }
-    private fun transaction(changes: Map<String, String?>, vararg owners: SubAgentConfigKey) {
+    private fun transaction(changes: Map<String, String?>, vararg owners: SubAgentConfigKey, kind: CommitKind = CommitKind.EDIT) {
         ensureClean()
         val values = preferences.all
         val old = changes.keys.associateWith { name -> values[name].let { if (it is Set<*>) it.toSet() else it } }
         val previous = owners.distinct().associateWith { owner -> stored(key(owner))?.let(::decode) }
+        val after = owners.distinct().associateWith { owner ->
+            if (changes.containsKey(key(owner))) changes[key(owner)]?.let(::decode)?.detached() else previous[owner]?.detached()
+        }
         try {
             val edit = preferences.edit()
             changes.forEach { (name, value) -> if (value == null) edit.remove(name) else edit.putString(name, value) }
@@ -170,10 +201,13 @@ internal class ConversationSubAgentPreferences(
             catch (_: Exception) { /* pending originals still held */ }
             throw failure
         }
-        owners.distinct().forEach { owner -> val flow = state.owners.getOrPut(owner) { MutableStateFlow(0L) }; flow.value = flow.value + 1 }
+        owners.distinct().forEach { owner ->
+            val flow = state.owners.getOrPut(owner) { MutableStateFlow(0L) }
+            publishCommitted(owner, flow.value + 1, kind, after[owner]); flow.value = flow.value + 1
+        }
         state.changes.value = state.changes.value + 1
         owners.distinct().forEach { owner ->
-            val configuration = stored(key(owner))?.let(::decode)?.detached()
+            val configuration = after[owner]
             previous[owner]?.profiles?.filter { oldProfile ->
                 configuration?.profiles?.singleOrNull { it.id == oldProfile.id }?.role != oldProfile.role
             }?.forEach { profile ->
@@ -203,7 +237,7 @@ internal class ConversationSubAgentPreferences(
         changes[SEED_KEY] = encode(ConversationSubAgentConfig(emptyList(), enabled = false))
         changes[SubAgentPresetCatalog.KEY] = SubAgentPresetCatalog.encode(emptyList())
         changes[SubAgentModelDefaults.KEY] = SubAgentModelDefaults.encode(emptyMap())
-        transaction(changes, *state.owners.keys.toTypedArray())
+        transaction(changes, *state.owners.keys.toTypedArray(), kind = CommitKind.RESET)
         true
     }
     private fun seed(): ConversationSubAgentConfig = stored(SEED_KEY)?.let(::decode) ?: ConversationSubAgentConfig(emptyList(), enabled = false)
@@ -265,7 +299,7 @@ internal class ConversationSubAgentPreferences(
         val payload = stored(key(SubAgentConfigKey.Preset(entry.id))) ?: return@synchronized WriteResult.Rejected
         stored(key(owner))?.let(::decode)
         val next = decode(payload).detached().copy(appliedPresetId = entry.id, appliedPresetName = entry.name, presetApplicationToken = UUID.randomUUID().toString())
-        transaction(mapOf(key(owner) to encode(next)), owner)
+        transaction(mapOf(key(owner) to encode(next)), owner, kind = CommitKind.APPLY_PRESET)
         WriteResult.Saved(revision(owner).value, next.detached())
     }
     private fun read(owner: SubAgentConfigKey): ConversationSubAgentConfig {
@@ -479,8 +513,11 @@ internal class ConversationSubAgentPreferences(
         validatePreferenceArchives(values)
     }
     fun refreshAfterRestore() = synchronized(lock) {
-        validateRestoredPreferences(); state.changes.value = state.changes.value + 1
-        state.owners.values.forEach { it.value = it.value + 1 }
+        validateRestoredPreferences()
+        state.owners.forEach { (owner, flow) ->
+            publishCommitted(owner, flow.value + 1, CommitKind.RESET, null); flow.value = flow.value + 1
+        }
+        state.changes.value = state.changes.value + 1
     }
     private fun encode(config: ConversationSubAgentConfig): String {
         config.validate()

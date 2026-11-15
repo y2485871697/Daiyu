@@ -21,6 +21,20 @@ data class ChildModelTask(val profileId: String, val prompt: String, val access:
 class ChildModelDefinition(val poolKey: String, val parallelLimit: Int, val display: ChildTaskDisplay?, val create: () -> ModelPort) {
     var role: ChildModelRole = ChildModelRole.REVIEW
         private set
+    var requestModel: ChildRequestModel? = null
+        private set
+    fun routed(providerId: String, modelId: String): ChildModelDefinition = apply { requestModel = ChildRequestModel(providerId, modelId) }
+    var profileId: String? = null
+        private set
+    var modelIdentity: String? = null
+        private set
+    var groupToken: String? = null
+        private set
+    fun identified(profileId: String, modelIdentity: String, groupToken: String?): ChildModelDefinition = apply {
+        this.profileId = profileId
+        this.modelIdentity = modelIdentity
+        this.groupToken = groupToken
+    }
     private var latest: (() -> ChildModelDefinition)? = null
     private var selection: Any? = null
     private var valid: () -> Boolean = { true }
@@ -42,6 +56,8 @@ class ChildModelDefinition(val poolKey: String, val parallelLimit: Int, val disp
         check(isValid()) { "child_profile_revoked" }
         return selected
     }
+    fun sameRequest(other: ChildModelDefinition): Boolean = role == other.role &&
+        (selection ?: this) == (other.selection ?: other)
     fun sameSelection(other: ChildModelDefinition): Boolean = poolKey == other.poolKey && parallelLimit == other.parallelLimit &&
         role == other.role && display == other.display && (selection ?: this) == (other.selection ?: other)
     constructor(poolKey: String, parallelLimit: Int, create: () -> ModelPort) : this(poolKey, parallelLimit, null, create)
@@ -58,7 +74,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
     private val onProgress: (ChildRunOwner, String) -> Unit = { _, _ -> },
     private val sharedPool: ((ChildModelDefinition) -> ChildPoolLease)? = null,
     private val onProfilesChanged: () -> Unit = {},
-    private val toolAssembly: ChildToolAssemblyFactory? = null) : AutoCloseable {
+    private val toolAssembly: ChildToolAssemblyFactory? = null,
+    private val diagnostics: ChildTaskDiagnostics? = null) : AutoCloseable {
     private val models = models.toMap()
     private fun limits(models: Map<String, ChildModelDefinition>) = models.values.groupBy { it.poolKey }.mapValues { (_, entries) ->
         require(entries.map { it.parallelLimit }.distinct().size == 1) { "child_pool_limit_conflict" }
@@ -70,10 +87,61 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
         val updates = synchronized(gate) { localPools.toMap() }
         updates.forEach { (key, pool) -> limit(key)?.let { pool.resize(it) } }
         val invalid = synchronized(gate) { runnerDefinitions.toList() }
-            .filter { !runCatching { it.second.isValid() }.getOrDefault(true) }
-        invalid.forEach { it.first.stop() }
+            .filter { !runCatching { it.second.isValid() }.getOrDefault(false) }
+        invalid.forEach { (runner, _) ->
+            val child = synchronized(gate) { activeChildren.values.firstOrNull { it.runner === runner } }
+            child?.let { pauseForConfiguration(it.record.owner) }
+        }
     }
     private val runnerDefinitions = mutableMapOf<ChatRunner, ChildModelDefinition>()
+    private class ActiveChild(var record: ChildTaskRecord, val assignment: ChildModelAssignment,
+        val pause: ChildTaskPauseControl) {
+        var runner: ChatRunner? = null
+        var partial = ""
+        var selected: ChildModelDefinition? = null
+        var request: app.daiyu.android.domain.runtime.RequestCheckpoint? = null
+        val requestIds = linkedSetOf<String>()
+    }
+    private val activeChildren = mutableMapOf<ChildRunOwner, ActiveChild>()
+
+    private fun trace(child: ActiveChild, phase: ChildTaskDiagnosticPhase) {
+        val event = synchronized(gate) { ChildTaskDiagnosticEvent(child.record.owner, child.record.assignedProfileId,
+            child.record.originalRole, phase, child.selected?.requestModel, child.request, child.requestIds.size) }
+        runCatching { diagnostics?.record(event) }
+    }
+    fun contains(owner: ChildRunOwner): Boolean = synchronized(gate) { owner in activeChildren }
+    fun progress(owner: ChildRunOwner): String = synchronized(gate) { activeChildren[owner]?.partial.orEmpty() }
+    fun snapshots(): List<RetainedChildTask> = synchronized(gate) {
+        activeChildren.values.map { child -> RetainedChildTask(child.record, false, false, false,
+            child.pause.snapshot(), ChildTaskQueueState.ACTIVE, configurationPaused = child.pause.isConfigurationBlocked()) }
+    }
+    fun pauseForConfiguration(owner: ChildRunOwner) {
+        val child = synchronized(gate) { activeChildren[owner] } ?: return
+        val alreadyBlocked = child.pause.isConfigurationBlocked()
+        child.pause.pauseForConfiguration()
+        if (!alreadyBlocked) trace(child, ChildTaskDiagnosticPhase.CONFIGURATION_PAUSE_REQUESTED)
+    }
+    fun resumeWithAssignment(owner: ChildRunOwner, assigned: ChildTaskRecord? = null): ChildTaskControlReceipt {
+        val child = synchronized(gate) { activeChildren[owner] } ?: return ChildTaskControlReceipt.STALE
+        if (assigned != null) {
+            synchronized(gate) { child.record = assigned }
+            trace(child, ChildTaskDiagnosticPhase.TAKEOVER)
+        }
+        val result = child.pause.resumeWithAssignment()
+        child.runner?.resume()
+        return result
+    }
+    fun takeOver(source: ChildTaskRecord, profileId: String, next: ChildModelDefinition): ChildTaskControlReceipt {
+        val child = synchronized(gate) { activeChildren[source.owner] } ?: return ChildTaskControlReceipt.STALE
+        if (source.originalRole == null || source.originalRole != next.role) return ChildTaskControlReceipt.ROLE_MISMATCH
+        if (child.pause.snapshot() != ChildTaskPauseState.PAUSED) return ChildTaskControlReceipt.PENDING
+        if (!next.isValid() || !next.acceptsNewTask()) return ChildTaskControlReceipt.CONFIGURATION_REQUIRED
+        val written = store?.reassigned(source, profileId, source.display) ?: return ChildTaskControlReceipt.STALE
+        child.assignment.reassign(profileId, next)
+        synchronized(gate) { child.record = written }
+        trace(child, ChildTaskDiagnosticPhase.TAKEOVER)
+        return resumeWithAssignment(source.owner)
+    }
     private val workers = Executors.newCachedThreadPool() { task -> Thread(task, "child-model").apply { isDaemon = true } }
     private val gate = Any()
     private var owner: RunExecutionOwner? = null
@@ -170,10 +238,10 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
         val started = AtomicBoolean(false)
         val completions = LinkedBlockingQueue<Pair<Int, Completion?>>()
         val failures = AtomicBoolean(false)
-        val pausedAtStart = pause?.excludedNanos() ?: 0L
-        fun poolWaiting(waiting: Boolean) { pause?.schedulingBoundary(waiting) }
+        val childPauses = snapshot.map { pause ?: ChildTaskPauseControl(onProfilesChanged) }
+        val pausedAtStart = childPauses.maxOf { it.excludedNanos() }
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
-        fun beforeDeadline(): Boolean = System.nanoTime() - ((pause?.excludedNanos() ?: 0L) - pausedAtStart) < deadline
+        fun beforeDeadline(): Boolean = System.nanoTime() - (childPauses.maxOf { it.excludedNanos() } - pausedAtStart) < deadline
         fun cancelled() = synchronized(gate) { closed || generation != current } || context.cancelled()
         fun uncertain(code: String): ExecutionReceipt {
             close()
@@ -184,6 +252,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                 ChildTaskRecord(ChildRunOwner(parent.conversationId.value, parent.runId.value, group, current,
                     UUID.randomUUID().toString(), UUID.randomUUID().toString()), parent.assistantMessageId.value,
                     parent.ownerId, index, task.profileId, task.prompt, display = models.getValue(task.profileId).display,
+                    originalRole = models.getValue(task.profileId).role,
                     access = if (models.getValue(task.profileId).role == ChildModelRole.IMPLEMENTATION)
                         checkNotNull(toolAssembly) { "child_execution_tools_unavailable" }.restrict(parentSession, task.access) else ChildToolAccess.NONE)
             }
@@ -203,7 +272,48 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                         var failureStage = ChildFailureStage.PREPARE
                         var executionFailure: Exception? = null
                         val diagnostics = ChildFailureDiagnostics()
-                        val definition = models.getValue(task.profileId)
+                        val childPause = childPauses[index]
+                        val assignment = ChildModelAssignment(record.assignedProfileId, models.getValue(task.profileId))
+                        val activeChild = ActiveChild(record, assignment, childPause)
+                        synchronized(gate) { activeChildren[record.owner] = activeChild }
+                        childPause.observePause { trace(activeChild, ChildTaskDiagnosticPhase.PAUSED) }
+                        trace(activeChild, ChildTaskDiagnosticPhase.ADMITTED)
+                        var waitingForPool = false
+                        fun poolWaiting(waiting: Boolean) {
+                            childPause.schedulingBoundary(waiting)
+                            if (waitingForPool != waiting) {
+                                waitingForPool = waiting
+                                trace(activeChild, if (waiting) ChildTaskDiagnosticPhase.QUEUE_WAIT else ChildTaskDiagnosticPhase.QUEUE_READY)
+                            }
+                        }
+                        val definition = assignment.definition
+                        val excludedAtStart = childPause.excludedNanos()
+                        fun beforeDeadline(): Boolean = System.nanoTime() - (childPause.excludedNanos() - excludedAtStart) < deadline
+                        var previousCleanup: java.util.concurrent.CompletableFuture<Unit>? = null
+                        fun awaitTransportCleanup() {
+                            val previous = previousCleanup ?: return
+                            while (!previous.isDone) {
+                                check(!cancelled() && beforeDeadline())
+                                Thread.sleep(10)
+                            }
+                            previous.join()
+                        }
+                        fun currentDefinition(): ChildModelDefinition {
+                            while (true) {
+                                if (!runCatching { definition.isValid() }.getOrDefault(false)) {
+                                    pauseForConfiguration(record.owner)
+                                }
+                                check(childPause.awaitBoundary() && !cancelled())
+                                try {
+                                    val selected = definition.current()
+                                    if (selected.role != definition.role) { pauseForConfiguration(record.owner); continue }
+                                    return selected
+                                }
+                                catch (failure: Exception) {
+                                    if (definition.isValid()) throw failure
+                                }
+                            }
+                        }
                         var permit: Semaphore? = null
                         var acquired = false
                         var lease: ChildPoolLease? = null
@@ -232,8 +342,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                         fun awaitSelection(): ChildModelDefinition {
                             while (true) {
                                 check(!cancelled() && beforeDeadline())
-                                check(pause?.awaitBoundary(boundary = { lease?.enterBoundary() }) != false)
-                                val selected = definition.current()
+                                check(childPause.awaitBoundary(boundary = { lease?.enterBoundary() }))
+                                val selected = currentDefinition()
                                 check(selected.role == definition.role) { "child_role_changed" }
                                 if (poolSelection?.sameSelection(selected) != true) {
                                     if (lease != null) lease?.close() else if (acquired) checkNotNull(permit).release()
@@ -250,33 +360,33 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                 } else if (!acquired) acquired = checkNotNull(permit).tryAcquire(25, TimeUnit.MILLISECONDS)
                                 if (!acquired) { poolWaiting(true); Thread.sleep(25); continue }
                                 check(!cancelled() && beforeDeadline())
-                                if (pause != null && pause.snapshot() != ChildTaskPauseState.ACTIVE) continue
-                                if (!selected.sameSelection(definition.current())) continue
+                                if (childPause.snapshot() != ChildTaskPauseState.ACTIVE) continue
+                                if (!selected.sameSelection(currentDefinition())) continue
                                 if (lease?.leaveBoundary() == false) { poolWaiting(true); Thread.sleep(25); continue }
                                 poolWaiting(false)
                                 if (!journalStarted) { store?.started(record); journalStarted = true }
                                 check(!cancelled() && beforeDeadline())
-                                if (pause != null && pause.snapshot() != ChildTaskPauseState.ACTIVE) {
+                                if (childPause.snapshot() != ChildTaskPauseState.ACTIVE) {
                                     if (lease != null) lease?.close() else if (acquired) checkNotNull(permit).release()
                                     acquired = false; lease = null; permit = null; poolSelection = null
                                     poolWaiting(false)
                                     continue
                                 }
-                                if (!selected.sameSelection(definition.current())) continue
+                                if (!selected.sameSelection(currentDefinition())) continue
                                 return selected
                             }
                         }
                         fun requireCurrentRole() {
-                            check(definition.current().role == definition.role) { "child_role_changed" }
+                            check(currentDefinition().role == definition.role) { "child_role_changed" }
                         }
                         fun awaitRequestBoundary() {
                             requireCurrentRole()
                             check(!cancelled() && beforeDeadline())
                             lease?.enterBoundary()
-                            check(pause?.awaitBoundary(boundary = { lease?.enterBoundary() }) != false)
+                            check(childPause.awaitBoundary(boundary = { lease?.enterBoundary() }))
                             while (lease != null) {
                                 check(!cancelled() && beforeDeadline())
-                                check(pause?.awaitBoundary(boundary = { lease?.enterBoundary() }) != false)
+                                check(childPause.awaitBoundary(boundary = { lease?.enterBoundary() }))
                                 if (checkNotNull(lease).tryAcquire() && checkNotNull(lease).leaveBoundary()) { poolWaiting(false); break }
                                 poolWaiting(true); Thread.sleep(25)
                             }
@@ -310,23 +420,32 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                 val selected = object : ModelPort {
                                     override fun open(history: List<Message>): ModelSession = open(history, tools.definitions)
                                     override fun open(history: List<Message>, definitions: List<app.daiyu.android.domain.ToolDefinition>): ModelSession {
+                                        awaitTransportCleanup()
                                         check(assembly != null || definitions.isEmpty())
                                         check(!cancelled() && beforeDeadline())
-                                        check(pause?.awaitBoundary() != false)
+                                        check(childPause.awaitBoundary())
                                         check(!cancelled() && beforeDeadline())
+                                        store?.get(record.owner)?.let { saved ->
+                                            record = saved.copy(status = ChildTaskStatus.QUEUED, text = "", detail = null)
+                                        }
                                         var selectedModel: ChildModelDefinition
                                         var port: ModelPort
                                         while (true) {
                                             selectedModel = awaitSelection()
                                             port = selectedModel.create()
-                                            if (pause != null && pause.snapshot() != ChildTaskPauseState.ACTIVE) continue
-                                            if (!selectedModel.sameSelection(definition.current())) continue
+                                            if (childPause.snapshot() != ChildTaskPauseState.ACTIVE) continue
+                                            if (!selectedModel.sameSelection(currentDefinition())) continue
                                             if (lease?.leaveBoundary() == false) continue
+                                            val assignedProfile = selectedModel.profileId ?: assignment.profileId
+                                            if (record.assignedProfileId != assignedProfile) {
+                                                record = checkNotNull(store?.reassigned(record, assignedProfile, record.display)) { "child_assignment_unconfirmed" }
+                                            }
                                             store?.selected(record, selectedModel.display)
                                             record = record.copy(display = selectedModel.display)
+                                            synchronized(gate) { activeChild.record = record; activeChild.selected = selectedModel }
                                             check(!cancelled() && beforeDeadline())
-                                            if (pause != null && pause.snapshot() != ChildTaskPauseState.ACTIVE) continue
-                                            if (!selectedModel.sameSelection(definition.current())) continue
+                                            if (childPause.snapshot() != ChildTaskPauseState.ACTIVE) continue
+                                            if (!selectedModel.sameSelection(currentDefinition())) continue
                                             if (lease?.leaveBoundary() == false) continue
                                             break
                                         }
@@ -337,15 +456,21 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                             started.set(true)
                                         }
                                         failureStage = ChildFailureStage.OPEN
+                                        trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_OPEN)
                                         val transport = try { port.open(history, definitions) }
                                         catch (failure: Exception) {
                                             executionFailure = failure
                                             requestFailure = failure as? ModelRequestException
                                             throw failure
                                         }
+                                        val cleanup = java.util.concurrent.CompletableFuture<Unit>()
+                                        previousCleanup = cleanup
                                         val cancelStarted = AtomicBoolean(false)
                                         synchronized(gate) { cleanupFinished = false; cleanupPins++ }
-                                        return object : ModelSession {
+                                        return object : RequestRebindingModelSession {
+                                            private var firstNext = true
+                                            override fun needsRebind(): Boolean = !selectedModel.sameRequest(currentDefinition())
+                                            override fun updateToolDefinitions(definitions: List<ToolDefinition>) = transport.updateToolDefinitions(definitions)
                                             override fun cancel() {
                                                 if (!cancelStarted.compareAndSet(false, true)) return
                                                 var confirmed = false
@@ -356,15 +481,23 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                         if (cleanupFinished) cleanupPins--
                                                     }
                                                     releaseItemIfReady()
+                                                    trace(activeChild, if (confirmed) ChildTaskDiagnosticPhase.CLEANUP_COMPLETED else ChildTaskDiagnosticPhase.CLEANUP_FAILED)
+                                                    if (confirmed || assembly == null) cleanup.complete(Unit)
+                                                    else cleanup.completeExceptionally(IllegalStateException("child_transport_cleanup_unconfirmed"))
                                                 }
                                             }
                                             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
-                                                if (assembly != null) awaitRequestBoundary()
+                                                val first = firstNext
+                                                firstNext = false
+                                                if (!first && assembly != null) awaitRequestBoundary()
+                                                trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_STARTED)
+                                                var firstEvent = true
                                                 val texts = mutableMapOf<String, Int>()
                                                 val progress = linkedMapOf<String, String>()
                                                 var rejected: Exception? = null
                                                 val checkedSink: (ModelEvent) -> Unit = checkedSink@ { event ->
                                                     if (cancelled()) return@checkedSink
+                                                    if (firstEvent) { firstEvent = false; trace(activeChild, ChildTaskDiagnosticPhase.FIRST_EVENT) }
                                                     rejected?.let { throw it }
                                                     try { when (event) {
                                                         is ModelEvent.TextDelta, is ModelEvent.TextFinal -> {
@@ -378,7 +511,9 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                             require(texts.values.sumOf { it.toLong() } <= MAX_OUTPUT)
                                                             sink(event)
                                                             progress[id] = if (final) text else progress[id].orEmpty() + text
-                                                            onProgress(child, progress.values.joinToString(""))
+                                                            val partial = progress.values.joinToString("")
+                                                            synchronized(gate) { activeChild.partial = partial }
+                                                            onProgress(child, partial)
                                                         }
                                                         is ModelEvent.ToolReady -> if (assembly == null) throw ModelRequestException(ModelFailure.PROTOCOL) else sink(event)
                                                         is ModelEvent.Usage -> sink(event)
@@ -404,6 +539,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                     } catch (failure: Exception) {
                                                         // A blocked read is never interrupted for pause. Only a
                                                         // transport-reported safe continuation may park here.
+                                                        trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_FAILED)
                                                         executionFailure = failure
                                                         val resumable = transport as? ResumableModelSession
                                                         val kind = (failure as? ModelRequestException)?.failure
@@ -414,14 +550,14 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                         // Claim intent and boundary together: retracting an intent
                                                         // before this point must not silently enable reconnect.
                                                         val yielding = lease?.yieldRequested == true
-                                                        if (!yielding && pause?.snapshot() != ChildTaskPauseState.PENDING) throw failure
+                                                        if (!yielding && childPause.snapshot() != ChildTaskPauseState.PENDING) throw failure
                                                         lease?.enterBoundary()
                                                         poolWaiting(lease?.yieldRequested == true)
-                                                        if (pause != null && !pause.awaitBoundary(requireRequest = !yielding,
+                                                        if (!childPause.awaitBoundary(requireRequest = !yielding,
                                                                 boundary = { lease?.enterBoundary() })) throw failure
                                                         while (lease != null) {
                                                             check(!cancelled() && beforeDeadline())
-                                                            check(pause?.awaitBoundary(boundary = { lease?.enterBoundary() }) != false)
+                                                            check(childPause.awaitBoundary(boundary = { lease?.enterBoundary() }))
                                                             if (checkNotNull(lease).tryAcquire() && checkNotNull(lease).leaveBoundary()) { poolWaiting(false); break }
                                                             poolWaiting(true)
                                                             Thread.sleep(25)
@@ -438,23 +574,40 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                 }
                                 val receipts = assembly?.receipts?.let { delegate -> object : app.daiyu.android.domain.runtime.ReceiptBatchToolExecutor by delegate {
                                     override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): List<ToolDispatchResult> {
-                                        check(pause?.awaitBoundary() != false && !cancelled())
+                                        check(childPause.awaitBoundary() && !cancelled())
                                         requireCurrentRole()
-                                        return delegate.execute(message, invocations, cancelled)
+                                        trace(activeChild, ChildTaskDiagnosticPhase.TOOL_STARTED)
+                                        return delegate.execute(message, invocations, cancelled).also { trace(activeChild, ChildTaskDiagnosticPhase.TOOL_COMPLETED) }
                                     }
                                     override fun start(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): ReceiptBatchStart {
-                                        check(pause?.awaitBoundary() != false && !cancelled())
+                                        check(childPause.awaitBoundary() && !cancelled())
                                         requireCurrentRole()
-                                        return delegate.start(message, invocations, cancelled)
+                                        trace(activeChild, ChildTaskDiagnosticPhase.TOOL_STARTED)
+                                        return delegate.start(message, invocations, cancelled).also {
+                                            if (it is ReceiptBatchStart.Completed) trace(activeChild, ChildTaskDiagnosticPhase.TOOL_COMPLETED)
+                                        }
                                     }
                                 } }
                                 val runner = ChatRunner(selected, memory, tools, RunnerOptions(
                                     receiptBatchExecutor = receipts, diagnostics = diagnostics,
-                                    runtimeStore = usageRecorder?.let { recorder -> object : RuntimeStore {
-                                        override fun save(checkpoint: RunCheckpoint) = recorder.record(record, checkpoint)
-                                    } },
+                                    onRequestCompletedBoundary = {
+                                        trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_COMPLETED)
+                                        lease?.enterBoundary(); currentDefinition()
+                                    },
+                                    runtimeStore = object : RuntimeStore {
+                                        override fun save(checkpoint: RunCheckpoint) {
+                                            synchronized(gate) {
+                                                activeChild.request = checkpoint.request
+                                                checkpoint.usageRequests.forEach { activeChild.requestIds.add(it.requestId) }
+                                            }
+                                            store?.get(record.owner)?.let { record = it.copy(status = ChildTaskStatus.QUEUED, text = "", detail = null) }
+                                            usageRecorder?.record(record, checkpoint, activeChild.selected?.requestModel)
+                                        }
+                                    },
                                     validateBatch = { require(assembly != null || it.isEmpty()) { "child_tools_disabled" } })) { scope.requireOwner(it) }
-                                val attached = synchronized(gate) { if (closed) false else { runners.add(runner); runnerDefinitions[runner] = definition; true } }
+                                val attached = synchronized(gate) { if (closed) false else {
+                                    runners.add(runner); runnerDefinitions[runner] = definition; activeChild.runner = runner; true
+                                } }
                                 try {
                                     if (attached && !cancelled()) {
                                         val previous = preceding?.let { source -> listOf(
@@ -464,6 +617,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                 Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("source-result", source.text)), RunStatus.COMPLETED)
                                         ) } ?: emptyList()
                                         val result = runner.run(initial, previous + user)
+                                        trace(activeChild, if (result.status == RunStatus.COMPLETED) ChildTaskDiagnosticPhase.COMPLETED else ChildTaskDiagnosticPhase.FAILED)
                                         if (executionFailure == null && result.status == RunStatus.COMPLETED) failureStage = ChildFailureStage.VALIDATE
                                         scope.requireOwner(result)
                                         check(!cancelled())
@@ -480,7 +634,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                             completion = Completion(index, child, result, text)
                                         }
                                     } else runner.stop()
-                                } finally { synchronized(gate) { runners.remove(runner); runnerDefinitions.remove(runner) } }
+                                } finally { synchronized(gate) { runners.remove(runner); runnerDefinitions.remove(runner); activeChildren.remove(record.owner) } }
                             }
                         } catch (failure: Exception) {
                             if (executionFailure == null) executionFailure = failure
@@ -503,7 +657,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                     synchronized(gate) { if (assemblyDrain == null) assemblyDrain = ChildToolDrain.Unknown("child_tool_drain_unconfirmed") }
                                 }
                             }
-                            pause?.terminate()
+                            childPause.terminate()
+                            synchronized(gate) { activeChildren.remove(record.owner) }
                             try {
                                 val result = completion
                                 if (result != null) store?.finished(record, result.status, result.text, result.detail)
@@ -571,6 +726,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
         val active = synchronized(gate) {
             closed = true
             pauseControl?.terminate()
+            activeChildren.values.forEach { it.pause.terminate() }
             runners.toList() to assemblies.toList()
         }
         active.first.forEach { it.stop() }

@@ -122,6 +122,8 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
     fun stop(owner: ChildRunOwner) = supervisor.stop(binding, owner)
     fun pause(owner: ChildRunOwner) = supervisor.pause(binding, owner)
     fun resume(owner: ChildRunOwner) = supervisor.resume(binding, owner)
+    fun takeOver(source: ChildTaskRecord, profileId: String, next: ChildModelDefinition) =
+        supervisor.takeOver(binding, source, profileId, next)
     fun revoke() = supervisor.revoke(binding)
     override fun close() = supervisor.finishParent(binding)
 

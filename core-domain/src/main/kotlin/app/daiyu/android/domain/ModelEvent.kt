@@ -43,6 +43,11 @@ interface ModelSession {
     fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit)
     fun cancel()
 }
+/** A child may request a fresh session only between completed provider requests. */
+interface RequestRebindingModelSession : ModelSession {
+    fun needsRebind(): Boolean
+}
+
 /** Optional transport-only resume capability. Implementations must not repost a model request or
  * tool outputs unless explicitly implementing RequestRetryModelSession. Cursor transports must
  * deliver only events not acknowledged by a successful sink return.

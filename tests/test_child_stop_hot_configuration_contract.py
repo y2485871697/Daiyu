@@ -31,13 +31,13 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
         self.assertIn("selectedModel = awaitSelection()",text)
         self.assertIn("val selected = definition.current()",text)
         self.assertIn("sharedPool?.invoke(selected)",text)
-        self.assertIn("selectedModel.sameSelection(definition.current())",text)
+        self.assertIn("selectedModel.sameSelection(currentDefinition())",text)
         selected = text.split("store?.selected(record, selectedModel.display)",1)[1]
-        self.assertLess(selected.index("selectedModel.sameSelection(definition.current())"), selected.index("port.open(history, definitions)"))
+        self.assertLess(selected.index("selectedModel.sameSelection(currentDefinition())"), selected.index("port.open(history, definitions)"))
         self.assertIn("else if (acquired) checkNotNull(permit).release()",text)
         self.assertIn("acquired = false; lease = null; permit = null",text)
         self.assertIn("if (!workerFinished || !cleanupFinished || !toolsDrained || itemReleased) false",text)
-        self.assertIn("if (assembly != null) awaitRequestBoundary()",text)
+        self.assertIn("if (!first && assembly != null) awaitRequestBoundary()",text)
         self.assertIn("(transport as ResumableModelSession).resume(attemptSink)",text)
     def test_non_destructive_edits_hot_apply_and_destructive_edits_revoke(self):
         text = (APP / "delegation/SubAgentHotUpdatePolicy.kt").read_text()
@@ -47,8 +47,8 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
         self.assertIn("frozen.parallelLimit(binding.profile.id, model)",binding)
         self.assertIn("frozen.poolKey(owner, binding.profile.id)",binding)
         self.assertIn("profileCurrent(binding.profile.id)",binding)
-        self.assertIn("val selected = latestModel(binding.profile.id)",binding)
-        self.assertIn('check(latestConfig() == next) { "child_model_configuration_changed" }',binding)
+        self.assertIn("val resolved = latestModel(profile.id)",binding)
+        self.assertIn('"child_model_configuration_changed"',binding)
     def test_configuration_events_keep_destructive_epoch_and_independent_control_lane(self):
         prefs = (APP / "delegation/ConversationSubAgentPreferences.kt").read_text()
         transaction = prefs.split("private fun transaction(", 1)[1].split("fun isConfigurationResetComplete", 1)[0]
@@ -64,7 +64,8 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
         reconcile = retained.split("fun reconcile(", 1)[1].split("fun command(", 1)[0]
         self.assertIn("bindings.values.filter", reconcile)
         self.assertIn("it.definition.isValid()", reconcile)
-        self.assertIn("stop(it.binding, it.initial.owner)", reconcile)
+        self.assertIn("task.pause.pauseForConfiguration()", reconcile)
+        self.assertNotIn("stop(it.binding", reconcile)
 
     def test_history_access_is_registered_independently_of_new_configuration(self):
         text = (APP / "integration/tools/RunChildTaskAccess.kt").read_text()

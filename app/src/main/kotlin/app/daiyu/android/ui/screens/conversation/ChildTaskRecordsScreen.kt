@@ -73,6 +73,8 @@ internal fun childTaskControlMessage(receipt: ChildTaskControlReceipt, retractin
         ChildTaskControlReceipt.PAUSED -> R.string.business_task_pause_confirmed
         ChildTaskControlReceipt.RESUMED -> if (retractingPause) R.string.business_task_pause_retracted
             else R.string.business_task_resumed
+        ChildTaskControlReceipt.CONFIGURATION_REQUIRED -> R.string.business_task_matching_profile_required
+        ChildTaskControlReceipt.ROLE_MISMATCH -> R.string.business_task_role_mismatch
         ChildTaskControlReceipt.STALE -> R.string.business_task_control_stale
     }
 

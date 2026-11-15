@@ -129,6 +129,24 @@ class ChildModelExecutionToolsTest {
             assertEquals(2, port.requests.get()); assertEquals(1, port.opens.get()); assertEquals(1, assembly.executions.get())
         } finally { release.countDown(); pause.resume(); batch.close(); executor.shutdownNow() }
     }
+    @Test fun configurationPauseAfterResponseBlocksToolWithoutCancellingOrReplaying() {
+        val parent = Parent(); val assembly = Assembly(); val port = Port()
+        val pause = ChildTaskPauseControl {}
+        port.beforeTool = { pause.pauseForConfiguration() }
+        val batch = parent.bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1, ChildModelRole.IMPLEMENTATION) { port }),
+            toolAssembly = factory(assembly)))
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            val result = executor.submit<ExecutionReceipt> { batch.executeQueued(parent.context(), listOf(parent.record()), pause) }
+            await { pause.snapshot() == ChildTaskPauseState.PAUSED }
+            assertFalse(result.isDone); assertEquals(1, port.opens.get()); assertEquals(1, port.requests.get())
+            assertEquals(0, assembly.executions.get()); assertEquals(1L, port.cancelled.count)
+            assertEquals(ChildTaskControlReceipt.CONFIGURATION_REQUIRED, pause.resume())
+            assertEquals(ChildTaskControlReceipt.RESUMED, pause.resumeWithAssignment())
+            assertTrue(result.get(5, TimeUnit.SECONDS) is ExecutionReceipt.Confirmed)
+            assertEquals(1, assembly.executions.get()); assertEquals(1, port.opens.get()); assertEquals(2, port.requests.get())
+        } finally { pause.terminate(); batch.close(); executor.shutdownNow() }
+    }
     @Test fun duplicateDrainDoesNotUnderflowAndUnknownRemainsPinned() {
         for (unknown in listOf(false, true)) {
             val parent = Parent(); val assembly = Assembly().apply { automaticDrain = false }; val port = Port(useTool = false)
@@ -158,17 +176,27 @@ class ChildModelExecutionToolsTest {
             assertFalse(idle.await(100, TimeUnit.MILLISECONDS))
         } finally { batch.close() }
     }
-    @Test fun roleChangeAfterOpenStopsBeforeToolDispatchOrNextRequest() {
+    @Test fun roleChangeAfterOpenPausesBeforeToolDispatchOrNextRequest() {
         val parent = Parent(); val assembly = Assembly(); val port = Port()
         var current = ChildModelDefinition("pool", 1, ChildModelRole.IMPLEMENTATION) { port }
         val original = ChildModelDefinition("pool", 1, null, latest = { current }, selection = "original",
             role = ChildModelRole.IMPLEMENTATION) { port }
         port.beforeTool = { current = ChildModelDefinition("pool", 1) { port } }
         val batch = parent.bind(ChildModelBatch(mapOf("one" to original), toolAssembly = factory(assembly)))
+        val done = CountDownLatch(1)
+        val worker = Thread {
+            try { batch.execute(parent.context(), listOf(ChildModelTask("one", "read", ChildToolAccess.DEFAULT))) }
+            finally { done.countDown() }
+        }
         try {
-            assertFalse(batch.execute(parent.context(), listOf(ChildModelTask("one", "read", ChildToolAccess.DEFAULT))) is ExecutionReceipt.Confirmed)
+            worker.start()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (batch.snapshots().singleOrNull()?.pauseState != ChildTaskPauseState.PAUSED && System.nanoTime() < deadline) Thread.sleep(5)
+            assertEquals(ChildTaskPauseState.PAUSED, batch.snapshots().single().pauseState)
+            assertTrue(batch.snapshots().single().configurationPaused)
             assertEquals(0, assembly.executions.get()); assertEquals(1, port.opens.get()); assertEquals(1, port.requests.get())
-        } finally { batch.close() }
+            assertFalse(done.await(100, TimeUnit.MILLISECONDS))
+        } finally { batch.close(); assertTrue(done.await(5, TimeUnit.SECONDS)); worker.join(1000) }
     }
     @Test fun secondRetainFailureRollsBackEntireReservationBeforeEnqueue() {
         val parent = Parent(); val retains = AtomicInteger(); val releases = AtomicInteger(); val enqueues = AtomicInteger()

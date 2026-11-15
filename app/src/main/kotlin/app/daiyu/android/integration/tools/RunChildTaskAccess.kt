@@ -18,6 +18,7 @@ internal class RunChildTaskAccess(
     private val currentProfiles: () -> Set<String>,
     private val currentProfileMetadata: (() -> List<SubAgentDescriptor>)? = null,
     private val initialProfiles: List<SubAgentDescriptor> = emptyList(),
+    private val takeOver: ((ChildTaskRecord, String) -> ChildTaskControlReceipt)? = null,
 ) {
     fun tools(): List<RegisteredTool> = listOf(object : RegisteredTool {
         override val definition = ToolDefinition("inspect_child_tasks", 1,
@@ -40,8 +41,10 @@ internal class RunChildTaskAccess(
                     .put("task_group_id", row.owner.taskGroupId).put("generation", row.owner.generation)
                     .put("child_run_id", row.owner.childRunId).put("assistant_message_id", row.owner.assistantMessageId)
                     .put("parent_message_id", row.parentMessageId).put("parent_owner_id", row.parentOwnerId)
-                    .put("expected_revision", row.revision).put("agent_name", row.display?.agentName ?: JSONObject.NULL).put("profile_id", row.profileId).put("status", row.status.name)
+                    .put("expected_revision", row.revision).put("original_role", row.originalRole?.name ?: JSONObject.NULL)
+                    .put("assigned_profile_id", row.assignedProfileId).put("agent_name", row.display?.agentName ?: JSONObject.NULL).put("profile_id", row.profileId).put("status", row.status.name)
                     .put("queue_state", state?.let { if (it.settled) ChildTaskQueueState.FINISHED.name else it.queueState.name }).put("pause_state", state?.let { if (it.settled) ChildTaskPauseState.FINISHED.name else it.pauseState.name }).put("snapshot_available", state != null).put("live_state_available", state != null && !state.settled)
+                    .put("configuration_paused", state?.configurationPaused ?: JSONObject.NULL)
                     .put("stop_requested", state?.stopRequested ?: JSONObject.NULL)
                     .put("journal_unconfirmed", state?.journalUnconfirmed ?: JSONObject.NULL)
                     .put("settled", state?.settled ?: JSONObject.NULL).put("offset", offset)
@@ -59,12 +62,12 @@ internal class RunChildTaskAccess(
                 .put("configuration_scope", "current_new_text_requests")
                 .put("available_profiles", JSONArray(profiles?.toList() ?: emptyList<String>()))
                 .put("available_profile_metadata", JSONArray(metadata.orEmpty().map { it.toJson() }))
-                .put("historical_metadata_policy", "Existing tasks keep their own snapshots; historical role and tier were not recorded. Do not infer them from current profiles.")
+                .put("historical_metadata_policy", "Existing tasks keep their own snapshots. original_role is recorded for new tasks; null means unknown. Historical tier is unavailable. Do not infer missing metadata from current profiles.")
                 .toString())
         }
     }, object : RegisteredTool {
         override val definition = ToolDefinition("control_child_task", 1,
-            "定向继续、暂停或停止本会话的现存子任务，允许控制旧主回复和旧配置的任务。继续不新建任务，不更换任务ID；已停止或排空任务不能重启。必须先inspect取得完整身份与修订，恢复主代理本身不会自动调用。",
+            "定向继续、暂停或停止本会话的现存子任务，允许控制旧主回复和旧配置的任务。继续不新建任务，不更换任务ID；已停止或排空任务不能重启。必须先inspect取得完整身份与修订，恢复主代理本身不会自动调用。配置暂停后可在continue中指定当前配置内同原职责的target_profile_id接手；无同职责候选则保持暂停。图片和视频生成不支持继续或接手，切组后即使模型相同也只能明确重新委派。",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("parent_run_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("task_group_id", ArgumentType.Text(200, minimumLength = 1)),
@@ -74,6 +77,7 @@ internal class RunChildTaskAccess(
                 ArgumentField("parent_message_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("parent_owner_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("expected_revision", ArgumentType.Text(20, minimumLength = 1)),
+                ArgumentField("target_profile_id", ArgumentType.Text(200, minimumLength = 1), required = false),
                 ArgumentField("action", ArgumentType.Text(20, setOf("continue", "pause", "stop"), 1)))))
         override fun prepare(arguments: ToolArguments): PreparedTool {
             val owner = ChildRunOwner(conversationId, arguments.text("parent_run_id"), arguments.text("task_group_id"),
@@ -86,19 +90,30 @@ internal class RunChildTaskAccess(
                 if (row == null || row.revision != revision || row.parentMessageId != arguments.text("parent_message_id") ||
                     row.parentOwnerId != arguments.text("parent_owner_id"))
                     return@contextual ExecutionReceipt.NotExecuted("child_source_stale")
+                val target = if (arguments.contains("target_profile_id")) arguments.text("target_profile_id") else null
+                if (target != null && arguments.text("action") != "continue")
+                    return@contextual ExecutionReceipt.NotExecuted("child_takeover_requires_continue")
                 val outcome = when (arguments.text("action")) {
-                    "continue" -> resume(row).name
+                    "continue" -> if (target == null) resume(row).name
+                        else (takeOver?.invoke(row, target) ?: ChildTaskControlReceipt.STALE).name
                     "pause" -> pause(row).name
                     else -> stop(row).name
                 }
-                if (outcome in setOf("STALE", "NOT_FOUND", "ALREADY_SETTLED")) ExecutionReceipt.NotExecuted(when (outcome) {
+                if (outcome in setOf("STALE", "NOT_FOUND", "ALREADY_SETTLED", "CONFIGURATION_REQUIRED", "ROLE_MISMATCH")) ExecutionReceipt.NotExecuted(when (outcome) {
                     "STALE" -> "child_control_unavailable"
                     "NOT_FOUND" -> "child_task_not_found"
+                    "CONFIGURATION_REQUIRED" -> "child_matching_profile_required"
+                    "ROLE_MISMATCH" -> "child_takeover_role_mismatch"
                     else -> "child_task_already_settled"
                 })
-                else ExecutionReceipt.Confirmed(JSONObject().put("child_run_id", owner.childRunId)
+                else {
+                    val updated = source(owner) ?: row
+                    ExecutionReceipt.Confirmed(JSONObject().put("child_run_id", owner.childRunId)
+                    .put("assigned_profile_id", updated.assignedProfileId)
+                    .put("expected_revision", updated.revision)
                     .put("profile_id", row.profileId).put("agent_name", row.display?.agentName ?: JSONObject.NULL)
                     .put("outcome", outcome).put("new_request", false).toString())
+                }
             }
         }
     }, object : RegisteredTool {
@@ -126,9 +141,11 @@ internal class RunChildTaskAccess(
                 ExecutionReceipt.Confirmed(JSONObject().put("child_run_id", owner.childRunId)
                     .put("parent_message_id", row.parentMessageId).put("parent_owner_id", row.parentOwnerId)
                     .put("expected_revision", row.revision).put("profile_id", row.profileId)
+                    .put("assigned_profile_id", row.assignedProfileId).put("original_role", row.originalRole?.name ?: JSONObject.NULL)
                     .put("agent_name", row.display?.agentName ?: JSONObject.NULL).put("status", row.status.name)
                     .put("queue_state", state?.let { if (it.settled) ChildTaskQueueState.FINISHED.name else it.queueState.name }).put("pause_state", state?.let { if (it.settled) ChildTaskPauseState.FINISHED.name else it.pauseState.name }).put("settled", state?.settled ?: JSONObject.NULL)
                     .put("snapshot_available", state != null).put("live_state_available", state != null && !state.settled)
+                    .put("configuration_paused", state?.configurationPaused ?: JSONObject.NULL)
                     .put("stop_requested", state?.stopRequested ?: JSONObject.NULL)
                     .put("journal_unconfirmed", state?.journalUnconfirmed ?: JSONObject.NULL)
                     .put("prompt", row.prompt).put("offset", offset).put("text", row.text.drop(offset).take(maxChars))

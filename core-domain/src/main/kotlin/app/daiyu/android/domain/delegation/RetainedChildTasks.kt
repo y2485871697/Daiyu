@@ -32,6 +32,7 @@ data class RetainedChildTask(
     val pauseState: ChildTaskPauseState = ChildTaskPauseState.ACTIVE,
     val queueState: ChildTaskQueueState = ChildTaskQueueState.ACTIVE,
     val contextLimited: Boolean = false,
+    val configurationPaused: Boolean = false,
 )
 
 internal class ChildTaskResources(
@@ -87,6 +88,7 @@ class ChildTaskBinding internal constructor(
  */
 class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutMillis: Long = 120_000,
     private val maxRetainedTasks: Int = 64, private val usageRecorder: ChildUsageRecorder? = null,
+    private val diagnostics: ChildTaskDiagnostics? = null,
     private val maxRequestsPerBinding: Int = 1024) : AutoCloseable {
     private class Pool(var limit: Int) {
         val capacity = ChildModelPool(limit)
@@ -95,7 +97,9 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     private class Task(val binding: ChildTaskBinding, val request: ChildTaskRequest,
         val initial: ChildTaskRecord, val invocation: ToolInvocation, val deadline: Long,
         val pause: ChildTaskPauseControl, val source: ChildTaskRecord? = null,
-        val definition: ChildModelDefinition, val toolPin: AutoCloseable? = null) {
+        definition: ChildModelDefinition, val toolPin: AutoCloseable? = null) {
+        val assignment = ChildModelAssignment(initial.assignedProfileId, definition)
+        val definition: ChildModelDefinition get() = assignment.definition
         var record = initial
         var stopRequested = false
         var settled = false
@@ -196,6 +200,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                     group, epoch, UUID.randomUUID().toString(), UUID.randomUUID().toString()),
                     owner.assistantMessageId.value, owner.ownerId, index, inputTask.profileId, inputTask.prompt,
                     display = resources.models.getValue(inputTask.profileId).display,
+                    originalRole = resources.models.getValue(inputTask.profileId).role,
                     access = if (resources.models.getValue(inputTask.profileId).role == ChildModelRole.IMPLEMENTATION)
                         checkNotNull(resources.toolAssembly) { "child_execution_tools_unavailable" }.restrict(resources.session, inputTask.access) else ChildToolAccess.NONE)
                 Task(binding, request, record, context.invocation, deadline,
@@ -285,8 +290,14 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             val pool = synchronized(gate) { pools[key]?.also { it.limit = size } }
             pool?.capacity?.resize(size)
         }
-        candidates.filter { !runCatching { it.definition.isValid() }.getOrDefault(true) }
-            .forEach { stop(it.binding, it.initial.owner) }
+        candidates.filter { !runCatching { it.definition.isValid() }.getOrDefault(false) }
+            .forEach { task ->
+                val batch = synchronized(gate) {
+                    if (task.settled || task.stopRequested || task.record.status !in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING)) null
+                    else { task.pause.pauseForConfiguration(); task.batch }
+                }
+                batch?.pauseForConfiguration(task.initial.owner)
+            }
         candidates.map { it.binding }.distinct().forEach(::notifyChanged)
     }
 
@@ -374,6 +385,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                     parent.assistantMessageId.value, parent.ownerId, 0, command.profileId, command.instruction,
                     sourceTaskId = source.owner.childRunId, commandKind = command.kind,
                     display = binding.resources?.models?.get(command.profileId)?.display,
+                    originalRole = definition.role,
                     access = if (definition.role == ChildModelRole.IMPLEMENTATION)
                         checkNotNull(binding.resources?.toolAssembly) { "child_execution_tools_unavailable" }
                             .restrict(checkNotNull(binding.resources).session, source.access) else ChildToolAccess.NONE)
@@ -535,10 +547,45 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             if (closed || task.admitting || task.stopRequested || task.journalUnconfirmed || task.record.status !in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING))
                 return ChildTaskControlReceipt.STALE
             binding.pauseGroup?.let { it.members.remove(owner); it.manual.add(owner) }
+            if (resume && !task.definition.isValid()) task.pause.pauseForConfiguration()
             if (resume) task.pause.resume() else task.pause.pause()
         }
         notifyChanged(binding)
         return receipt
+    }
+
+    fun takeOver(binding: ChildTaskBinding, source: ChildTaskRecord, profileId: String,
+        next: ChildModelDefinition): ChildTaskControlReceipt {
+        requireBinding(binding)
+        val task = synchronized(gate) {
+            tasks[source.owner.childRunId]?.takeIf { it.binding === binding && it.initial.owner == source.owner }
+                ?: return ChildTaskControlReceipt.STALE
+        }
+        val previous = synchronized(gate) {
+            if (closed || task.admitting || task.stopRequested || task.settled || task.journalUnconfirmed ||
+                task.record.revision != source.revision) return ChildTaskControlReceipt.STALE
+            if (task.initial.originalRole == null || next.role != task.initial.originalRole)
+                return ChildTaskControlReceipt.ROLE_MISMATCH
+            if (task.pause.snapshot() != ChildTaskPauseState.PAUSED) return ChildTaskControlReceipt.PENDING
+            if (!next.isValid() || !next.acceptsNewTask()) return ChildTaskControlReceipt.CONFIGURATION_REQUIRED
+            task.admitting = true
+            task.record
+        }
+        try {
+            val written = store.reassigned(previous, profileId, previous.display)
+                ?: return ChildTaskControlReceipt.STALE
+            synchronized(gate) {
+                task.record = written
+                if (closed || task.stopRequested || !next.isValid() || !next.acceptsNewTask())
+                    return ChildTaskControlReceipt.CONFIGURATION_REQUIRED
+                task.assignment.reassign(profileId, next)
+                binding.pauseGroup?.let { it.members.remove(source.owner); it.manual.add(source.owner) }
+            }
+            return task.batch?.resumeWithAssignment(source.owner, written) ?: task.pause.resumeWithAssignment()
+        } finally {
+            synchronized(gate) { task.admitting = false }
+            notifyChanged(binding)
+        }
     }
 
     fun stop(binding: ChildTaskBinding, owner: ChildRunOwner): ChildTaskStop {
@@ -582,7 +629,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         requireBinding(binding)
         return synchronized(gate) {
             (binding.recent.values + tasks.values.filter { it.binding === binding }.map {
-                RetainedChildTask(it.record, it.stopRequested, false, it.journalUnconfirmed, it.pause.snapshot(), it.queueState)
+                RetainedChildTask(it.record, it.stopRequested, false, it.journalUnconfirmed, it.pause.snapshot(), it.queueState, configurationPaused = it.pause.isConfigurationBlocked())
             }).sortedWith(compareBy({ it.record.owner.generation }, { it.record.index }))
         }
     }
@@ -637,7 +684,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             }
             val remaining = TimeUnit.NANOSECONDS.toMillis(task.deadline - System.nanoTime()).coerceAtLeast(1)
             batch = ChildModelBatch(mapOf(task.initial.profileId to definition), remaining, journal(task), usageRecorder,
-                onProgress = { _, text -> progress(task, text) }, toolAssembly = resources.toolAssembly,
+                onProgress = { _, text -> progress(task, text) }, toolAssembly = resources.toolAssembly, diagnostics = diagnostics,
                 sharedPool = { selected -> synchronized(gate) {
                     check(!task.settled && task.binding.resources === resources)
                     val pool = pools.getOrPut(selected.poolKey) { Pool(selected.parallelLimit) }
@@ -673,10 +720,11 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
 
     private fun journal(state: Task): ChildTaskStore = object : ChildTaskStore {
         override fun enqueue(parent: RunExecutionOwner, tasks: List<ChildTaskRecord>) = error("child_already_queued")
+        override fun get(owner: ChildRunOwner): ChildTaskRecord? = store.get(owner)
         override fun started(task: ChildTaskRecord) {
             try {
                 store.started(task)
-                synchronized(gate) { state.record = task.copy(status = ChildTaskStatus.RUNNING, revision = state.record.revision) }
+                synchronized(gate) { state.record = state.record.copy(status = ChildTaskStatus.RUNNING) }
             } catch (failure: Exception) {
                 synchronized(gate) { state.journalUnconfirmed = true }
                 throw failure
@@ -688,11 +736,17 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             synchronized(gate) { state.record = state.record.copy(display = display) }
             notifyChanged(state.binding)
         }
+        override fun reassigned(task: ChildTaskRecord, profileId: String, display: ChildTaskDisplay?): ChildTaskRecord? {
+            val written = store.reassigned(task, profileId, display) ?: return null
+            synchronized(gate) { state.record = written }
+            notifyChanged(state.binding)
+            return written
+        }
         override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) {
             try {
                 store.finished(task, status, text, detail)
                 synchronized(gate) {
-                    state.record = task.copy(status = status, text = text, detail = detail, revision = state.record.revision)
+                    state.record = state.record.copy(status = status, text = text, detail = detail)
                     state.journalUnconfirmed = false
                 }
             } catch (failure: Exception) {

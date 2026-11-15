@@ -43,7 +43,11 @@ class ConversationDatabase internal constructor(context: Context, private val af
     }
     override fun onOpen(db: SQLiteDatabase) {
         super.onOpen(db)
-        app.daiyu.android.context.DatabaseTransactions { db }.run(ConversationOutputTimes::install)
+        app.daiyu.android.context.DatabaseTransactions { db }.run { transaction ->
+            ConversationOutputTimes.install(transaction)
+            SQLiteChildTaskStore.installAssignmentSchema(transaction)
+            app.daiyu.android.model.usage.SQLiteChildUsageStore.installSchema(transaction)
+        }
     }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0,assistant_id TEXT,workspace_binding TEXT)")

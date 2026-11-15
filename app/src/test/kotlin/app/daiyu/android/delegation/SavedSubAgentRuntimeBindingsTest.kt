@@ -86,6 +86,32 @@ class SavedSubAgentRuntimeBindingsTest {
         assertEquals(listOf(changed.modelId, changed.modelId), captured.map { it.model })
     }
 
+    @Test fun committedPresetRequiresTheSameCompleteRequestIdentity() {
+        for (differentBody in listOf(false, true)) {
+            val disk = HotConfigurationPreferences()
+            val repository = ConversationSubAgentPreferences(disk)
+            repository.update(owner) { config }
+            val other = child.copy(id = "other-record")
+            val source = listOf(provider.copy(models = listOf(child, other)))
+            val preset = repository.addPreset("replacement")
+            repository.update(SubAgentConfigKey.Preset(preset.id)) {
+                it.copy(profiles = listOf(profile.copy(id = "replacement", modelId = other.id)))
+            }
+            val resolve: (String, String) -> ModelSettings = { _, id ->
+                if (differentBody && id == other.id) saved.copy(requestOptions = saved.requestOptions.copy(customBody = """{"temperature":0.3}""")) else saved
+            }
+            val bindings = SavedSubAgentRuntimeBindings { noNetwork }
+            fun latest() = repository.snapshot(owner)
+            val definition = bindings.freeze(owner, latest(), source, resolve,
+                latestConfig = ::latest,
+                latestModel = { id -> bindings.freeze(owner, latest(), source, resolve).getValue(id) },
+                runtimeStart = repository.openRuntime(owner)).getValue(profile.id)
+            repository.applyPreset(owner, preset.id)
+            assertEquals(!differentBody, definition.isValid())
+            if (!differentBody) assertEquals("replacement", definition.current().profileId)
+        }
+    }
+
     @Test fun savedSelectionWorksWithoutShieldAndOldDefinitionsKeepTheirSnapshot() {
         var current = saved
         val captured = mutableListOf<ProviderSnapshot>()

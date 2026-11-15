@@ -502,5 +502,19 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
         runtime.recoverPending()
         assertEquals(read, store.list(owner.conversationId.value).single())
     }
+    fun testAssignmentKeepsOriginalRoleAndUsesRevisionCas() {
+        val db = fresh(); val runtime = lease(db); val owner = parent(db)
+        val record = tasks(owner, 1).single().copy(originalRole = ChildModelRole.REVIEW)
+        val store = runtime.childTasks
+        store.enqueue(owner, listOf(record)); store.started(record)
+        val next = store.reassigned(record, "replacement", ChildTaskDisplay("Replacement", "actual/model", "Actual"))!!
+        assertEquals("review", next.profileId); assertEquals("replacement", next.assignedProfileId)
+        assertEquals(ChildModelRole.REVIEW, next.originalRole); assertEquals(1L, next.revision)
+        assertEquals(next, store.get(record.owner))
+        assertNull(store.reassigned(record, "stale", record.display))
+        store.finished(next.copy(status = ChildTaskStatus.QUEUED), ChildTaskStatus.COMPLETED, "retained result")
+        assertEquals("replacement", store.get(record.owner)!!.assignedProfileId)
+        assertEquals("retained result", store.get(record.owner)!!.text)
+    }
 
 }

@@ -1626,6 +1626,7 @@ class ChatController internal constructor(private val application:Application,
     private var runtimeStore:SQLiteRuntimeStore?=null
     private var childSupervisor:app.daiyu.android.domain.delegation.RetainedChildTasks?=null
     private val backgroundRuns=linkedMapOf<RunId,RunChildTasks>()
+    private val childRunFactories = linkedMapOf<RunId, (ProviderSnapshot) -> ModelPort>()
     private var childCommandReaders=0
     private var childrenClosing=false
     private var childrenClosed=false
@@ -1736,6 +1737,7 @@ class ChatController internal constructor(private val application:Application,
             if (resources?.initial?.runId == run || backgroundRuns[run]?.isReleased() == false ||
                 browserChildren.any { it.parent.identity.runId == run && !it.drained }) continue
             entries.remove()
+            childRunFactories.remove(run)
             app.daiyu.android.execution.UserExecutionService.release(lease)
         }
     }
@@ -1913,7 +1915,8 @@ class ChatController internal constructor(private val application:Application,
     private fun freezeSavedChildModels(key: SubAgentConfigKey.Conversation, hotUpdates: Boolean = true,
         profileId: String? = null, runModel: (ProviderSnapshot) -> ModelPort): FrozenSubAgentModels {
         val ownerState = childPreferences.ownerState(key)
-        val config = childPreferences.snapshot(key)
+        val runtimeStart = childPreferences.openRuntime(key)
+        val config = runtimeStart.config
         val lifetimes = config.profiles.associate { it.id to childPreferences.profileLifetime(key, it.id) }
         val registryRevision = providers.snapshot().revision
         val availableConfig = config.copy(profiles = config.profiles.filterNot { (it.providerId to it.modelId) in deletedCatalogModels })
@@ -1938,7 +1941,8 @@ class ChatController internal constructor(private val application:Application,
                 profileId = id, runModel = runModel).getValue(id) }) else null,
             latestModels = if (hotUpdates) ({ freezeSavedChildModels(key, runModel = runModel) }) else null,
             profileCurrent = { id -> childPreferences.profileLifetime(key, id) == lifetimes[id] },
-            modelDeleted = { (it.providerId to it.modelId) in deletedCatalogModels })
+            modelDeleted = { (it.providerId to it.modelId) in deletedCatalogModels },
+            currentLifetime = { childPreferences.profileLifetime(key, it) }, runtimeStart = runtimeStart)
         } catch (failure: app.daiyu.android.domain.ModelRequestException) {
             problem = failure.userMessage
             notifyChanged()
@@ -1988,12 +1992,17 @@ class ChatController internal constructor(private val application:Application,
             check(!closed && ready && !recoveryFailed) { "child_tasks_unavailable" }
             backgroundRuns.values.toList() to browserChildren.toList()
         }
-        return (retained.first.flatMap { it.snapshots() } + retained.second.mapNotNull { it.snapshot })
+        return (retained.first.flatMap { it.snapshots() } + retained.second.mapNotNull { it.snapshot } +
+            synchronized(this) { childModelBatches.keys.toList() }.flatMap { it.snapshots() })
             .filter { it.record.owner.conversationId == conversationId.value }
     }
     internal fun childTaskProgress(owner: app.daiyu.android.domain.delegation.ChildRunOwner): String =
         synchronized(this) { childSupervisor }?.progress(owner).orEmpty().ifEmpty {
-            synchronized(this) { browserChildProgress[owner].orEmpty() }
+            synchronized(this) { browserChildProgress[owner].orEmpty() }.ifEmpty {
+                synchronized(this) { childModelBatches.keys.toList() }.firstNotNullOfOrNull { batch ->
+                    batch.progress(owner).takeIf { it.isNotEmpty() }
+                }.orEmpty()
+            }
         }
     internal fun pauseChildTask(record: ChildTaskRecord): app.daiyu.android.domain.delegation.ChildTaskControlReceipt {
         val retained = synchronized(this) {
@@ -2009,6 +2018,26 @@ class ChatController internal constructor(private val application:Application,
         val browser = synchronized(this) { browserChildren.firstOrNull { !closed && ready && it.scope.owner == record.owner } }
         return browser?.resume() ?: retained?.resume(record.owner) ?: app.daiyu.android.domain.delegation.ChildTaskControlReceipt.STALE
     }
+    private fun takeOverChildTask(record: ChildTaskRecord, profileId: String): app.daiyu.android.domain.delegation.ChildTaskControlReceipt {
+        check(Looper.myLooper() != Looper.getMainLooper()) { "child_command_requires_worker" }
+        if (record.originalRole == null) return app.daiyu.android.domain.delegation.ChildTaskControlReceipt.ROLE_MISMATCH
+        val key = SubAgentConfigKey.Conversation(record.owner.conversationId)
+        val profile = childPreferences.snapshot(key).profiles.singleOrNull { it.id == profileId }
+            ?: return app.daiyu.android.domain.delegation.ChildTaskControlReceipt.CONFIGURATION_REQUIRED
+        if (profile.role !in setOf("implementation", "review"))
+            return app.daiyu.android.domain.delegation.ChildTaskControlReceipt.ROLE_MISMATCH
+        val factory = synchronized(this) { childRunFactories[RunId(record.owner.parentRunId)] }
+            ?: return app.daiyu.android.domain.delegation.ChildTaskControlReceipt.CONFIGURATION_REQUIRED
+        val selected = try { freezeSavedChildModels(key, profileId = profileId, runModel = factory).getValue(profileId) } catch (_: Exception) {
+            return app.daiyu.android.domain.delegation.ChildTaskControlReceipt.CONFIGURATION_REQUIRED
+        }
+        if (selected.role != record.originalRole) return app.daiyu.android.domain.delegation.ChildTaskControlReceipt.ROLE_MISMATCH
+        val retained = synchronized(this) { backgroundRuns[RunId(record.owner.parentRunId)] }
+        if (retained != null) return retained.takeOver(record, profileId, selected)
+        val batch = synchronized(this) { childModelBatches.keys.firstOrNull { it.contains(record.owner) } }
+        return batch?.takeOver(record, profileId, selected) ?: app.daiyu.android.domain.delegation.ChildTaskControlReceipt.STALE
+    }
+
     /** Worker-only records action. Historical work gets a new real Runner owner, never a reopened binding. */
     internal fun directChildTask(command: ChildTaskCommand): ChildTaskCommandReceipt {
         check(Looper.myLooper() != Looper.getMainLooper()) { "child_command_requires_worker" }
@@ -2046,6 +2075,7 @@ class ChatController internal constructor(private val application:Application,
             val key = SubAgentConfigKey.Conversation(conversation.value)
             var frozenAssistantId: String? = null
             var replyIdentity: AssistantReplyIdentity? = null
+            var directChildFactory: ((ProviderSnapshot) -> ModelPort)? = null
             val models = try {
                 val assistantId = database.assistantId(conversation) ?: throw MissingAssistantBindingException()
                 frozenAssistantId = assistantId
@@ -2054,11 +2084,13 @@ class ChatController internal constructor(private val application:Application,
                 val assistantContext = AssistantRunContext.capture(assistantStore, assistantId, assistantAssets)
                 replyIdentity = AssistantReplyIdentity.capture(assistantContext, assistantAssets)
                 check(assistantStore.read(assistantId) == profile) { "assistant_profile_changed" }
-                freezeSavedChildModels(key) { provider ->
+                val factory: (ProviderSnapshot) -> ModelPort = { provider ->
                     val delegate = sessionModel?.invoke(provider, assistantContext, screenSessionContext(conversation))
                         ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
                     app.daiyu.android.model.usage.UsageRecorder.wrap(messageImages.wrap(delegate, provider), provider)
                 }
+                directChildFactory = factory
+                freezeSavedChildModels(key, runModel = factory)
             } catch (failure: Exception) {
                 return ChildTaskCommandReceipt.Rejected(if (failure is app.daiyu.android.domain.ModelRequestException)
                     failure.userMessage else "child_model_binding_unavailable")
@@ -2093,6 +2125,7 @@ class ChatController internal constructor(private val application:Application,
                 retain = { tasks -> synchronized(this) {
                     check(!closed && !preparationCancelled(token))
                     backgroundRuns[run] = tasks
+                    childRunFactories[run] = checkNotNull(directChildFactory)
                     retainExecution(token, initial)
                 } })
         } finally { finishPreparation(token); backgroundTasksChanged() }
@@ -2275,7 +2308,8 @@ class ChatController internal constructor(private val application:Application,
                 abandoned.forEach { reasoningPreference.forget(it.value); database.delete(it) }
             }
             app.daiyu.android.voice.control.VoiceCallTempFiles.recover(application.cacheDir)
-            childSupervisor=app.daiyu.android.domain.delegation.RetainedChildTasks(runtime.childTasks, usageRecorder=runtime.childUsage)
+            childSupervisor=app.daiyu.android.domain.delegation.RetainedChildTasks(runtime.childTasks, usageRecorder=runtime.childUsage,
+                diagnostics = app.daiyu.android.domain.delegation.ChildTaskDiagnostics(RuntimeDiagnostics::childTask))
             val history=questions.records()
             synchronized(this) {rememberQuestions(history)}
             false
@@ -3946,13 +3980,14 @@ class ChatController internal constructor(private val application:Application,
         }
         val conversationId=platformAction?.conversationId ?: mcpPreparation?.scope?.conversationId ?: gui?.conversationId ?: terminalJobPreparation?.identity?.conversationId ?: virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
+        val childRunFactory: (ProviderSnapshot) -> ModelPort = { provider ->
+            val delegate = sessionModel?.invoke(provider, assistantContext, screenSessionContext(conversationId))
+                ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
+            app.daiyu.android.model.usage.UsageRecorder.wrap(messageImages.wrap(delegate, provider), provider)
+        }
         val childPreparation = if (!withChildren) null else try {
             val key = SubAgentConfigKey.Conversation(conversationId.value)
-            freezeSavedChildModels(key) { provider ->
-                val delegate = sessionModel?.invoke(provider, assistantContext, screenSessionContext(conversationId))
-                    ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
-                app.daiyu.android.model.usage.UsageRecorder.wrap(messageImages.wrap(delegate, provider), provider)
-            }
+            freezeSavedChildModels(key, runModel = childRunFactory)
         } catch (failure:Exception) {
             problem=if (failure is app.daiyu.android.domain.ModelRequestException) failure.userMessage
                 else "子模型配置不可用、已变更或不支持"
@@ -4223,6 +4258,22 @@ class ChatController internal constructor(private val application:Application,
             } else null
             val runMode = app.daiyu.android.runningmode.AndroidRunningModeStore.get(application).mode.value
             val androidCommands = RunCommandTools.androidConfiguration(application, workspace.resolved.hostDirectory, runMode)
+            val mediaStart = childPreferences.openRuntime(SubAgentConfigKey.Conversation(conversationId.value))
+            val captureMediaAdmission: () -> (() -> Boolean) = {
+                val cursor = mediaStart.cursor()
+                var baseline = mediaStart.config
+                cursor.drain { edge -> edge.after?.let { baseline = it } }
+                val media = baseline.profiles.filter { it.role in setOf("image_generation", "video_generation") }
+                var valid = true
+                val admission: () -> Boolean = { synchronized(cursor) {
+                    cursor.drain { edge ->
+                        if (edge.kind != ConversationSubAgentPreferences.CommitKind.EDIT || edge.after == null ||
+                            media.any { original -> edge.after.profiles.none { it.id == original.id && it.role == original.role } }) valid = false
+                    }
+                    valid
+                } }
+                admission
+            }
             val ordinaryGeneration = if (ordinaryRun) try { GenerationSettingsStore(application).loadSnapshot() }
                 catch (_: GenerationSettingsException) { null } else null
             val ordinaryShizuku = if (ordinaryRun && androidCommands.backend == "shizuku" && application is ChatApplication) shizukuAccess.refresh() else null
@@ -4245,23 +4296,21 @@ class ChatController internal constructor(private val application:Application,
                 records = { childTasks(conversationId) },
                 source = { owner -> checkNotNull(childSupervisor).source(owner) },
                 live = { liveChildTasks(conversationId) },
-                progress = { owner ->
-                    checkNotNull(childSupervisor).progress(owner).ifEmpty {
-                        synchronized(this) { browserChildProgress[owner].orEmpty() }
-                    }
-                },
+                progress = ::childTaskProgress,
                 resume = ::resumeChildTask, pause = ::pauseChildTask, stop = ::stopChildTask,
                 currentProfiles = currentChildProfiles,
                 currentProfileMetadata = { currentChildConfiguration()?.descriptors.orEmpty() },
-                initialProfiles = childPreparation?.descriptors.orEmpty())
+                initialProfiles = childPreparation?.descriptors.orEmpty(),
+                takeOver = ::takeOverChildTask)
             val executionChildren = if (!withChildren || !ordinaryRun) null else executionChildTools(application,
                 checkNotNull(ordinaryAssistant), toolLedger, workspace, checkNotNull(ordinaryBrowserSettings), platformSnapshot.resultPolicy, shizukuAccess)
             val children = if (!withChildren) null else RunChildModels(
                 ChildModelBatch(childModels, store = checkNotNull(runtimeStore).childTasks,
                     onProfilesChanged = ::scheduleDeletedModelCleanup,
                     usageRecorder = checkNotNull(runtimeStore).childUsage,
-                    currentModels = currentChildModels, toolAssembly = executionChildren).also { batch ->
-                    synchronized(this) { childModelBatches[batch] = conversationId.value }
+                    currentModels = currentChildModels, toolAssembly = executionChildren,
+                    diagnostics = app.daiyu.android.domain.delegation.ChildTaskDiagnostics(RuntimeDiagnostics::childTask)).also { batch ->
+                    synchronized(this) { childModelBatches[batch] = conversationId.value; childRunFactories[run] = childRunFactory }
                 }, childModels.keys, currentProfiles = currentChildProfiles,
                 initialProfiles = childPreparation?.descriptors.orEmpty())
             preparingChildren = children
@@ -4309,6 +4358,7 @@ class ChatController internal constructor(private val application:Application,
                         RunChildTasks(supervisor, binding, admittedModels.keys, currentChildModels, currentChildProfiles,
                             initialProfiles = admittedConfiguration?.descriptors.orEmpty()).also { tasks ->
                             backgroundRuns[run] = tasks
+                            childRunFactories[run] = childRunFactory
                             resources?.takeIf { it.initial.runId == run && it.childrenPauseRequested }?.let { lifetime ->
                                 lifetime.pausedChildren = ChildPauseCapture(tasks, tasks.pauseGroup())
                             }
@@ -4360,7 +4410,7 @@ class ChatController internal constructor(private val application:Application,
                             scopes.add(scope)
                         }
                         ordinaryGeneration?.let { settings -> scopes.add(RunOrdinaryGenerationTools(realOwner, task, settings,
-                            retainGenerationResources(settings.accountScope), generationInputs) { isRunUnfenced(assistant) }) }
+                            retainGenerationResources(settings.accountScope), generationInputs, captureAdmission = captureMediaAdmission) { isRunUnfenced(assistant) }) }
                         scopes.add(RunOrdinaryJobTools(application, realOwner, task, grants, jobConfigurations,
                             launch = { environment -> if (environment == "android") androidLaunch else {
                                 if (jobHost == null || jobReference == null || "linux" !in jobConfigurations) null else

@@ -12,17 +12,22 @@ internal object BackupChildTaskCodec {
         "control_revision", "source_task_id", "command_kind")
     private val displayColumns = listOf("agent_name_snapshot", "model_id_snapshot", "model_name_snapshot")
     private val v5TaskColumns = legacyTaskColumns + displayColumns
-    private val taskColumns = v5TaskColumns + "tool_access_json"
+    private val v6TaskColumns = v5TaskColumns + "tool_access_json"
+    private val taskColumns = v6TaskColumns + listOf("original_role", "assigned_profile_id")
     private fun withDisplayColumns(row: JSONObject): JSONObject = JSONObject().apply {
         row.keys().forEach { key -> put(key, row.get(key)) }
-        (displayColumns + "tool_access_json").forEach { key -> if (!has(key)) put(key, JSONObject.NULL) }
+        (displayColumns + "tool_access_json" + "original_role").forEach { key -> if (!has(key)) put(key, JSONObject.NULL) }
+        if (!has("assigned_profile_id") || isNull("assigned_profile_id")) put("assigned_profile_id", getString("profile_id"))
     }
     private val commandColumns = listOf("call_id", "fingerprint", "source_id", "successor_id", "expected_revision", "acknowledged")
     private val legacyUsageColumns = listOf("task_id", "request_id", "request_owner", "attempt_id", "operation", "checkpoint_revision",
         "input_tokens", "output_tokens", "cached_tokens")
     private val typedUsageColumns = legacyUsageColumns + "usage_source"
     private val v4UsageColumns = typedUsageColumns + "cache_creation_tokens"
-    private val usageColumns = v4UsageColumns + "has_usage"
+    private val v5UsageColumns = v4UsageColumns + "has_usage"
+    private val requestModelColumns = listOf("provider_id_snapshot", "api_model_snapshot", "requested_at_ms",
+        "request_sequence", "assigned_profile_snapshot", "original_role_snapshot")
+    private val usageColumns = v5UsageColumns + requestModelColumns
     data class Validated(val tasks: List<JSONObject>, val commands: List<JSONObject>, val usage: List<JSONObject>)
     fun export(db: SQLiteDatabase, conversation: String?): JSONObject {
         require(listOf("child_tasks", "child_task_commands", "child_request_usage").all { BackupHistoryRows.exists(db, it) }) {
@@ -31,7 +36,8 @@ internal object BackupChildTaskCodec {
         val where = if (conversation == null) "" else " WHERE conversation_id=?"
         val args = conversation?.let { arrayOf(it) }
         val snapshots = BackupHistoryRows.history(db, "child_task", conversation)
-        val tasks = BackupHistoryRows.read(db, "child_tasks", taskColumns, where, args, "seq").map { physical ->
+        val tasks = BackupHistoryRows.read(db, "child_tasks", taskColumns, where, args, "seq").map { raw ->
+            val physical = withDisplayColumns(raw)
             snapshots[physical.getString("task_id")]?.let(::withDisplayColumns)?.also { original ->
                 require(BackupHistoryRows.same(terminal(original), physical)) { "已恢复子任务历史被更改" }
             } ?: physical
@@ -43,18 +49,18 @@ internal object BackupChildTaskCodec {
             if (conversation == null) "" else " WHERE source_id IN (SELECT task_id FROM child_tasks WHERE conversation_id=?)", args)
         val usage = BackupHistoryRows.read(db, "child_request_usage", usageColumns,
             if (conversation == null) "" else " WHERE task_id IN (SELECT task_id FROM child_tasks WHERE conversation_id=?)", args)
-        return JSONObject().put("version", 6).put("tasks", JSONArray(tasks)).put("commands", JSONArray(commands)).put("usage", JSONArray(usage))
+        return JSONObject().put("version", 7).put("tasks", JSONArray(tasks)).put("commands", JSONArray(commands)).put("usage", JSONArray(usage))
     }
     fun validate(value: JSONObject?, messages: JSONArray): Validated {
         if (value == null) return Validated(emptyList(), emptyList(), emptyList())
         with(BackupHistoryRows) {
-            fields(value, listOf("version", "tasks", "commands", "usage")); val version = number(value, "version"); require(version in 1L..6L)
+            fields(value, listOf("version", "tasks", "commands", "usage")); val version = number(value, "version"); require(version in 1L..7L)
             val tasks = rows(value.getJSONArray("tasks")).map { row ->
-                fields(row, if (version < 3L) legacyTaskColumns else if (version < 6L) v5TaskColumns else taskColumns)
+                fields(row, if (version < 3L) legacyTaskColumns else if (version < 6L) v5TaskColumns else if (version < 7L) v6TaskColumns else taskColumns)
                 withDisplayColumns(row)
             }; val commands = rows(value.getJSONArray("commands"))
             val usage = rows(value.getJSONArray("usage")).map { row ->
-                fields(row, if (version == 1L) legacyUsageColumns else if (version < 4L) typedUsageColumns else if (version == 4L) v4UsageColumns else usageColumns)
+                fields(row, if (version == 1L) legacyUsageColumns else if (version < 4L) typedUsageColumns else if (version == 4L) v4UsageColumns else if (version < 7L) v5UsageColumns else usageColumns)
                 // Copy values, not serialized JSON: numberToString could normalize 1.0 to
                 // an integer before the strict storage-type validator gets to inspect it.
                 JSONObject().apply {
@@ -62,6 +68,7 @@ internal object BackupChildTaskCodec {
                     if (version == 1L) put("usage_source", "MAIN")
                     if (version < 4L) put("cache_creation_tokens", JSONObject.NULL)
                     if (version < 5L) put("has_usage", 1)
+                    if (version < 7L) requestModelColumns.forEach { put(it, JSONObject.NULL) }
                 }
             }
             val messagesById = messageMap(messages); val byId = linkedMapOf<String, ChildTaskRecord>(); val groups = mutableSetOf<Pair<String, Int>>()
@@ -106,11 +113,18 @@ internal object BackupChildTaskCodec {
                 id(row, "request_owner"); id(row, "attempt_id"); require(text(row, "operation") in setOf("OPEN", "NEXT", "RESUME"))
                 require(number(row, "checkpoint_revision") > 0)
                 val hasUsage = number(row, "has_usage"); require(hasUsage in 0..1)
-                if (hasUsage == 0L) require(text(row, "usage_source") == "SUMMARY" &&
-                    listOf("input_tokens", "output_tokens", "cached_tokens", "cache_creation_tokens").all(row::isNull))
+                if (hasUsage == 0L) require(listOf("input_tokens", "output_tokens", "cached_tokens", "cache_creation_tokens").all(row::isNull))
                 listOf("input_tokens", "output_tokens", "cached_tokens", "cache_creation_tokens").forEach { if (!row.isNull(it)) require(number(row, it) >= 0) }
                 if (!row.isNull("input_tokens") && !row.isNull("cached_tokens"))
                     require(number(row, "cached_tokens") <= number(row, "input_tokens"))
+                require(row.isNull("provider_id_snapshot") == row.isNull("api_model_snapshot"))
+                listOf("provider_id_snapshot", "assigned_profile_snapshot").forEach {
+                    if (!row.isNull(it)) id(row, it)
+                }
+                if (!row.isNull("api_model_snapshot")) require(text(row, "api_model_snapshot").isNotBlank() && text(row, "api_model_snapshot").length <= 500)
+                if (!row.isNull("requested_at_ms")) require(number(row, "requested_at_ms") >= 0)
+                if (!row.isNull("request_sequence")) require(number(row, "request_sequence") in 1..Int.MAX_VALUE.toLong())
+                if (!row.isNull("original_role_snapshot")) ChildModelRole.valueOf(text(row, "original_role_snapshot"))
                 fun token(key: String): Long? = if (row.isNull(key)) null else number(row, key)
                 app.daiyu.android.domain.ModelEvent.Usage(token("input_tokens"), token("output_tokens"),
                     token("cached_tokens"), token("cache_creation_tokens"))
@@ -129,7 +143,9 @@ internal object BackupChildTaskCodec {
             if (row.isNull("command_kind")) null else ChildTaskCommandKind.valueOf(text(row, "command_kind")),
             if (displayColumns.all(row::isNull)) null else ChildTaskDisplay(
                 text(row, "agent_name_snapshot"), text(row, "model_id_snapshot"), text(row, "model_name_snapshot")),
-            if (row.isNull("tool_access_json")) ChildToolAccess.NONE else ChildToolAccess.fromJson(text(row, "tool_access_json")))
+            if (row.isNull("tool_access_json")) ChildToolAccess.NONE else ChildToolAccess.fromJson(text(row, "tool_access_json")),
+            if (row.isNull("original_role")) null else ChildModelRole.valueOf(text(row, "original_role")),
+            id(row, "assigned_profile_id"))
     }
     internal fun terminal(row: JSONObject): JSONObject = JSONObject(row.toString()).apply {
         when (getString("status")) {
@@ -154,6 +170,7 @@ internal object BackupChildTaskCodec {
             BackupHistoryRows.fields(retained, when (keys) {
                 legacyTaskColumns.toSet() -> legacyTaskColumns
                 v5TaskColumns.toSet() -> v5TaskColumns
+                v6TaskColumns.toSet() -> v6TaskColumns
                 else -> taskColumns
             })
             val normalized = withDisplayColumns(retained)

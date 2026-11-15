@@ -93,8 +93,10 @@ internal class SQLiteRuntimeStore private constructor(
     private fun available() { check(!closed && lock.isValid) { "运行存储所有权已释放" } }
 
     private val childUsageStore = SQLiteChildUsageStore(database)
-    internal val childUsage = ChildUsageRecorder { task, checkpoint ->
-        childAccess { childUsageStore.record(task, checkpoint) }
+    internal val childUsage = object : ChildUsageRecorder {
+        override fun record(task: ChildTaskRecord, checkpoint: RunCheckpoint) = childAccess { childUsageStore.record(task, checkpoint) }
+        override fun record(task: ChildTaskRecord, checkpoint: RunCheckpoint, model: app.daiyu.android.domain.delegation.ChildRequestModel?) =
+            childAccess { childUsageStore.record(task, checkpoint, model) }
     }
     private val childStore = SQLiteChildTaskStore(database)
     internal val childTasks: ChildTaskStore = object : ChildTaskStore {
@@ -105,6 +107,8 @@ internal class SQLiteRuntimeStore private constructor(
             childAccess { childStore.enqueueCommand(parent, command, successor) }
         override fun started(task: ChildTaskRecord) = childAccess { childStore.started(task) }
         override fun selected(task: ChildTaskRecord, display: ChildTaskDisplay?) = childAccess { childStore.selected(task, display) }
+        override fun reassigned(task: ChildTaskRecord, profileId: String, display: ChildTaskDisplay?) =
+            childAccess { childStore.reassigned(task, profileId, display) }
         override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) =
             childAccess { childStore.finished(task, status, text, detail) }
         override fun list(conversationId: String, limit: Int) = childAccess { childStore.list(conversationId, limit) }

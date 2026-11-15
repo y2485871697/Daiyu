@@ -10,6 +10,7 @@ import app.daiyu.android.model.generation.*
 internal class RunOrdinaryGenerationTools(owner: RunExecutionOwner, authorization: TaskAuthorization,
     private val settings: GenerationSettingsSnapshot, private val resources: ControllerGenerationResources,
     inputAssets: Map<String, GenerationInput> = emptyMap(),
+    private val captureAdmission: () -> (() -> Boolean) = { { true } },
     private val current: () -> Boolean) : RunOwnedToolScope(owner, authorization) {
     private val inputs = inputAssets.toMap()
     override val tools = listOf(false, true).mapNotNull { video ->
@@ -38,6 +39,7 @@ internal class RunOrdinaryGenerationTools(owner: RunExecutionOwner, authorizatio
                     }
                 }))
             override fun prepare(arguments: ToolArguments): PreparedTool {
+                val admitted = captureAdmission()
                 val profile = if (arguments.contains("profile_id")) profiles.single { it.id == arguments.text("profile_id") } else profiles.single()
                 val source = if (arguments.contains("source_asset_id")) sources.getValue(arguments.text("source_asset_id")) else null
                 val mask = if (arguments.contains("mask_asset_id")) sources.getValue(arguments.text("mask_asset_id")) else null
@@ -50,15 +52,24 @@ internal class RunOrdinaryGenerationTools(owner: RunExecutionOwner, authorizatio
                     references = listOfNotNull(source), mask = mask)))
                 val config = GenerationRunConfig(listOf(batch), maxPolls = settings.maxPolls)
                 val effect = RunGenerationTools.writeEffect(settings.accountScope, owner, config, batch)
-                return write(effect) { context ->
+                fun configurationDenial() = if (admitted()) null else
+                    ExecutionReceipt.NotExecuted("generation_configuration_paused_redispatch_required")
+                return PreparedTool.approvedWrite(effect, approve = { context ->
+                    if (denial(context) != null || configurationDenial() != null) null
+                    else TaskAuthorization(authorization.sessionId, authorization.taskId, setOf(effect))
+                }, admit = { denial(it) ?: configurationDenial() }) execute@ { context ->
+                    denial(context, original = false)?.let { return@execute it }
+                    configurationDenial()?.let { return@execute it }
+                    if (context.authorization.sessionId != authorization.sessionId || context.authorization.taskId != authorization.taskId ||
+                        context.authorization.allowedWrites != setOf(effect)) return@execute ExecutionReceipt.NotExecuted("task_write_not_authorized")
                     val network = resources.generationNetwork(GenerationDownloadAuthorization { assetOwner, url ->
-                        current() && resources.validateOwner(assetOwner) && settings.downloads.allows(url)
+                        current() && admitted() && resources.validateOwner(assetOwner) && settings.downloads.allows(url)
                     })
                     val runtime = RunGenerationTools(config, owner, context.authorization, settings.accountScope,
                         resources::database, resources::assets,
-                        validateOwner = { assetOwner -> live() && current() && resources.validateOwner(assetOwner) },
+                        validateOwner = { assetOwner -> live() && current() && admitted() && resources.validateOwner(assetOwner) },
                         approval = GenerationRunApproval { review ->
-                            if (live() && current() && review.context === context && review.effect == effect &&
+                            if (live() && current() && admitted() && review.context === context && review.effect == effect &&
                                 context.authorization.allowedWrites == setOf(effect)) GenerationRunDecision.APPROVED else GenerationRunDecision.DENIED
                         }, downloadAuthorization = network.authorization, http = network.http,
                         fenceFactory = resources::createFence)

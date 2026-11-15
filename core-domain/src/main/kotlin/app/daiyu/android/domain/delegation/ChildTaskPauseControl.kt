@@ -6,7 +6,7 @@ enum class ChildTaskPauseState { ACTIVE, PENDING, PAUSED, FINISHED }
 enum class ChildTaskQueueState { ACTIVE, PENDING, FINISHED }
 
 /** PENDING is only intent; PAUSED acknowledges a resumable boundary, never an in-flight read. */
-enum class ChildTaskControlReceipt { PENDING, PAUSED, RESUMED, STALE }
+enum class ChildTaskControlReceipt { PENDING, PAUSED, RESUMED, STALE, CONFIGURATION_REQUIRED, ROLE_MISMATCH }
 
 enum class ChildTaskStopDisposition { CONTINUE, PAUSE, STOP }
 
@@ -15,6 +15,13 @@ internal class ChildTaskPauseControl(private val onChanged: () -> Unit) {
     private val gate = Object()
     private var state = ChildTaskPauseState.ACTIVE
     private var ended = false
+    private var configurationBlocked = false
+    private var pauseObserver: () -> Unit = {}
+    fun observePause(observer: () -> Unit) { synchronized(gate) { pauseObserver = observer } }
+    private fun notifyPaused() {
+        runCatching { synchronized(gate) { pauseObserver }.invoke() }
+        runCatching(onChanged)
+    }
     private var pausedAt = 0L
     private var pausedTotal = 0L
     private var poolWaiting = false
@@ -38,9 +45,37 @@ internal class ChildTaskPauseControl(private val onChanged: () -> Unit) {
         if (state == ChildTaskPauseState.PAUSED) ChildTaskControlReceipt.PAUSED else ChildTaskControlReceipt.PENDING
     }
 
+    fun isConfigurationBlocked(): Boolean = synchronized(gate) { configurationBlocked }
+
+    fun pauseForConfiguration(): ChildTaskControlReceipt = synchronized(gate) {
+        if (ended) return@synchronized ChildTaskControlReceipt.STALE
+        configurationBlocked = true
+        if (state == ChildTaskPauseState.ACTIVE) state = ChildTaskPauseState.PENDING
+        if (state == ChildTaskPauseState.PAUSED) ChildTaskControlReceipt.PAUSED else ChildTaskControlReceipt.PENDING
+    }
+
+    fun acknowledgeBoundary() {
+        val changed = synchronized(gate) {
+            if (ended || state != ChildTaskPauseState.PENDING) false else {
+                state = ChildTaskPauseState.PAUSED
+                pausedAt = System.nanoTime()
+                updateExcluded()
+                true
+            }
+        }
+        if (changed) notifyPaused()
+    }
+
+    fun resumeWithAssignment(): ChildTaskControlReceipt = synchronized(gate) {
+        if (ended) return@synchronized ChildTaskControlReceipt.STALE
+        configurationBlocked = false
+        resume()
+    }
+
     /** Also retracts an intent that has not reached a boundary. Never opens a request. */
     fun resume(): ChildTaskControlReceipt = synchronized(gate) {
         if (ended) return@synchronized ChildTaskControlReceipt.STALE
+        if (configurationBlocked) return@synchronized ChildTaskControlReceipt.CONFIGURATION_REQUIRED
         endPause()
         state = ChildTaskPauseState.ACTIVE
         updateExcluded()
@@ -75,7 +110,7 @@ internal class ChildTaskPauseControl(private val onChanged: () -> Unit) {
                     true
                 } else false
             }
-            if (changed) runCatching(onChanged)
+            if (changed) notifyPaused()
             boundary()
             synchronized(gate) {
                 if (!ended && state == ChildTaskPauseState.PAUSED) gate.wait(25)

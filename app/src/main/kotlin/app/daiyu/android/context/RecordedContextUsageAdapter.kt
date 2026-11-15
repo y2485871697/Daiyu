@@ -56,6 +56,14 @@ class ContextUsageSnapshot internal constructor(
             .put("output", fieldCoverage(summary.output)).put("cached", fieldCoverage(summary.cached)))
         .put("coverage", coverageJson())
         .put("historical_model", JSONObject.NULL)
+        .put("child_request_models", org.json.JSONArray(selected.filter { it.origin is app.daiyu.android.domain.usage.UsageOrigin.Child }.map { request ->
+            JSONObject().put("child_run_id", request.runId).put("request_id", request.request.requestId)
+                .put("attempt_id", request.request.attemptId).put("request_sequence", request.requestSequence ?: JSONObject.NULL)
+                .put("requested_at_ms", request.requestedAtMs ?: JSONObject.NULL)
+                .put("assigned_profile_id", request.assignedProfileId ?: JSONObject.NULL)
+                .put("provider_id", request.historicalModel?.providerId ?: JSONObject.NULL)
+                .put("model_id", request.historicalModel?.modelId ?: JSONObject.NULL)
+        }))
         .put("incomplete", incomplete)
 
     private fun fieldCoverage(value: ReportedTokenSubtotal) = JSONObject()

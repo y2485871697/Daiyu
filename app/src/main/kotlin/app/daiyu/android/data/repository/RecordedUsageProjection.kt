@@ -24,9 +24,8 @@ internal data class RecordedUsageProjection(val attributed: AttributedUsageStats
         total = if (combined.input.unknownRequestCount == 0L && combined.output.unknownRequestCount == 0L)
             sumKnownTokens(combined.input.reportedTokens, combined.output.reportedTokens) else null,
     )
-    // Neither checkpoint usage nor child receipts persist provider/model/time attribution.
-    val historicalModelAvailable: Boolean get() = false
-    val historicalTimeAvailable: Boolean get() = false
+    val historicalModelAvailable: Boolean get() = attributed.requests.any { it.historicalModel != null }
+    val historicalTimeAvailable: Boolean get() = attributed.requests.any { it.requestedAtMs != null }
     val coverageDescription: String get() {
         val p = attributed.parentCoverage
         val c = attributed.childCoverage

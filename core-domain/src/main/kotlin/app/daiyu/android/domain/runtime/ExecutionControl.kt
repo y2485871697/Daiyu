@@ -160,7 +160,9 @@ class RunnerOptions(
     val contextRuntime: RunContextRuntime? = null,
     val diagnostics: RunDiagnostics? = null,
     /** Transient accepted hosted-search events; acknowledged batches notify only after commit. */
-    val onNativeSearch: (ModelEvent.NativeSearch) -> Unit = {}
+    val onNativeSearch: (ModelEvent.NativeSearch) -> Unit = {},
+    /** A completed request drained; the child may wait before tools or final publication. */
+    val onRequestCompletedBoundary: () -> Unit = {},
 ) {
     init {
         require(batchExecutor == null || receiptBatchExecutor == null)

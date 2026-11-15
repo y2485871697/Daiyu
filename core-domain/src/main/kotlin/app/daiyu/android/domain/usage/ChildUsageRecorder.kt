@@ -9,6 +9,7 @@ import app.daiyu.android.domain.runtime.RunCheckpoint
  * Stores only reported usage, not a resumable child checkpoint or execution permission. */
 fun interface ChildUsageRecorder {
     fun record(task: ChildTaskRecord, checkpoint: RunCheckpoint)
+    fun record(task: ChildTaskRecord, checkpoint: RunCheckpoint, model: app.daiyu.android.domain.delegation.ChildRequestModel?) = record(task, checkpoint)
 }
 
 fun childRequestUsage(task: ChildTaskRecord, checkpoint: RunCheckpoint): List<AttributedRequestUsage> {

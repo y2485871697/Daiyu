@@ -17,7 +17,9 @@ import java.util.concurrent.CancellationException
 internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsageRecorder {
     private val transactions = DatabaseTransactions { database.writableDatabase }
 
-    override fun record(task: ChildTaskRecord, checkpoint: RunCheckpoint) {
+    override fun record(task: ChildTaskRecord, checkpoint: RunCheckpoint) = record(task, checkpoint, null)
+
+    override fun record(task: ChildTaskRecord, checkpoint: RunCheckpoint, model: app.daiyu.android.domain.delegation.ChildRequestModel?) {
         val reported = childRequestUsage(task, checkpoint)
         val requests = reported.associateBy { it.request.requestId }
         val summaries = checkpoint.context?.summaries.orEmpty()
@@ -27,7 +29,9 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
             requests[request.requestId]?.let { require(it.request == request && it.source == app.daiyu.android.domain.runtime.UsageRequestSource.SUMMARY) }
         }
         val records = reported.map { Observation(it.request, it.source, it.snapshot) } +
-            summaries.filter { it.requestId !in requests }.map {
+            checkpoint.usageRequests.filter { it.requestId !in requests }.map {
+                Observation(it, app.daiyu.android.domain.runtime.UsageRequestSource.MAIN, null)
+            } + summaries.filter { it.requestId !in requests }.map {
                 Observation(it, app.daiyu.android.domain.runtime.UsageRequestSource.SUMMARY, null)
             }
         require(records.size <= 100) { "child_usage_request_limit" }
@@ -55,7 +59,7 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                 }
             }
             check(records.map { it.request.requestId }.containsAll(priorIds)) { "child_usage_snapshot_lost_request" }
-            records.forEach { record ->
+            records.forEachIndexed { index, record ->
                 check(priorSources[record.request.requestId]?.let { it == record.source.name } != false) {
                     "child_usage_request_source_changed"
                 }
@@ -71,7 +75,16 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                 if (record.request.requestId in priorIds) {
                     check(db.update(TABLE, values, "task_id=? AND request_id=?",
                         arrayOf(task.owner.childRunId, record.request.requestId)) == 1)
-                } else check(db.insertOrThrow(TABLE, null, values) != -1L) { "child_usage_admission_not_persisted" }
+                } else {
+                    if (record.source == app.daiyu.android.domain.runtime.UsageRequestSource.MAIN &&
+                        checkpoint.request?.requestId == record.request.requestId && model != null) {
+                        values.put("provider_id_snapshot", model.providerId); values.put("api_model_snapshot", model.modelId)
+                        values.put("requested_at_ms", System.currentTimeMillis()); values.put("request_sequence", index + 1)
+                        values.put("assigned_profile_snapshot", task.assignedProfileId)
+                        values.put("original_role_snapshot", task.originalRole?.name)
+                    }
+                    check(db.insertOrThrow(TABLE, null, values) != -1L) { "child_usage_admission_not_persisted" }
+                }
                 record.snapshot?.let { snapshot ->
                     app.daiyu.android.storage.ConversationUsageStore.record(db, task.owner.conversationId,
                         record.request.owner, record.request.requestId, snapshot)
@@ -99,6 +112,13 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                 found
             }
             if (!hasPresence) db.execSQL("ALTER TABLE $TABLE ADD COLUMN has_usage INTEGER NOT NULL DEFAULT 1 CHECK(has_usage IN (0,1))")
+            val present = db.rawQuery("PRAGMA table_info($TABLE)", null).use { columns -> buildSet {
+                while (columns.moveToNext()) add(columns.getString(1))
+            } }
+            mapOf("provider_id_snapshot" to "TEXT", "api_model_snapshot" to "TEXT", "requested_at_ms" to "INTEGER",
+                "request_sequence" to "INTEGER", "assigned_profile_snapshot" to "TEXT", "original_role_snapshot" to "TEXT").forEach { (column, type) ->
+                if (column !in present) db.execSQL("ALTER TABLE $TABLE ADD COLUMN $column $type")
+            }
         }
 
         /** Shares the caller's read transaction with parent checkpoint reading. */
@@ -126,14 +146,14 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                         if (count == 0) notStarted++ else unreadable++
                         continue
                     }
-                    if (status !in setOf("RUNNING", "COMPLETED", "UNKNOWN")) { unreadable++; continue }
+                    if (status !in setOf("RUNNING", "COMPLETED", "UNKNOWN", "FAILED")) { unreadable++; continue }
                     if (count == 0) { missing++; continue }
                     if (count > 100) { unreadable++; continue }
                     if (count > maxRequests - result.size) { deferred++; continue }
                     var missingSummary = false
                     val requestOwners = mutableSetOf<String>()
                     val snapshots = try {
-                        db.rawQuery("SELECT request_id,request_owner,attempt_id,operation,input_tokens,output_tokens,cached_tokens,usage_source,cache_creation_tokens,has_usage" +
+                        db.rawQuery("SELECT request_id,request_owner,attempt_id,operation,input_tokens,output_tokens,cached_tokens,usage_source,cache_creation_tokens,has_usage,provider_id_snapshot,api_model_snapshot,requested_at_ms,request_sequence,assigned_profile_snapshot" +
                             " FROM $TABLE WHERE task_id=? ORDER BY rowid", arrayOf(taskId)).use { usage ->
                             buildList {
                                 while (usage.moveToNext()) {
@@ -149,14 +169,19 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                                     val source = app.daiyu.android.domain.runtime.UsageRequestSource.valueOf(usage.getString(7))
                                     require(usage.getType(9) == android.database.Cursor.FIELD_TYPE_INTEGER && usage.getInt(9) in 0..1)
                                     if (usage.getInt(9) == 0) {
-                                        require(source == app.daiyu.android.domain.runtime.UsageRequestSource.SUMMARY && listOf(4, 5, 6, 8).all(usage::isNull))
+                                        require(listOf(4, 5, 6, 8).all(usage::isNull))
                                         missingSummary = true
                                         continue
                                     }
                                     add(AttributedRequestUsage(tasks.getString(1), tasks.getString(2), tasks.getString(3),
                                         taskId, tasks.getString(4), UsageOrigin.Child(taskId, tasks.getString(5), tasks.getString(6)),
                                         request, ModelEvent.Usage(token(4), token(5), token(6), token(8)),
-                                        app.daiyu.android.domain.runtime.UsageRequestSource.valueOf(usage.getString(7))))
+                                        app.daiyu.android.domain.runtime.UsageRequestSource.valueOf(usage.getString(7)),
+                                        historicalModel = if (usage.isNull(10) || usage.isNull(11)) null else
+                                            app.daiyu.android.domain.delegation.ChildRequestModel(usage.getString(10), usage.getString(11)),
+                                        requestedAtMs = if (usage.isNull(12)) null else usage.getLong(12),
+                                        requestSequence = if (usage.isNull(13)) null else usage.getInt(13),
+                                        assignedProfileId = if (usage.isNull(14)) null else usage.getString(14)))
                                 }
                             }
                         }.also { require(requestOwners.size == 1) }

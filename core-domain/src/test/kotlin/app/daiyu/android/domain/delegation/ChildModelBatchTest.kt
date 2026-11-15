@@ -256,13 +256,13 @@ class ChildModelBatchTest {
         } finally { batch.close() }
     }
 
-    @Test fun revokingOneProfileDoesNotCancelItsUnaffectedBatchSibling() {
+    @Test fun revokingOneProfilePausesWithoutCancellingItsUnaffectedBatchSibling() {
         val records = Records(); val valid = java.util.concurrent.atomic.AtomicBoolean(true)
         val entered = CountDownLatch(2); val cancelled = CountDownLatch(1); val finish = CountDownLatch(1)
         val bad = object : ModelPort {
             override fun open(history: List<Message>): ModelSession = object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
-                    entered.countDown(); check(cancelled.await(5, TimeUnit.SECONDS)); throw InterruptedException()
+                    entered.countDown(); check(finish.await(5, TimeUnit.SECONDS)); sink(ModelEvent.TextFinal("t", "old result"))
                 }
                 override fun cancel() { cancelled.countDown() }
             }
@@ -271,16 +271,19 @@ class ChildModelBatchTest {
         val batch = bind(ChildModelBatch(mapOf(
             "bad" to ChildModelDefinition("a", 1, null, null, "old", valid = valid::get) { bad },
             "good" to ChildModelDefinition("b", 1) { good }), store = records))
-        val result = AtomicReference<ExecutionReceipt>(); val worker = Thread {
-            result.set(batch.execute(context(), listOf(ChildModelTask("bad", "old"), ChildModelTask("good", "good"))))
-        }
+        val worker = Thread { batch.execute(context(), listOf(ChildModelTask("bad", "old"), ChildModelTask("good", "good"))) }
         try {
             worker.start(); assertTrue(entered.await(5, TimeUnit.SECONDS)); valid.set(false)
-            batch.configurationChanged { null }; assertTrue(cancelled.await(5, TimeUnit.SECONDS))
-            assertTrue(worker.isAlive); finish.countDown(); worker.join(5000); assertFalse(worker.isAlive)
-            assertTrue(result.get() is ExecutionReceipt.Unknown)
+            batch.configurationChanged { null }; assertFalse(cancelled.await(100, TimeUnit.MILLISECONDS))
+            finish.countDown()
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (batch.snapshots().none { it.record.profileId == "bad" && it.pauseState == ChildTaskPauseState.PAUSED } && System.nanoTime() < deadline) Thread.sleep(5)
+            assertTrue(batch.snapshots().any { it.record.profileId == "bad" && it.pauseState == ChildTaskPauseState.PAUSED && it.configurationPaused })
+            assertTrue(worker.isAlive)
+            assertTrue(records.completed.await(5, TimeUnit.SECONDS))
             assertEquals("kept", records.list(parent.conversationId.value).single { it.profileId == "good" }.text)
-        } finally { finish.countDown(); cancelled.countDown(); batch.close(); worker.join(5000) }
+            assertEquals("old result", batch.snapshots().single { it.record.profileId == "bad" }.let { batch.progress(it.record.owner) })
+        } finally { finish.countDown(); batch.close(); worker.join(5000); assertFalse(worker.isAlive) }
     }
 
     @Test fun failedSiblingCannotEraseAlreadyCommittedChildResult() {

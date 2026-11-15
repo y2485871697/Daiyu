@@ -454,7 +454,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 LockSupport.park()
             }
         }
-        fun boundary(): Boolean {
+        fun boundary(rebind: Boolean = false): Boolean {
             segmentHistory.finishReasoning()
             current = segmentHistory.project(current)
             setPhase(if (pauseRequested) ExecutionPhase.PAUSED else ExecutionPhase.BOUNDARY)
@@ -463,7 +463,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             if (stopped.get() || terminalReserved) throw InterruptedException()
             val acceptedUsers = synchronized(terminalLock) {
                 if (stopped.get() || terminalReserved) throw InterruptedException()
-                if (!breakStream && supplements.isEmpty()) null
+                if (!rebind && !breakStream && supplements.isEmpty()) null
                 else supplements.toList().also {
                     supplements.clear(); breakStream = false
                     execution = execution.copy(queuedSupplements = 0)
@@ -701,7 +701,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             var active = open()
             if (stopped.get()) { cancelSession(active); throw InterruptedException() }
             while (true) {
-                if (boundary()) { cancelSession(active); active = open() }
+                val rebind = round > 0 && (active as? RequestRebindingModelSession)?.needsRebind() == true
+                if (boundary(rebind)) { cancelSession(active); active = open() }
                 if (round > 0 && compactAtBoundary()) {
                     cancelSession(active); active = open()
                 }
@@ -1278,6 +1279,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 round++
                 synchronized(terminalLock) { setPhase(ExecutionPhase.BOUNDARY) }
                 checkpoint()
+                options.onRequestCompletedBoundary()
                 require(pending.none { it.name == "ask_user" } || pending.size == 1) { "ask_user必须独占工具批次" }
                 options.validateBatch(pending.toList())
                 if (pending.any { it.name == "ask_user" }) {

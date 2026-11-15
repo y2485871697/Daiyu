@@ -176,6 +176,7 @@ internal object RuntimeDiagnostics {
     }
     private val sequence = AtomicLong()
     private val dropped = AtomicLong()
+    private val childDropped = AtomicLong()
     private val generation = AtomicLong()
     // Clear-only epoch: broad opt-in toggles must not invalidate automatic back/content evidence.
     private val backGeneration = AtomicLong()
@@ -528,12 +529,47 @@ internal object RuntimeDiagnostics {
         current.appendBytes(bytes)
     }
 
+    fun childTask(event: app.daiyu.android.domain.delegation.ChildTaskDiagnosticEvent) {
+        val epoch = generation.get()
+        if (directory == null || !enabled) return
+        val time = System.currentTimeMillis()
+        try {
+            val row = JSONObject().put("time_ms", time).put("stage", "CHILD_TASK").put("code", event.phase.name)
+                .put("conversation_id", event.owner.conversationId).put("parent_run_id", event.owner.parentRunId)
+                .put("task_group_id", event.owner.taskGroupId).put("child_run_id", event.owner.childRunId)
+                .put("generation", event.owner.generation).put("assigned_profile_id", event.profileId)
+                .put("original_role", event.role?.name ?: JSONObject.NULL)
+                .put("provider_id", event.model?.providerId ?: JSONObject.NULL)
+                .put("model_id", event.model?.modelId ?: JSONObject.NULL)
+                .put("request_id", event.request?.requestId ?: JSONObject.NULL)
+                .put("attempt_id", event.request?.attemptId ?: JSONObject.NULL)
+                .put("request_operation", event.request?.operation?.name ?: JSONObject.NULL)
+                .put("request_sequence", event.requestSequence ?: JSONObject.NULL).toString()
+            executor.execute {
+                try { lock.withLock {
+                    if (enabled && generation.get() == epoch) {
+                        val missing = childDropped.getAndSet(0)
+                        if (missing > 0) append(JSONObject().put("time_ms", time).put("stage", "CHILD_TASK")
+                            .put("code", "DROPPED").put("count", missing).toString())
+                        append(row)
+                    }
+                } }
+                catch (_: Throwable) { childDropped.incrementAndGet() }
+            }
+        } catch (_: Throwable) { childDropped.incrementAndGet() }
+    }
+
+    fun exportChildTasks(): JSONArray {
+        awaitWrites()
+        return exportLocked(childOnly = true)
+    }
+
     fun export(): JSONArray {
         awaitWrites()
         return exportLocked()
     }
 
-    private fun exportLocked(): JSONArray = lock.withLock {
+    private fun exportLocked(childOnly: Boolean = false): JSONArray = lock.withLock {
         val root = directory ?: return@withLock JSONArray()
         val rows = java.util.ArrayDeque<JSONObject>()
         for (i in 2 downTo 0) {
@@ -541,7 +577,10 @@ internal object RuntimeDiagnostics {
             if (!file.exists() || file.length() > FILE_BYTES) continue
             file.useLines { lines -> lines.forEach { line ->
                 if (line.length <= 16 * 1024) try {
-                    rows.addLast(JSONObject(line)); if (rows.size > 256) rows.removeFirst()
+                    val value = JSONObject(line)
+                    if (!childOnly || value.optString("stage") == "CHILD_TASK") {
+                        rows.addLast(value); if (rows.size > (if (childOnly) 1024 else 256)) rows.removeFirst()
+                    }
                 } catch (_: Exception) { }
             } }
         }
@@ -554,6 +593,7 @@ internal object RuntimeDiagnostics {
         active.clear()
         directory?.let { root -> for (i in 0..2) File(root, "trace-$i.jsonl").let { check(!it.exists() || it.delete()) } }
         dropped.set(0)
+        childDropped.set(0)
     }
 
     internal const val FILE_BYTES = 512 * 1024

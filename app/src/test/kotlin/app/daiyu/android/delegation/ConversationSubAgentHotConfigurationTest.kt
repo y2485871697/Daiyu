@@ -55,6 +55,43 @@ class ConversationSubAgentHotConfigurationTest {
             .parallelLimitForPool(owner, key) { error("explicit values must not read the catalog") })
     }
 
+    @Test fun committedEdgesPreventDeletionAndIncompatiblePresetResurrection() {
+        for (destructive in listOf("delete", "role", "preset")) {
+            val repository = ConversationSubAgentPreferences(HotConfigurationPreferences())
+            val a = profile.copy(providerId = "provider", modelId = "model")
+            repository.update(owner) { it.copy(profiles = listOf(a)) }
+            val matching = repository.addPreset("matching")
+            repository.update(SubAgentConfigKey.Preset(matching.id)) { it.copy(profiles = listOf(a.copy(id = "b"))) }
+            val mismatch = repository.addPreset("different")
+            repository.update(SubAgentConfigKey.Preset(mismatch.id)) { it.copy(profiles = listOf(a.copy(modelId = "other"))) }
+            val binding = CommittedProfileBinding(repository.openRuntime(owner), a)
+            when (destructive) {
+                "delete" -> repository.update(owner) { it.copy(profiles = emptyList()) }
+                "role" -> repository.update(owner) { it.copy(profiles = listOf(a.copy(role = "implementation"))) }
+                else -> repository.applyPreset(owner, mismatch.id)
+            }
+            repository.applyPreset(owner, matching.id)
+            assertNull(destructive, binding.current())
+            repository.applyPreset(owner, matching.id)
+            assertNull(binding.current())
+        }
+    }
+    @Test fun onlyCommittedPresetEdgesBridgeIdsAndFailedCommitDoesNotRevoke() {
+        val disk = HotConfigurationPreferences(); val repository = ConversationSubAgentPreferences(disk)
+        val a = profile.copy(providerId = "provider", modelId = "model")
+        repository.update(owner) { it.copy(profiles = listOf(a)) }
+        val preset = repository.addPreset("same model")
+        repository.update(SubAgentConfigKey.Preset(preset.id)) { it.copy(profiles = listOf(a.copy(id = "b"))) }
+        val binding = CommittedProfileBinding(repository.openRuntime(owner), a)
+        disk.failNextCommit = true
+        assertThrows(IllegalStateException::class.java) { repository.update(owner) { it.copy(profiles = emptyList()) } }
+        assertTrue(repository.recoverDurability()); assertEquals(a, binding.current()!!.profile)
+        repository.applyPreset(owner, preset.id)
+        assertEquals("b", binding.current()!!.profile.id)
+        repository.update(owner) { it.copy(profiles = listOf(a), presetApplicationToken = "forged") }
+        assertNull(binding.current())
+    }
+
     private fun assertPoolCapacity(pool: app.daiyu.android.domain.delegation.ChildModelPool, expected: Int) {
         val leases = List(expected + 1) { pool.lease() }
         try {
@@ -80,7 +117,7 @@ class ConversationSubAgentHotConfigurationTest {
     }
 }
 
-private class HotConfigurationPreferences(initial: Map<String, Any?> = emptyMap()) : SharedPreferences {
+internal class HotConfigurationPreferences(initial: Map<String, Any?> = emptyMap()) : SharedPreferences {
     private val values = initial.toMutableMap()
     var failNextCommit = false
     fun reopen() = HotConfigurationPreferences(values.toMap())

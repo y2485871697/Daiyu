@@ -26,6 +26,10 @@ data class AttributedRequestUsage(
     val snapshot: ModelEvent.Usage,
     /** Explicit durable purpose, independent of parent/child attribution and request ID spelling. */
     val source: app.daiyu.android.domain.runtime.UsageRequestSource = app.daiyu.android.domain.runtime.UsageRequestSource.MAIN,
+    val historicalModel: app.daiyu.android.domain.delegation.ChildRequestModel? = null,
+    val requestedAtMs: Long? = null,
+    val requestSequence: Int? = null,
+    val assignedProfileId: String? = null,
 ) {
     init {
         require(conversationId.isNotBlank() && conversationId.length <= 200)

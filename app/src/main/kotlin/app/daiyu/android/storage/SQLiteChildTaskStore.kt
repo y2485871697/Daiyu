@@ -106,7 +106,7 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
         transactions.run { db ->
             val prior = checkNotNull(find(db, task.owner.childRunId)) { "child_task_missing" }
             check(prior.copy(status = ChildTaskStatus.QUEUED, text = "", detail = null,
-                revision = task.revision, display = task.display) == task && prior.status == ChildTaskStatus.RUNNING) {
+                revision = task.revision, display = task.display, assignedProfileId = task.assignedProfileId) == task && prior.status == ChildTaskStatus.RUNNING) {
                 "child_task_owner_mismatch"
             }
             val values = ContentValues().apply {
@@ -115,6 +115,21 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
             }
             check(db.update(TABLE, values, "task_id=? AND status='RUNNING'", arrayOf(task.owner.childRunId)) == 1)
         }
+    }
+
+    override fun reassigned(task: ChildTaskRecord, profileId: String, display: ChildTaskDisplay?): ChildTaskRecord? = transactions.run { db ->
+        val prior = find(db, task.owner.childRunId) ?: return@run null
+        if (prior.owner != task.owner || prior.revision != task.revision || prior.originalRole == null ||
+            prior.status !in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING)) return@run null
+        val next = prior.copy(assignedProfileId = profileId, display = display, revision = Math.incrementExact(prior.revision))
+        val update = ContentValues().apply {
+            put("assigned_profile_id", next.assignedProfileId); put("control_revision", next.revision)
+            put("agent_name_snapshot", display?.agentName); put("model_id_snapshot", display?.modelId)
+            put("model_name_snapshot", display?.modelName)
+        }
+        check(db.update(TABLE, update, "task_id=? AND control_revision=?", arrayOf(task.owner.childRunId, prior.revision.toString())) == 1)
+        check(matchesWrittenTask(db, next)) { "child_assignment_write_mismatch" }
+        next
     }
 
     override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) {
@@ -128,7 +143,7 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
             val prior = db.query(TABLE, COLUMNS, "task_id=?", arrayOf(task.owner.childRunId), null, null, null).use {
                 check(it.moveToFirst()) { "child_task_missing" }; row(it)
             }
-            check(prior.copy(status = ChildTaskStatus.QUEUED, text = "", detail = null, revision = task.revision, display = task.display) == task) { "child_task_owner_mismatch" }
+            check(prior.copy(status = ChildTaskStatus.QUEUED, text = "", detail = null, revision = task.revision, display = task.display, assignedProfileId = task.assignedProfileId) == task) { "child_task_owner_mismatch" }
             check(prior.status !in TERMINAL && (status != ChildTaskStatus.RUNNING || prior.status == ChildTaskStatus.QUEUED)) {
                 "child_task_already_finished"
             }
@@ -166,6 +181,7 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
         put("prompt", task.prompt); put("status", task.status.name); put("text", task.text); put("detail", task.detail)
         put("agent_name_snapshot", task.display?.agentName); put("model_id_snapshot", task.display?.modelId)
         put("model_name_snapshot", task.display?.modelName)
+        put("original_role", task.originalRole?.name); put("assigned_profile_id", task.assignedProfileId)
         if (task.access != ChildToolAccess.NONE) put("tool_access_json", task.access.toJson()) else putNull("tool_access_json")
         put("control_revision", task.revision); put("source_task_id", task.sourceTaskId); put("command_kind", task.commandKind?.name)
     }
@@ -178,13 +194,15 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
         if (c.isNull(16)) null else ChildTaskCommandKind.valueOf(c.getString(16)),
         if (c.isNull(17) && c.isNull(18) && c.isNull(19)) null else
             ChildTaskDisplay(c.getString(17), c.getString(18), c.getString(19)),
-        if (c.isNull(20)) ChildToolAccess.NONE else ChildToolAccess.fromJson(c.getString(20)))
+        if (c.isNull(20)) ChildToolAccess.NONE else ChildToolAccess.fromJson(c.getString(20)),
+        if (c.isNull(21)) null else ChildModelRole.valueOf(c.getString(21)),
+        if (c.isNull(22)) c.getString(9) else c.getString(22))
 
     companion object {
         private const val TABLE = "child_tasks"
         private val COLUMNS = arrayOf("task_id", "conversation_id", "parent_run_id", "parent_message_id", "parent_owner_id",
             "task_group_id", "generation", "task_index", "assistant_message_id", "profile_id", "prompt", "status", "text", "detail",
-            "control_revision", "source_task_id", "command_kind", "agent_name_snapshot", "model_id_snapshot", "model_name_snapshot", "tool_access_json")
+            "control_revision", "source_task_id", "command_kind", "agent_name_snapshot", "model_id_snapshot", "model_name_snapshot", "tool_access_json", "original_role", "assigned_profile_id")
         private val TERMINAL = setOf(ChildTaskStatus.COMPLETED, ChildTaskStatus.NOT_EXECUTED, ChildTaskStatus.UNKNOWN, ChildTaskStatus.FAILED)
 
         fun installSchema(db: SQLiteDatabase) {
@@ -197,6 +215,15 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
             installCommandSchema(db)
             installDisplaySchema(db)
             installAccessSchema(db)
+            installAssignmentSchema(db)
+        }
+
+        fun installAssignmentSchema(db: SQLiteDatabase) {
+            val columns = db.rawQuery("PRAGMA table_info(child_tasks)", null).use { c ->
+                buildSet { while (c.moveToNext()) add(c.getString(1)) }
+            }
+            if ("original_role" !in columns) db.execSQL("ALTER TABLE child_tasks ADD COLUMN original_role TEXT")
+            if ("assigned_profile_id" !in columns) db.execSQL("ALTER TABLE child_tasks ADD COLUMN assigned_profile_id TEXT")
         }
 
         fun installAccessSchema(db: SQLiteDatabase) {

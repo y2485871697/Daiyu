@@ -62,7 +62,8 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertIn('(state.bounded || protectClearance()) && list != null', source)
         self.assertIn('nestedTail.migrating || nestedTail.followCatchup', source)
         self.assertEqual(2, source.count('while (followBottom && (disclosureViewport.active != null || nestedTail.followCatchup ||'))
-        self.assertIn('if (!protectClearance()) state.followCatchup = false', source)
+        self.assertIn('val protect = protectClearance()', source)
+        self.assertIn('if (!protect) state.followCatchup = false', source)
         self.assertNotIn('16.dp.roundToPx()', source)
         self.assertNotIn('24.dp.roundToPx()', source)
 

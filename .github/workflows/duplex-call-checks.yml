@@ -14,7 +14,7 @@ on:
         type: string
         required: true
       validation_sha:
-        description: 可选已审验证源，仅覆盖语音反馈契约及一个JVM夹具，不改冻结生产/设备测试
+        description: 可选已审验证源，仅覆盖两项通话契约及一个JVM夹具，不改冻结生产/设备测试
         type: string
         required: false
         default: ''
@@ -69,7 +69,8 @@ jobs:
           assert re.fullmatch('[0-9a-f]{40}', validation)
           subprocess.run(['git', 'merge-base', '--is-ancestor', source, validation], check=True)
           subprocess.run(['git', 'merge-base', '--is-ancestor', validation, workflow], check=True)
-          files = ('tests/test_chat_voice_feedback_contract.py',
+          files = ('tests/test_doubao_call_sheet_contract.py',
+                   'tests/test_chat_voice_feedback_contract.py',
                    'app/src/test/kotlin/app/daiyu/android/VoiceCallPresentationOwnerTest.kt')
           records = []
           for path in files:

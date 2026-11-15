@@ -13,7 +13,8 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
         self.assertIn('voiceAnchor.translate(-overlayOrigin)', screen)
         self.assertIn('composerTop = composerBounds', screen)
         main = (SRC / 'MainActivity.kt').read_text()
-        self.assertIn('callUi = shownVoiceCall()', main)
+        self.assertIn('val pageCallUi = shownVoiceCall()', main)
+        self.assertIn('callUi = pageCallUi,', main)
         self.assertIn('else doubaoCallActions()', main)
         self.assertNotIn('engineeringUi || remoteVoice.duplexActive', main)
 

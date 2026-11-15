@@ -206,7 +206,8 @@ jobs:
             classes=(MessageImageContractTest)
             filters=(--tests app.daiyu.android.ui.screens.search.MessageSearchRequestStateTest
                      --tests app.daiyu.android.ui.screens.search.SearchRequestStateTest
-                     --tests app.daiyu.android.ui.screens.search.ConversationSearchResultsTest)
+                     --tests app.daiyu.android.ui.screens.search.ConversationSearchResultsTest
+                     --tests app.daiyu.android.ui.screens.search.SearchHighlightTest)
           fi
           if [[ "$WORKFLOW_CHECK_SCOPE" == conversation-date ]]; then
             classes=()
@@ -270,7 +271,7 @@ jobs:
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'legacy-restore':
               expected = {'LegacyReconnectRestoreTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'search-history':
-              expected = {'MessageImageContractTest', 'MessageSearchRequestStateTest', 'SearchRequestStateTest', 'ConversationSearchResultsTest'}
+              expected = {'MessageImageContractTest', 'MessageSearchRequestStateTest', 'SearchRequestStateTest', 'ConversationSearchResultsTest', 'SearchHighlightTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'conversation-date':
               expected = {'ConversationDrawerGroupsTest', 'ConversationPreviewTest', 'BackupConversationMergeTest', 'MessageDisplayStoreTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'ime':

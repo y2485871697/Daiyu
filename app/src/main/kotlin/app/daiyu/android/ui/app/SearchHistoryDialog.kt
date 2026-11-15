@@ -33,6 +33,8 @@ import androidx.compose.ui.semantics.onClick as semanticsClick
 import androidx.compose.ui.semantics.semantics
 import app.daiyu.android.ui.haptics.TouchHaptics
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -42,6 +44,9 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.R
 import app.daiyu.android.ui.components.UsageGlassDialog
 import app.daiyu.android.ui.model.MessageSearchHit
+import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
+import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
+import app.daiyu.android.ui.screens.search.highlightSearchBody
 import app.daiyu.android.ui.screens.assistants.AssistantSearchField
 import app.daiyu.android.ui.screens.search.MessageSearchPageReader
 import app.daiyu.android.ui.screens.search.MessageSearchRequest
@@ -71,6 +76,7 @@ internal fun SearchHistoryDialog(
 ) {
     val scope = rememberCoroutineScope()
     val feedbackView = LocalView.current
+    val colors = assistantPreviewPalette()
     val requests = remember(scope) { MessageSearchRequestState(scope) }
     val snapshot = requests.state.collectAsState().value
     val latestSearch by rememberUpdatedState(onSearchPage)
@@ -79,16 +85,20 @@ internal fun SearchHistoryDialog(
     var resumed by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var query by remember(conversationId) { mutableStateOf("") }
     var searchFocused by remember(conversationId) { mutableStateOf(false) }
-    val request = MessageSearchRequest(query.trim(), conversationId)
+    var searchAll by remember(conversationId) { mutableStateOf(false) }
+    val request = MessageSearchRequest(query.trim(), if (searchAll) null else conversationId)
+    val scopeAvailable = searchAll || conversationId != null
     val listState = remember(request) { LazyListState() }
     val loadingListState = rememberLazyListState()
     var visit by remember(lifecycle) { mutableStateOf(Any()) }
     val renderedVisit = visit
     var searchedQuery by remember(conversationId) { mutableStateOf<String?>(null) }
+    var searchedRequest by remember(conversationId) { mutableStateOf<MessageSearchRequest?>(null) }
+    var searchedAll by remember(conversationId) { mutableStateOf(false) }
 
     fun available() = visit === renderedVisit && currentOwner() && lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
     fun search() {
-        if (available() && conversationId != null && request.query.isNotEmpty()) {
+        if (available() && scopeAvailable && request.query.isNotEmpty()) {
             requests.start(request, debounceMillis = 180, read = latestSearch)
         } else requests.cancel()
     }
@@ -103,9 +113,11 @@ internal fun SearchHistoryDialog(
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer); requests.cancel() }
     }
-    LaunchedEffect(request, query, resumed) {
-        if (available() && searchedQuery != query) {
+    LaunchedEffect(request, query, searchAll, resumed) {
+        if (available() && (searchedQuery != query || searchedRequest != request || searchedAll != searchAll)) {
             searchedQuery = query
+            searchedRequest = request
+            searchedAll = searchAll
             search()
         }
     }
@@ -115,7 +127,7 @@ internal fun SearchHistoryDialog(
     ) else null
     val renderReadOnly = !resumed
     val useResultsPosition = renderFrame != null
-    val showInitialLoading = request.query.isNotBlank() && conversationId != null &&
+    val showInitialLoading = request.query.isNotBlank() && scopeAvailable &&
         (phase == SearchPhase.Idle || phase == SearchPhase.Loading)
     fun requestCurrent(): Boolean {
         val now = requests.state.value
@@ -137,14 +149,24 @@ internal fun SearchHistoryDialog(
             }, placeholder = stringResource(R.string.search_history_hint),
                 focused = searchFocused, onFocusChanged = { searchFocused = it },
                 modifier = Modifier.padding(bottom = 8.dp).testTag("search-history-search"),
-                fieldModifier = Modifier.testTag("search:query"))
+                fieldModifier = Modifier.testTag("search:query"),
+                trailingContent = {
+                    AssistantPreviewButton(stringResource(if (searchAll) R.string.search_history_scope_all
+                        else R.string.search_history_scope_current), onClick = {
+                        if (available()) {
+                            requests.cancel()
+                            searchAll = !searchAll
+                        }
+                    }, modifier = Modifier.testTag("search:scope"),
+                        compact = true, enabled = resumed)
+                })
             Box(Modifier.fillMaxWidth().weight(1f).testTag("search-history-content")) {
                 LazyColumn(Modifier.fillMaxSize()
                     .testTag("search-history-results"),
                     state = if (useResultsPosition) listState else loadingListState) {
                     when {
                         request.query.isBlank() -> Unit
-                        conversationId == null -> item("empty-draft") {
+                        !scopeAvailable -> item("empty-draft") {
                             SearchNotice(stringResource(R.string.search_history_no_results), "search:empty")
                         }
                         phase == SearchPhase.ReadError -> item("error") { SearchReadError { retrySearch() } }
@@ -153,13 +175,13 @@ internal fun SearchHistoryDialog(
                         }
                         renderFrame != null -> {
                             itemsIndexed(renderFrame.rows,
-                                key = { index, hit -> "${hit.messageId.length}:${hit.messageId}:${hit.segmentIndex}:$index" },
+                                key = { index, hit -> "${hit.conversationId.length}:${hit.conversationId}:${hit.messageId.length}:${hit.messageId}:${hit.segmentIndex}:$index" },
                             ) { _, hit ->
                                 val generation = snapshot.generation
                                 val openHit: () -> Unit = {
                                     val now = requests.state.value
                                     if (!renderReadOnly && available() && now.generation == generation && now.request == request &&
-                                        now.phase == SearchPhase.Results && hit.conversationId == conversationId) {
+                                        now.phase == SearchPhase.Results && (searchAll || hit.conversationId == conversationId)) {
                                         TouchHaptics.action(feedbackView) { onOpenHit(hit) }
                                     }
                                 }
@@ -169,7 +191,11 @@ internal fun SearchHistoryDialog(
                                         .semantics { semanticsClick { openHit(); true } }
                                         .clickable(clickFeedback = false, onClick = openHit) else Modifier)
                                     .padding(vertical = 10.dp, horizontal = 4.dp)) {
-                                    Text("${hit.roleLabel} · ${hit.snippet}", fontSize = 14.sp, lineHeight = 21.sp,
+                                    Text(remember(hit.roleLabel, hit.snippet, request.query, colors.accent) {
+                                        highlightSearchBody(hit.roleLabel, hit.snippet, request.query,
+                                            SpanStyle(color = colors.accent, background = colors.accent.copy(alpha = .16f),
+                                                fontWeight = FontWeight.SemiBold))
+                                    }, fontSize = 14.sp, lineHeight = 21.sp,
                                         color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                                         maxLines = 2, overflow = TextOverflow.Ellipsis)
                                 }

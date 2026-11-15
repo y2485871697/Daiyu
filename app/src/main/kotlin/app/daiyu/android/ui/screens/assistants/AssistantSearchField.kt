@@ -33,6 +33,7 @@ internal fun AssistantSearchField(
     onFocusChanged: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     fieldModifier: Modifier = Modifier,
+    trailingContent: (@Composable () -> Unit)? = null,
 ) {
     val colors = assistantPreviewPalette()
     val s = assistantPreviewScale()
@@ -54,5 +55,6 @@ internal fun AssistantSearchField(
                     innerTextField()
                 }
             })
+        trailingContent?.invoke()
     }
 }

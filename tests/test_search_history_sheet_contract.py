@@ -49,7 +49,7 @@ class SearchHistorySheetContract(unittest.TestCase):
 
     def test_search_and_owner_guards_remain_wired(self):
         dialog = (SRC / 'ui/app/SearchHistoryDialog.kt').read_text()
-        for token in ('it.take(1000)', 'MessageSearchRequest(query.trim(), conversationId)',
+        for token in ('it.take(1000)', 'MessageSearchRequest(query.trim(), if (searchAll) null else conversationId)',
                       'debounceMillis = 180', 'now.generation == generation', 'hit.conversationId == conversationId',
                       'requests.cancel(); onDismiss()', 'SearchAppendPhase.Invalidated'):
             self.assertIn(token, dialog)
@@ -59,7 +59,7 @@ class SearchHistorySheetContract(unittest.TestCase):
         dialog = (SRC / 'ui/app/SearchHistoryDialog.kt').read_text()
         self.assertIn('filterIsInstance<MessageBlock.Text>()', source)
         self.assertNotIn('block.invocation', source)
-        self.assertIn('"${hit.roleLabel} · ${hit.snippet}"', dialog)
+        self.assertIn('highlightSearchBody(hit.roleLabel, hit.snippet, request.query', dialog)
         self.assertIn('contentAlignment = Alignment.Center', dialog)
         self.assertIn('SearchHistoryLoading()', dialog)
         self.assertIn('SearchAppendPhase.Loading -> SearchHistoryLoading(', dialog)
@@ -109,3 +109,28 @@ class SearchHistorySheetContract(unittest.TestCase):
                  'requestScroll(hit.messageId, false, hit.segmentIndex)')
         positions = [action.index(step) for step in steps]
         self.assertEqual(sorted(positions), positions)
+
+    def test_scope_toggle_reuses_log_button_and_restarts_scope_without_losing_query(self):
+        dialog = (SRC / 'ui/app/SearchHistoryDialog.kt').read_text()
+        field = (SRC / 'ui/screens/assistants/AssistantSearchField.kt').read_text()
+        host = (SRC / 'MainActivity.kt').read_text()
+        for token in ('trailingContent = {', 'AssistantPreviewButton(', 'compact = true',
+                      'requests.cancel()\n                            searchAll = !searchAll',
+                      'searchedAll != searchAll', 'scopeAvailable = searchAll || conversationId != null'):
+            self.assertIn(token, dialog)
+        self.assertIn('trailingContent?.invoke()', field)
+        self.assertIn('retainedData.searchPage(request.query, request.conversationId, cursor', host)
+        action = host.split('private fun historySearchHitAction(', 1)[1].split('private fun closeSearch', 1)[0]
+        self.assertNotIn('hit.conversationId == page.conversationId', action)
+        for guard in ('epoch == historySearchEpoch', 'searchPage === page',
+                      'selected?.id?.value == page.conversationId', 'Lifecycle.State.RESUMED'):
+            self.assertIn(guard, action)
+
+    def test_highlight_is_literal_body_only_and_targeted_cloud_tests_include_it(self):
+        source = (SRC / 'ui/screens/search/SearchHighlight.kt').read_text()
+        self.assertIn('val bodyStart = length', source)
+        self.assertIn('body.indexOf(needle, startIndex = from, ignoreCase = true)', source)
+        self.assertIn('addStyle(highlight, bodyStart + at, bodyStart + at + needle.length)', source)
+        self.assertNotIn('Regex(', source)
+        workflow = (ROOT / '.github/workflows/chat-workflow-checks.yml').read_text()
+        self.assertIn('--tests app.daiyu.android.ui.screens.search.SearchHighlightTest', workflow)

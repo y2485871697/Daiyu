@@ -36,6 +36,7 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
     private val tag = "search:message:current:segment:1"
 
     private fun show(dark: Boolean = false, scale: Float = 1f, fontScale: Float = 1f,
+        conversationId: String? = "current",
         reader: MessageSearchPageReader = { _, _, _ -> MessageSearchPage(listOf(hit)) }) {
         mainThread {
             visible = true
@@ -48,7 +49,7 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
                         AgentAppTheme(AppearanceSettings(interfaceScale = scale,
                             themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                             applyInterfaceScale = true) {
-                            if (visible) SearchHistoryDialog("current", reader,
+                            if (visible) SearchHistoryDialog(conversationId, reader,
                                 onOpenHit = { opened = it; visible = false },
                                 onDismiss = { dismissals++; visible = false }, ownerCurrent = { visible })
                         }
@@ -57,6 +58,93 @@ class SearchHistoryDialogTest : WiredActivityTestCase() {
             }
         }
         ui.waitForIdle()
+    }
+
+    fun testScopeButtonKeepsQueryAndHighlightsEveryBodyMatchInBothThemes() {
+        for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
+            val reads = AtomicInteger()
+            val globalHit = hit.copy(conversationId = "other", snippet = "用好工具，再用一次")
+            show(dark, scale, reader = { request, _, _ ->
+                reads.incrementAndGet()
+                assertEquals("用", request.query)
+                MessageSearchPage(listOf(if (request.conversationId == null) globalHit
+                    else hit.copy(snippet = "用好工具，再用一次")))
+            })
+            node("search:scope").assertTextEquals("当前")
+            node("search:query").performTextReplacement("用")
+            dismissIme()
+            awaitUniqueTag(tag)
+            val spans = node(tag).fetchSemanticsNode().config[SemanticsProperties.Text].single().spanStyles
+            assertEquals(listOf(5 to 6, 11 to 12), spans.map { it.start to it.end })
+            val field = node("search-history-search").fetchSemanticsNode().boundsInRoot
+            val input = node("search:query").fetchSemanticsNode().boundsInRoot
+            val button = node("search:scope").fetchSemanticsNode().boundsInRoot
+            assertTrue(button.left >= input.right && button.right <= field.right)
+            assertTrue(button.top >= field.top && button.bottom <= field.bottom)
+            val oldClick = checkNotNull(node(tag).fetchSemanticsNode().config[SemanticsActions.OnClick].action)
+            node("search:scope").performClick()
+            node("search:scope").assertTextEquals("全部")
+            node("search:query").assertEditableText("用")
+            val globalTag = "search:message:other:segment:1"
+            awaitUniqueTag(globalTag)
+            node(tag).assertDoesNotExist()
+            mainThread { oldClick() }
+            assertNull(opened)
+            realPauseResume(activity)
+            node("search:scope").assertTextEquals("全部")
+            node(globalTag).assertIsDisplayed()
+            assertEquals(2, reads.get())
+            node("search:scope").performClick()
+            awaitUniqueTag(tag)
+            node(globalTag).assertDoesNotExist()
+            assertEquals(3, reads.get())
+            node("search:scope").performClick()
+            awaitUniqueTag(globalTag)
+            node(globalTag).performClick()
+            assertEquals(globalHit, opened)
+        }
+    }
+
+    fun testDraftCanSwitchToAllAndLateOldScopeCannotReplaceResults() {
+        val reads = AtomicInteger()
+        val globalHit = hit.copy(conversationId = "other")
+        show(conversationId = null, reader = { request, _, _ ->
+            reads.incrementAndGet()
+            assertNull(request.conversationId)
+            MessageSearchPage(listOf(globalHit))
+        })
+        node("search:query").performTextReplacement("历史")
+        dismissIme()
+        node("search:empty").assertExists()
+        assertEquals(0, reads.get())
+        node("search:scope").performClick()
+        awaitUniqueTag("search:message:other:segment:1")
+        assertEquals(1, reads.get())
+        node("search:scope").performClick()
+        node("search:empty").assertExists()
+        node("search:message:other:segment:1").assertDoesNotExist()
+        assertEquals(1, reads.get())
+
+        val entered = CountDownLatch(1); val release = CountDownLatch(1); val finished = CountDownLatch(1)
+        try {
+            show(reader = { request, _, _ ->
+                if (request.conversationId != null) {
+                    entered.countDown()
+                    try { check(release.await(10, TimeUnit.SECONDS)) } finally { finished.countDown() }
+                }
+                MessageSearchPage(listOf(if (request.conversationId == null) globalHit else hit))
+            })
+            node("search:query").performTextReplacement("历史")
+            ui.mainClock.advanceTimeBy(200)
+            ui.waitUntil(5_000) { entered.count == 0L }
+            node("search:scope").performClick()
+            awaitUniqueTag("search:message:other:segment:1")
+            release.countDown()
+            assertTrue(finished.await(5, TimeUnit.SECONDS))
+            ui.waitForIdle()
+            node("search:message:other:segment:1").assertIsDisplayed()
+            node(tag).assertDoesNotExist()
+        } finally { release.countDown() }
     }
 
     fun testSilentBlankCompactRowsAndExactHitInBothThemesAndScales() {

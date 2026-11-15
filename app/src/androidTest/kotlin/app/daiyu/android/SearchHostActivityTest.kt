@@ -116,6 +116,47 @@ class SearchHostActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testChatAllScopeOpensOtherConversationOlderMessageAndKeepsOriginDraft() {
+        val (origin, _) = seed("搜索起点", "scope-origin", "跨会话唯一词")
+        val (target, older) = seed("全部搜索目标", "scope-target", "跨会话唯一词", later = 30)
+        mainThread { activity.select(origin) }
+        setDraft("起点未发送草稿")
+        openMessages()
+        replaceSearchQuery("跨会话唯一词")
+        val targetTag = "search:message:${target.id.value}:${older.id.value}:0"
+        awaitTag("search:message:${origin.id.value}:scope-origin-user-0:0")
+        node(targetTag).assertDoesNotExist()
+        node("search:scope").performClick()
+        node("search:scope").assertTextEquals("全部")
+        awaitTag(targetTag)
+        node("search-history-results").scrollToDescendant(hasTestTag(targetTag))
+        node(targetTag).performClick()
+        awaitTag("chat-turn:${older.id.value}")
+        node("chat-turn:${older.id.value}").assertIsDisplayed()
+        node("chat-title").assertTextEquals("全部搜索目标")
+        node("search-history-dialog").assertDoesNotExist()
+        assertEquals("起点未发送草稿", fixture.database.conversations().single { it.id == origin.id }.draft)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testDraftAllScopeCanOpenAnotherConversation() {
+        val (target, message) = seed("草稿全局目标", "draft-all", "草稿全局正文词")
+        mainThread { activity.select(null) }
+        setDraft("无会话未发送草稿")
+        openMessages()
+        replaceSearchQuery("草稿全局正文词")
+        node("search:empty").assertExists()
+        node("search:scope").performClick()
+        val tag = "search:message:${target.id.value}:${message.id.value}:0"
+        awaitTag(tag)
+        node(tag).performClick()
+        awaitTag("chat-turn:${message.id.value}")
+        node("chat-turn:${message.id.value}").assertIsDisplayed()
+        node("chat-title").assertTextEquals("草稿全局目标")
+        assertEquals("无会话未发送草稿", fixture.database.draft())
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testSearchHitOpensSupplementAndLaterRepeatedAssistantSegment() {
         val (conversation, _) = seed("分段检索", "segments", "普通提问", later = 30, segmentedFirstAnswer = true)
         val ownerId = MessageId("segments-answer-0")

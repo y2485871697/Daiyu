@@ -3022,8 +3022,8 @@ class MainActivity : ComponentActivity() {
                     key(page) {
                         SearchHistoryDialog(conversationId = page.conversationId,
                             onSearchPage = { request, cursor, signal ->
-                                check(page.conversationId != null && request.conversationId == page.conversationId)
-                                retainedData.searchPage(request.query, page.conversationId, cursor,
+                                check(request.conversationId == null || request.conversationId == page.conversationId)
+                                retainedData.searchPage(request.query, request.conversationId, cursor,
                                     cancellationSignal = signal)
                             }, ownerCurrent = {
                                 activityUsable() && searchPage === page && retainedPage == page.route &&
@@ -6762,7 +6762,7 @@ class MainActivity : ComponentActivity() {
         val epoch = historySearchEpoch
         return { hit ->
             if (activityUsable() && epoch == historySearchEpoch && searchPage === page && retainedPage == page.route &&
-                selected?.id?.value == page.conversationId && hit.conversationId == page.conversationId &&
+                selected?.id?.value == page.conversationId &&
                 lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
                 guard { openHistoryHit(hit) }
             }

@@ -37,6 +37,7 @@ JAVA_SECOND_SOURCE = (
 
 class SourceTests(unittest.TestCase):
     def test_call_clock_fixture_keeps_strict_raster_assertions(self):
+        self.assertIn('app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest,app.daiyu.android.ControllerReasoningFreezeTest', (ROOT / "scripts/smoke_boot.sh").read_text())
         script = (ROOT / 'scripts/smoke_boot.sh').read_text()
         setup = script.split('  if test "$api" = 26 && test "${SMOKE_MODE:-}" = smoke &&', 1)[1].split('  instrumentation_options=()', 1)[0]
         self.assertIn('test "${SMOKE_TEST_CLASSES:-}" = "app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest"', setup)

@@ -2272,7 +2272,7 @@ class ChatController internal constructor(private val application:Application,
             while (true) {
                 val abandoned = database.temporaryVoiceConversations()
                 if (abandoned.isEmpty()) break
-                abandoned.forEach { database.delete(it) }
+                abandoned.forEach { reasoningPreference.forget(it.value); database.delete(it) }
             }
             app.daiyu.android.voice.control.VoiceCallTempFiles.recover(application.cacheDir)
             childSupervisor=app.daiyu.android.domain.delegation.RetainedChildTasks(runtime.childTasks, usageRecorder=runtime.childUsage)
@@ -2493,10 +2493,17 @@ class ChatController internal constructor(private val application:Application,
         if (!admitted) { complete(null); return }
         executor.execute {
             val value = runCatching {
+                val inheritedReasoning = reasoningPreference.snapshot(source?.value)
                 val temporary = database.create(source?.let(database::assistantId) ?: assistantStore.selectedId.value,
                     modelSource = source, temporaryVoice = true)
-                try { VoiceCallStart(temporary, freezeConversationProvider(temporary.id).settings.model) }
-                catch (failure: Exception) { database.delete(temporary.id); throw failure }
+                try {
+                    reasoningPreference.set(temporary.id.value, inheritedReasoning)
+                    VoiceCallStart(temporary, freezeConversationProvider(temporary.id).settings.model)
+                } catch (failure: Exception) {
+                    reasoningPreference.forget(temporary.id.value)
+                    database.delete(temporary.id)
+                    throw failure
+                }
             }.getOrNull()
             handler.post { complete(value) }
         }
@@ -2512,6 +2519,7 @@ class ChatController internal constructor(private val application:Application,
                 }
                 executor.execute {
                     try {
+                        reasoningPreference.forget(owner.value)
                         database.delete(owner)
                         app.daiyu.android.voice.control.VoiceCallTempFiles.clear(application.cacheDir, owner.value)
                     } catch (_: Exception) {
@@ -4998,7 +5006,7 @@ class ChatController internal constructor(private val application:Application,
                     while (true) {
                         val temporary = database.temporaryVoiceConversations()
                         if (temporary.isEmpty()) break
-                        temporary.forEach { database.delete(it) }
+                        temporary.forEach { reasoningPreference.forget(it.value); database.delete(it) }
                     }
                     app.daiyu.android.voice.control.VoiceCallTempFiles.recover(application.cacheDir)
                 } catch (_: Exception) { problem = "临时语音清理未完成" }

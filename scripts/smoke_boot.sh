@@ -307,9 +307,11 @@ workspace_entry_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".
                            for name in workspace_entry_target}
 doubao_motion_target = {"app.daiyu.android.ui.screens.chat.conversation." + name for name in (
     "DoubaoCallOverlayTest", "DoubaoCallOrbPixelsTest", "DoubaoCallOverlayZeroDurationTest")}
-doubao_motion_only = mode == "smoke" and sorted(raw_filter.split(",")) == sorted(doubao_motion_target)
+doubao_motion_reasoning_target = doubao_motion_target | {"app.daiyu.android.ControllerReasoningFreezeTest"}
+doubao_motion_only = mode == "smoke" and sorted(raw_filter.split(",")) in (
+    sorted(doubao_motion_target), sorted(doubao_motion_reasoning_target))
 doubao_motion_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
-                         for name in doubao_motion_target}
+                         for name in raw_filter.split(",")} if doubao_motion_only else set()
 provider_catalog_target = (
     "app.daiyu.android.ui.screens.settings.ProviderCatalogSettingsScreenTest",
     "app.daiyu.android.LocalCatalogModelsActivityTest",
@@ -643,7 +645,8 @@ adb_stage install-app 120 install "$APK" 2>&1 | tee smoke/install.txt
 adb_stage install-tests 120 install delivery/tests/platform-test.apk 2>&1 | tee smoke/test-install.txt
 if test "$expected" -gt 0; then
   if test "$api" = 26 && test "${SMOKE_MODE:-}" = smoke &&
-      test "${SMOKE_TEST_CLASSES:-}" = "app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest"; then
+      { test "${SMOKE_TEST_CLASSES:-}" = "app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest" ||
+        test "${SMOKE_TEST_CLASSES:-}" = "app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest,app.daiyu.android.ControllerReasoningFreezeTest"; }; then
     call_clock_previous=$(adb_stage call-clock-previous 15 shell settings get global sysui_demo_allowed | tr -d '\r')
     [[ "$call_clock_previous" =~ ^(null|0|1)$ ]]
     call_clock_demo=1

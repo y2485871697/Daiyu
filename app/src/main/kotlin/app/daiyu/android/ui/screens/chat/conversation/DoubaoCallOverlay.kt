@@ -99,7 +99,7 @@ data class DoubaoCallUi(
     val searchCompletion: String? = null,
     val responseLabel: String = "豆包",
     val captionEpoch: Long = 0,
-
+    val errorTitle: String = "连接遇到问题",
 )
 
 data class DoubaoCallActions(
@@ -461,7 +461,7 @@ private fun DoubaoCallUi.statusLabel(): String = if (compressing) "正在整理�
     DoubaoCallVisualState.RESPONDING -> if (modelSelectable) "正在回应" else "豆包正在回应"
     DoubaoCallVisualState.MUTED -> "麦克风已静音"
     DoubaoCallVisualState.ENDED -> "通话已结束"
-    DoubaoCallVisualState.ERROR -> "连接遇到问题"
+    DoubaoCallVisualState.ERROR -> errorTitle
 }
 
 @Composable

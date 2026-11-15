@@ -18,7 +18,8 @@ internal class VoiceCallPresentationOwner {
         initialCompression = completedCompression
         compressionStarted = false
         state = DoubaoCallUi(--serial, conversation, startedAtMillis = now,
-            title = voiceCallModelShortName(modelName), modelSelectable = true, responseLabel = "助手")
+            title = voiceCallModelShortName(modelName), modelSelectable = true, responseLabel = "助手",
+            errorTitle = "通话遇到问题")
     }
     fun update(value: VoiceControlState, speaker: Boolean, compressing: Boolean, completedCompression: String?, now: Long) {
         val previous = state ?: return
@@ -47,7 +48,9 @@ internal class VoiceCallPresentationOwner {
                     VoiceControlStopReason.RELEASE_FAILED -> "语音资源释放未确认"
                     VoiceControlStopReason.CONFIGURATION_CHANGED -> "请检查语音配置"
                     VoiceControlStopReason.EXPIRED -> "本次个人音色授权已到期，请重新拨打"
-                    VoiceControlStopReason.RESPONSE_FAILED, VoiceControlStopReason.REJECTED -> "回答未完成，请重新拨打"
+                    VoiceControlStopReason.RESPONSE_FAILED -> value.unsupportedReasoning?.unsupportedMessage
+                        ?: "回答未完成，请重新拨打"
+                    VoiceControlStopReason.REJECTED -> "回答未完成，请重新拨打"
                     else -> null
                 }
                 else -> null

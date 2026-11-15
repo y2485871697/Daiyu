@@ -11,6 +11,7 @@ internal class ConversationReasoningPreference(private val values: KeyValue) {
     interface KeyValue {
         fun get(key: String): String?
         fun set(key: String, value: String)
+        fun remove(key: String)
     }
 
     constructor(preferences: SharedPreferences) : this(object : KeyValue {
@@ -19,6 +20,12 @@ internal class ConversationReasoningPreference(private val values: KeyValue) {
         override fun set(key: String, value: String) {
             check(preferences.edit().putString(key, value).commit() && preferences.getString(key, null) == value) {
                 "思考偏好保存未确认；请重新保存"
+            }
+        }
+
+        override fun remove(key: String) {
+            check(preferences.edit().remove(key).commit() && !preferences.contains(key)) {
+                "思考偏好清理未确认"
             }
         }
     })
@@ -33,6 +40,18 @@ internal class ConversationReasoningPreference(private val values: KeyValue) {
 
     @Synchronized fun set(conversationId: String?, effort: ReasoningEffort) {
         save(key(conversationId), effort)
+    }
+
+    @Synchronized fun forget(conversationId: String) {
+        val key = key(conversationId)
+        try {
+            values.remove(key)
+            check(values.get(key) == null) { "思考偏好清理未确认" }
+            unconfirmed.remove(key)
+        } catch (failure: Exception) {
+            unconfirmed.add(key)
+            throw failure
+        }
     }
 
     private fun save(key: String, requested: ReasoningEffort) {

@@ -253,7 +253,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
     private fun body(session: Call, answer: Answer, value: VoiceAssistantBody) {
         if (!current(session) || session.answer !== answer || value.owner != answer.owner || !admitted(session)) return
         if (value.status !in setOf(VoiceBodyStatus.STREAMING, VoiceBodyStatus.COMPLETE) || value.text.length > MAX_TEXT) {
-            end(session, VoiceControlStopReason.RESPONSE_FAILED); return
+            end(session, VoiceControlStopReason.RESPONSE_FAILED,
+                value.unsupportedReasoning.takeIf { value.status == VoiceBodyStatus.FAILED }); return
         }
         if (answer.final) return
         session.reply = value.text
@@ -299,7 +300,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         if (stop) attempt { ports.stopAcceptedRun(answer.owner) }
         if (failed) { releaseFailed = true; if (current(session)) end(session, VoiceControlStopReason.RELEASE_FAILED) }
     }
-    private fun end(session: Call, reason: VoiceControlStopReason) {
+    private fun end(session: Call, reason: VoiceControlStopReason,
+        unsupportedReasoning: app.daiyu.android.domain.RequestReasoningEffort? = null) {
         if (call !== session) return
         call = null
         var failed = false
@@ -314,7 +316,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         if (failed) releaseFailed = true
         mutable.value = VoiceControlState(phase = VoiceControlPhase.STOPPED,
             permitId = session.permit.id, profile = session.permit.profile,
-            reason = if (failed || releaseFailed) VoiceControlStopReason.RELEASE_FAILED else reason)
+            reason = if (failed || releaseFailed) VoiceControlStopReason.RELEASE_FAILED else reason,
+            unsupportedReasoning = unsupportedReasoning.takeUnless { failed || releaseFailed })
     }
     override fun close() { call?.let { end(it, VoiceControlStopReason.CLOSED) }; closed = true }
     companion object { private const val MAX_TEXT = 100_000 }

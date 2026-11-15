@@ -360,4 +360,26 @@ class VoiceCallControllerTest {
         assertEquals(1, f.revoked.size)
         assertNull(c.start(profile))
     }
+
+    @Test fun failedReasoningChoiceSurvivesCleanupButCannotBeSpokenOrLeakIntoTheNextCall() {
+        val f = Fake(); val c = VoiceCallController(f)
+        c.start(profile); f.finishRecognition(); f.accept(owner)
+        f.observations.single().body(VoiceAssistantBody(owner, "", VoiceBodyStatus.FAILED,
+            unsupportedReasoning = app.daiyu.android.domain.RequestReasoningEffort.OFF))
+        f.flush()
+        assertEquals(VoiceControlStopReason.RESPONSE_FAILED, c.state.value.reason)
+        assertEquals(app.daiyu.android.domain.RequestReasoningEffort.OFF, c.state.value.unsupportedReasoning)
+        assertEquals("", c.state.value.transcript); assertEquals("", c.state.value.reply)
+        assertTrue(f.outputs.single().bodies.isEmpty())
+        assertEquals(1, f.sends.size); assertEquals(listOf(owner), f.stopped)
+        val oldBody = f.observations.single().body
+        val nextPermit = c.start(profile)!!
+        assertNull(c.state.value.unsupportedReasoning)
+        oldBody(VoiceAssistantBody(owner, "", VoiceBodyStatus.FAILED,
+            unsupportedReasoning = app.daiyu.android.domain.RequestReasoningEffort.HIGH))
+        f.flush()
+        assertEquals(nextPermit, c.state.value.permitId); assertTrue(c.state.value.active)
+        assertNull(c.state.value.unsupportedReasoning)
+    }
+
 }

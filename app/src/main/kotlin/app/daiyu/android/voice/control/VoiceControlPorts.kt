@@ -43,7 +43,8 @@ enum class VoiceAdmission { READY, PERMISSION_REQUIRED, REVOKED, QUESTION_WAITIN
 enum class VoiceBodyStatus { STREAMING, COMPLETE, QUESTION_WAITING, FAILED, CANCELLED, UNKNOWN }
 /** Only assistant Text body blocks, excluding reasoning, tools, UI hints and other runs. */
 data class VoiceAssistantBody(val owner: VoiceAssistantOwner, val text: String, val status: VoiceBodyStatus,
-    val searching: Boolean = false, val searchCompletion: String? = null)
+    val searching: Boolean = false, val searchCompletion: String? = null,
+    val unsupportedReasoning: app.daiyu.android.domain.RequestReasoningEffort? = null)
 
 fun interface VoiceControlCancellation { fun cancel() }
 interface VoiceControlRecognition {

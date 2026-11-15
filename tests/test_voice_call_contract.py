@@ -4,6 +4,31 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "app/src/main/kotlin/app/daiyu/android"
 class VoiceCallContractTest(unittest.TestCase):
+    def test_call_inherits_strict_source_reasoning_and_cleans_only_temporary_preference(self):
+        controller = (SRC / 'ChatController.kt').read_text()
+        create = controller.split('internal fun createVoiceCall(', 1)[1].split('internal fun discardVoiceCall', 1)[0]
+        self.assertIn('val inheritedReasoning = reasoningPreference.snapshot(source?.value)', create)
+        self.assertLess(create.index('snapshot(source?.value)'), create.index('database.create('))
+        self.assertIn('reasoningPreference.set(temporary.id.value, inheritedReasoning)', create)
+        self.assertNotIn('ReasoningEffort.OFF', create)
+        discard = controller.split('internal fun discardVoiceCall(', 1)[1].split('internal fun sendText', 1)[0]
+        self.assertLess(discard.index('reasoningPreference.forget(owner.value)'), discard.index('database.delete(owner)'))
+        self.assertIn('abandoned.forEach { reasoningPreference.forget(it.value); database.delete(it) }', controller)
+        self.assertIn('temporary.forEach { reasoningPreference.forget(it.value); database.delete(it) }', controller)
+
+    def test_reasoning_rejection_is_a_closed_diagnostic_not_a_network_title_or_spoken_text(self):
+        observer = (SRC / 'voice/control/AndroidUniversalOwnerObserver.kt').read_text()
+        self.assertIn('RequestReasoningEffort.entries.firstOrNull { it.unsupportedMessage == message.error }', observer)
+        self.assertIn('unsupportedReasoning = unsupportedReasoning', observer)
+        controller = (SRC / 'voice/control/VoiceCallController.kt').read_text()
+        self.assertIn('value.unsupportedReasoning.takeIf { value.status == VoiceBodyStatus.FAILED }', controller)
+        owner = (SRC / 'VoiceCallPresentationOwner.kt').read_text()
+        self.assertIn('errorTitle = "通话遇到问题"', owner)
+        self.assertIn('value.unsupportedReasoning?.unsupportedMessage', owner)
+        overlay = (SRC / 'ui/screens/chat/conversation/DoubaoCallOverlay.kt').read_text()
+        self.assertIn('val errorTitle: String = "连接遇到问题"', overlay)
+        self.assertIn('DoubaoCallVisualState.ERROR -> errorTitle', overlay)
+
     def test_start_publishes_active_identity_before_asynchronous_recognition(self):
         controller = (SRC / 'voice/control/VoiceCallController.kt').read_text()
         listening = controller.split('private fun listen(session: Call)', 1)[1].split('private fun recognized', 1)[0]

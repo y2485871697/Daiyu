@@ -122,4 +122,79 @@ class ControllerReasoningFreezeTest : InstrumentationTestCase() {
             assertEquals(1, fixture.opens.get())
         } finally { fixture.close() }
     }
+
+    fun testVoiceCallInheritsSourceReasoningIntoItsActualTextRequestAndCleansItAfterHangup() {
+        val frozen = CopyOnWriteArrayList<ProviderSnapshot>()
+        val fixture = RunControlFixture(instrumentation.targetContext, onSession = { p, _, _ -> frozen += p })
+        try {
+            awaitControl("controller ready") { fixture.controller.ready }
+            fixture.controller.reasoningPreference.set(null, ReasoningEffort.LOW)
+            val source = fixture.database.create()
+            fixture.controller.reasoningPreference.set(source.id.value, ReasoningEffort.HIGH)
+            val binding = checkNotNull(fixture.database.modelBinding(source.id))
+            fixture.controller.reasoningPreference.rememberModel(binding.providerSlotId, binding.localModelIdentity, ReasoningEffort.OFF)
+            val start = AtomicReference<ChatController.VoiceCallStart?>()
+            val created = CountDownLatch(1)
+            controlMain { fixture.controller.createVoiceCall(source.id) { start.set(it); created.countDown() } }
+            assertTrue(created.await(10, TimeUnit.SECONDS))
+            val temporary = checkNotNull(start.get()).conversation
+            assertEquals(ReasoningEffort.HIGH, fixture.controller.reasoningPreference.snapshot(temporary.id.value))
+            fixture.controller.reasoningPreference.set(source.id.value, ReasoningEffort.OFF)
+            fixture.session("voice answer", held = false)
+            val ticket = ChatController.TextSendTicket()
+            val result = AtomicReference<ChatController.TextSendResult?>()
+            val accepted = CountDownLatch(1)
+            controlMain {
+                assertTrue(fixture.controller.sendText(temporary, 0, 1, "voice request", ticket, voiceConversation = true) {
+                    result.set(it); fixture.controller.acknowledgeTextSend(ticket); accepted.countDown()
+                })
+            }
+            assertTrue(accepted.await(10, TimeUnit.SECONDS))
+            assertTrue(result.get() is ChatController.TextSendResult.Accepted)
+            awaitControl("voice complete") { fixture.controller.active == null }
+            val provider = frozen.single()
+            assertTrue(provider.requestOptions.voiceTextOnly)
+            assertEquals("high", JSONObject(provider.requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
+            assertEquals(1, fixture.opens.get())
+            controlMain { fixture.controller.discardVoiceCall(temporary.id) }
+            val key = "reasoning:conversation:${temporary.id.value}"
+            awaitControl("temporary call deleted") {
+                fixture.database.temporaryVoiceConversations().isEmpty() &&
+                    !fixture.application.getSharedPreferences("conversation-ui", 0).contains(key)
+            }
+            assertEquals(ReasoningEffort.OFF, fixture.controller.reasoningPreference.snapshot(source.id.value))
+            assertEquals(ReasoningEffort.LOW, fixture.controller.reasoningPreference.snapshot(null))
+        } finally { fixture.close() }
+    }
+
+    fun testVoiceCallCopiesDraftAndExplicitOffButRejectsCorruptSourceBeforeCreatingAnyCall() {
+        val fixture = RunControlFixture(instrumentation.targetContext)
+        try {
+            awaitControl("controller ready") { fixture.controller.ready }
+            fun create(source: app.daiyu.android.domain.ConversationId?): ChatController.VoiceCallStart? {
+                val value = AtomicReference<ChatController.VoiceCallStart?>()
+                val done = CountDownLatch(1)
+                controlMain { fixture.controller.createVoiceCall(source) { value.set(it); done.countDown() } }
+                assertTrue(done.await(10, TimeUnit.SECONDS))
+                return value.get()
+            }
+            fixture.controller.reasoningPreference.set(null, ReasoningEffort.MINIMAL)
+            val fromDraft = checkNotNull(create(null)).conversation
+            assertEquals(ReasoningEffort.MINIMAL, fixture.controller.reasoningPreference.snapshot(fromDraft.id.value))
+            controlMain { fixture.controller.discardVoiceCall(fromDraft.id) }
+            awaitControl("draft call deleted") { fixture.database.temporaryVoiceConversations().isEmpty() }
+            val source = fixture.database.create()
+            fixture.controller.reasoningPreference.set(source.id.value, ReasoningEffort.OFF)
+            val fromOff = checkNotNull(create(source.id)).conversation
+            assertEquals(ReasoningEffort.OFF, fixture.controller.reasoningPreference.snapshot(fromOff.id.value))
+            controlMain { fixture.controller.discardVoiceCall(fromOff.id) }
+            awaitControl("off call deleted") { fixture.database.temporaryVoiceConversations().isEmpty() }
+            assertTrue(fixture.application.getSharedPreferences("conversation-ui", 0).edit()
+                .putString("reasoning:conversation:${source.id.value}", "corrupt-choice").commit())
+            assertNull(create(source.id))
+            assertTrue(fixture.database.temporaryVoiceConversations().isEmpty())
+            assertEquals(0, fixture.opens.get())
+        } finally { fixture.close() }
+    }
+
 }

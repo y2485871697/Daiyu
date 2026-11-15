@@ -11,6 +11,7 @@ class ConversationReasoningPreferenceTest {
         override fun set(key: String, value: String) {
             values[key] = value
         }
+        override fun remove(key: String) { values.remove(key) }
     }
 
     @Test fun missingAndUnknownDisplayValuesUseOff() {
@@ -60,6 +61,7 @@ class ConversationReasoningPreferenceTest {
         val unreadable = ConversationReasoningPreference(object : ConversationReasoningPreference.KeyValue {
             override fun get(key: String): String? = throw IllegalStateException("unreadable")
             override fun set(key: String, value: String) {}
+            override fun remove(key: String) {}
         })
         assertEquals(ReasoningEffort.OFF, unreadable.get("conversation")) // Display only.
         try { unreadable.snapshot("conversation"); throw AssertionError("unreadable runtime preference accepted") }
@@ -87,6 +89,7 @@ class ConversationReasoningPreferenceTest {
         val preference = ConversationReasoningPreference(object : ConversationReasoningPreference.KeyValue {
             override fun get(key: String) = stored
             override fun set(key: String, value: String) { stored = value; check(!fails) }
+            override fun remove(key: String) { stored = null; check(!fails) }
         })
         try { preference.set(null, ReasoningEffort.LOW); throw AssertionError("save accepted") } catch (_: IllegalStateException) {}
         try { preference.snapshot(null); throw AssertionError("unconfirmed value accepted") } catch (_: IllegalStateException) {}
@@ -129,6 +132,7 @@ class ConversationReasoningPreferenceTest {
         val preference = ConversationReasoningPreference(object : ConversationReasoningPreference.KeyValue {
             override fun get(key: String) = values[key]
             override fun set(key: String, value: String) { values[key] = value; check(!fails) }
+            override fun remove(key: String) { values.remove(key); check(!fails) }
         })
         preference.set("old", ReasoningEffort.LOW)
         fails = true
@@ -210,6 +214,40 @@ class ConversationReasoningPreferenceTest {
         restored.set("new-id", ReasoningEffort.MINIMAL)
         assertEquals(ReasoningEffort.OFF, restored.snapshot("source"))
         assertEquals(ReasoningEffort.LOW, restored.snapshot(null))
+    }
+
+
+    @Test fun temporaryPreferenceRemovalPreservesSourceDraftAndModelMemory() {
+        val values = MemoryKeyValue()
+        val preference = ConversationReasoningPreference(values)
+        preference.set(null, ReasoningEffort.LOW)
+        preference.set("source", ReasoningEffort.HIGH)
+        preference.rememberModel("provider", "model", ReasoningEffort.OFF)
+        preference.set("voice-call-test", preference.snapshot("source"))
+        preference.forget("voice-call-test")
+        assertEquals(null, values.values["reasoning:conversation:voice-call-test"])
+        assertEquals(ReasoningEffort.LOW, preference.snapshot(null))
+        assertEquals(ReasoningEffort.HIGH, preference.snapshot("source"))
+        assertEquals(ReasoningEffort.OFF, preference.rememberedModel("provider", "model"))
+    }
+
+    @Test fun failedRemovalStaysFencedUntilConfirmedCleanup() {
+        val values = mutableMapOf<String, String>()
+        var fails = false
+        val preference = ConversationReasoningPreference(object : ConversationReasoningPreference.KeyValue {
+            override fun get(key: String) = values[key]
+            override fun set(key: String, value: String) { values[key] = value }
+            override fun remove(key: String) { check(!fails); values.remove(key) }
+        })
+        preference.set("voice-call-test", ReasoningEffort.HIGH)
+        fails = true
+        try { preference.forget("voice-call-test"); throw AssertionError("cleanup accepted") }
+        catch (_: IllegalStateException) {}
+        try { preference.snapshot("voice-call-test"); throw AssertionError("unconfirmed cleanup admitted") }
+        catch (_: IllegalStateException) {}
+        fails = false
+        preference.forget("voice-call-test")
+        assertEquals(ReasoningEffort.OFF, preference.snapshot("voice-call-test"))
     }
 
 }

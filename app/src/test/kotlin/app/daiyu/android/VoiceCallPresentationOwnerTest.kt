@@ -64,4 +64,18 @@ class VoiceCallPresentationOwnerTest {
         owner.finishClose(key - 1); assertNotNull(owner.state)
         owner.finishClose(key); assertNull(owner.state)
     }
+
+    @Test fun exactSafeReasoningFailureIsDisplayedWithoutClaimingAConnectionFailure() {
+        val owner = VoiceCallPresentationOwner()
+        owner.begin("anchor", "permit", 100, null, "gpt")
+        owner.update(state(VoiceControlPhase.STOPPED).copy(reason = VoiceControlStopReason.RESPONSE_FAILED,
+            unsupportedReasoning = app.daiyu.android.domain.RequestReasoningEffort.OFF), false, false, null, 200)
+        assertEquals("模型不支持关闭思考", owner.state!!.reason)
+        assertEquals("通话遇到问题", owner.state!!.errorTitle)
+        assertEquals(DoubaoCallVisualState.ERROR, owner.state!!.visualState)
+        assertEquals("连接遇到问题", DoubaoCallUi(1, null, startedAtMillis = 0).errorTitle)
+        owner.begin("anchor", "next", 300, null, "gpt")
+        assertNull(owner.state!!.reason)
+    }
+
 }

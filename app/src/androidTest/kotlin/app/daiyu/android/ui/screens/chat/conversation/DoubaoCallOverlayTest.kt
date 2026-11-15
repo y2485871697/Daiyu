@@ -110,6 +110,23 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         }
     }
 
+    fun testOrdinaryFailureShowsSafeReasonWhileRealtimeKeepsItsConnectionTitle() {
+        mount(initialState = session().copy(title = "GPT", modelSelectable = true,
+            visualState = DoubaoCallVisualState.ERROR, errorTitle = "通话遇到问题", reason = "模型不支持关闭思考"))
+        finishOpening()
+        ui.onNodeWithTag("doubao-call-status").assertTextEquals("通话遇到问题")
+        ui.onNodeWithTag("doubao-call-status-detail").assertTextEquals("模型不支持关闭思考")
+        ui.onNodeWithText("连接遇到问题").assertDoesNotExist()
+        mainThread { call = call!!.copy(presentation = DoubaoCallPresentation.MINI) }
+        advanceOverlayFrames(40)
+        ui.onNodeWithText("通话遇到问题").assertExists()
+        mainThread { call = call!!.copy(presentation = DoubaoCallPresentation.EXPANDED) }
+        advanceOverlayFrames(40)
+        ui.onNodeWithTag("doubao-call-status-detail").assertTextEquals("模型不支持关闭思考")
+        mainThread { call = call!!.copy(errorTitle = "连接遇到问题", modelSelectable = false) }
+        ui.onNodeWithTag("doubao-call-status").assertTextEquals("连接遇到问题")
+    }
+
     fun testModelChevronActualInkIsCenteredBesideModelTitle() {
         mount(initialState = session().copy(title = "GPT", modelSelectable = true))
         finishOpening()

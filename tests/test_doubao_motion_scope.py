@@ -19,10 +19,10 @@ class DoubaoMotionScopeTest(unittest.TestCase):
             self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=raw))[1])
         self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="release", SMOKE_TEST_CLASSES=",".join(classes)))[1])
 
-    def fixture(self, root):
+    def fixture(self, root, classes=None):
         helper = discovery.SpeechPlatformDiscoveryTest()
         helper.fixture(root)
-        for i, name in enumerate(recorder.DOUBAO_MOTION_PLATFORM_CLASSES):
+        for i, name in enumerate(classes or recorder.DOUBAO_MOTION_PLATFORM_CLASSES):
             package, _, short = name.rpartition(".")
             path = root / "app/src/androidTest/kotlin" / (name.replace(".", "/") + ".kt")
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,3 +58,28 @@ class DoubaoMotionScopeTest(unittest.TestCase):
             result = helper.select(root, classes=",".join(recorder.DOUBAO_MOTION_PLATFORM_CLASSES))
             self.assertNotEqual(0, result.returncode)
             self.assertFalse((root / "smoke/selection.json").exists())
+
+    def test_reasoning_extension_is_exact_and_discovers_all_four_classes(self):
+        classes = recorder.DOUBAO_MOTION_REASONING_PLATFORM_CLASSES
+        self.assertEqual(4, len(classes))
+        for selected in (classes, tuple(reversed(classes))):
+            command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))
+            self.assertEqual("doubao-motion-targeted", scope)
+            self.assertNotIn("discover", command)
+        for selected in (classes[1:], (*classes, classes[0]), (*classes, "app.daiyu.android.OtherTest")):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))[1])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); helper = self.fixture(root, classes)
+            selected = []
+            for shard in range(4):
+                result = helper.select(root, shard, classes=",".join(classes))
+                self.assertEqual(0, result.returncode, result.stderr)
+                inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                selection = json.loads((root / "smoke/selection.json").read_text())
+                self.assertEqual("targeted", inventory["discovery_scope"])
+                self.assertEqual({name: i + 1 for i, name in enumerate(classes)}, inventory["all_classes"])
+                selected.extend(selection["selected_classes"])
+            self.assertCountEqual(classes, selected)
+            source = root / "app/src/androidTest/kotlin/app/daiyu/android/ControllerReasoningFreezeTest.kt"
+            source.unlink()
+            self.assertNotEqual(0, helper.select(root, classes=",".join(classes)).returncode)

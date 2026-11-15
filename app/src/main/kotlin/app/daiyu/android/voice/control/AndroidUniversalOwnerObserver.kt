@@ -21,7 +21,11 @@ internal fun universalAssistantBody(owner: VoiceAssistantOwner, message: Message
         message.status == RunStatus.FAILED -> VoiceBodyStatus.FAILED
         else -> VoiceBodyStatus.CANCELLED
     }
-    return VoiceAssistantBody(owner, message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("") { it.text }, status)
+    val unsupportedReasoning = if (status == VoiceBodyStatus.FAILED)
+        app.daiyu.android.domain.RequestReasoningEffort.entries.firstOrNull { it.unsupportedMessage == message.error }
+        else null
+    return VoiceAssistantBody(owner, message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("") { it.text },
+        status, unsupportedReasoning = unsupportedReasoning)
 }
 
 /**

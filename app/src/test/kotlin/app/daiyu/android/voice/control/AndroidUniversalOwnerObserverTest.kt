@@ -39,4 +39,17 @@ class AndroidUniversalOwnerObserverTest {
             RunStatus.INTERRUPTED to VoiceBodyStatus.CANCELLED)
         statuses.forEach { (run, expected) -> assertEquals(expected, universalAssistantBody(owner, message(run), false)?.status) }
     }
+
+    @Test fun failedReasoningChoiceUsesOnlyTheClosedSafeDiagnosticSet() {
+        RequestReasoningEffort.entries.forEach { effort ->
+            val failed = message(RunStatus.FAILED).copy(error = effort.unsupportedMessage)
+            val projected = checkNotNull(universalAssistantBody(owner, failed, false))
+            assertEquals(effort, projected.unsupportedReasoning)
+            assertEquals("Hello world", projected.text)
+            assertNull(universalAssistantBody(owner, failed.copy(status = RunStatus.RUNNING), false)?.unsupportedReasoning)
+            assertNull(universalAssistantBody(owner, failed.copy(error = "private URL/token"), false)?.unsupportedReasoning)
+            assertNull(universalAssistantBody(owner, failed.copy(id = MessageId("other")), false))
+        }
+    }
+
 }

@@ -93,13 +93,15 @@ class ManagedInputContractTest(unittest.TestCase):
 
     def test_home_selection_is_prepared_after_back_and_verified_before_leaving(self):
         text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ManagedInputActivityTest.kt').read_text()
-        home = text.split('private fun fieldHomeRoundTrip', 1)[1].split('fun testHomeReturnPreservesVisibleOrdinary', 1)[0]
+        home = text.split('private fun fieldHomeRoundTrip', 1)[1].split('    fun testWindowImePolicyRestoresZero', 1)[0]
         self.assertLess(home.index('sendKeyDownUpSync'), home.index('SemanticsActions.SetSelection'))
         self.assertLess(home.index('assertEquals(1, selection.end)'), home.index('GLOBAL_ACTION_HOME'))
         self.assertNotIn('assertTrue(it(5, 1, true))', home)
         self.assertIn('!= wantedSelection', home)
         self.assertIn('testWindowImePolicyRestoresZeroAndKeepsLaterWindowModes', text)
         self.assertIn('listOf(0 to null, resize to pan, resize to (pan or hidden), unchanged to null)', text)
+        self.assertIn('awaitStableWindowFrame(box) { box.windowToken }', text)
+        self.assertIn('assertTrue(field.isAttachedToWindow)', text)
 
     def test_registration_cleanup_preserves_later_window_wrappers(self):
         text = SOURCE.read_text()
@@ -146,7 +148,7 @@ class ManagedInputContractTest(unittest.TestCase):
                       'awaitFieldIme("managed-first", visible = false)', '动作次数 1',
                       'realLongPress("managed-first")', 'realDrag("managed-first")', 'fixture.database.exportBackup()', 'fixture.opens.get()'):
             self.assertIn(token, text)
-        home = text.split('private fun fieldHomeRoundTrip', 1)[1].split('fun testHomeReturnPreservesVisibleOrdinary', 1)[0]
+        home = text.split('private fun fieldHomeRoundTrip', 1)[1].split('    fun testWindowImePolicyRestoresZero', 1)[0]
         returned = home.split('awaitHostWindowFocus(original)', 1)[1]
         self.assertIn('awaitFieldIme(tag, visible = !hiddenBeforeHome)', returned)
         self.assertIn('node(tag).assertIsFocused()', returned)

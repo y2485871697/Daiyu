@@ -383,18 +383,24 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         val resize = android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
         val pan = android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
         val hidden = android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN
-        mainThread {
-            for ((initial, later) in listOf(0 to null, resize to pan, resize to (pan or hidden), unchanged to null)) {
-                val dialog = android.app.Dialog(activity)
-                val box = android.widget.FrameLayout(activity)
+        for ((initial, later) in listOf(0 to null, resize to pan, resize to (pan or hidden), unchanged to null)) {
+            lateinit var dialog: android.app.Dialog
+            lateinit var box: android.widget.FrameLayout
+            mainThread {
+                dialog = android.app.Dialog(activity)
+                box = android.widget.FrameLayout(activity)
                 dialog.setContentView(box)
                 dialog.show()
-                try {
+            }
+            try {
+                awaitStableWindowFrame(box) { box.windowToken }
+                mainThread {
                     val window = checkNotNull(dialog.window)
                     window.attributes = window.attributes.apply { softInputMode = initial }
                     val field = android.widget.EditText(activity)
                     field.manageInput(window)
                     box.addView(field)
+                    assertTrue(field.isAttachedToWindow)
                     assertEquals((initial and stateMask.inv()) or unchanged, window.attributes.softInputMode)
                     if (later != null) window.setSoftInputMode(
                         if ((later and stateMask) == 0) later or unchanged else later)
@@ -405,8 +411,8 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                         else -> (later and stateMask.inv()) or (initial and stateMask)
                     }
                     assertEquals(expected, window.attributes.softInputMode)
-                } finally { dialog.dismiss() }
-            }
+                }
+            } finally { mainThread { dialog.dismiss() } }
         }
     }
 

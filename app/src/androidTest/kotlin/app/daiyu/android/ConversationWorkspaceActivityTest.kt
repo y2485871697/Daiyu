@@ -28,6 +28,15 @@ import app.daiyu.android.ui.screens.chat.conversation.*
 class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
     private fun px(dp: Int): Float = dp * activity.resources.displayMetrics.density
 
+    private val restoredWorkspaceDraft = "显式入口保留草稿"
+
+    override fun createFixture() = RunControlFixture(instrumentation.targetContext,
+        beforeController = { database, _ ->
+            if (name == "testRealNonEmptyDraftKeepsExplicitWorkspaceEntryAvailable") {
+                database.draft(restoredWorkspaceDraft)
+            }
+        })
+
     private var opens = 0
     private var voiceLongPresses = 0
     private var saves = 0
@@ -223,7 +232,10 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
     }
 
     fun testLongDraftScrollsInsideEditorWithoutOpeningWorkspace() {
-        composerDraft = (1..30).joinToString("\n") { "第${it}行正文滚动内容" }
+        composerDraft = (1..30).joinToString("\n") { index ->
+            val marker = ('A'.code + (index - 1) % 26).toChar()
+            "${index.toString().padStart(2, '0')}: " + marker.toString().repeat(1 + (index * 7) % 18)
+        }
         val draft = composerDraft
         showComposer(selectionStart = 0)
         val field = node("chat-draft")
@@ -250,18 +262,23 @@ class ConversationWorkspaceActivityTest : WiredActivityTestCase() {
         for (y in 0 until before.height) for (x in 0 until before.width) {
             if (before[x, y] != after[x, y]) changed++
         }
-        assertTrue("Multiline text must scroll inside the editor", changed > before.width)
+        assertTrue("Multiline text must scroll inside the editor; changed=$changed width=${before.width}", changed > before.width)
         ui.runOnIdle { assertEquals(0, opens); assertEquals(draft, composerDraft) }
     }
 
     fun testRealNonEmptyDraftKeepsExplicitWorkspaceEntryAvailable() {
         awaitControl("chat local readers idle") { !fixture.controller.dataBusy }
         awaitHostWindowFocus(activity)
-        val draft = "显式入口保留草稿"
-        setDraft(draft)
+        val draft = restoredWorkspaceDraft
+        assertDraft(draft)
+        mainThread { assertEquals(draft, invokeHost(activity, "getDraft")) }
+        assertEquals(draft, fixture.database.draft())
         dismissIme()
-        node("chat-workspace-gesture-area").performTouchInput { swipe(center, center + Offset(0f, -px(80))) }
-        node("conversation-workspace-sheet").assertDoesNotExist()
+        for (tag in listOf("chat-workspace-gesture-area", "chat-draft")) {
+            node(tag).performTouchInput { swipe(center, center + Offset(0f, -px(80))) }
+            node("conversation-workspace-sheet").assertDoesNotExist()
+            assertDraft(draft)
+        }
         node("chat-workspace-gesture-area").performClick()
         awaitUniqueTag("conversation-workspace-sheet")
         node("workspace-path-card:0").assertExists()

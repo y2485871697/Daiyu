@@ -299,9 +299,9 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
             button.top - bounds.bottom, density)
         val unclipped = surface.getUnclippedBoundsInRoot()
         val semantics = surface.fetchSemanticsNode()
-        assertEquals("surface width is not clipped", unclipped.width.value * density,
+        assertEquals("surface width is not clipped", (unclipped.right - unclipped.left).value * density,
             semantics.boundsInRoot.width, density)
-        assertEquals("surface height is not clipped", unclipped.height.value * density,
+        assertEquals("surface height is not clipped", (unclipped.bottom - unclipped.top).value * density,
             semantics.boundsInRoot.height, density)
         lateinit var safe: androidx.compose.ui.geometry.Rect
         mainThread {

@@ -31,6 +31,7 @@ import app.daiyu.android.integration.tools.*
 import app.daiyu.android.tasksurface.*
 import app.daiyu.android.delegation.*
 import app.daiyu.android.domain.delegation.ChildTaskRecord
+import app.daiyu.android.domain.delegation.ChildRunOwner
 import app.daiyu.android.domain.delegation.ChildTaskStatus
 import app.daiyu.android.domain.delegation.ChildTaskCommand
 import app.daiyu.android.domain.delegation.ChildTaskCommandReceipt

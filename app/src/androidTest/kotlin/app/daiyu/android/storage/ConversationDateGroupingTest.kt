@@ -228,7 +228,7 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
             pane.value.historyConversations.size == owners.size
         }
         node("drawer-conversation:${firstVisible.id.value}").assertIsDisplayed()
-        node("drawer-list").performScrollToNode(hasTestTag("drawer-conversation:${wanted.id.value}"))
+        node("drawer-list").scrollToDescendant(hasTestTag("drawer-conversation:${wanted.id.value}"))
         node("drawer-conversation:${firstVisible.id.value}").assertIsNotDisplayed()
         val top = node("drawer-conversation:${wanted.id.value}").assertIsDisplayed().getUnclippedBoundsInRoot().top.value
         node("drawer-conversation:${wanted.id.value}").performClick()

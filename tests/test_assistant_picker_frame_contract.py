@@ -1,6 +1,8 @@
 """检查助手选择器边框和布局的源码配置。"""
 from pathlib import Path
 import unittest
+import json
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/AssistantPickerVisualTest.kt'
@@ -39,6 +41,28 @@ class AssistantPickerFrameContractTest(unittest.TestCase):
         self.assertIn('assistant_picker_only = mode == "smoke" and raw_filter == assistant_picker_target', smoke)
         self.assertIn('[assistant_picker_source] if assistant_picker_only else', smoke)
         self.assertIn('or assistant_picker_only or popup_title_only', smoke)
+
+    def test_assistant_picker_inventory_keeps_new_methods_and_three_empty_shards(self):
+        from test_speech_platform_discovery import SpeechPlatformDiscoveryTest
+        helper = SpeechPlatformDiscoveryTest()
+        target = 'app.daiyu.android.AssistantPickerVisualTest'
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper.fixture(root)
+            source = root / 'app/src/androidTest/kotlin/app/daiyu/android/AssistantPickerVisualTest.kt'
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text('package app.daiyu.android\nclass AssistantPickerVisualTest : TestCase() {\n'
+                              ' fun testExisting() {}\n fun testDeleteSheet() {}\n}\n')
+            for shard in range(4):
+                result = helper.select(root, shard=shard, classes=target)
+                self.assertEqual(0, result.returncode, result.stderr)
+                inventory = json.loads((root / 'smoke/instrumentation-shards.json').read_text())
+                selection = json.loads((root / 'smoke/selection.json').read_text())
+                self.assertEqual('targeted', inventory['discovery_scope'])
+                self.assertEqual({target: 2}, inventory['all_classes'])
+                self.assertEqual(2 if shard == 0 else 0, selection['expected_tests'])
+                self.assertEqual([target] if shard == 0 else [], selection['selected_classes'])
+                self.assertEqual('planned' if shard == 0 else 'filtered-empty-shard', selection['status'])
 
     def test_all_geometry_and_text_are_sampled_in_one_stable_native_frame(self):
         text = SOURCE.read_text()

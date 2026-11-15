@@ -352,7 +352,7 @@ if terminal_command_pager_only and (os.environ.get("SMOKE_API") != "all" or shar
     raise ValueError("TerminalCommandPagerTest requires smoke_api=all and its sole shard")
 if mode == "candidate" and shards not in (1, 4):
     raise ValueError("Candidate mode requires one diagnostic or four parallel shards per API")
-if not 1 <= shards <= 16 or not 0 <= shard < shards or (not provider_catalog_only and not doubao_motion_only and not workflow_body_only and not workspace_import_only and not platform_only and not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pause_receipt_only and not linux_pin_only and not linux_settings_only and not chat_status_bar_only and not rename_presentation_only and not workspace_entry_only and len(classes) < shards):
+if not 1 <= shards <= 16 or not 0 <= shard < shards or (not assistant_picker_only and not provider_catalog_only and not doubao_motion_only and not workflow_body_only and not workspace_import_only and not platform_only and not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pause_receipt_only and not linux_pin_only and not linux_settings_only and not chat_status_bar_only and not rename_presentation_only and not workspace_entry_only and len(classes) < shards):
     raise ValueError("Invalid instrumentation shard")
 # Use one shared plan for both APIs, so allocation and completeness stay identical.
 import sys

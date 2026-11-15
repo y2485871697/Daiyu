@@ -663,6 +663,10 @@ MESSAGE_ACTION_MODULES = (
 
 def command_for(python, env):
     if (env.get("SMOKE_MODE") == "smoke"
+            and env.get("SMOKE_TEST_CLASSES") == "app.daiyu.android.ChatSubmissionActivityTest"):
+        return [python, "-B", "-m", "unittest", "test_chat_submission_preview_contract",
+                "test_message_confirmation_contract", "-v"], "regeneration-preparation-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(MESSAGE_ACTION_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *MESSAGE_ACTION_MODULES, "-v"], "message-actions-targeted"
     if (env.get("SMOKE_MODE") == "smoke"

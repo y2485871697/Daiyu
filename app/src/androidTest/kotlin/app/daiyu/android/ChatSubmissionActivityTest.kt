@@ -44,7 +44,9 @@ class ChatSubmissionActivityTest : WiredActivityTestCase() {
         assertEquals(original, fixture.database.messages(conversation.id))
         assertNull(fixture.controller.active)
         assertEquals(0, fixture.opens.get())
-        mainThread { assertTrue(state().statusText.orEmpty().contains("重新生成")) }
+        mainThread { assertNull(state().statusText) }
+        ui.onNodeWithText("正在准备重新生成…").assertDoesNotExist()
+        ui.onNodeWithTag("chat-status").assertDoesNotExist()
         return conversation to original
     }
 

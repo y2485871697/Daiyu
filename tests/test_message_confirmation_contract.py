@@ -42,6 +42,39 @@ class MessageConfirmationContractTest(unittest.TestCase):
                       "else messageCallbacks.onRegenerate(id)"):
             self.assertIn(token, caller)
 
+    def test_regeneration_preparation_is_silent_without_hiding_other_status(self):
+        status = self.main.split("statusText = controller.problem ?: when {", 1)[1].split("composer = ComposerUi(", 1)[0]
+        self.assertNotIn("正在准备重新生成", self.main)
+        self.assertNotIn("regeneration", status)
+        for token in ("controller.dataBusy -> controller.dataStatus", '!controller.ready -> "恢复会话中"',
+                      '!selectionReady -> "加载会话中"', "messageEditBlocked ->", "imageHost.sending ->"):
+            self.assertIn(token, status)
+        self.assertIn("else -> null", status)
+        activity = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ChatSubmissionActivityTest.kt").read_text()
+        self.assertIn("mainThread { assertNull(state().statusText) }", activity)
+        self.assertIn('ui.onNodeWithText("正在准备重新生成…").assertDoesNotExist()', activity)
+        self.assertIn('ui.onNodeWithTag("chat-status").assertDoesNotExist()', activity)
+        for token in ("testRegenerationHidesReplyWhilePreparingAndRestoresItOnRejection",
+                      "testAcceptedRegenerationReplacesPreviewOnlyAfterExactNewReplyIsPublished",
+                      "assertEquals(original, fixture.database.messages(conversation.id))",
+                      "assertEquals(1, fixture.opens.get())"):
+            self.assertIn(token, activity)
+
+    def test_regeneration_device_scope_runs_only_related_contracts(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("regeneration_hint_recorder", ROOT / "scripts/acceptance/record_tool_tests.py")
+        recorder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(recorder)
+        target = "app.daiyu.android.ChatSubmissionActivityTest"
+        command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=target))
+        self.assertEqual("regeneration-preparation-targeted", scope)
+        self.assertEqual(["python3", "-B", "-m", "unittest", "test_chat_submission_preview_contract",
+                          "test_message_confirmation_contract", "-v"], command)
+        for mode, classes in (("compile", target), ("release", target), ("daily", target),
+                              ("candidate", target), ("smoke", target + "," + target),
+                              ("smoke", target + ",app.daiyu.android.OtherTest")):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=classes))[1])
+
     def test_prompt_options_are_explicit_and_keep_existing_defaults(self):
         prompt = self.main.split("private class ConfirmPrompt(", 1)[1].split("private var prompt", 1)[0]
         self.assertIn("val destructive: Boolean = false", prompt)

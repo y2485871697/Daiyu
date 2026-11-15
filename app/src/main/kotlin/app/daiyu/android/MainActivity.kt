@@ -7693,7 +7693,6 @@ class MainActivity : ComponentActivity() {
                     stopRequested = controlOwner?.let(controller::runStopping) == true),
                 submissionPreview = submissionPreview,
                 statusText = controller.problem ?: when {
-                    regeneration != null && regeneration.assistantId == null -> "正在准备重新生成…"
                     controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";
                     !selectionReady -> "加载会话中";
                     messageEditBlocked -> if (messageActionLoading != null) "正在核对消息；未保存编辑已保留"

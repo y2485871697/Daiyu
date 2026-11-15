@@ -298,12 +298,13 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                             }
                             previous.join()
                         }
-                        fun currentDefinition(): ChildModelDefinition {
+                        fun currentDefinition(honorUserPause: Boolean = true): ChildModelDefinition {
                             while (true) {
                                 if (!runCatching { definition.isValid() }.getOrDefault(false)) {
                                     pauseForConfiguration(record.owner)
                                 }
-                                check(childPause.awaitBoundary() && !cancelled())
+                                if (honorUserPause || childPause.isConfigurationBlocked()) check(childPause.awaitBoundary())
+                                check(!cancelled())
                                 try {
                                     val selected = definition.current()
                                     if (selected.role != definition.role) { pauseForConfiguration(record.owner); continue }
@@ -596,7 +597,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                     receiptBatchExecutor = receipts, diagnostics = diagnostics,
                                     onRequestCompletedBoundary = {
                                         trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_COMPLETED)
-                                        lease?.enterBoundary(); currentDefinition()
+                                        lease?.enterBoundary(); currentDefinition(honorUserPause = false)
                                     },
                                     runtimeStore = object : RuntimeStore {
                                         override fun save(checkpoint: RunCheckpoint) {

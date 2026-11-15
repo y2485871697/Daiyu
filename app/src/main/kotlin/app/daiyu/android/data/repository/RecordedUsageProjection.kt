@@ -24,8 +24,10 @@ internal data class RecordedUsageProjection(val attributed: AttributedUsageStats
         total = if (combined.input.unknownRequestCount == 0L && combined.output.unknownRequestCount == 0L)
             sumKnownTokens(combined.input.reportedTokens, combined.output.reportedTokens) else null,
     )
-    val historicalModelAvailable: Boolean get() = attributed.requests.any { it.historicalModel != null }
-    val historicalTimeAvailable: Boolean get() = attributed.requests.any { it.requestedAtMs != null }
+    val historicalModelAvailable: Boolean get() = attributed.requests.any { it.historicalModel != null } ||
+        attributed.unreportedChildRequests.any { it.historicalModel != null }
+    val historicalTimeAvailable: Boolean get() = attributed.requests.any { it.requestedAtMs != null } ||
+        attributed.unreportedChildRequests.any { it.requestedAtMs != null }
     val coverageDescription: String get() {
         val p = attributed.parentCoverage
         val c = attributed.childCoverage

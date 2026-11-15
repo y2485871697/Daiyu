@@ -60,6 +60,56 @@ class AttributedUsageDatabaseTest : InstrumentationTestCase() {
         DatabaseTransactions { database.readableDatabase }.run { RecordedUsageReader.readAttributed(it, conversation, budget) }
     private fun rejects(work: () -> Unit) { try { work(); fail("must reject") } catch (_: Exception) {} }
 
+    fun testUnreportedRequestKeepsItsModelWithoutInventingUsage() {
+        val owner = parent(); val child = task(owner)
+        val base = checkpoint(child)
+        val admitted = base.copy(usage = emptyList(), usageRequests = listOf(checkNotNull(base.request)))
+        val model = ChildRequestModel("provider-real", "model-real")
+        runtime.childUsage.record(child, admitted, model)
+        val stats = read(owner.conversationId)
+        assertTrue(stats.requests.isEmpty())
+        assertEquals(0L, stats.summary.child.requestSnapshotCount)
+        assertNull(stats.summary.child.input.reportedTokens)
+        assertEquals(1, stats.childCoverage.tasksWithoutReportedUsage)
+        val metadata = stats.unreportedChildRequests.single()
+        assertEquals(base.request, metadata.request); assertEquals(model, metadata.historicalModel)
+        assertEquals(1, metadata.requestSequence); assertNotNull(metadata.requestedAtMs)
+        val json = app.daiyu.android.context.ContextUsageSnapshot(stats, owner.runId.value).toJson()
+        assertEquals(0L, json.getLong("requests")); assertTrue(json.isNull("total_tokens"))
+        val route = json.getJSONArray("child_request_models").getJSONObject(0)
+        assertEquals("provider-real", route.getString("provider_id"))
+        assertEquals("model-real", route.getString("model_id"))
+        assertEquals(1, route.getInt("request_sequence"))
+        assertEquals(0, app.daiyu.android.context.ContextUsageSnapshot(stats, "sibling-run")
+            .toJson().getJSONArray("child_request_models").length())
+        runtime.childUsage.record(child, admitted.copy(revision = 2, usage = base.usage), model)
+        val reported = read(owner.conversationId)
+        assertTrue(reported.unreportedChildRequests.isEmpty())
+        assertEquals(1L, reported.summary.child.requestSnapshotCount)
+        assertEquals(model, reported.requests.single().historicalModel)
+    }
+
+    fun testUnreportedMetadataSharesBudgetAndRejectsAnEntireCorruptTask() {
+        val owner = parent()
+        val children = listOf(task(owner), task(owner))
+        children.forEach { child ->
+            val base = checkpoint(child)
+            runtime.childUsage.record(child, base.copy(usage = emptyList(),
+                usageRequests = listOf(checkNotNull(base.request))), ChildRequestModel("provider", "model"))
+        }
+        DatabaseTransactions { database.readableDatabase }.run { db ->
+            val result = SQLiteChildUsageStore.read(db, owner.conversationId.value, 20, 1)
+            assertTrue(result.requests.isEmpty()); assertEquals(1, result.unreportedRequests.size)
+            assertEquals(1, result.coverage.deferredTasks)
+        }
+        val child = children.last()
+        database.writableDatabase.execSQL("INSERT INTO child_request_usage(task_id,request_id,request_owner,attempt_id,operation,checkpoint_revision,has_usage) " +
+            "VALUES(?, 'corrupt', 'foreign-owner', 'attempt', 'NEXT', 1, 0)", arrayOf(child.owner.childRunId))
+        val stats = read(owner.conversationId)
+        assertEquals(1, stats.childCoverage.unreadableTasks)
+        assertFalse(stats.unreportedChildRequests.any { it.runId == child.owner.childRunId })
+    }
+
     fun testMainRequestSequenceIgnoresReportedSummaryRequests() {
         val owner = parent(); val child = task(owner)
         val base = checkpoint(child)

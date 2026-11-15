@@ -44,6 +44,17 @@ class RecordedUsageProjectionTest {
         assertNull(missing.tokens.total)
     }
 
+    @Test fun unreportedChildMetadataMakesRoutingAvailableWithoutCountingTokens() {
+        val base = projection(emptyList())
+        val metadata = app.daiyu.android.model.usage.ChildRequestMetadata("parent", "child",
+            RequestCheckpoint("request", "attempt", "owner", RequestOperation.NEXT),
+            app.daiyu.android.domain.delegation.ChildRequestModel("provider", "actual-model"), 123L, 1, "profile")
+        val value = base.copy(attributed = base.attributed.copy(unreportedChildRequests = listOf(metadata)))
+        assertTrue(value.historicalModelAvailable); assertTrue(value.historicalTimeAvailable)
+        assertEquals(0L, value.combined.requestSnapshotCount)
+        assertEquals(UsageTokenMetrics(), value.tokens)
+    }
+
     @Test fun metricOverflowRemainsUnknownWithoutCrashingTheScreen() {
         val max = UsageTokenMetrics(Long.MAX_VALUE, 1, 0, 0, Long.MAX_VALUE)
         val sum = max + UsageTokenMetrics(1, 2, 0, 0, 1)

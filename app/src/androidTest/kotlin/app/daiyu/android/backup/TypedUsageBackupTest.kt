@@ -114,10 +114,11 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val legacy = fresh(); legacy.service().importPackage(original.toString())
         assertTrue(row(legacy.service().exportPackage(), "creation").isNull("cache_creation_tokens"))
     }
-    fun testChildV5WithoutAccessImportsAsNoneAndReexportsV6() {
+    fun testChildV5WithoutAccessImportsAsNoneAndReexportsV7() {
         val source = fresh(); val parent = seed(source)
         val old = mutate(source.service().exportPackage()) { data ->
             val history = data.getJSONObject("child_task_history").put("version", 5)
+            stripChildV7Fields(history)
             val tasks = history.getJSONArray("tasks"); assertTrue(tasks.length() > 0)
             repeat(tasks.length()) { tasks.getJSONObject(it).remove("tool_access_json") }
         }
@@ -127,7 +128,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         assertTrue(restored.isNotEmpty())
         assertTrue(restored.all { it.access == app.daiyu.android.domain.delegation.ChildToolAccess.NONE })
         val history = payload(target.service().exportPackage()).getJSONObject("child_task_history")
-        assertEquals(6, history.getInt("version"))
+        assertEquals(7, history.getInt("version"))
         val tasks = history.getJSONArray("tasks")
         repeat(tasks.length()) { assertTrue(tasks.getJSONObject(it).has("tool_access_json")); assertTrue(tasks.getJSONObject(it).isNull("tool_access_json")) }
     }
@@ -145,6 +146,17 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
             payload(target.service().exportPackage()).getJSONObject("child_task_history").toString())
     }
 
+    private fun stripChildV7Fields(history: JSONObject) {
+        history.getJSONArray("tasks").let { rows -> repeat(rows.length()) {
+            rows.getJSONObject(it).apply { remove("original_role"); remove("assigned_profile_id") }
+        } }
+        history.getJSONArray("usage").let { rows -> repeat(rows.length()) { index ->
+            val row = rows.getJSONObject(index)
+            listOf("provider_id_snapshot", "api_model_snapshot", "requested_at_ms", "request_sequence",
+                "assigned_profile_snapshot", "original_role_snapshot").forEach { row.remove(it) }
+        } }
+    }
+
     private fun downgradeCreation(data: JSONObject) {
         data.remove("statistics")
         data.getJSONObject("tables").remove("chat_timeline_events")
@@ -153,6 +165,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         }
         strip(data.getJSONObject("tables").getJSONArray("context_usage"))
         data.optJSONObject("child_task_history")?.let { child ->
+            stripChildV7Fields(child)
             child.put("version", 3); strip(child.getJSONArray("usage"))
             child.getJSONArray("tasks").let { rows -> repeat(rows.length()) { rows.getJSONObject(it).remove("tool_access_json") } }
             child.getJSONArray("usage").let { rows -> repeat(rows.length()) { rows.getJSONObject(it).remove("has_usage") } }
@@ -399,7 +412,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val exported = source.service().exportPackage()
         assertEquals(8, JSONObject(exported).getInt("version")); assertEquals(original, physical(source))
         assertEquals(exported, source.service().exportPackage())
-        assertEquals(6, payload(exported).getJSONObject("child_task_history").getInt("version"))
+        assertEquals(7, payload(exported).getJSONObject("child_task_history").getInt("version"))
         assertEquals(0L, row(exported, "title-zero").getLong("input_tokens"))
         assertEquals(1L, row(exported, "vision-null").getLong("has_usage"))
         assertTrue(row(exported, "vision-null").isNull("input_tokens"))
@@ -454,6 +467,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
                     listOf("generation_outputs", "generation_attempts", "child_tasks", "child_commands", "child_requests").forEach { data.getJSONObject("inventory").remove(it) }
                 } else {
                     val child = data.getJSONObject("child_task_history").put("version", 1)
+                    stripChildV7Fields(child)
                     val childTasks = child.getJSONArray("tasks")
                     repeat(childTasks.length()) { index ->
                         listOf("agent_name_snapshot", "model_id_snapshot", "model_name_snapshot", "tool_access_json").forEach { childTasks.getJSONObject(index).remove(it) }
@@ -506,7 +520,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         }
         val exported = source.service().exportPackage()
         val history = payload(exported).getJSONObject("child_task_history")
-        assertEquals(6, history.getInt("version"))
+        assertEquals(7, history.getInt("version"))
         val target = fresh(); target.service().importPackage(exported)
         target.tx { db ->
             db.rawQuery("SELECT has_usage,input_tokens FROM child_request_usage WHERE request_id='child-missing'", null).use {
@@ -623,6 +637,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         val source = fresh(); seed(source)
         val old = mutate(source.service().exportPackage()) { data ->
             val history = data.getJSONObject("child_task_history").put("version", 2)
+            stripChildV7Fields(history)
             history.getJSONArray("usage").let { rows -> repeat(rows.length()) { rows.getJSONObject(it).apply { remove("cache_creation_tokens"); remove("has_usage") } } }
             val tasks = history.getJSONArray("tasks")
             repeat(tasks.length()) { index ->
@@ -637,7 +652,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
             }
             assertTrue(legacy.isNotEmpty())
             legacy.forEach { (id, row) ->
-                listOf("agent_name_snapshot", "model_id_snapshot", "model_name_snapshot", "tool_access_json").forEach { row.remove(it) }
+                listOf("agent_name_snapshot", "model_id_snapshot", "model_name_snapshot", "tool_access_json", "original_role", "assigned_profile_id").forEach { row.remove(it) }
                 db.execSQL("UPDATE neutral_backup_history SET payload=? WHERE kind='child_task' AND identity=?", arrayOf(row.toString(), id))
             }
         }
@@ -648,7 +663,7 @@ class TypedUsageBackupTest : InstrumentationTestCase() {
         assertEquals(authoritativeStatistics, payload(target.service().exportPackage()).getJSONObject("statistics").toString())
         assertTrue(target.service().importPackage(old).alreadyImported)
         val exported = payload(target.service().exportPackage()).getJSONObject("child_task_history")
-        assertEquals(6, exported.getInt("version"))
+        assertEquals(7, exported.getInt("version"))
         assertTrue(exported.getJSONArray("tasks").getJSONObject(0).isNull("model_id_snapshot"))
         target.tx { db ->
             val row = db.rawQuery("SELECT identity,payload FROM neutral_backup_history WHERE kind='child_task' LIMIT 1", null).use { c ->

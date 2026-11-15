@@ -124,7 +124,7 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
 
         /** Shares the caller's read transaction with parent checkpoint reading. */
         fun read(db: SQLiteDatabase, conversationId: String?, maxTasks: Int, maxRequests: Int):
-            Pair<List<AttributedRequestUsage>, ChildUsageCoverage> {
+            ChildUsageReadResult {
             check(db.inTransaction()) { "child_usage_transaction_required" }
             require(maxTasks in 1..1000 && maxRequests in 0..20_000)
             val filter = if (conversationId == null) "" else " WHERE t.conversation_id=?"
@@ -133,6 +133,7 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                 " AND m.conversation_id=t.conversation_id AND m.run_id=t.parent_run_id AND m.role='assistant'"
             val total = db.rawQuery("SELECT COUNT(*)$from$filter", args).use { it.moveToFirst(); it.getInt(0) }
             val result = mutableListOf<AttributedRequestUsage>()
+            val unreported = mutableListOf<ChildRequestMetadata>()
             var inspected = 0; var missing = 0; var notStarted = 0; var unreadable = 0; var deferred = 0
             db.rawQuery("SELECT t.task_id,t.conversation_id,t.parent_run_id,t.parent_message_id," +
                 "t.assistant_message_id,t.profile_id,t.task_group_id,t.status$from$filter ORDER BY t.seq DESC LIMIT ?",
@@ -150,9 +151,10 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                     if (status !in setOf("RUNNING", "COMPLETED", "UNKNOWN", "FAILED")) { unreadable++; continue }
                     if (count == 0) { missing++; continue }
                     if (count > 100) { unreadable++; continue }
-                    if (count > maxRequests - result.size) { deferred++; continue }
+                    if (count > maxRequests - result.size - unreported.size) { deferred++; continue }
                     var missingSummary = false
                     val requestOwners = mutableSetOf<String>()
+                    val taskUnreported = mutableListOf<ChildRequestMetadata>()
                     val snapshots = try {
                         db.rawQuery("SELECT request_id,request_owner,attempt_id,operation,input_tokens,output_tokens,cached_tokens,usage_source,cache_creation_tokens,has_usage,provider_id_snapshot,api_model_snapshot,requested_at_ms,request_sequence,assigned_profile_snapshot" +
                             " FROM $TABLE WHERE task_id=? ORDER BY rowid", arrayOf(taskId)).use { usage ->
@@ -172,6 +174,12 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                                     if (usage.getInt(9) == 0) {
                                         require(listOf(4, 5, 6, 8).all(usage::isNull))
                                         missingSummary = true
+                                        taskUnreported.add(ChildRequestMetadata(tasks.getString(2), taskId, request,
+                                            historicalModel = if (usage.isNull(10) || usage.isNull(11)) null else
+                                                app.daiyu.android.domain.delegation.ChildRequestModel(usage.getString(10), usage.getString(11)),
+                                            requestedAtMs = if (usage.isNull(12)) null else usage.getLong(12),
+                                            requestSequence = if (usage.isNull(13)) null else usage.getInt(13),
+                                            assignedProfileId = if (usage.isNull(14)) null else usage.getString(14)))
                                         continue
                                     }
                                     add(AttributedRequestUsage(tasks.getString(1), tasks.getString(2), tasks.getString(3),
@@ -192,9 +200,10 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                     }
                     if (missingSummary) missing++
                     result.addAll(snapshots)
+                    unreported.addAll(taskUnreported)
                 }
             }
-            return result to ChildUsageCoverage(total, inspected, missing, notStarted, unreadable, deferred)
+            return ChildUsageReadResult(result, ChildUsageCoverage(total, inspected, missing, notStarted, unreadable, deferred), unreported)
         }
     }
 }

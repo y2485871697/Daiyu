@@ -321,6 +321,8 @@ class RetainedChildTasksPauseTest {
             assertEquals(ChildTaskPauseState.FINISHED, snapshot(supervisor, binding).pauseState)
             assertEquals(0, pausedNotifications.get())
             assertEquals(ChildTaskStatus.COMPLETED, snapshot(supervisor, binding).record.status)
+            assertEquals("complete", snapshot(supervisor, binding).record.text)
+            assertEquals(1, model.opens.get()); assertEquals(1, model.reads.get())
             assertEquals(0, model.resumes.get())
         } finally { drain(supervisor, model) }
     }

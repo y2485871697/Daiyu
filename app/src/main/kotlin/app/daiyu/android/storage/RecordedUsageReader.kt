@@ -34,10 +34,10 @@ internal object RecordedUsageReader {
     fun readAttributed(db: SQLiteDatabase, conversationId: ConversationId? = null,
         budget: RecordedUsageBudget = RecordedUsageBudget()): AttributedUsageStats {
         val (parentCoverage, parents) = readParents(db, conversationId, budget)
-        val (children, childCoverage) = SQLiteChildUsageStore.read(db, conversationId?.value,
+        val (children, childCoverage, unreportedChildren) = SQLiteChildUsageStore.read(db, conversationId?.value,
             budget.maxMessages, budget.maxUsageRecords - parents.size)
         val requests = parents + children
-        return AttributedUsageStats(aggregateAttributedUsage(requests), requests, parentCoverage, childCoverage)
+        return AttributedUsageStats(aggregateAttributedUsage(requests), requests, parentCoverage, childCoverage, unreportedChildren)
     }
 
     private fun readParents(db: SQLiteDatabase, conversationId: ConversationId?, budget: RecordedUsageBudget):

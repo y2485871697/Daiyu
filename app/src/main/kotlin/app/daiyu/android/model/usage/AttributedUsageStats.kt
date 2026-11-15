@@ -16,11 +16,34 @@ internal data class ChildUsageCoverage(
     val scanComplete: Boolean get() = totalTasks == inspectedTasks && unreadableTasks == 0 && deferredTasks == 0
 }
 
+internal data class ChildRequestMetadata(
+    val parentRunId: String,
+    val runId: String,
+    val request: app.daiyu.android.domain.runtime.RequestCheckpoint,
+    val historicalModel: app.daiyu.android.domain.delegation.ChildRequestModel?,
+    val requestedAtMs: Long?,
+    val requestSequence: Int?,
+    val assignedProfileId: String?,
+)
+
+internal fun AttributedRequestUsage.toChildRequestMetadata(): ChildRequestMetadata {
+    require(origin is app.daiyu.android.domain.usage.UsageOrigin.Child)
+    return ChildRequestMetadata(requireNotNull(parentRunId), requireNotNull(runId), request,
+        historicalModel, requestedAtMs, requestSequence, assignedProfileId)
+}
+
+internal data class ChildUsageReadResult(
+    val requests: List<AttributedRequestUsage>,
+    val coverage: ChildUsageCoverage,
+    val unreportedRequests: List<ChildRequestMetadata>,
+)
+
 internal data class AttributedUsageStats(
     val summary: AttributedUsageSummary,
     val requests: List<AttributedRequestUsage>,
     val parentCoverage: RecordedUsageStats,
     val childCoverage: ChildUsageCoverage,
+    val unreportedChildRequests: List<ChildRequestMetadata> = emptyList(),
 ) {
     val scanComplete: Boolean get() = parentCoverage.scanComplete && childCoverage.scanComplete
 }

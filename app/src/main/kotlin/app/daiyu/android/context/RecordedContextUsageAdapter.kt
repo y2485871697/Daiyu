@@ -6,6 +6,7 @@ import app.daiyu.android.domain.usage.RecordedUsageSummary
 import app.daiyu.android.domain.usage.ReportedTokenSubtotal
 import app.daiyu.android.domain.usage.aggregateRecordedUsage
 import app.daiyu.android.model.usage.AttributedUsageStats
+import app.daiyu.android.model.usage.toChildRequestMetadata
 import app.daiyu.android.storage.RecordedUsageReader
 import org.json.JSONObject
 
@@ -20,6 +21,10 @@ class ContextUsageSnapshot internal constructor(
     override fun hashCode(): Int = 31 * attributed.hashCode() + (runId?.hashCode() ?: 0)
 
     private val selected = attributed.requests.filter { runId == null || it.parentRunId == runId || it.runId == runId }
+    private val selectedChildModels = selected.filter { it.origin is app.daiyu.android.domain.usage.UsageOrigin.Child }
+        .map { it.toChildRequestMetadata() } + attributed.unreportedChildRequests.filter {
+            runId == null || it.parentRunId == runId || it.runId == runId
+        }
     internal val summary: RecordedUsageSummary = aggregateRecordedUsage(selected.asSequence().map { it.snapshot })
     val requests: Long get() = summary.requestSnapshotCount
     val reportedRequests: Long get() = selected.count { it.snapshot.inputTokens != null && it.snapshot.outputTokens != null }.toLong()
@@ -56,7 +61,7 @@ class ContextUsageSnapshot internal constructor(
             .put("output", fieldCoverage(summary.output)).put("cached", fieldCoverage(summary.cached)))
         .put("coverage", coverageJson())
         .put("historical_model", JSONObject.NULL)
-        .put("child_request_models", org.json.JSONArray(selected.filter { it.origin is app.daiyu.android.domain.usage.UsageOrigin.Child }.map { request ->
+        .put("child_request_models", org.json.JSONArray(selectedChildModels.map { request ->
             JSONObject().put("child_run_id", request.runId).put("request_id", request.request.requestId)
                 .put("attempt_id", request.request.attemptId).put("request_sequence", request.requestSequence ?: JSONObject.NULL)
                 .put("requested_at_ms", request.requestedAtMs ?: JSONObject.NULL)

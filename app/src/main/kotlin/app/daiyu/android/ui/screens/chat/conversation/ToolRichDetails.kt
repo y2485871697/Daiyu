@@ -53,13 +53,16 @@ internal object ToolRichDetails {
         if (uri.host == null) "[链接已隐藏]" else URI(uri.scheme, null, uri.host, uri.port, uri.path, null, null).toASCIIString()
     }.getOrDefault("[链接已隐藏]")
 
-    fun project(category: String, toolName: String, arguments: String, result: String?, screenScreenshot: Boolean? = null): ToolRichDetailsUi {
-        val args = json(arguments)
+    fun project(category: String, toolName: String, arguments: String, result: String?, screenScreenshot: Boolean? = null,
+        argumentJson: ToolPresentationJson = ToolPresentationJson(arguments),
+        resultJson: ToolPresentationJson = ToolPresentationJson(result),
+    ): ToolRichDetailsUi {
+        val args = argumentJson.read(MAX_INPUT)
         val launchingDelegation = category == "delegation" && toolName in setOf("run_child_models", "start_child_tasks")
         val encodedScreenshot = screenScreenshot ?: (toolName == "screen" &&
             (args?.optString("operation") == "screenshot" || (args?.optString("operation") == "observe" &&
                 !args.has("observation_id") && app.daiyu.android.media.NativeScreenImage.isVisualFallback(result))))
-        val envelope = if (encodedScreenshot) null else json(result, if (category in setOf("terminal", "background_job")) 1_048_576 else MAX_INPUT)
+        val envelope = if (encodedScreenshot) null else resultJson.read(if (category in setOf("terminal", "background_job")) 1_048_576 else MAX_INPUT)
         val output = if (category in setOf("apps", "files", "personal_search", "device_read", "system_action", "terminal", "background_job"))
             envelope?.optJSONObject("data") ?: envelope else envelope
         val cookies = category == "browser" && (args?.optString("action") in setOf("get_cookies", "set_cookies"))

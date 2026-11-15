@@ -141,6 +141,7 @@ MARKDOWN_ENTRY_MODULES = (
 
 SESSION_ENTRY_PLATFORM_CLASSES = MARKDOWN_ENTRY_PLATFORM_CLASSES + (
     'app.daiyu.android.ui.screens.chat.conversation.ChatInitialPositionTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatViewportFrameTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest',
 )
 SESSION_ENTRY_MODULES = MARKDOWN_ENTRY_MODULES + (

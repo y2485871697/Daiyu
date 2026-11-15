@@ -36,9 +36,12 @@ internal object ToolCategoryDetails {
         "ownerTransportReady" to "宿主通道就绪", "displayInitialized" to "显示已初始化", "hasFrame" to "已有画面",
         "sourceEmpty" to "画面源为空")
 
-    fun project(category: String, arguments: String, result: String?, toolName: String = "", terminalTarget: TerminalToolTarget? = null, screenScreenshot: Boolean? = null): ToolCategoryDetailsUi {
-        val args = parse(arguments)
-        val envelope = parse(result)
+    fun project(category: String, arguments: String, result: String?, toolName: String = "", terminalTarget: TerminalToolTarget? = null, screenScreenshot: Boolean? = null,
+        argumentJson: ToolPresentationJson = ToolPresentationJson(arguments),
+        resultJson: ToolPresentationJson = ToolPresentationJson(result),
+    ): ToolCategoryDetailsUi {
+        val args = argumentJson.read(65_536)
+        val envelope = resultJson.read(65_536)
         val output = if (category in setOf("apps", "files", "personal_search", "device_read", "system_action"))
             envelope?.optJSONObject("data") ?: envelope else envelope
         val fields = mutableListOf<ToolFieldUi>()
@@ -122,8 +125,6 @@ internal object ToolCategoryDetails {
             else -> "工具记录" to "未识别的工具使用只读安全回退；不根据返回文本猜测执行成功。"
         }
         if (result == null) fields += ToolFieldUi("返回内容", "尚未收到")
-        return ToolCategoryDetailsUi(heading, fields.distinct(), items, notice, ToolRichDetails.project(category, toolName, arguments, result, screenScreenshot))
+        return ToolCategoryDetailsUi(heading, fields.distinct(), items, notice, ToolRichDetails.project(category, toolName, arguments, result, screenScreenshot, argumentJson, resultJson))
     }
-    private fun parse(value: String?): JSONObject? = if (value == null || value.length > 65_536 || !value.trimStart().startsWith('{')) null
-        else runCatching { JSONObject(value) }.getOrNull()
 }

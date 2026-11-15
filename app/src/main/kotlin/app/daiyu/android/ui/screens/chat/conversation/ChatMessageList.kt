@@ -216,6 +216,7 @@ internal fun ChatMessageList(
     speechMessageId: String? = null,
     compressionActivities: List<app.daiyu.android.timeline.CompressionActivity> = emptyList(),
     speechPreparingMessageId: String? = null,
+    onViewportReady: (Boolean) -> Unit = {},
 ) {
     val reconnects = remember(timeline) {
         timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
@@ -729,6 +730,7 @@ internal fun ChatMessageList(
             }
         }
     }
+    SideEffect { onViewportReady(!initialPositionPending) }
     Box(modifier.fillMaxSize()) {
       BoxWithConstraints(Modifier.fillMaxSize()) {
         val viewportHeightPx = constraints.maxHeight

@@ -4,6 +4,7 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.CompositionLocalProvider
@@ -42,6 +43,7 @@ import java.util.concurrent.TimeUnit
 
 class ChatInitialPositionTest : WiredActivityTestCase() {
     private data class Draw(val owner: String, val tail: Boolean, val bottom: Float, val frameOwner: String, val probeEpoch: Int)
+    private var retainFrames = false
     private var probeEpoch by mutableStateOf(0)
     private val capturedProbes = CopyOnWriteArrayList<Pair<String, Int>>()
     private var owner by mutableStateOf("first")
@@ -133,7 +135,8 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                                 }
                             }
                         }) {
-                            holder.SaveableStateProvider(visit) {
+                            val messages: @androidx.compose.runtime.Composable ((Boolean) -> Unit) -> Unit = { ready ->
+                              holder.SaveableStateProvider(visit) {
                                 key(visit) {
                                     ChatMessageList(if (rowsAvailable) turns else emptyList(), ChatScreenActions(
                                         onVisibleCompleted = { reads += it },
@@ -143,9 +146,12 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                                         val colors = probeColors.getValue(visit)
                                         Box(Modifier.fillMaxWidth().height(if (tail) tailHeight else 40.dp)
                                             .background(if (tail) colors.first else colors.second))
-                                    })
+                                    }, onViewportReady = ready)
                                 }
+                              }
                             }
+                            if (retainFrames) ChatViewportFrame(visit, false, Modifier.fillMaxSize(), messages)
+                            else messages({})
                         }
                     }
                 }
@@ -408,6 +414,58 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
         }
         ui.waitForIdle()
         assertEquals(0, fixture.opens.get())
+    }
+
+    fun testColdSwitchRetainsEveryCapturedViewportUntilFormattedTargetCommits() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        retainFrames = true
+        try {
+            mount { text ->
+                if (text.contains("retained cold target")) {
+                    entered.countDown()
+                    check(release.await(10, TimeUnit.SECONDS)) { "Markdown parse gate timed out" }
+                }
+                MarkdownParser.parse(text)
+            }
+            ui.mainClock.autoAdvance = false
+            mainThread { rowsAvailable = false }
+            switchTo("cold", "# retained cold target")
+            frames(3)
+            mainThread { rowsAvailable = true }
+            frames(4)
+            ui.waitUntil(5_000) { entered.count == 0L }
+            val probes = capturedProbes.filter { it.first == "cold" }
+            assertTrue(probes.isNotEmpty())
+            probes.forEach { probe ->
+                assertTrue("Each pending viewport probe must retain the committed frame: $probe",
+                    draws.any { it.frameOwner == "cold" && it.probeEpoch == probe.second && it.owner == "first" })
+            }
+            assertTrue(reads.flatten().none { it.startsWith("cold-") })
+            release.countDown()
+            ui.mainClock.autoAdvance = true
+            ui.waitUntil(5_000) {
+                throwCaptureFailure()
+                draws.any { it.frameOwner == "cold" && it.owner == "cold" && it.tail }
+            }
+            val finalProbe = requestProbe()
+            ui.mainClock.advanceTimeByFrame()
+            awaitProbe(finalProbe)
+            awaitCapturedFrames()
+            val committed = draws.filter { it.frameOwner == "cold" && it.probeEpoch == finalProbe.second }
+            assertTrue("Target must replace the retained viewport", committed.isNotEmpty())
+            val expectedBottom = viewportBottom - 24f * activity.resources.displayMetrics.density
+            committed.forEach {
+                assertEquals("cold", it.owner)
+                assertTrue(it.tail)
+                assertEquals(expectedBottom, it.bottom, 2f)
+            }
+            assertTrue(draws.none { it.frameOwner == "cold" && it.owner == "unmarked visible content" })
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            release.countDown()
+            ui.mainClock.autoAdvance = true
+        }
     }
 
 }

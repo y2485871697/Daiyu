@@ -29,8 +29,12 @@ internal object ToolCardPresentations {
     private val browserActions = mapOf("list_tabs" to "查看标签页", "get_readable" to "读取正文", "get_text" to "读取正文", "find_elements" to "查找元素", "get_page_info" to "读取页面信息", "get_backbone" to "读取页面结构", "screenshot" to "网页截图", "new_tab" to "新建标签页", "close_tab" to "关闭标签页", "navigate" to "打开页面", "click" to "网页点击", "type" to "网页输入", "hover" to "悬停网页元素", "scroll" to "网页滚动", "execute_js" to "执行网页脚本", "fetch" to "获取网页资源", "get_cookies" to "读取 Cookie", "set_cookies" to "设置 Cookie", "scroll_and_collect" to "滚动收集网页内容", "set_user_agent" to "设置浏览器标识", "set_viewport" to "设置网页视口", "wait_for_selector" to "等待网页元素", "wait_for_dom_stable" to "等待页面稳定", "reload" to "刷新网页", "go_back" to "网页后退", "go_forward" to "网页前进")
     private val guiActions = mapOf("observe" to "查看屏幕", "screenshot" to "手机截图", "tap" to "点击", "long_press" to "长按", "scroll_forward" to "滚动", "scroll_backward" to "滚动", "input" to "输入", "back" to "系统按键", "home" to "系统按键", "recents" to "系统按键", "notifications" to "系统按键")
 
-    fun present(toolName: String, arguments: String, result: String?): Presentation {
-        val args = parse(arguments)
+    fun present(toolName: String, arguments: String, result: String?): Presentation =
+        presentParsed(toolName, arguments, result, ToolPresentationJson(arguments), ToolPresentationJson(result))
+
+    internal fun presentParsed(toolName: String, arguments: String, result: String?,
+        argumentJson: ToolPresentationJson, resultJson: ToolPresentationJson): Presentation {
+        val args = argumentJson.read(65_536)
         val screenScreenshot = toolName == "screen" && (args?.optString("operation") == "screenshot" ||
             (args?.optString("operation") == "observe" && !args.has("observation_id") &&
                 app.daiyu.android.media.NativeScreenImage.isVisualFallback(result)))
@@ -56,7 +60,7 @@ internal object ToolCardPresentations {
             else -> emptyList()
         }
         val params = numbers(args, paramKeys)
-        val output = parse(result)
+        val output = resultJson.read(65_536)
         val returned = when (toolName) {
             "launch_app" -> if (output?.optString("status") == "PLATFORM_LAUNCH_ACCEPTED_NOT_VERIFIED")
                 listOf("启动请求已受理 · 界面未核实") else emptyList()
@@ -98,7 +102,7 @@ internal object ToolCardPresentations {
             else -> "已收到返回内容，状态以执行回执为准"
         }
         val target = if (kind.first in setOf("terminal", "background_job")) TerminalToolTarget.fromResult(toolName, result, output) else null
-        val details = ToolCategoryDetails.project(kind.first, arguments, result, toolName, target, screenScreenshot)
+        val details = ToolCategoryDetails.project(kind.first, arguments, result, toolName, target, screenScreenshot, argumentJson, resultJson)
         val sections = buildList {
             if (kind.first in setOf("delegation", "child_control")) {
                 details.rich.prose?.let { add(ToolDetailSectionUi("结果", it.text)) }
@@ -130,10 +134,6 @@ internal object ToolCardPresentations {
         "dispatched" to "已派发", "start_failed" to "启动失败", "cancelled_before_dispatch" to "派发前取消",
         "unknown_after_process_restart" to "进程重启后状态未确认")
 
-    private fun parse(source: String?): JSONObject? {
-        if (source == null || source.length > 65_536 || !source.trimStart().startsWith('{')) return null
-        return runCatching { JSONObject(source) }.getOrNull()
-    }
     private fun numbers(value: JSONObject?, keys: List<String>): String = keys.mapNotNull { key ->
         val number = value?.opt(key) as? Number ?: return@mapNotNull null
         val long = number.toLong()

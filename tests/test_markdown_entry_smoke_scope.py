@@ -48,6 +48,7 @@ class MarkdownEntrySmokeScopeTests(unittest.TestCase):
     def test_session_entry_scope_adds_initial_position_and_static_timeline_without_full_discovery(self):
         classes = CLASSES + (
             'app.daiyu.android.ui.screens.chat.conversation.ChatInitialPositionTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatViewportFrameTest',
             'app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest',
         )
         self.assertEqual(classes, recorder.SESSION_ENTRY_PLATFORM_CLASSES)

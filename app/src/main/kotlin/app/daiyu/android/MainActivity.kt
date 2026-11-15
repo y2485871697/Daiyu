@@ -5644,6 +5644,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private val streamingHistoryRefresh = app.daiyu.android.ui.screens.chat.conversation.StreamingHistoryRefresh()
+    private var historyWindowReady = false
     private var refreshHistoryLoading = false
     private var refreshHistoryPending = false
     private var refreshHistoryRequestSerial = 0L
@@ -5721,9 +5722,10 @@ class MainActivity : ComponentActivity() {
                     if (active != null && Triple(entry.second.conversationId, entry.second.id, entry.second.runId) == currentOwner)
                         entry.first to active else entry
                 }
-                if (capturedDisplay != null || refreshed != shown) {
+                if (!historyWindowReady || capturedDisplay != null || refreshed != shown) {
                     displayWindow = null
                     if (presentations != null) toolPresentations = presentations
+                    historyWindowReady = true
                     shown = refreshed.toMutableList()
                     prepareMessageActionSnapshot()
                     publishChat()
@@ -6878,6 +6880,7 @@ class MainActivity : ComponentActivity() {
         selectionStart = (range?.first ?: draft.length).coerceIn(0, draft.length)
         selectionEnd = (range?.second ?: draft.length).coerceIn(0, draft.length)
         displayWindow = prepared?.display
+        historyWindowReady = conversation == null || prepared != null
         timelineRead?.cancel(); timelineRead = null
         timelineConversation = conversation?.id
         timelineEntries = prepared?.timeline.orEmpty()
@@ -7517,6 +7520,7 @@ class MainActivity : ComponentActivity() {
                 workflowBoundaries != oldBoundaries ||
                 reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position }
             chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
+                historyReady = historyWindowReady,
                 scrollRequest = scrollRequest,
                 contentRevision = chatState.contentRevision + if (rowsChanged) 1 else 0,
                 timeline = visibleTimeline,

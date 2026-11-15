@@ -155,10 +155,13 @@ internal fun DaiyuChatScreen(
         }
         ChatConversationLayers(Modifier.weight(1f)
             .windowInsetsPadding(WindowInsets.navigationBars.union(WindowInsets.ime)), messages = { bottomInset ->
-            androidx.compose.runtime.key(state.conversationKey) {
+            ChatViewportFrame(state.conversationKey, state.historyReady && displayedTurns.isEmpty(), Modifier.fillMaxSize()) { onViewportReady ->
+              androidx.compose.runtime.key(state.conversationKey) {
                 ChatMessageList(displayedTurns, actions, Modifier.fillMaxSize().then(dismissInputOnTap),
                     state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset, state.timeline, state.compressionActivity,
-                    speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId, compressionActivities = state.compressionActivities)
+                    speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId, compressionActivities = state.compressionActivities,
+                    onViewportReady = onViewportReady)
+              }
             }
         }, composer = { backdrop ->
             ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop,

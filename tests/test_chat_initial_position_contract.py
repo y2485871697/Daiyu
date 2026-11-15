@@ -8,6 +8,24 @@ HOST = ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt'
 
 
 class ChatInitialPositionContract(unittest.TestCase):
+    def test_ready_viewport_is_committed_outside_the_conversation_key(self):
+        screen = (CHAT.parent / 'ChatScreen.kt').read_text()
+        frame = (CHAT.parent / 'ChatViewportFrame.kt').read_text()
+        chat = CHAT.read_text()
+        self.assertLess(screen.index('ChatViewportFrame(state.conversationKey'), screen.index('androidx.compose.runtime.key(state.conversationKey)'))
+        self.assertIn('onViewportReady = onViewportReady', screen)
+        self.assertIn('state.historyReady && displayedTurns.isEmpty()', screen)
+        self.assertIn('historyWindowReady = conversation == null || prepared != null', HOST.read_text())
+        self.assertIn('historyReady = historyWindowReady,', HOST.read_text())
+        self.assertIn('SideEffect { onViewportReady(!initialPositionPending) }', chat)
+        self.assertIn('remember(owner, empty) { mutableStateOf(empty) }', frame)
+        self.assertIn('if (readiness.value)', frame)
+        self.assertIn('if (recorded.hasFrame) drawLayer(frame)', frame)
+        self.assertIn('Modifier.clearAndSetSemantics {}', frame)
+        self.assertIn('event.changes.forEach { it.consume() }', frame)
+        self.assertNotIn('toImageBitmap', frame)
+        self.assertNotIn('animate', frame)
+
     def test_selection_publishes_target_and_fresh_bottom_request_together(self):
         host = HOST.read_text()
         select = host.split('private fun select(conversation: Conversation?, prepared:', 1)[1].split('private fun sendDraft(', 1)[0]

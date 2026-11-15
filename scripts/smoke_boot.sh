@@ -123,6 +123,7 @@ markdown_entry_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.'
                           for name in markdown_entry_target}
 session_entry_target = markdown_entry_target | {
     'app.daiyu.android.ui.screens.chat.conversation.ChatInitialPositionTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatViewportFrameTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest',
 }
 session_entry_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(session_entry_target)

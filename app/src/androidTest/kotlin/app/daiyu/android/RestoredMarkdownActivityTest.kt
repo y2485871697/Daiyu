@@ -31,7 +31,12 @@ class RestoredMarkdownActivityTest : WiredActivityTestCase() {
                 blocks = listOf(MessageBlock.Text("first", "Restored **$marker**."),
                     MessageBlock.Text("second", "Second paragraph.")), status = RunStatus.RUNNING)
             database.send(user, answer)
-            database.save(answer.copy(status = RunStatus.COMPLETED))
+            val terminalStatus =
+                if (name == "testDisplayPublishesRealBodyAndDraftWhileAuthorityReadIsBlocked")
+                    RunStatus.STOPPED
+                else
+                    RunStatus.COMPLETED
+            database.save(answer.copy(status = terminalStatus))
             check(preferences.edit().putString("selected", conversation.id.value).commit())
             original = database.messages(conversation.id)
         })
@@ -228,7 +233,6 @@ class RestoredMarkdownActivityTest : WiredActivityTestCase() {
             app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
         mainThread {
             val answer = original.last().second
-            fixture.database.save(answer.copy(status = RunStatus.STOPPED))
             app.daiyu.android.timeline.ChatTimelineStore.write(fixture.database.writableDatabase,
                 app.daiyu.android.timeline.ChatTimelineEntry.Compression("first-display-compression",
                     app.daiyu.android.timeline.TimelineAnchor(conversation.id.value, answer.runId.value, answer.id.value, 0),

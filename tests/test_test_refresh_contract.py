@@ -41,6 +41,40 @@ class TestRefreshContract(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_changes(['.github/workflows/build.yml'])
 
+    def test_build_workflow_accepts_only_the_reviewed_smoke_tool_route_append(self):
+        line = b'          script: bash -c \'set +e; smoke_script=scripts/smoke_boot.sh; test -s smoke/prelaunch-ready.txt && bash "$smoke_script"; code=$?; printf "%s\\n" "$code" > smoke/exit-code.txt; exit "$code"\'\n'
+        route = b' if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest,app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest,app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi;'
+        before, grouped = self.build_group_fixture()
+        before += line
+        route_only = before.replace(line, line.replace(b' test -s ', route + b' test -s ', 1))
+        validate_changes(['.github/workflows/build.yml'], build_pair=(before, route_only))
+        grouped += line.replace(b' test -s ', route + b' test -s ', 1)
+        validate_changes(['.github/workflows/build.yml'], build_pair=(before, grouped))
+        for invalid in (
+                grouped.replace(b'= smoke &&', b'= compile &&'),
+                grouped.replace(b'ChatMessageSpacingTest,', b'OtherTest,'),
+                grouped.replace(b'.smoke-validation-tools/scripts/smoke_boot.sh', b'scripts/other.sh'),
+                grouped.replace(b'code=$?;', b'code=0;'),
+                grouped.replace(b'test -s smoke/prelaunch-ready.txt', b'true'),
+                grouped.replace(b'exit "$code"', b'exit 0'),
+                grouped.replace(b'SIGNING: fixed', b'SIGNING: changed'),
+                grouped.replace(route, route + route),
+                grouped.replace(b'          script: bash -c ', b'          # script: bash -c '),
+                route_only.replace(route, b'').replace(b' code=$?;', route + b' code=$?;', 1)):
+            with self.subTest(workflow=invalid), self.assertRaises(ValueError):
+                validate_changes(['.github/workflows/build.yml'], build_pair=(before, invalid))
+        comment_before = before.replace(b'          script: bash -c ', b'          # script: bash -c ')
+        comment_after = grouped.replace(b'          script: bash -c ', b'          # script: bash -c ')
+        with self.assertRaises(ValueError):
+            validate_changes(['.github/workflows/build.yml'], build_pair=(comment_before, comment_after))
+        inline_before = before.replace(b' test -s ', b' # retained test -s ', 1)
+        inline_after = inline_before.replace(b' test -s ', route + b' test -s ', 1)
+        with self.assertRaises(ValueError):
+            validate_changes(['.github/workflows/build.yml'], build_pair=(inline_before, inline_after))
+        with self.assertRaises(ValueError):
+            validate_changes(['.github/workflows/build.yml'],
+                             build_pair=(before + line, route_only + line.replace(b' test -s ', route + b' test -s ', 1)))
+
     def test_build_workflow_accepts_multiple_queue_expression_appends_only(self):
         before, after = self.build_group_fixture()
         tail = b"${{ inputs.mode == 'smoke' && '-timeline-divider' || '' }}"

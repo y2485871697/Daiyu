@@ -25,6 +25,45 @@ class NativeCompletionWebSearchTest {
     private fun read(stream: String, events: MutableList<ModelEvent>) = NativeCompletionStream.read(
         ProviderProtocol.CHAT_COMPLETIONS, stream.reader().buffered(), { false }, events::add)
 
+    private fun searchEvent(phase: String, id: String = "search-fixture") = JSONObject()
+        .put("type", "response.web_search_call.$phase").put("item_id", id)
+
+    @Test fun chatSearchLifecycleFramesReachTheCallWithoutReplacingChatIdentityOrText() {
+        val events = mutableListOf<ModelEvent>()
+        val start = chunk(JSONObject().put("content", "前")).put("id", "chat-fixture")
+        val end = chunk(JSONObject().put("content", "后"), "stop").put("id", "chat-fixture")
+        read(frame(start) + frame(searchEvent("searching").put("id", "different-event-id")) +
+            frame(searchEvent("completed")) + frame(end) + frame("[DONE]"), events)
+        assertEquals(listOf(NativeSearchPhase.RUNNING, NativeSearchPhase.COMPLETED),
+            events.filterIsInstance<ModelEvent.NativeSearch>().map { it.phase })
+        assertEquals("前后", events.filterIsInstance<ModelEvent.TextFinal>().single().text)
+    }
+
+    @Test fun chatSearchMixedFrameKeepsItsAnswerAndDoesNotInventAStartOrSuccess() {
+        for ((wire, phase) in listOf("completed" to NativeSearchPhase.COMPLETED,
+            "failed" to NativeSearchPhase.FAILED, "incomplete" to NativeSearchPhase.INCOMPLETE)) {
+            val events = mutableListOf<ModelEvent>()
+            val mixed = chunk(JSONObject().put("content", "answer"), "stop")
+                .put("type", "response.web_search_call.$wire").put("item_id", "search-fixture")
+            read(frame(mixed) + frame("[DONE]"), events)
+            assertEquals(listOf(phase), events.filterIsInstance<ModelEvent.NativeSearch>().map { it.phase })
+            assertEquals("answer", events.filterIsInstance<ModelEvent.TextFinal>().single().text)
+        }
+    }
+
+    @Test fun chatSearchNeverInfersActivityFromWordsOrCitationAndRejectsInvalidIdentity() {
+        val events = mutableListOf<ModelEvent>()
+        read(frame(chunk(JSONObject().put("content", "正在搜索"))) + frame(chunk(JSONObject()
+            .put("annotations", JSONArray().put(citation(end = 4))), "stop")) + frame("[DONE]"), events)
+        assertTrue(events.none { it is ModelEvent.NativeSearch })
+        for (id in listOf("", " ", "x".repeat(201))) {
+            try {
+                read(frame(searchEvent("searching", id)), mutableListOf())
+                fail("invalid search identity")
+            } catch (failure: ModelRequestException) { assertEquals(ModelFailure.PROTOCOL, failure.failure) }
+        }
+    }
+
     @Test fun nullableUnusedTerminalMetadataDoesNotFailAnAlreadyDeliveredAnswer() {
         val events = mutableListOf<ModelEvent>()
         read(frame(chunk(JSONObject().put("content", "answer"))) + frame(chunk(JSONObject()

@@ -123,7 +123,10 @@ class ConfirmableTranscript {
 
 /** Speech chaining: speak complete sentences as soon as available, not each token. */
 class VoiceChain(private val gate: AudioOwnerGate, private val output: SpeechOutput,
-    private val publish: (VoiceState) -> Unit) {
+    private val maxSegmentCodePoints: Int, private val publish: (VoiceState) -> Unit) {
+    constructor(gate: AudioOwnerGate, output: SpeechOutput, publish: (VoiceState) -> Unit) :
+        this(gate, output, 300, publish)
+    init { require(maxSegmentCodePoints in 1..300) }
     private var lease: AudioOwnerGate.Lease? = null
     private var owner: VoiceOwner? = null
     private val pending = ArrayDeque<String>()
@@ -204,9 +207,22 @@ class VoiceChain(private val gate: AudioOwnerGate, private val output: SpeechOut
     fun stop(next: VoiceOwner): Boolean = gate.cancel(next)
     private fun extract(flush: Boolean) {
         var start = 0
-        for (index in buffer.indices) {
-            if (buffer[index] in "。！？.!?\n" || index - start >= 299) {
-                pending.addLast(buffer.substring(start, index + 1)); start = index + 1
+        var index = 0
+        var count = 0
+        var softEnd = -1
+        while (index < buffer.length) {
+            // A streamed surrogate pair may arrive in two deltas.
+            if (!flush && index == buffer.lastIndex && Character.isHighSurrogate(buffer[index])) break
+            val point = Character.codePointAt(buffer, index)
+            index += Character.charCount(point)
+            count++
+            val sentenceEnd = point <= Char.MAX_VALUE.code && point.toChar() in "。！？.!?\n"
+            if (maxSegmentCodePoints < 300 && count >= maxSegmentCodePoints / 2 &&
+                point <= Char.MAX_VALUE.code && point.toChar() in "，,；;：: ") softEnd = index
+            if (sentenceEnd || count >= maxSegmentCodePoints) {
+                val end = if (!sentenceEnd && softEnd > start) softEnd else index
+                pending.addLast(buffer.substring(start, end))
+                start = end; index = end; count = 0; softEnd = -1
             }
         }
         if (start > 0) buffer.delete(0, start)

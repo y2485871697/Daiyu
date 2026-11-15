@@ -23,6 +23,7 @@ internal class AndroidUniversalPlayback(
     private val drained: () -> Unit,
     private val failed: () -> Unit,
     private val gate: AudioOwnerGate = ActivityVoiceAudio.gate, // Isolated fake gate in JVM tests only.
+    segmentCodePoints: Int = 300,
 ) : VoiceControlPlayback {
     private val playbackProgress = java.util.concurrent.atomic.AtomicLong()
     override val progress: Long get() = playbackProgress.get()
@@ -55,7 +56,7 @@ internal class AndroidUniversalPlayback(
         override fun stop() = releaseOutput(false)
         override fun close() = releaseOutput(true)
     }
-    private val chain = VoiceChain(gate, trackedOutput) { state ->
+    private val chain = VoiceChain(gate, trackedOutput, segmentCodePoints) { state ->
         post {
             if (!closed.get()) when (state.phase) {
                 VoicePhase.COMPLETE -> finish(finalBody && allowed())

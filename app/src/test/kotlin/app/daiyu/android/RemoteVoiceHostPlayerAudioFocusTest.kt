@@ -108,6 +108,35 @@ class RemoteVoiceHostPlayerAudioFocusTest {
         return media.last()
     }
 
+    @Test fun personalPreparedDurationDiagnosticDistinguishesInvalidAndOverCapBeforeStart() {
+        for (duration in listOf(-1, 0, 15_000, 15_001)) {
+            val file = File.createTempFile("personal-cap-", ".json", context.cacheDir).apply { delete() }
+            try {
+                val store = DiagnosticLogStore(file, executor = Executor { it.run() })
+                store.setEnabled(true); host.closeStrict()
+                host = newHost(FrozenVoiceSpeech(config).withUpload(PersonalCascadeUpload { _, _ -> 15_000 }, 15_000),
+                    diagnostics = store)
+                ShadowMediaPlayer.setMediaInfoProvider { ShadowMediaPlayer.MediaInfo(duration, -1) }
+                val (_, shadow) = preparing("personal-$duration")
+                shadow.invokePreparedListener()
+                val rows = JSONObject(file.readText()).getJSONArray("events")
+                val stages = (0 until rows.length()).map { rows.getJSONObject(it).getString("event") }
+                if (duration == 15_000) {
+                    assertEquals(SpeechPhase.SPEAKING, host.state.value.phase)
+                    assertTrue("SPEECH_NATIVE_STARTED" in stages)
+                } else {
+                    assertEquals(SpeechPhase.ERROR, host.state.value.phase)
+                    assertEquals(ShadowMediaPlayer.State.END, shadow.state)
+                    assertFalse("SPEECH_NATIVE_STARTED" in stages)
+                    assertTrue((if (duration <= 0) "SPEECH_PERSONAL_AUDIO_DURATION_INVALID"
+                        else "SPEECH_PERSONAL_AUDIO_CAP_EXCEEDED") in stages)
+                }
+                host.closeStrict()
+            } finally { file.delete() }
+        }
+        assertEquals(4, requests)
+    }
+
     @Test fun revokedCallReservationRejectsBeforeAnySynthesisRequest() {
         host.closeStrict()
         host = newHost(FrozenVoiceSpeech(config).withUpload(object : PersonalCascadeUpload {

@@ -18,6 +18,19 @@ class PersonalVoiceCallAuthorizationTest {
     private fun denied(action: () -> Unit) {
         try { action(); fail("A stale or exhausted capability must reject") } catch (_: IllegalStateException) { }
     }
+    @Test fun shortSegmentsKeepTheCallWideAudioBudgetAcrossAnswersWithoutRefund() {
+        val call = PersonalVoiceCallAuthorization(binding, PersonalVoiceCascadeLimits(24, 4800, 180_000, 600_000),
+            { binding }, { true }, { 100L })
+        val first = answer(call)
+        repeat(6) { assertEquals(15_000L, first.consume("first-$it", "字".repeat(32), 15_000)) }
+        first.close()
+        val second = answer(call, answer = owner.copy(runId = "next", messageId = "next"))
+        repeat(6) { assertEquals(15_000L, second.consume("next-$it", "字".repeat(32), 15_000)) }
+        assertTrue(second.current())
+        denied { second.consume("overflow", "字", 15_000) }
+        assertFalse(call.current())
+    }
+
     @Test fun finalReservationRemainsLiveButNextAnswerCannotResetTotalBudget() {
         val call = authorization()
         val first = answer(call)

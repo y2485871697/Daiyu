@@ -5,6 +5,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import app.daiyu.android.voice.*
+import app.daiyu.android.diagnostics.DiagnosticEvent
+import app.daiyu.android.diagnostics.DiagnosticLogStore
 import app.daiyu.android.voice.control.*
 import app.daiyu.android.voice.personal.*
 import app.daiyu.android.voice.duplex.DuplexRouteLease
@@ -35,6 +37,7 @@ internal class ActivityUniversalVoiceHost(
     private val stopAcceptedRun: (VoiceAssistantOwner) -> Unit,
     private val submissionReady: () -> Boolean = { true },
     private val revokePendingTicket: (VoiceControlPermit) -> Unit,
+    private val diagnostics: DiagnosticLogStore? = null,
 ) : AutoCloseable {
     private val app = context.applicationContext
     private val main = Handler(Looper.getMainLooper())
@@ -225,7 +228,12 @@ internal class ActivityUniversalVoiceHost(
             val personal = binding.personal?.answer(turn,
                 PersonalVoiceCascadeOwner(owner.conversationId, owner.runId, owner.messageId))
             val speech = if (personal == null) binding.speech else binding.speech.withUpload(object : PersonalCascadeUpload {
-                override fun consume(requestId: String, exactText: String): Long = personal.consume(requestId, exactText, 15_000)
+                override fun consume(requestId: String, exactText: String): Long = try {
+                    personal.consume(requestId, exactText, 15_000)
+                } catch (failure: Exception) {
+                    diagnostics?.recordAsync(DiagnosticEvent.SPEECH_PERSONAL_AUTHORIZATION_DENIED)
+                    throw failure
+                }
                 override fun current(): Boolean = personal.current()
             }, 15_000)
             val allowed = { admitted(turn.permit) && frozen === binding && personal?.current() != false }
@@ -237,12 +245,13 @@ internal class ActivityUniversalVoiceHost(
                     base.speak(text, object : SpeechOutput.Events {
                         override fun started() { if (allowed()) events.started() else events.failed("universal_output_revoked") }
                         override fun completed() { if (allowed()) events.completed() else events.failed("universal_output_revoked") }
-                        override fun failed(reason: String) = events.failed("universal_output_failed")
+                        override fun failed(reason: String) = events.failed(reason)
                     })
                 }
             }
             val playback = try {
-                AndroidUniversalPlayback(identity, guarded, allowed, ::post, drained, failed, outputAudio).also { it.start() }
+                AndroidUniversalPlayback(identity, guarded, allowed, ::post, drained, failed, outputAudio,
+                    segmentCodePoints = if (personal == null) 300 else 32).also { it.start() }
             } catch (failure: Throwable) { personal?.close(); throw failure }
             return object : VoiceControlPlayback by playback {
                 override fun closeAndDrain() { personal?.close(); playback.closeAndDrain() }
@@ -303,7 +312,8 @@ internal class ActivityUniversalVoiceHost(
         if (speech.configuration.engine == "SYSTEM") return ProductionSpeechOutput(app, owner)
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
         val delegate = ProductionSpeechOutput(owner, {
-            val player = RemoteVoiceHostPlayer(app, scope, runtime, speech, temporaryVoiceOwner = owner.conversationId)
+            val player = RemoteVoiceHostPlayer(app, scope, runtime, speech, diagnostics = diagnostics,
+                temporaryVoiceOwner = owner.conversationId)
             object : ProductionSpeechPlayer {
                 override val state get() = player.state
                 override fun bindOwner(owner: String) = player.bindOwner(owner)

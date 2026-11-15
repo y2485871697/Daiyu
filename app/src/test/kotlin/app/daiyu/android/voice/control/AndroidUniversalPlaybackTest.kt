@@ -33,7 +33,7 @@ class AndroidUniversalPlaybackTest {
         }
         fun complete(index: Int) = requests[index].second.completed()
     }
-    private class Fixture {
+    private class Fixture(segmentCodePoints: Int = 300) {
         val gate = AudioOwnerGate()
         val output = Output()
         val queue = ConcurrentLinkedQueue<() -> Unit>()
@@ -42,9 +42,26 @@ class AndroidUniversalPlaybackTest {
         var failures = 0
         val owner = VoiceOwner("conversation", "run", "session")
         val playback = AndroidUniversalPlayback(owner, output, { allowed }, { queue.add(it); Unit },
-            { check(output.closed); drains++ }, { failures++ }, gate)
+            { check(output.closed); drains++ }, { failures++ }, gate, segmentCodePoints)
         init { playback.start(); flush() }
         fun flush() { var count = 0; while (true) { val action = queue.poll() ?: return; check(++count < 100); action() } }
+    }
+
+    @Test fun personalLongAnswerDrainsOnlyAfterEveryShortTrackActuallyCompletes() {
+        val f = Fixture(segmentCodePoints = 32)
+        val text = "很长的搜索结果回答".repeat(20) + "。"
+        f.playback.body(text, true); f.flush()
+        assertEquals(1, f.output.requests.size)
+        var index = 0
+        while (index < f.output.requests.size) {
+            assertEquals(index + 1, f.output.requests.size)
+            assertEquals(0, f.drains)
+            assertTrue(f.output.requests[index].first.codePointCount(0, f.output.requests[index].first.length) <= 32)
+            f.output.complete(index++); f.flush()
+        }
+        assertEquals(text, f.output.requests.joinToString("") { it.first })
+        assertEquals(1, f.drains); assertEquals(0, f.failures)
+        assertEquals(1, f.output.closes)
     }
 
     @Test fun finalAndEnqueueAreNotDrainUntilActualCompletionAndStrictClose() {

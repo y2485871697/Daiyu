@@ -4,6 +4,18 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "app/src/main/kotlin/app/daiyu/android"
 class VoiceCallContractTest(unittest.TestCase):
+    def test_call_personal_segments_and_existing_diagnostics_are_wired_at_production_entry(self):
+        main = (SRC / 'MainActivity.kt').read_text()
+        host = (SRC / 'ActivityUniversalVoiceHost.kt').read_text()
+        adapter = (SRC / 'voice/control/AndroidUniversalPlayback.kt').read_text()
+        self.assertIn('diagnostics = controller.diagnostics,', main)
+        self.assertIn('RemoteVoiceHostPlayer(app, scope, runtime, speech, diagnostics = diagnostics,', host)
+        self.assertIn('segmentCodePoints = if (personal == null) 300 else 32', host)
+        self.assertIn('VoiceChain(gate, trackedOutput, segmentCodePoints)', adapter)
+        self.assertIn('personal.consume(requestId, exactText, 15_000)', host)
+        self.assertIn('SPEECH_PERSONAL_AUTHORIZATION_DENIED', host)
+        self.assertIn('override fun failed(reason: String) = events.failed(reason)', host)
+
     def test_call_inherits_strict_source_reasoning_and_cleans_only_temporary_preference(self):
         controller = (SRC / 'ChatController.kt').read_text()
         create = controller.split('internal fun createVoiceCall(', 1)[1].split('internal fun discardVoiceCall', 1)[0]

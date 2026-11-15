@@ -16,6 +16,40 @@ class VoiceSessionCoreTest {
         override fun close() { closes++ }
     }
 
+    @Test fun personalSegmentsBoundLongSentencesWithoutDroppingOrRepeatingCodePoints() {
+        val output = Output(); val states = mutableListOf<VoiceState>()
+        val chain = VoiceChain(AudioOwnerGate(), output, 32, states::add)
+        val text = "汉".repeat(20) + "，" + "字".repeat(50) + "😀".repeat(20) + "结束。"
+        chain.begin(a)
+        text.forEach { chain.delta(a, it.toString()) }
+        assertEquals("汉".repeat(20) + "，", output.texts.first())
+        chain.done(a)
+        var index = 0
+        while (index < output.events.size) output.events[index++].completed()
+        assertEquals(text, output.texts.joinToString(""))
+        assertTrue(output.texts.all { it.codePointCount(0, it.length) <= 32 })
+        assertTrue(output.texts.none { Character.isLowSurrogate(it.first()) || Character.isHighSurrogate(it.last()) })
+        assertEquals(VoicePhase.COMPLETE, states.last().phase)
+        chain.close()
+    }
+
+    @Test fun streamedSurrogateAtPersonalBoundaryWaitsForItsSecondHalf() {
+        val output = Output(); val chain = VoiceChain(AudioOwnerGate(), output, 32) {}
+        chain.begin(a)
+        chain.delta(a, "字".repeat(31) + "\uD83D")
+        assertTrue(output.texts.isEmpty())
+        chain.delta(a, "\uDE00")
+        assertEquals(listOf("字".repeat(31) + "😀"), output.texts)
+        chain.done(a); output.events.single().completed(); chain.close()
+    }
+
+    @Test fun defaultSpeechKeepsTheExistingThreeHundredCharacterLimit() {
+        val output = Output(); val chain = VoiceChain(AudioOwnerGate(), output) {}
+        chain.begin(a); chain.delta(a, "字".repeat(299)); assertTrue(output.texts.isEmpty())
+        chain.delta(a, "字"); assertEquals(listOf("字".repeat(300)), output.texts)
+        chain.done(a); output.events.single().completed(); chain.close()
+    }
+
     @Test fun inactiveDeltaGuardsPrecedeLengthValidationAndActiveErrorsReleaseLock() {
         val output = Output(); val states = mutableListOf<VoiceState>()
         val chain = VoiceChain(AudioOwnerGate(), output, states::add)

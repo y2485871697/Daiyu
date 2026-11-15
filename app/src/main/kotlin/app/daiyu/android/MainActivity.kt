@@ -400,6 +400,7 @@ class MainActivity : ComponentActivity() {
             stopAcceptedRun = { owner -> universalAssistants.remove(owner)?.let { controller.stop(it) }; Unit },
             submissionReady = { controller.active == null && controller.textSendState() == null && pendingTextSend == null &&
                 controller.ready && !controller.dataBusy && !controller.isMainContextCompressing(voiceCallConversation?.id) },
+            diagnostics = controller.diagnostics,
             revokePendingTicket = { permit ->
                 universalTickets.entries.filter { it.value.turn.permit.id == permit.id }.map { it.key }
                     .forEach { controller.cancelTextSend(it) }

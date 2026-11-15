@@ -66,6 +66,19 @@ internal object NativeCompletionStream {
             if (data.trim() == "null") return@frame true
             val chunk = MessagesRequest.jsonObject(data)
             if (chunk.has("error")) throw ProviderHttpFailure.event(chunk.optJSONObject("error"))
+            val searchPhase = when (chunk.optString("type")) {
+                "response.web_search_call.in_progress", "response.web_search_call.searching" -> NativeSearchPhase.RUNNING
+                "response.web_search_call.completed" -> NativeSearchPhase.COMPLETED
+                "response.web_search_call.failed" -> NativeSearchPhase.FAILED
+                "response.web_search_call.incomplete" -> NativeSearchPhase.INCOMPLETE
+                else -> null
+            }
+            if (searchPhase != null) {
+                val itemId = chunk.string("item_id")
+                protocol(itemId.isNotBlank() && itemId.length <= 200)
+                sink(ModelEvent.NativeSearch(itemId, searchPhase))
+                if (!chunk.has("choices") && !chunk.has("usage")) return@frame true
+            }
             if (chunk.has("id") && !chunk.isNull("id")) {
                 val next = chunk.string("id")
                 if (next.isNotBlank()) { protocol(sourceId == null || sourceId == next); sourceId = next }

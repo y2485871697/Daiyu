@@ -138,8 +138,14 @@ internal class RemoteVoiceHostPlayer(
                         deadline?.cancel(); deadline = null
                         // Manual read-aloud starts unknown/long tracks as in the original player.
                         // Only an explicit automatic personal-voice grant reserves audio duration.
-                        if (frozen.upload != null) check(RemoteVoicePlaybackBudget.accepts(source.duration.toLong(), cap)) {
-                            "voice_audio_duration_limit"
+                        if (frozen.upload != null) {
+                            val duration = source.duration.toLong()
+                            if (!RemoteVoicePlaybackBudget.accepts(duration, cap)) {
+                                diagnostics?.recordAsync(if (duration <= 0) DiagnosticEvent.SPEECH_PERSONAL_AUDIO_DURATION_INVALID
+                                    else DiagnosticEvent.SPEECH_PERSONAL_AUDIO_CAP_EXCEEDED)
+                                finish(owner, requestId, false)
+                                return@setOnPreparedListener
+                            }
                         }
                         val lease = SpeechAudioFocus(context,
                             attributes, handler) {

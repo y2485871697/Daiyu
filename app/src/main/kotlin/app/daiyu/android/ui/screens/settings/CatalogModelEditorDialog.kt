@@ -83,9 +83,6 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
                                         }.wrapContentSize(Alignment.Center))
                             },
                             onValueChange = { contextInput = contextInput.copy(text = it) })
-                        Text("该值用于会话裁剪和上下文预算。留空时使用远端或官方目录值。",
-                            style = MiuixTheme.textStyles.footnote2, color = colors.onSurfaceVariantSummary,
-                            modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
                         Column(Modifier.fillMaxWidth().testTag("catalog-model-capabilities")
                             .clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerHigh)) {
                             SettingsSwitchRow("支持视觉", value.vision, interactive) { value = value.copy(vision = it) }

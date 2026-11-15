@@ -3,6 +3,7 @@ import io
 import itertools
 import json
 import os
+import subprocess
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -944,3 +945,80 @@ class ReturnChatHandoffScopeTest(unittest.TestCase):
                     self.assertEqual(str(ROOT / "tests"), call.call_args.kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0])
             finally:
                 os.chdir(old)
+
+class TaskScrollFrozenCheckToolsTest(unittest.TestCase):
+    def test_exact_scope_uses_current_tools_and_preserves_raw_failure_and_both_shas(self):
+        classes = recorder.TASK_SCROLL_PLATFORM_CLASSES
+        raw = b"synthetic frozen-check failure\r\nraw stderr\x00\n"
+        old = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                os.chdir(directory)
+                Path("tests").mkdir()
+                Path("tests/test_acceptance_tool_receipt.py").write_text("raise AssertionError('stale checkout')\n")
+                for python in ("python", "python3"):
+                    for selected in (classes, tuple(reversed(classes))):
+                        for code in (0, 9):
+                            env = dict(GITHUB_SHA="b" * 40, EXPECTED_SHA="a" * 40,
+                                       GITHUB_RUN_ID="42", GITHUB_RUN_ATTEMPT="1",
+                                       SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected))
+                            def child(command, stdout, stderr, env=None, cwd=None):
+                                self.assertEqual(ROOT, cwd)
+                                self.assertEqual(str(ROOT / "tests"), env["PYTHONPATH"].split(os.pathsep)[0])
+                                self.assertEqual(subprocess.STDOUT, stderr)
+                                stdout.write(raw)
+                                return code
+                            console = io.BytesIO()
+                            with patch.dict(os.environ, env, clear=True), \
+                                    patch.object(recorder.subprocess, "check_output", return_value="a" * 40 + "\n"), \
+                                    patch.object(recorder.subprocess, "call", side_effect=child) as call, \
+                                    patch.object(recorder.sys, "stdout", SimpleNamespace(buffer=console)):
+                                self.assertEqual(code, recorder.record(python))
+                            receipt = json.loads(Path("tool-evidence/receipt.json").read_text())
+                            self.assertEqual(dict(sha="a" * 40, run_id=42, attempt=1), receipt["identity"])
+                            self.assertEqual("b" * 40, receipt["workflow_sha"])
+                            self.assertEqual("b" * 40, receipt["validation_tools_sha"])
+                            self.assertEqual("task-scroll-targeted", receipt["scope"])
+                            self.assertEqual(code, receipt["exit_code"])
+                            self.assertEqual([python, "-B", "-m", "unittest", *recorder.TASK_SCROLL_MODULES, "-v"], receipt["command"])
+                            self.assertEqual(receipt["command"], call.call_args.args[0])
+                            self.assertNotIn("discover", receipt["command"])
+                            self.assertEqual(raw, Path("tool-evidence/unittest.log").read_bytes())
+                            self.assertEqual(raw, console.getvalue())
+                            call.assert_called_once()
+            finally:
+                os.chdir(old)
+
+    def test_inexact_scope_and_other_modes_keep_full_fallback(self):
+        selected = ",".join(recorder.TASK_SCROLL_PLATFORM_CLASSES)
+        invalid = (",".join(recorder.TASK_SCROLL_PLATFORM_CLASSES[:-1]),
+                   selected + "," + recorder.TASK_SCROLL_PLATFORM_CLASSES[0],
+                   selected + ",app.daiyu.android.OtherTest", " " + selected,
+                   selected + " ", selected.replace(",", ", ", 1))
+        for value in invalid:
+            self.assertEqual((["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"),
+                             recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=value)))
+        for mode in ("", "compile", "candidate", "daily", "release", "checks"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=selected))[1])
+
+    def test_interruption_removes_stale_success_without_creating_a_receipt(self):
+        old = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                os.chdir(directory)
+                receipt = Path("tool-evidence/receipt.json")
+                receipt.parent.mkdir()
+                env = dict(GITHUB_SHA="b" * 40, EXPECTED_SHA="a" * 40,
+                           GITHUB_RUN_ID="42", GITHUB_RUN_ATTEMPT="1", SMOKE_MODE="smoke",
+                           SMOKE_TEST_CLASSES=",".join(recorder.TASK_SCROLL_PLATFORM_CLASSES))
+                for failure in (OSError("fixture"), KeyboardInterrupt()):
+                    receipt.write_text('{"exit_code":0}')
+                    with patch.dict(os.environ, env, clear=True), \
+                            patch.object(recorder.subprocess, "check_output", return_value="a" * 40 + "\n"), \
+                            patch.object(recorder.subprocess, "call", side_effect=failure):
+                        with self.assertRaises(type(failure)):
+                            recorder.record("python3")
+                    self.assertFalse(receipt.exists())
+            finally:
+                os.chdir(old)
+

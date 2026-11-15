@@ -83,7 +83,9 @@ class TaskScrollSmokeScopeTests(unittest.TestCase):
                     self.assertEqual(9, receipt['exit_code'])
                     self.assertEqual(dict(sha='c' * 40, run_id=14, attempt=1), receipt['identity'])
                     self.assertEqual(call.call_args.args[0], receipt['command'])
-                    self.assertTrue(call.call_args.kwargs['env']['PYTHONPATH'].startswith(str(Path('tests').resolve())))
+                    tools_root = Path(recorder.__file__).resolve().parents[2]
+                    self.assertEqual(tools_root, call.call_args.kwargs['cwd'])
+                    self.assertEqual(str(tools_root / 'tests'), call.call_args.kwargs['env']['PYTHONPATH'].split(os.pathsep)[0])
             finally:
                 os.chdir(old)
 

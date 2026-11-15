@@ -5,6 +5,8 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,6 +31,30 @@ import app.daiyu.android.ui.haptics.clickable
 import app.daiyu.android.ui.screens.chat.conversation.ChatAnchoredMenu
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.Text
+
+@Stable
+internal class ConversationDrawerControlsState(
+    filterRunning: Boolean = false,
+    filterCompleted: Boolean = false,
+    sortByLastOutput: Boolean = false,
+    reverse: Boolean = false,
+) {
+    var filterRunning by mutableStateOf(filterRunning)
+    var filterCompleted by mutableStateOf(filterCompleted)
+    var sortByLastOutput by mutableStateOf(sortByLastOutput)
+    var reverse by mutableStateOf(reverse)
+
+    companion object {
+        val Saver = listSaver<ConversationDrawerControlsState, Boolean>(
+            save = { listOf(it.filterRunning, it.filterCompleted, it.sortByLastOutput, it.reverse) },
+            restore = { ConversationDrawerControlsState(it[0], it[1], it[2], it[3]) },
+        )
+    }
+}
+
+@Composable
+internal fun rememberConversationDrawerControlsState(): ConversationDrawerControlsState =
+    rememberSaveable(saver = ConversationDrawerControlsState.Saver) { ConversationDrawerControlsState() }
 
 @Composable
 internal fun ConversationDrawerControls(

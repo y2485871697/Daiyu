@@ -108,6 +108,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                                 historyConversations = rows, conversationsLoaded = loaded,
                             )) }
                             ConversationSidePaneScaffold(
+                                controlsState = app.daiyu.android.ui.components.rememberConversationDrawerControlsState(),
                                 state = state, visible = visible, backHandlerEnabled = true,
                                 onOpen = { visible = true }, onDismiss = { visible = false },
                                 onSearchChange = { state = state.copy(searchQuery = it) },

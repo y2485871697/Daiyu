@@ -134,6 +134,7 @@ class ColorfulThemeActivityTest : WiredActivityTestCase() {
         for (dark in listOf(false, true)) {
             show(dark) {
                 ConversationSidePaneScaffold(
+                    controlsState = app.daiyu.android.ui.components.rememberConversationDrawerControlsState(),
                     state = ConversationPaneUiState(
                         conversations = listOf(ConversationSummaryUi("preview", "界面调整", "检查设置与聊天页面", "", mode = ConversationModeUi.Chat, isToday = true)),
                         selectedConversationId = "preview", searchQuery = "",

@@ -59,7 +59,8 @@ class ConversationDateContractTest(unittest.TestCase):
         for name in ('testMissingColumnMigrationUsesKnownCreationAndFreezesUnknownDateOnlyOnce',
                      'testSchema32UpgradeThenContinuationRenameAndPinKeepTheOriginalDay',
                      'testEditingRegeneratingAndDeletingTailKeepTheStableDayButBranchGetsToday',
-                     'testSelectingAnOldConversationKeepsTheOpenDrawerAndItsScrollPosition'):
+                     'testSelectingAnOldConversationKeepsTheOpenDrawerAndItsScrollPosition',
+                     'testDrawerConditionsSurviveRealConversationSelectionAndReopen'):
             self.assertIn('fun ' + name + '()', device)
 
     def test_drawer_controls_use_compact_upward_menus_and_highlight_without_check_circles(self):
@@ -85,8 +86,15 @@ class ConversationDateContractTest(unittest.TestCase):
         self.assertIn('menu.minWidth.roundToPx()', layer)
         self.assertIn('preferAbove = menu.preferAbove', layer)
         pane = (MAIN / 'ui/components/ConversationSidePaneScaffold.kt').read_text()
-        self.assertIn('var sortByLastOutput by rememberSaveable { mutableStateOf(false) }', pane)
-        self.assertIn('var reverse by rememberSaveable { mutableStateOf(false) }', pane)
+        for name in ('filterRunning', 'filterCompleted', 'sortByLastOutput', 'reverse'):
+            self.assertIn('val ' + name + ' = controlsState.' + name, pane)
+            self.assertNotIn('var ' + name + ' by rememberSaveable', pane)
+        activity = (MAIN / 'MainActivity.kt').read_text()
+        owner = activity.index('val conversationDrawerControlsState = rememberConversationDrawerControlsState()')
+        self.assertLess(owner, activity.index('val rootChatContent:'))
+        self.assertIn('controlsState = conversationDrawerControlsState,', activity)
+        self.assertIn('controlsState = controlsState,', pane)
+        self.assertIn('rememberSaveable(saver = ConversationDrawerControlsState.Saver)', source)
         self.assertIn('state.searchResults().filterDrawerStatus(filterRunning, filterCompleted)', pane)
         self.assertIn('drawer-assistant-button', pane)
         self.assertIn('val showDateHeadings = !sortByLastOutput && !filterRunning && !filterCompleted', pane)

@@ -566,6 +566,97 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
         awaitControl("heading regression generation completed") { fixture.controller.active == null }
     }
 
+    fun testDrawerConditionsSurviveRealConversationSelectionAndReopen() {
+        val db = fixture.database
+        @Suppress("UNCHECKED_CAST")
+        fun pane() = (MainActivity::class.java.getDeclaredField("paneState\$delegate")
+            .apply { isAccessible = true }.get(activity) as androidx.compose.runtime.MutableState<
+                app.daiyu.android.ui.model.ConversationPaneUiState>).value
+        fun selected() = MainActivity::class.java.getDeclaredField("selected")
+            .apply { isAccessible = true }.get(activity) as? Conversation
+        fun host(name: String): Any? = MainActivity::class.java.getDeclaredMethod(name)
+            .apply { isAccessible = true }.invoke(activity)
+        fun row(owner: Conversation) = node("drawer-conversation:${owner.id.value}")
+        val baseDay = oldMillis()
+        fun seed(title: String, dayOffset: Long, outputAt: Long): Conversation {
+            val owner = db.create("default")
+            val (user, reply) = pair(owner.id)
+            db.send(user.copy(createdAt = outputAt - 1), reply.copy(createdAt = outputAt))
+            db.save(reply.copy(createdAt = outputAt, status = RunStatus.COMPLETED))
+            db.rename(owner.id, title)
+            db.draft(owner.id, "draft-$title")
+            db.writableDatabase.execSQL("UPDATE conversations SET sidebar_date=? WHERE id=?",
+                arrayOf<Any>(baseDay + dayOffset * 86_400_000L, owner.id.value))
+            return owner
+        }
+        val a = seed("witness-a", 2, 1_000L)
+        val b = seed("witness-b", 0, 2_000L)
+        val c = seed("witness-c", 1, 3_000L)
+        val target = seed("switch-target", 3, 4_000L)
+        val ordinary = seed("ordinary", 1, 2_500L)
+        val receipt = checkNotNull(ConversationCompletionMarkers.read(db.readableDatabase, ordinary.id))
+        assertTrue(ConversationCompletionMarkers.acknowledge(db.writableDatabase, receipt))
+        mainThread { activity.select(ordinary) }
+        fun choose(button: String, choice: String) {
+            node(button).performClick()
+            node(choice).performClick()
+            androidx.test.espresso.Espresso.pressBack()
+        }
+        fun assertConditionsAndResults() {
+            node("conversation-drawer").assertIsDisplayed()
+            node("drawer-filter-button").performClick()
+            node("drawer-choice-completed").assertIsSelected()
+            node("drawer-choice-running").assertIsSelected()
+            androidx.test.espresso.Espresso.pressBack()
+            node("drawer-sort-button").performClick()
+            node("drawer-choice-last-output").assertIsSelected()
+            node("drawer-choice-date").assertIsNotSelected()
+            node("drawer-choice-reverse").assertIsSelected()
+            node("drawer-choice-forward").assertIsNotSelected()
+            androidx.test.espresso.Espresso.pressBack()
+            node("drawer-list").performScrollToKey(a.id.value)
+            listOf(a, b, c).forEach { row(it).assertIsDisplayed() }
+            row(ordinary).assertDoesNotExist()
+            val tops = listOf(a, b, c).map { screenBounds("drawer-conversation:${it.id.value}").top }
+            assertTrue("last-output/reverse: a before b", tops[0] < tops[1])
+            assertTrue("last-output/reverse: b before c", tops[1] < tops[2])
+        }
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        awaitPaneRows(listOf(a.id, b.id, c.id, target.id, ordinary.id))
+        choose("drawer-filter-button", "drawer-choice-completed")
+        choose("drawer-filter-button", "drawer-choice-running")
+        choose("drawer-sort-button", "drawer-choice-last-output")
+        choose("drawer-sort-button", "drawer-choice-reverse")
+        assertConditionsAndResults()
+        node("drawer-list").performScrollToKey(target.id.value)
+        row(target).assertIsDisplayed().performClick()
+        awaitControl("real drawer selection committed with target draft") {
+            selected()?.id == target.id && pane().selectedConversationId == target.id.value &&
+                fixture.controller.preferences.getString("selected", null) == target.id.value &&
+                host("getDraft") == "draft-switch-target"
+        }
+        ui.waitForIdle()
+        mainThread {
+            assertEquals(true, host("getSidebarVisible"))
+            assertEquals("chat", host("getRetainedPage"))
+        }
+        assertConditionsAndResults()
+        awaitNodeWindowFocus(node("conversation-drawer"))
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        awaitControl("Back closed the actual sidebar") { host("getSidebarVisible") == false }
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        node("drawer-filter-menu").assertDoesNotExist()
+        node("drawer-sort-menu").assertDoesNotExist()
+        assertConditionsAndResults()
+        mainThread {
+            assertEquals(target.id, selected()?.id)
+            assertEquals(target.id.value, pane().selectedConversationId)
+            assertEquals("draft-switch-target", host("getDraft"))
+        }
+        node("assistant-sheet").assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testClosingDrawerDismissesTheOpenMenuAndDoesNotReopenItOnNextVisit() {
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
         node("drawer-filter-button").performClick()

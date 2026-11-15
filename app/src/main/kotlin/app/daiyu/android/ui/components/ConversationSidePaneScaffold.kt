@@ -59,7 +59,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
@@ -162,6 +161,7 @@ private object DrawerMetrics {
 @Composable
 internal fun ConversationSidePaneScaffold(
     state: ConversationPaneUiState,
+    controlsState: ConversationDrawerControlsState,
     visible: Boolean,
     backHandlerEnabled: Boolean,
     onOpen: () -> Unit,
@@ -299,6 +299,7 @@ internal fun ConversationSidePaneScaffold(
             drawerContent = {
                 ConversationPanePanel(
                     state = state,
+                    controlsState = controlsState,
                     listState = listState,
                     width = paneWidth,
                     drawerShape = drawerShape,
@@ -350,6 +351,7 @@ internal fun ConversationSidePaneScaffold(
 @Composable
 private fun ConversationPanePanel(
     state: ConversationPaneUiState,
+    controlsState: ConversationDrawerControlsState,
     listState: LazyListState,
     managing: Boolean,
     onManagingChange: (Boolean) -> Unit,
@@ -390,10 +392,10 @@ private fun ConversationPanePanel(
     val selectedExportIds = state.historyConversations.filter { it.id in selectedIds }.map { it.id }
     val batchExport = managing && selectedExportIds.size > 1
     val query = state.searchQuery.trim()
-    var filterRunning by rememberSaveable { mutableStateOf(false) }
-    var filterCompleted by rememberSaveable { mutableStateOf(false) }
-    var sortByLastOutput by rememberSaveable { mutableStateOf(false) }
-    var reverse by rememberSaveable { mutableStateOf(false) }
+    val filterRunning = controlsState.filterRunning
+    val filterCompleted = controlsState.filterCompleted
+    val sortByLastOutput = controlsState.sortByLastOutput
+    val reverse = controlsState.reverse
     val visibleConversations = remember(state.conversations, query, filterRunning, filterCompleted) {
         state.searchResults().filterDrawerStatus(filterRunning, filterCompleted)
     }
@@ -537,9 +539,9 @@ private fun ConversationPanePanel(
             PaneAssistantBar(
                 controls = {
                     ConversationDrawerControls(filterRunning, filterCompleted, sortByLastOutput, reverse,
-                        onRunningChange = { filterRunning = it }, onCompletedChange = { filterCompleted = it },
-                        onReset = { filterRunning = false; filterCompleted = false },
-                        onSortChange = { sortByLastOutput = it }, onReverseChange = { reverse = it },
+                        onRunningChange = { controlsState.filterRunning = it }, onCompletedChange = { controlsState.filterCompleted = it },
+                        onReset = { controlsState.filterRunning = false; controlsState.filterCompleted = false },
+                        onSortChange = { controlsState.sortByLastOutput = it }, onReverseChange = { controlsState.reverse = it },
                         canOpen = enableSearchFocus)
                 },
                 name = activeAssistant?.name?.ifBlank { stringResource(R.string.app_name) }

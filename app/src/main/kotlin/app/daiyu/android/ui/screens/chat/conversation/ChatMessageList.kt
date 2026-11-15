@@ -555,7 +555,7 @@ internal fun ChatMessageList(
         // A following reader keeps the original bounded outer motion until its
         // virtual origin has caught the real content origin. Unwrapping then has
         // no visible jump and cannot pay the outstanding growth in one frame.
-        while (followBottom && (disclosureViewport.active != null || nestedTail.followCatchup ||
+        while (followBottom && (disclosureViewport.active != null ||
                 abs(nestedTail.scrollOffset - nestedTail.viewportOffset) > 1f)) {
             withFrameNanos { }
             if (!ownsMigration()) return@LaunchedEffect
@@ -566,7 +566,7 @@ internal fun ChatMessageList(
         listState.stopScroll(MutatePriority.PreventUserInput)
         withFrameNanos { }
         if (!ownsMigration()) return@LaunchedEffect
-        while (followBottom && (disclosureViewport.active != null || nestedTail.followCatchup ||
+        while (followBottom && (disclosureViewport.active != null ||
                 abs(nestedTail.scrollOffset - nestedTail.viewportOffset) > 1f)) {
             withFrameNanos { }
             if (!ownsMigration()) return@LaunchedEffect

@@ -34,8 +34,8 @@ internal val WorkflowDisclosureGeometry = SemanticsPropertyKey<() -> String>("Wo
 internal class WorkflowCollapseExtent {
     private var height = 0
 
-    fun measure(measuredHeight: Int, expanded: Boolean): Int {
-        height = if (expanded) measuredHeight else minOf(height, measuredHeight)
+    fun measure(measuredHeight: Int, expanded: Boolean, closingLimit: Int? = null): Int {
+        height = if (expanded) measuredHeight else minOf(height, measuredHeight, closingLimit ?: height)
         return height
     }
 }
@@ -79,6 +79,8 @@ internal class WorkflowDisclosureMotion(
         private set
     val alignment: Alignment.Vertical get() = if (upwards) Alignment.Bottom else Alignment.Top
     val collapseAlignment: Alignment.Vertical get() = if (collapseUp) Alignment.Top else alignment
+    var closingDetailHeight: Int? = null
+        private set
     private var anchorAtTop = false
     private var anchorTop = 0f
     private var header: LayoutCoordinates? = null
@@ -149,6 +151,18 @@ internal class WorkflowDisclosureMotion(
     }
 
     fun toggle(opening: Boolean) {
+        closingDetailHeight = if (collapseUp && !opening) {
+            val placedContainer = container?.takeIf { it.isAttached }
+            val placedHeader = header?.takeIf { it.isAttached }
+            if (placedContainer != null && placedHeader != null) {
+                var height = (placedContainer.size.height - placedHeader.size.height).coerceAtLeast(0)
+                context?.viewport?.bounds?.invoke()?.let { safe ->
+                    height = minOf(height, (safe.bottom - placedHeader.positionInWindow().y -
+                        placedHeader.size.height).toInt().coerceAtLeast(0))
+                }
+                height
+            } else null
+        } else null
         val viewport = context?.viewport
         val following = context?.outputActive?.invoke() == true &&
             viewport?.let { it.follows() || followingOnPress && pressGesture == it.gesture } == true
@@ -175,6 +189,7 @@ internal class WorkflowDisclosureMotion(
         if (value && !expanded && !manualChange && !cycleChosen) {
             cycleChosen = chooseDirection(context?.viewport?.follows?.invoke() == true)
         }
+        if (value) closingDetailHeight = null
         expanded = value
         manualChange = false
     }

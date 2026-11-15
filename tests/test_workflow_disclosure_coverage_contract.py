@@ -7,6 +7,15 @@ CHAT = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 
 
 class WorkflowDisclosureCoverageTests(unittest.TestCase):
+    def test_total_workflow_reversals_are_capped_by_placed_closing_geometry(self):
+        motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
+        work = (CHAT / 'WorkProcessCard.kt').read_text()
+        self.assertIn('closingDetailHeight: Int?', motion)
+        self.assertIn('placedContainer.size.height - placedHeader.size.height', motion)
+        self.assertIn('safe.bottom - placedHeader.positionInWindow().y', motion)
+        self.assertIn('disclosure.closingDetailHeight', work)
+        self.assertIn('minOf(height, measuredHeight, closingLimit ?: height)', motion)
+
     def test_supplemental_chat_disclosures_have_both_geometry_anchors_and_toggle(self):
         for name in ('QuestionCard.kt', 'ToolCategoryContent.kt', 'ChildTaskToolContent.kt', 'ChildTaskCardContent.kt'):
             with self.subTest(name=name):
@@ -16,6 +25,12 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
                               'WorkflowExpandableContent(visibility, disclosure)'):
                     self.assertIn(token, source)
                 self.assertNotIn('SettingsExpandableContent(', source)
+
+    def test_terminal_handoff_waits_for_geometric_offsets_not_catchup_flag(self):
+        source = (CHAT / 'ChatMessageList.kt').read_text()
+        migration = source.split('// Unwrap only after terminal', 1)[1].split('val requestedIndex', 1)[0]
+        self.assertEqual(2, migration.count('abs(nestedTail.scrollOffset - nestedTail.viewportOffset) > 1f'))
+        self.assertNotIn('|| nestedTail.followCatchup', migration)
 
     def test_disclosure_scroll_moves_the_window_not_only_its_clipped_contents(self):
         source = (CHAT / 'ChatMessageList.kt').read_text()

@@ -126,7 +126,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
         }
         AnimatedVisibility(visibility, modifier = Modifier.layout { measurable, constraints ->
             val detail = measurable.measure(constraints)
-            val height = detailExtent.measure(detail.height, expanded)
+            val height = detailExtent.measure(detail.height, expanded, disclosure.closingDetailHeight)
             layout(detail.width, height) { detail.placeRelative(0, 0) }
         }, enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment),
             exit = fadeOut() + shrinkVertically(shrinkTowards = disclosure.collapseAlignment)) {

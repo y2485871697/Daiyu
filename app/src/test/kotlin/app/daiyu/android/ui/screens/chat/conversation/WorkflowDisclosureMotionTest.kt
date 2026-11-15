@@ -72,4 +72,14 @@ class WorkflowDisclosureMotionTest {
         assertEquals(24, extent.measure(24, expanded = true))
     }
 
+    @Test fun workflowCollapseUsesThePlacedExtentRatherThanAnAheadOfFrameMeasure() {
+        val extent = WorkflowCollapseExtent()
+        assertEquals(44, extent.measure(44, expanded = true))
+        assertEquals(56, extent.measure(56, expanded = true))
+        assertEquals(44, extent.measure(60, expanded = false, closingLimit = 44))
+        assertEquals(40, extent.measure(40, expanded = false, closingLimit = 44))
+        assertEquals(48, extent.measure(48, expanded = true))
+        assertEquals(48, extent.measure(52, expanded = false, closingLimit = 48))
+    }
+
 }

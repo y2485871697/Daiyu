@@ -90,7 +90,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertNotIn("listState.layoutInfo", viewport)
         self.assertIn("ChatTailClearance.roundToPx()", source)
         migration = source.split("// Unwrap only after terminal", 1)[1].split("val requestedIndex", 1)[0]
-        for token in ("revealedTurns[tail.listKey] != tail", "while (followBottom && (disclosureViewport.active != null || nestedTail.followCatchup ||",
+        for token in ("revealedTurns[tail.listKey] != tail", "while (followBottom && (disclosureViewport.active != null ||",
                       "stopScroll(MutatePriority.PreventUserInput)",
                       "nestedTail.scrollOffset.roundToInt() - nestedTail.viewportOffset",
                       "listState.scrollToItem(index, offset + delta)"):

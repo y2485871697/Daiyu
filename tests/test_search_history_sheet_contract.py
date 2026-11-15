@@ -7,6 +7,21 @@ SRC = ROOT / 'app/src/main/kotlin/app/daiyu/android'
 
 
 class SearchHistorySheetContract(unittest.TestCase):
+    def test_retained_page_content_freezes_its_call_site_snapshot(self):
+        host = (SRC / 'MainActivity.kt').read_text()
+        page = host.split('ChatPageHost(', 1)[1].split('val returnRefreshRequest', 1)[0]
+        keys, body = page.split('content = remember(', 1)[1].split(') {', 1)
+        self.assertEqual({key.strip() for key in keys.split(',') if key.strip()}, {
+            'chatPageState', 'pageState', 'pageCompression', 'pageActions', 'pageGeneration',
+            'pageImageLoader', 'pageAssistant', 'pageCallUi', 'pageCallActions',
+            'mediaGallery', 'speechMessageId', 'speechPreparingMessageId', 'routeActive',
+        })
+        self.assertIn('@Composable { presented, onReady ->', body)
+        self.assertIn('chatPageState.SaveableStateProvider(pageState.conversationKey ?: "new-chat")', body)
+        self.assertIn('pageState.conversationKey == chatState.conversationKey && pageGeneration == editorGeneration', body)
+        self.assertIn('DaiyuChatScreen(pageState, pageActions,', body)
+        self.assertIn('routeActive && pageCurrent && presented', body)
+
     def test_blank_query_is_silent_without_falling_into_loading(self):
         dialog = (SRC / 'ui/app/SearchHistoryDialog.kt').read_text()
         self.assertIn('request.query.isBlank() -> Unit', dialog)

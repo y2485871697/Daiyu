@@ -2514,7 +2514,12 @@ class MainActivity : ComponentActivity() {
                                     }
                             app.daiyu.android.ui.screens.chat.conversation.ChatPageHost(
                                 owner = pageState.conversationKey, modifier = Modifier.fillMaxSize(),
-                            ) { presented, onReady ->
+                                content = remember(
+                                    chatPageState, pageState, pageCompression, pageActions, pageGeneration,
+                                    pageImageLoader, pageAssistant, pageCallUi, pageCallActions,
+                                    mediaGallery, speechMessageId, speechPreparingMessageId, routeActive,
+                                ) {
+                                @Composable { presented, onReady ->
                             val pageCurrent = pageState.conversationKey == chatState.conversationKey && pageGeneration == editorGeneration
                             chatPageState.SaveableStateProvider(pageState.conversationKey ?: "new-chat") {
                             BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -2592,7 +2597,9 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
-                            }
+                                }
+                                },
+                            )
                     }
                 }
                 val returnRefreshRequest = chatReturnRefresh

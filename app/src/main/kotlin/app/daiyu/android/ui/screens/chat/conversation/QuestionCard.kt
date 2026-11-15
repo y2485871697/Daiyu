@@ -114,7 +114,8 @@ private fun QuestionCardContent(
     val saved = record.answer ?: draft.saved.takeIf { binding != null || !record.interrupted }
     val value = if (record.answer == null && saved != null) record.copy(answer = saved) else record
     val confirmedAnswer = value.answer
-    val completed = confirmedAnswer != null || value.interrupted
+    val archived = confirmedAnswer != null
+    val completed = archived || value.interrupted
     val selection = confirmedAnswer ?: draft.selection
     val otherText = if (confirmedAnswer is QuestionAnswer.Other) confirmedAnswer.text else draft.other
     val noteText = if (confirmedAnswer != null) confirmedAnswer.note.orEmpty() else draft.note
@@ -148,7 +149,7 @@ private fun QuestionCardContent(
     val colors = questionCardColors()
     val shape = RoundedCornerShape(14.dp)
     var expanded by remember(owner) {
-        mutableStateOf(confirmedAnswer == null || draft.reply == Reply.SAVED_REFRESH_FAILED)
+        mutableStateOf(true)
     }
     val visibility = remember(owner) { MutableTransitionState(expanded) }
     visibility.targetState = expanded
@@ -206,75 +207,47 @@ private fun QuestionCardContent(
             Column(Modifier.fillMaxWidth().padding(horizontal = 11.dp, vertical = 12.dp)) {
                 Text(value.question.question, color = colors.text, style = questionTextStyle(16, 1.6f))
                 Spacer(Modifier.height(10.dp))
-                when {
-                    confirmedAnswer != null -> {
-                        val option = (confirmedAnswer as? QuestionAnswer.Selected)?.let { answer ->
-                            value.question.options.firstOrNull { it.id == answer.optionId }
+                if (value.interrupted && !archived) {
+                    // No fabricated expiry reason: the domain currently exposes interruption only.
+                    Text("提问已中断，当前不可作答", color = colors.muted,
+                        style = questionTextStyle(15, 1.6f))
+                } else {
+                    Column(Modifier.fillMaxWidth().selectableGroup().alpha(if (editable || archived) 1f else .5f),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        value.question.options.forEachIndexed { index, option ->
+                            QuestionOptionRow(
+                                label = option.label,
+                                description = option.description,
+                                recommended = option.id == value.question.recommendedOptionId,
+                                selected = selection is QuestionAnswer.Selected && selection.optionId == option.id,
+                                enabled = editable,
+                                onClick = { session.select(QuestionAnswer.Selected(option.id)) },
+                                modifier = Modifier.testTag("question-option:$index"),
+                            )
                         }
-                        val label = when (confirmedAnswer) {
-                            is QuestionAnswer.Selected -> option?.label ?: "已保存选项"
-                            is QuestionAnswer.Other -> "其他… ${confirmedAnswer.text}"
-                            is QuestionAnswer.Delegate -> "你看着办"
+                        var index = value.question.options.size
+                        if (value.question.allowOther) {
+                            QuestionOptionRow("其他…", "", false, selection is QuestionAnswer.Other, editable,
+                                { session.select(QuestionAnswer.Other("")) }, Modifier.testTag("question-option:$index"))
+                            if (selection is QuestionAnswer.Other) {
+                                QuestionInput(otherText, "填写你的选择", editable, { session.editOther(it) },
+                                    Modifier.padding(top = 4.dp, bottom = 5.dp)
+                                        .testTag("question-other"), fadeDisabled = false, archived = archived)
+                            }
+                            index++
                         }
-                        Text("已选择：$label", color = colors.text,
-                            style = questionTextStyle(15, 1.6f, FontWeight.Medium))
-                        val description = if (confirmedAnswer is QuestionAnswer.Delegate)
-                            "仅把当前问题交给代鱼决定，不扩大操作权限。" else option?.description.orEmpty()
-                        if (description.isNotEmpty()) {
-                            Spacer(Modifier.height(5.dp))
-                            Text(description, color = colors.muted, style = questionTextStyle(14, 1.6f))
-                        }
-                        confirmedAnswer.note?.takeIf { it.isNotEmpty() }?.let { note ->
-                            Spacer(Modifier.height(12.dp))
-                            QuestionDivider(colors.line)
-                            Spacer(Modifier.height(9.dp))
-                            Text("补充说明（可选）", color = colors.muted,
-                                style = questionTextStyle(14, 1.6f, FontWeight.Medium))
-                            Spacer(Modifier.height(4.dp))
-                            Text(note, color = colors.text, style = questionTextStyle(15, 1.6f))
+                        if (value.question.allowDelegation) {
+                            QuestionOptionRow("你看着办", "仅把当前问题交给代鱼决定，不扩大操作权限", false,
+                                selection is QuestionAnswer.Delegate, editable,
+                                { session.select(QuestionAnswer.Delegate()) }, Modifier.testTag("question-option:$index"))
                         }
                     }
-                    value.interrupted -> {
-                        // No fabricated expiry reason: the domain currently exposes interruption only.
-                        Text("提问已中断，当前不可作答", color = colors.muted,
-                            style = questionTextStyle(15, 1.6f))
+                    if (value.question.allowNote && selection !is QuestionAnswer.Other) {
+                        Spacer(Modifier.height(9.dp))
+                        QuestionInput(noteText, "补充说明（可选）", editable, { session.editNote(it) },
+                            Modifier.testTag("question-note"), archived = archived)
                     }
-                    else -> {
-                        Column(Modifier.fillMaxWidth().selectableGroup().alpha(if (editable) 1f else .5f),
-                            verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            value.question.options.forEachIndexed { index, option ->
-                                QuestionOptionRow(
-                                    label = option.label,
-                                    description = option.description,
-                                    recommended = option.id == value.question.recommendedOptionId,
-                                    selected = selection is QuestionAnswer.Selected && selection.optionId == option.id,
-                                    enabled = editable,
-                                    onClick = { session.select(QuestionAnswer.Selected(option.id)) },
-                                    modifier = Modifier.testTag("question-option:$index"),
-                                )
-                            }
-                            var index = value.question.options.size
-                            if (value.question.allowOther) {
-                                QuestionOptionRow("其他…", "", false, selection is QuestionAnswer.Other, editable,
-                                    { session.select(QuestionAnswer.Other("")) }, Modifier.testTag("question-option:$index"))
-                                if (selection is QuestionAnswer.Other) {
-                                    QuestionInput(otherText, "填写你的选择", editable, { session.editOther(it) },
-                                        Modifier.padding(top = 4.dp, bottom = 5.dp)
-                                            .testTag("question-other"), fadeDisabled = false)
-                                }
-                                index++
-                            }
-                            if (value.question.allowDelegation) {
-                                QuestionOptionRow("你看着办", "仅把当前问题交给代鱼决定，不扩大操作权限", false,
-                                    selection is QuestionAnswer.Delegate, editable,
-                                    { session.select(QuestionAnswer.Delegate()) }, Modifier.testTag("question-option:$index"))
-                            }
-                        }
-                        if (value.question.allowNote) {
-                            Spacer(Modifier.height(9.dp))
-                            QuestionInput(noteText, "补充说明（可选）", editable, { session.editNote(it) },
-                                Modifier.testTag("question-note"))
-                        }
+                    if (!archived) {
                         Spacer(Modifier.height(10.dp))
                         val submitShape = RoundedCornerShape(11.dp)
                         Box(Modifier.testTag("question-submit").fillMaxWidth().heightIn(min = 44.dp)
@@ -324,14 +297,14 @@ private fun QuestionOptionRow(
         .then(if (focused) Modifier.border(1.dp, selectionAccent, shape) else Modifier)
         .selectable(selected = selected, enabled = enabled, role = Role.RadioButton,
             interactionSource = interaction, indication = null, onClick = onClick)
-        .padding(horizontal = 7.dp, vertical = 9.dp), verticalAlignment = Alignment.Top,
+        .padding(horizontal = 7.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(9.dp)) {
-        Box(Modifier.padding(top = 3.dp).size(18.dp)
+        Box(Modifier.testTag("question-option-indicator").size(18.dp)
             .border(1.3.dp, if (selected) selectionAccent else colors.muted, CircleShape),
             contentAlignment = Alignment.Center) {
             if (selected) Box(Modifier.size(8.dp).background(selectionAccent, CircleShape))
         }
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).testTag("question-option-text")) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(label, Modifier.align(Alignment.CenterVertically), color = colors.text,
                     style = questionTextStyle(15, 1.6f, FontWeight.Medium))
@@ -360,12 +333,23 @@ private fun QuestionInput(
     onValueChange: (String) -> Unit,
     modifier: Modifier,
     fadeDisabled: Boolean = true,
+    archived: Boolean = false,
 ) {
     val colors = questionCardColors()
     val shape = RoundedCornerShape(14.dp)
     val container = daiyuInputContainerColor()
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+    if (archived) {
+        Box(modifier.fillMaxWidth().clip(shape).background(container)
+            .border(1.dp, colors.line, shape)
+            .heightIn(min = 52.dp).padding(horizontal = 14.dp, vertical = 12.dp),
+            contentAlignment = Alignment.CenterStart) {
+            Text(value.ifEmpty { hint }, color = if (value.isEmpty()) colors.muted else colors.text,
+                style = questionTextStyle(15, 1.6f))
+        }
+        return
+    }
     BasicTextField(value = value, onValueChange = { onValueChange(questionTextLimit(it)) }, enabled = enabled,
         interactionSource = interaction,
         minLines = 1,
@@ -521,7 +505,9 @@ private class QuestionCardSession(
         if (!editable) return
         val value = shownRecord ?: return
         val action = submitAction ?: return
-        val note = draft.note.takeIf { value.question.allowNote && it.isNotEmpty() }
+        val note = draft.note.takeIf {
+            value.question.allowNote && draft.selection !is QuestionAnswer.Other && it.isNotEmpty()
+        }
         val answer = when (val selection = draft.selection) {
             is QuestionAnswer.Selected -> if (value.question.options.any { it.id == selection.optionId })
                 QuestionAnswer.Selected(selection.optionId, note) else null

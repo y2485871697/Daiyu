@@ -419,6 +419,28 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testTemporaryEmptyRowsCannotEraseAnAlreadyCommittedViewport() {
+        retainFrames = true
+        mount()
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { rowsAvailable = false }
+            repeat(3) {
+                val probe = requestProbe()
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                awaitProbe(probe)
+                assertTrue("Unconfirmed empty rows erased the committed frame: $probe",
+                    draws.any { it.frameOwner == "first" && it.probeEpoch == probe.second && it.owner == "first" && it.tail })
+            }
+            mainThread { rowsAvailable = true }
+            frames(3)
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+        assertOnlyAlignedDraws("first")
+    }
+
     fun testColdSwitchRetainsEveryCapturedViewportUntilFormattedTargetCommits() {
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
@@ -441,7 +463,7 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
             val probes = capturedProbes.filter { it.first == "cold" }
             assertTrue(probes.isNotEmpty())
             probes.forEach { probe ->
-                assertTrue("Each pending viewport probe must retain the committed frame: $probe",
+                assertTrue("Each pending viewport probe must retain the committed frame: $probe; captured=${draws.filter { it.frameOwner == probe.first && it.probeEpoch == probe.second }}",
                     draws.any { it.frameOwner == "cold" && it.probeEpoch == probe.second && it.owner == "first" })
             }
             assertTrue(reads.flatten().none { it.startsWith("cold-") })

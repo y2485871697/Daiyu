@@ -730,7 +730,7 @@ internal fun ChatMessageList(
             }
         }
     }
-    SideEffect { onViewportReady(!initialPositionPending) }
+    SideEffect { onViewportReady(!initialPositionPending && turns.isNotEmpty()) }
     Box(modifier.fillMaxSize()) {
       BoxWithConstraints(Modifier.fillMaxSize()) {
         val viewportHeightPx = constraints.maxHeight

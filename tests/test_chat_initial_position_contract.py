@@ -17,7 +17,7 @@ class ChatInitialPositionContract(unittest.TestCase):
         self.assertIn('state.historyReady && displayedTurns.isEmpty()', screen)
         self.assertIn('historyWindowReady = conversation == null || prepared != null', HOST.read_text())
         self.assertIn('historyReady = historyWindowReady,', HOST.read_text())
-        self.assertIn('SideEffect { onViewportReady(!initialPositionPending) }', chat)
+        self.assertIn('SideEffect { onViewportReady(!initialPositionPending && turns.isNotEmpty()) }', chat)
         self.assertIn('remember(owner, empty) { mutableStateOf(empty) }', frame)
         self.assertIn('if (readiness.value)', frame)
         self.assertIn('if (recorded.hasFrame) drawLayer(frame)', frame)
@@ -68,6 +68,7 @@ class ChatInitialPositionContract(unittest.TestCase):
         self.assertIn('it.index == index && it.key == currentTailKey', chat)
         device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatInitialPositionTest.kt').read_text()
         self.assertIn('testEmptySnapshotKeepsFirstPlacementPendingUntilHistoryArrives', device)
+        self.assertIn('testTemporaryEmptyRowsCannotEraseAnAlreadyCommittedViewport', device)
         self.assertIn('testFirstVisitWithoutScrollRequestDoesNotAnimateColdHistoryIntoPlace', device)
 
     def test_hidden_rows_cannot_take_touch_or_send_visibility_receipts(self):

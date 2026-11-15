@@ -651,6 +651,21 @@ GENERATION_PORT_MODULES = (
 )
 
 
+RETURN_CHAT_HANDOFF_PLATFORM_CLASSES = PAGE_BACK_PLATFORM_CLASSES + (
+    "app.daiyu.android.RetainedToolOutcomesTest",
+    "app.daiyu.android.ToolReceiptPauseActivityTest",
+    "app.daiyu.android.ToolScreenshotPreviewActivityTest",
+    "app.daiyu.android.ui.ToolScreenshotReceiptTest",
+    "app.daiyu.android.ui.screens.chat.conversation.ChildTaskListTest",
+    "app.daiyu.android.ControllerGenerationResourcesTest",
+    "app.daiyu.android.ControllerGenerationIntegrationTest",
+)
+RETURN_CHAT_HANDOFF_MODULES = tuple(dict.fromkeys(
+    PAGE_BACK_MODULES + PAUSE_RECEIPT_MODULES + SCREEN_CLEANUP_MODULES
+    + CHILD_TASK_CARD_MODULES + GENERATION_PORT_MODULES
+))
+
+
 MESSAGE_ACTION_PLATFORM_CLASSES = ('app.daiyu.android.ControllerMessageActionsTest', 'app.daiyu.android.MessageActionsActivityTest', 'app.daiyu.android.MessageConfirmationActivityTest', 'app.daiyu.android.ui.screens.chat.conversation.MessageActionBarLayoutTest', 'app.daiyu.android.ui.screens.chat.conversation.MessageActionAvailabilityTest')
 MESSAGE_ACTION_MODULES = (
     "test_message_generation_actions_contract", "test_message_action_snapshot_admission_contract",
@@ -662,6 +677,9 @@ MESSAGE_ACTION_MODULES = (
 
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(RETURN_CHAT_HANDOFF_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *RETURN_CHAT_HANDOFF_MODULES, "-v"], "return-chat-handoff-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and env.get("SMOKE_TEST_CLASSES") == "app.daiyu.android.ChatSubmissionActivityTest"):
         return [python, "-B", "-m", "unittest", "test_chat_submission_preview_contract",
@@ -871,7 +889,7 @@ def record(python):
         child_env = os.environ.copy()
         child_env["PYTHONPATH"] = str(Path("tests").resolve()) + os.pathsep + child_env.get("PYTHONPATH", "")
     validation_cwd = None
-    if scope in ("generation-port-targeted", "message-actions-targeted"):
+    if scope in ("generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted"):
         validation_cwd = Path(__file__).resolve().parents[2]
         child_env["PYTHONPATH"] = str(validation_cwd / "tests") + os.pathsep + os.environ.get("PYTHONPATH", "")
     log = root / "unittest.log"

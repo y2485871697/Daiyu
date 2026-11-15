@@ -802,3 +802,76 @@ class SearchInventoryTest(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", workflow)
         self.assertIn('test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "' + canonical + '"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi', workflow)
         self.assertIn('bash "$smoke_script"', workflow)
+
+
+class ReturnChatHandoffScopeTest(unittest.TestCase):
+    CLASSES = recorder.PAGE_BACK_PLATFORM_CLASSES + (
+        "app.daiyu.android.RetainedToolOutcomesTest",
+        "app.daiyu.android.ToolReceiptPauseActivityTest",
+        "app.daiyu.android.ToolScreenshotPreviewActivityTest",
+        "app.daiyu.android.ui.ToolScreenshotReceiptTest",
+        "app.daiyu.android.ui.screens.chat.conversation.ChildTaskListTest",
+        "app.daiyu.android.ControllerGenerationResourcesTest",
+        "app.daiyu.android.ControllerGenerationIntegrationTest",
+    )
+    MODULES = tuple(dict.fromkeys(
+        recorder.PAGE_BACK_MODULES + recorder.PAUSE_RECEIPT_MODULES + recorder.SCREEN_CLEANUP_MODULES
+        + recorder.CHILD_TASK_CARD_MODULES + recorder.GENERATION_PORT_MODULES
+    ))
+
+    def test_exact_scope_uses_stable_deduplicated_union(self):
+        self.assertEqual(self.CLASSES, recorder.RETURN_CHAT_HANDOFF_PLATFORM_CLASSES)
+        self.assertEqual(12, len(set(self.CLASSES)))
+        self.assertEqual(self.MODULES, recorder.RETURN_CHAT_HANDOFF_MODULES)
+        self.assertEqual(len(self.MODULES), len(set(self.MODULES)))
+        self.assertIn("test_tool_receipt_pause_contract", self.MODULES)
+        self.assertIn("test_tool_receipt_snapshot_contract", self.MODULES)
+        for classes in (self.CLASSES, tuple(reversed(self.CLASSES)), tuple(sorted(self.CLASSES))):
+            for python in ("python", "python3"):
+                command, scope = recorder.command_for(python, dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(classes)))
+                self.assertEqual("return-chat-handoff-targeted", scope)
+                self.assertEqual([python, "-B", "-m", "unittest", *self.MODULES, "-v"], command)
+                self.assertNotIn("discover", command)
+
+    def test_inexact_filters_and_other_modes_keep_full_fallback(self):
+        selected = ",".join(self.CLASSES)
+        invalid = [",".join(self.CLASSES[:i] + self.CLASSES[i + 1:]) for i in range(len(self.CLASSES))]
+        invalid += [selected + "," + self.CLASSES[0], selected + ",app.daiyu.android.OtherTest",
+                    " " + selected, selected + " ", selected.replace(",", ", ", 1), selected + ","]
+        for value in invalid:
+            self.assertEqual((["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"),
+                             recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=value)))
+        for mode in ("", "compile", "candidate", "daily", "release"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=selected))[1])
+
+    def test_existing_targeted_scopes_are_unchanged(self):
+        for prefix, scope in (("PAGE_BACK", "page-back-targeted"), ("PAUSE_RECEIPT", "pause-receipts-targeted"),
+                              ("GENERATION_PORT", "generation-port-targeted")):
+            classes = getattr(recorder, prefix + "_PLATFORM_CLASSES")
+            modules = getattr(recorder, prefix + "_MODULES")
+            command, actual = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(classes)))
+            self.assertEqual(scope, actual)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *modules, "-v"], command)
+
+    def test_receipt_keeps_failure_identity_and_validation_cwd(self):
+        old = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                os.chdir(directory)
+                env = dict(GITHUB_SHA="b" * 40, EXPECTED_SHA="a" * 40, GITHUB_RUN_ID="42",
+                           GITHUB_RUN_ATTEMPT="1", SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(self.CLASSES))
+                with patch.dict(os.environ, env, clear=True), patch.object(recorder.subprocess, "check_output", return_value="a" * 40 + "\n"), patch.object(recorder.subprocess, "call", return_value=9) as call, patch.object(recorder.sys, "stdout", SimpleNamespace(buffer=io.BytesIO())):
+                    self.assertEqual(9, recorder.record("python3"))
+                    receipt = json.loads(Path("tool-evidence/receipt.json").read_text())
+                    self.assertEqual(dict(sha="a" * 40, run_id=42, attempt=1), receipt["identity"])
+                    self.assertEqual("b" * 40, receipt["workflow_sha"])
+                    self.assertEqual("b" * 40, receipt["validation_tools_sha"])
+                    self.assertEqual("return-chat-handoff-targeted", receipt["scope"])
+                    self.assertEqual(9, receipt["exit_code"])
+                    self.assertEqual(["python3", "-B", "-m", "unittest", *self.MODULES, "-v"], receipt["command"])
+                    call.assert_called_once()
+                    self.assertEqual(receipt["command"], call.call_args.args[0])
+                    self.assertEqual(ROOT, call.call_args.kwargs["cwd"])
+                    self.assertEqual(str(ROOT / "tests"), call.call_args.kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0])
+            finally:
+                os.chdir(old)

@@ -2596,7 +2596,7 @@ class MainActivity : ComponentActivity() {
                     "manage" -> ManageChatsScreen(
                         conversations = paneState.historyConversations,
                         onBack = { returnToChat() },
-                        onOpenConversation = { id -> guard { openRetainedConversation(id) } },
+                        onOpenConversation = { id -> guard { dismissSidebar(); returnToChat(); selectPaneConversation(id) } },
                         onTogglePin = { id -> guard { toggleRetainedPin(id) } },
                         onDeleteConversation = { item -> guard { deleteRetainedConversation(item.id) } },
                         onDeleteAll = { guard {
@@ -2614,7 +2614,7 @@ class MainActivity : ComponentActivity() {
                                 loadConversations = { retainedData.summaries(page.active) },
                                 folders = paneState.folders, initialFolderId = page.folderId,
                                 onOpenConversation = { id ->
-                                    if (searchPage === page && retainedPage == page.route) guard { openRetainedConversation(id) }
+                                    if (searchPage === page && retainedPage == page.route) guard { dismissSidebar(); returnToChat(); selectPaneConversation(id) }
                                 },
                                 onBack = { closeSearch(page) },
                             ) else MessageSearchScreen(

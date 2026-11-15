@@ -31,7 +31,11 @@ class SidebarSelectionContractTest(unittest.TestCase):
         self.assertIn('selected?.id != owner || editorGeneration != editor', click)
         self.assertIn('catch (cancelled: kotlinx.coroutines.CancellationException)', click)
         self.assertIn('select(snapshot.conversation, snapshot)', click)
-        self.assertIn('if (revision != currentPaneRevision()) continue', click)
+        self.assertIn(
+            'if (revision != currentPaneRevision() || snapshot.timeline != null && '
+            'snapshot.timelineRevision != controller.timelineVersion) continue',
+            ' '.join(click.split()),
+        )
         pause = host.split('override fun onPause() {', 1)[1].split('override fun onStop()', 1)[0]
         self.assertIn('cancelPaneConversationSelection()', pause)
         opening = host.split('private fun openSidebar()', 1)[1].split('private fun dismissSidebar()', 1)[0]
@@ -71,10 +75,18 @@ class SidebarSelectionContractTest(unittest.TestCase):
         prepare = click.split('private fun preparePaneSnapshot(', 1)[1]
         self.assertIn('prepareRestoredMarkdown(snapshot.display, checkActive = checkActive)', prepare)
         self.assertIn('prepare(id, snapshot, checkActive)', prepare)
-        self.assertIn('snapshot.copy(presentations = presentations)', prepare)
+        self.assertIn(
+            'return snapshot.copy(presentations = presentations, toolReceipts = receipts, '
+            'timeline = timeline, timelineRevision = timelineRevision)',
+            ' '.join(prepare.split()),
+        )
         self.assertNotIn('toolPresentations', io)
-        self.assertLess(click.index('if (revision != currentPaneRevision()) continue'),
-                        click.index('select(snapshot.conversation, snapshot)'))
+        normalized_click = ' '.join(click.split())
+        self.assertLess(
+            normalized_click.index('if (revision != currentPaneRevision() || snapshot.timeline != null && '
+                                   'snapshot.timelineRevision != controller.timelineVersion) continue'),
+            normalized_click.index('select(snapshot.conversation, snapshot)'),
+        )
         selected = host.split('private fun select(conversation: Conversation?, prepared:', 1)[1].split('private fun sendDraft(', 1)[0]
         self.assertIn('prepared?.presentations?.let { toolPresentations = it }', selected)
         self.assertLess(selected.index('refresh()'), selected.index('publishChat(rowsChanged = false, scrollRequest'))
@@ -92,7 +104,8 @@ class SidebarSelectionContractTest(unittest.TestCase):
         closing = host.split('private fun dismissSidebar()', 1)[1].split('private fun paneRefreshAllowed', 1)[0]
         self.assertIn('dismissSidebarState()', closing)
         self.assertIn('refresh()', closing)
-        self.assertIn('ChatTurnMapper.mapDisplay(window,\n                    presentations = toolPresentations,', host)
+        self.assertIn('ChatTurnMapper.mapDisplay(window, toolReceipt = visibleDisplayReceipts, '
+                      'presentations = toolPresentations,', ' '.join(host.split()))
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ConversationPaneSwitchActivityTest.kt').read_text()
         for name in ('testPreparedDisplayDoesNotReparseToolsOrHydrateAuthorityBehindDrawer',
                      'testCancelledPresentationPreparationCannotInstallItsCacheIntoLastSelection',
@@ -106,10 +119,17 @@ class SidebarSelectionContractTest(unittest.TestCase):
         host = (SRC / 'MainActivity.kt').read_text()
         helper = host.split('private fun openRetainedConversation(id: String) {', 1)[1].split('\n', 1)[0]
         self.assertIn('val conversation = retainedConversation(id); dismissSidebar(); returnToChat(); select(conversation)', helper)
-        self.assertIn('onOpenConversation = { id -> guard { openRetainedConversation(id) } }', host)
+        normalized = ' '.join(host.split())
+        ordinary_open = 'guard { dismissSidebar(); returnToChat(); selectPaneConversation(id) }'
+        self.assertIn('onOpenConversation = { id -> ' + ordinary_open + ' }', normalized)
+        self.assertIn('if (searchPage === page && retainedPage == page.route) ' + ordinary_open, normalized)
         self.assertIn('onNewConversation = { guard { createNewConversation(); dismissSidebar() } }', host)
         hit = host.split('private fun openHistoryHit(', 1)[1].split('private fun toast(', 1)[0]
         self.assertIn('openRetainedConversation(hit.conversationId)', hit)
+        self.assertNotIn('selectPaneConversation(', hit)
+        self.assertLess(hit.index('val window = controller.database.messages(conversation.id, sequence + 1, 50)'),
+                        hit.index('openRetainedConversation(hit.conversationId)'))
+        self.assertLess(hit.index('openRetainedConversation(hit.conversationId)'), hit.index('shown = window'))
 
     def test_drawer_back_scrim_gestures_and_management_are_unchanged(self):
         pane = (SRC / 'ui/components/ConversationSidePaneScaffold.kt').read_text()
@@ -120,7 +140,13 @@ class SidebarSelectionContractTest(unittest.TestCase):
         self.assertIn('else onConversationSelected(conversation.id)', pane)
         host = (SRC / 'MainActivity.kt').read_text()
         self.assertIn('onOpen = { openSidebar() }, onDismiss = { dismissSidebar() }', host)
-        self.assertIn('val composerAvailable = !sidebarVisible && controller.ready', host)
+        self.assertIn(
+            'val composerAvailable = chatReturnRefresh == null && !sidebarVisible && '
+            'controller.ready && selectionReady && controller.problem?.startsWith("会话恢复失败") != true && '
+            'controller.textSendState() == null && pendingTextSend == null && !imageHost.sending && '
+            '!shizukuWritesBlocked && !mcpPreparing && mcpApproval == null',
+            ' '.join(host.split()),
+        )
         self.assertIn('val allowed = composerAvailable && !controller.dataBusy', host)
 
     def test_activity_regression_covers_reselection_drafts_filter_and_explicit_close(self):

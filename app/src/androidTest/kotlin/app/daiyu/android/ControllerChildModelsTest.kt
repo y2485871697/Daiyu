@@ -36,6 +36,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         val preferences = ConversationSubAgentPreferences(app.getSharedPreferences("subagent_configuration", 0))
         val toolName = if (background) "start_child_tasks" else "run_child_models"
         var expectedDelegation = true
+        var beforeParentContinuation: (() -> String?)? = null
         val controller: ChatController
         lateinit var conversation: Conversation
         init {
@@ -57,6 +58,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
                             check(definitions.any { it.name == "start_child_tasks" } == expectedDelegation)
                         }
                         var rounds = 0
+                        var delegationCallId = "child-call"
                         return object : ModelSession {
                             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                                 if (isChild) {
@@ -65,11 +67,17 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
                                 else if (rounds++ == 0) sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("child-call"), toolName,
                                     """{"tasks":[{"profile_id":"review","prompt":"review task"}]}""")))
                                 else {
-                                    check(outputs.single().callId == ToolCallId("child-call"))
+                                    check(outputs.single().callId == ToolCallId(delegationCallId))
                                     val receipt = org.json.JSONObject(outputs.single().output)
                                     check(receipt.getBoolean("accepted") && !receipt.getBoolean("completed"))
                                     check(!receipt.has("results") && !outputs.single().output.contains("independent answer"))
-                                    sink(ModelEvent.TextFinal("parent", "combined answer"))
+                                    val nextProfile = beforeParentContinuation?.invoke()
+                                    if (nextProfile == null) sink(ModelEvent.TextFinal("parent", "combined answer"))
+                                    else {
+                                        delegationCallId = "child-call-added"
+                                        sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId(delegationCallId), toolName,
+                                            """{"tasks":[{"profile_id":"$nextProfile","prompt":"newly added task"}]}""")))
+                                    }
                                 }
                             }
                             override fun cancel() { if (isChild) cancelled.countDown() }
@@ -152,6 +160,27 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         if (editing) assertEquals("edited child task", f.database.messages(f.conversation.id).first().second.blocks
             .filterIsInstance<MessageBlock.Text>().single().text)
     }
+    fun testAddedProfileIsAvailableToTheNextDelegationInTheSameParentRun() {
+        val f = fresh()
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        val callbacks = AtomicInteger()
+        f.beforeParentContinuation = {
+            if (callbacks.getAndIncrement() == 0) {
+                entered.countDown(); check(release.await(10, TimeUnit.SECONDS)); "added"
+            } else null
+        }
+        try {
+            assertNotNull(f.controller.sendWithChildren(f.conversation, "add during parent run"))
+            assertTrue(entered.await(10, TimeUnit.SECONDS))
+            val key = SubAgentConfigKey.Conversation(f.conversation.id.value)
+            assertTrue(f.preferences.update(key) { it.copy(profiles = it.profiles + f.profile.copy(id = "added", name = "Added")) }
+                is ConversationSubAgentPreferences.WriteResult.Saved)
+            release.countDown(); finishParent(f)
+            assertEquals(1, f.parentOpened.get()); assertEquals(2, f.childOpened.get())
+            assertEquals(setOf("review", "added"), f.controller.childTasks(f.conversation.id).map { it.profileId }.toSet())
+        } finally { release.countDown() }
+    }
+
     fun testOrdinarySendUsesSavedCollaborationForAnEmptyExistingConversation() {
         for (enabled in listOf(true, false)) {
             val f = fresh(); setCollaboration(f, enabled)

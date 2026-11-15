@@ -10,8 +10,9 @@ class DelegationBatchAndSendContract(unittest.TestCase):
     def test_ordinary_entries_explicitly_share_the_conversation_switch(self):
         source = (APP / "ChatController.kt").read_text()
         self.assertIn("private fun conversationChildrenEnabled(conversation: Conversation?): Boolean", source)
-        self.assertEqual(3, source.count("withChildren = conversationChildrenEnabled(conversation)"))
-        self.assertIn("val withChildren = conversationChildrenEnabled(conversation)", source)
+        self.assertEqual(2, source.count("withChildren = conversationChildrenEnabled(conversation)"))
+        self.assertIn("val withChildren = !voiceConversation && conversationChildrenEnabled(conversation)", source)
+        self.assertIn("withChildren=withChildren,expectedDraftText=text,voiceConversation=voiceConversation", source)
         self.assertIn("withChildren = conversationChildrenEnabled(owner), actionRevision = revision", source)
         self.assertIn("MessageAction.REGENERATE, MessageAction.SAVE_EDIT ->", source)
 

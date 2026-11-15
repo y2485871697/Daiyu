@@ -28,6 +28,20 @@ class PageBackSmokeScopeTests(unittest.TestCase):
         self.assertIn("inputs.smoke_classes == '" + ','.join(CLASSES) + "' && '-page-back' || ''", group)
         self.assertIn('  cancel-in-progress: false', workflow)
 
+    def test_exact_return_build_smoke_has_its_own_non_cancelling_queue(self):
+        workflow = (Path(__file__).resolve().parents[1] /
+                    '.github/workflows/build.yml').read_text()
+        concurrency = workflow.split('\nconcurrency:\n', 1)[1].split('\njobs:\n', 1)[0]
+        group = next(line for line in concurrency.splitlines()
+                     if line.startswith('  group:'))
+        self.assertTrue(group.startswith('  group: daiyu-${{ inputs.mode }}-${{ github.ref }}'))
+        suffix = (
+            "${{ inputs.mode == 'smoke' && inputs.smoke_classes == '"
+            + ','.join(CLASSES) + "' && '-page-back' || '' }}"
+        )
+        self.assertTrue(group.endswith(suffix), group)
+        self.assertIn('  cancel-in-progress: false', concurrency.splitlines())
+
     def test_exact_return_scope_runs_explicit_contracts_and_tool_guards(self):
         self.assertEqual(CLASSES, recorder.PAGE_BACK_PLATFORM_CLASSES)
         for classes in (CLASSES, tuple(reversed(CLASSES))):

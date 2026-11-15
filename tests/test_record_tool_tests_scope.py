@@ -819,6 +819,18 @@ class ReturnChatHandoffScopeTest(unittest.TestCase):
         + recorder.CHILD_TASK_CARD_MODULES + recorder.GENERATION_PORT_MODULES
     ))
 
+    def test_exact_scope_has_its_own_non_cancelling_build_queue(self):
+        workflow = (ROOT / ".github/workflows/build.yml").read_text()
+        concurrency = workflow.split("\nconcurrency:\n", 1)[1].split("\njobs:\n", 1)[0]
+        group = next(line for line in concurrency.splitlines() if line.startswith("  group:"))
+        self.assertTrue(group.startswith("  group: daiyu-${{ inputs.mode }}-${{ github.ref }}"))
+        suffix = (
+            "${{ inputs.mode == 'smoke' && inputs.smoke_classes == '"
+            + ",".join(self.CLASSES) + "' && '-return-chat-handoff' || '' }}"
+        )
+        self.assertIn(suffix, group)
+        self.assertIn("  cancel-in-progress: false", concurrency.splitlines())
+
     def test_exact_scope_uses_stable_deduplicated_union(self):
         self.assertEqual(self.CLASSES, recorder.RETURN_CHAT_HANDOFF_PLATFORM_CLASSES)
         self.assertEqual(12, len(set(self.CLASSES)))

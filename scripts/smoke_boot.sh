@@ -413,6 +413,14 @@ fi
 printf '%s\n%s\n' "$expected" "$test_classes" > smoke/instrumentation-targets.txt
 collect_diagnostics() {
   local exit_status=$?
+  if test "${call_clock_demo:-0}" = 1; then
+    timeout --kill-after=5 10 adb shell am broadcast --receiver-foreground -a com.android.systemui.demo --es command exit > smoke/call-clock-exit.txt 2>&1 || true
+    if test "$call_clock_previous" = null; then
+      timeout --kill-after=5 10 adb shell settings delete global sysui_demo_allowed > smoke/call-clock-restore.txt 2>&1 || true
+    else
+      timeout --kill-after=5 10 adb shell settings put global sysui_demo_allowed "$call_clock_previous" > smoke/call-clock-restore.txt 2>&1 || true
+    fi
+  fi
   if test "$exit_status" -ne 0 && test -f smoke/platform-tests.txt; then
     timeout --kill-after=5 20 adb pull /sdcard/Android/data/app.daiyu.android/files/settings-ui smoke/settings-ui > smoke/settings-ui-pull.txt 2>&1 || true
   fi
@@ -432,6 +440,7 @@ collect_diagnostics() {
   ps axww -o args= | grep '[q]emu-system-' > smoke/qemu-command.txt || true
   return "$exit_status"
 }
+call_clock_demo=0
 trap collect_diagnostics EXIT
 adb_stage device 60 wait-for-device
 api=$(adb_stage api 15 shell getprop ro.build.version.sdk | tr -d '\r')
@@ -569,6 +578,16 @@ if grep -Eq 'FATAL EXCEPTION|Fatal signal [0-9]+|GL errors!' smoke/logcat-before
 adb_stage install-app 120 install "$APK" 2>&1 | tee smoke/install.txt
 adb_stage install-tests 120 install delivery/tests/platform-test.apk 2>&1 | tee smoke/test-install.txt
 if test "$expected" -gt 0; then
+  if test "$api" = 26 && test "${SMOKE_MODE:-}" = smoke &&
+      test "${SMOKE_TEST_CLASSES:-}" = "app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest"; then
+    call_clock_previous=$(adb_stage call-clock-previous 15 shell settings get global sysui_demo_allowed | tr -d '\r')
+    [[ "$call_clock_previous" =~ ^(null|0|1)$ ]]
+    call_clock_demo=1
+    adb_stage call-clock-enable 15 shell settings put global sysui_demo_allowed 1 > smoke/call-clock-enable.txt
+    adb_stage call-clock-enter 15 shell am broadcast --receiver-foreground -a com.android.systemui.demo --es command enter > smoke/call-clock-enter.txt
+    adb_stage call-clock-freeze 15 shell am broadcast --receiver-foreground -a com.android.systemui.demo --es command clock --es hhmm 1200 > smoke/call-clock-freeze.txt
+    printf 'API=%s\nSystemUI clock=1200\nprevious_demo_allowed=%s\n' "$api" "$call_clock_previous" > smoke/call-clock-fixture.txt
+  fi
   instrumentation_options=()
   if test "${SMOKE_MODE:-}" = candidate; then
     instrumentation_options=(-e timeout_msec 180000)

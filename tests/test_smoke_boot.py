@@ -36,6 +36,30 @@ JAVA_SECOND_SOURCE = (
 
 
 class SourceTests(unittest.TestCase):
+    def test_call_clock_fixture_keeps_strict_raster_assertions(self):
+        script = (ROOT / 'scripts/smoke_boot.sh').read_text()
+        setup = script.split('  if test "$api" = 26 && test "${SMOKE_MODE:-}" = smoke &&', 1)[1].split('  instrumentation_options=()', 1)[0]
+        self.assertIn('test "${SMOKE_TEST_CLASSES:-}" = "app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest"', setup)
+        self.assertIn('--es command enter', setup)
+        self.assertIn('--es command clock --es hhmm 1200', setup)
+        self.assertNotIn('date ', setup)
+        self.assertNotIn('wm ', setup)
+        cleanup = script.split('collect_diagnostics() {', 1)[1].split('trap collect_diagnostics EXIT', 1)[0]
+        self.assertIn('--es command exit', cleanup)
+        self.assertIn('settings delete global sysui_demo_allowed', cleanup)
+        self.assertIn('settings put global sysui_demo_allowed "$call_clock_previous"', cleanup)
+        test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/DoubaoCallOverlayTest.kt').read_text()
+        frozen = test.split('fun testRasterReallyFreezesAnimatedChildrenNotOnlyState()', 1)[1].split('fun testClosingPicture', 1)[0]
+        self.assertIn('SystemClock.sleep(1_100L)', frozen)
+        self.assertIn('ui.mainClock.advanceTimeBy(180L)', frozen)
+        self.assertIn('for (y in 0 until first.height) for (x in 0 until first.width)', frozen)
+        self.assertIn('first[x, y], second[x, y]', frozen)
+        workflow = (ROOT / '.github/workflows/doubao-call-motion-checks.yml').read_text()
+        self.assertIn('path: .motion-validation-tools', workflow)
+        self.assertIn('python3 .motion-validation-tools/scripts/verify_smoke_source.py', workflow)
+        self.assertIn('bash .motion-validation-tools/scripts/smoke_boot.sh', workflow)
+        self.assertNotIn('GITHUB_SHA="$EXPECTED_SHA" python3 .motion-validation-tools/scripts/verify_smoke_source.py', workflow)
+
     def test_native_framebuffer_does_not_change_default_test_canvas(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
         hook = (ROOT / 'scripts/prepare_smoke_emulator.sh').read_text()

@@ -27,7 +27,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
     private var density = 1f
     private val work = WorkProcessUi(emptyList(), "已完成")
 
-    private fun mountList(following: Boolean, lower: Boolean = false) {
+    private fun mountList(following: Boolean, lower: Boolean = false, tool: Boolean = false) {
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             BoxWithConstraints(Modifier.size(320.dp, 420.dp)) {
@@ -37,7 +37,9 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                         scrollRequest = if (following) ChatScrollRequest(1) else ChatScrollRequest(1, messageId = "tail", followBottom = false),
                         turnExtras = { turn -> if (turn.id == "tail") {
                             if (lower) Box(Modifier.height(140.dp))
-                            WorkProcessCard(work, "direction-fixture", content = {
+                            if (tool) WorkStepRow(WorkStepUi("tool", "fixture", "", WorkStepState.OK), toolContent = {
+                                Box(Modifier.fillMaxWidth().height(80.dp).testTag("direction-body"))
+                            }) else WorkProcessCard(work, "direction-fixture", content = {
                                 Box(Modifier.fillMaxWidth().height(80.dp).testTag("direction-body"))
                             })
                             if (following) Box(Modifier.height(180.dp))
@@ -46,7 +48,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             }
         } } }
         ui.waitForIdle()
-        ui.onNodeWithTag("work-process-header").assertIsDisplayed()
+        ui.onNodeWithTag(if (tool) "tool-step-header:tool" else "work-process-header").assertIsDisplayed()
     }
 
     private fun bottom(): Float {
@@ -73,18 +75,29 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             touchHeader()
-            repeat(28) {
+            repeat(60) {
                 ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
                 assertDirection(true)
                 assertTrue("No disclosure frame may reach behind the composer", bottom() <= safeBottom + 1f)
                 assertEquals("Upward disclosure holds its lower edge", anchor, bottom(), 2f)
             }
         } finally { ui.mainClock.autoAdvance = true }
+        ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(
+            androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
+        assertTrue("The detail must really finish expanding", ui.onNodeWithTag("direction-body").fetchSemanticsNode().boundsInRoot.height >= 79f * density)
         assertEquals(0, fixture.opens.get())
+    }
+
+    private fun assertHalf(lower: Boolean) {
+        val center = ui.onNodeWithTag("work-process-header").fetchSemanticsNode().boundsInRoot.center.y
+        val listTop = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot.top
+        val safeBottom = ui.onNodeWithTag("direction-composer").fetchSemanticsNode().boundsInRoot.top - 16f * density
+        assertEquals("Fixture header must be in the requested safe half", lower, center >= (listTop + safeBottom) / 2f)
     }
 
     fun testDetachedUpperHeaderExpandsDownWithoutMovingItsTop() {
         mountList(following = false)
+        assertHalf(lower = false)
         val anchor = top()
         touchHeader(); ui.waitForIdle()
         assertDirection(false)
@@ -94,6 +107,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
 
     fun testDetachedLowerHeaderExpandsUpAndCollapseUsesTheSameEdge() {
         mountList(following = false, lower = true)
+        assertHalf(lower = true)
         val anchor = bottom()
         val originalTop = top()
         touchHeader(); ui.waitForIdle()
@@ -103,12 +117,13 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             touchHeader()
-            repeat(28) {
+            repeat(60) {
                 ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
                 assertDirection(true)
                 assertEquals("Collapse must retain the same edge on every frame", anchor, bottom(), 2f)
             }
         } finally { ui.mainClock.autoAdvance = true }
+        ui.onNodeWithTag("direction-body").assertDoesNotExist()
         assertEquals(originalTop, top(), 2f)
     }
 
@@ -152,6 +167,14 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         ui.onNodeWithTag("tool-step-header:tool").performClick(); ui.waitForIdle()
         assertDirection(true, "tool-step-header:tool")
     }
+    fun testRealToolHeaderTouchRetainsTheFollowingPriority() {
+        mountList(following = true, tool = true)
+        ui.onNodeWithTag("tool-step-header:tool").performTouchInput { click() }
+        ui.waitForIdle()
+        assertDirection(true, "tool-step-header:tool")
+        ui.onNodeWithTag("direction-body").assertExists()
+    }
+
     fun testReasoningSummaryUsesTheSameFollowingPriority() {
         kotlinx.coroutines.runBlocking { projectMarkdown(listOf("direction summary")) }
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -161,9 +184,12 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             }
         } } }
         ui.waitForIdle()
-        ui.onNodeWithTag("reported-reasoning-header:reasoning").performClick(); ui.waitForIdle()
+        ui.onNodeWithTag("reported-reasoning-header:reasoning").performTouchInput { click() }; ui.waitForIdle()
         assertDirection(true, "reported-reasoning-header:reasoning")
         ui.onNodeWithTag("reported-reasoning-content:reasoning").assertExists()
+        ui.onNodeWithTag("reported-reasoning-content:reasoning").performTouchInput { click() }; ui.waitForIdle()
+        assertDirection(true, "reported-reasoning-header:reasoning")
+        ui.onNodeWithTag("reported-reasoning-content:reasoning").assertDoesNotExist()
     }
 
 }

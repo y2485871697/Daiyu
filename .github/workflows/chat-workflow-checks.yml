@@ -19,7 +19,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: daiyu-chat-workflow-${{ github.ref }}
+  group: daiyu-chat-workflow-${{ github.ref }}-${{ inputs.check_scope }}
   cancel-in-progress: false
 jobs:
   workflow:

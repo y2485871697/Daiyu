@@ -128,7 +128,9 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageRetainedContentActivityTest.kt').read_text()
         test = body(regression, 'fun testRealMainChatReturnKeepsExpandedTrustedToolHeightAndLocalState()')
         for token in ('activity.select(conversation)', 'openSettings()', 'repeat(4)', 'assertRetained()',
-                      'retains its composition', 'retains measured height', 'no vertical handoff jump'):
+                      'retains its composition', 'retains measured height', 'no vertical handoff jump',
+                      'node("tool-children:handoff-call").assertIsNotDisplayed()',
+                      'ui.onNodeWithTag("tool-children:handoff-call", useUnmergedTree = false).assertDoesNotExist()'):
             self.assertIn(token, test)
         self.assertNotIn('activity.setContent', test)
 

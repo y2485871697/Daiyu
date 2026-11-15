@@ -21,7 +21,7 @@ class TestRefreshContract(unittest.TestCase):
         group = [line for line in lines if line.startswith('  group: ')]
         self.assertEqual(1, len(group))
         self.assertTrue(group[0].startswith('  group: daiyu-test-refresh-${{ github.ref }}'))
-        self.assertTrue(group[0].endswith("${{ inputs.smoke_classes == 'app.daiyu.android.ConversationWorkspaceActivityTest' && '-workspace-gesture' || '' }}"))
+        self.assertIn("${{ inputs.smoke_classes == 'app.daiyu.android.ConversationWorkspaceActivityTest' && '-workspace-gesture' || '' }}", group[0])
         self.assertIn('  cancel-in-progress: false', lines)
 
     def build_group_fixture(self):

@@ -280,7 +280,8 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         lateinit var key: RetainedToolOutcomes.ReadKey
         lateinit var snapshot: Any
         mainThread {
-            key = checkNotNull(loadedKey())
+            key = currentKey()
+            assertTrue(checkNotNull(loadedKey()).canDisplayFor(key))
             snapshot = checkNotNull(field("toolReceiptSnapshot").get(activity))
             assertTrue(fixture.controller.pause(owner))
             assertTrue(checkNotNull(fixture.controller.runState(owner)).pauseRequested)
@@ -291,7 +292,9 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         awaitReceipts()
         mainThread {
             assertTrue(checkNotNull(fixture.controller.runState(owner)).pauseRequested)
-            key = checkNotNull(loadedKey())
+            key = currentKey()
+            assertTrue(key.execution?.pauseRequested == true)
+            assertTrue(checkNotNull(loadedKey()).canDisplayFor(key))
             snapshot = checkNotNull(field("toolReceiptSnapshot").get(activity))
         }
         first.release.countDown()
@@ -303,7 +306,9 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         }
         awaitReceipts()
         mainThread {
-            key = checkNotNull(loadedKey())
+            key = currentKey()
+            assertEquals(ExecutionPhase.PAUSED, key.execution?.phase)
+            assertTrue(checkNotNull(loadedKey()).canDisplayFor(key))
             snapshot = checkNotNull(field("toolReceiptSnapshot").get(activity))
             assertEquals(ExecutionPhase.PAUSED, fixture.controller.runState(owner)?.phase)
             assertTrue(key.canDisplayFor(currentKey()))

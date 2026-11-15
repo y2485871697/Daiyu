@@ -855,6 +855,18 @@ class ReturnChatHandoffScopeTest(unittest.TestCase):
         self.assertIn(suffix, group)
         self.assertIn("  cancel-in-progress: false", concurrency.splitlines())
 
+    def test_exact_scope_has_its_own_non_cancelling_test_refresh_queue(self):
+        workflow = (ROOT / ".github/workflows/test-refresh-regression.yml").read_text()
+        concurrency = workflow.split("\nconcurrency:\n", 1)[1].split("\nenv:\n", 1)[0]
+        group = next(line for line in concurrency.splitlines() if line.startswith("  group:"))
+        self.assertTrue(group.startswith("  group: daiyu-test-refresh-${{ github.ref }}"))
+        suffix = (
+            "${{ inputs.smoke_classes == '" + ",".join(self.CLASSES)
+            + "' && '-return-chat-handoff' || '' }}"
+        )
+        self.assertIn(suffix, group)
+        self.assertIn("  cancel-in-progress: false", concurrency.splitlines())
+
     def test_exact_scope_uses_stable_deduplicated_union(self):
         self.assertEqual(self.CLASSES, recorder.RETURN_CHAT_HANDOFF_PLATFORM_CLASSES)
         self.assertEqual(12, len(set(self.CLASSES)))

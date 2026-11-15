@@ -78,6 +78,9 @@ class ToolReceiptPauseContract(unittest.TestCase):
         for token in ('SQLiteRuntimeStore.acquire(database)', 'call("publishChat")', 'val pending = Job()',
                       'fixture.controller.pause(owner)', 'fixture.controller.resume(owner)',
                       'ExecutionPhase.PAUSED', 'pendingFrame(key, snapshot, expected)',
+                      'key = currentKey()', 'assertEquals(ExecutionPhase.PAUSED, key.execution?.phase)',
+                      'assertTrue(key.execution?.pauseRequested == true)',
+                      'assertTrue(checkNotNull(loadedKey()).canDisplayFor(key))',
                       'WorkStepState.UNKNOWN', 'assertTrue("fresh read remains pending", pending.isActive)',
                       'key.copy(data = key.data + 1)', 'key.copy(generation = key.generation - 1)'):
             self.assertIn(token, test)

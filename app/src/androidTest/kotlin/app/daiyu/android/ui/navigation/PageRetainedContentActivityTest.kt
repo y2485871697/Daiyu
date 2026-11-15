@@ -656,7 +656,8 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         }
         openSettings()
         ui.waitForIdle()
-        node("tool-children:handoff-call").assertDoesNotExist()
+        node("tool-children:handoff-call").assertIsNotDisplayed()
+        ui.onNodeWithTag("tool-children:handoff-call", useUnmergedTree = false).assertDoesNotExist()
         val advancing = ui.mainClock.autoAdvance
         ui.mainClock.autoAdvance = false
         try {

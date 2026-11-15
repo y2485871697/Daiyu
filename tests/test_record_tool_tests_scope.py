@@ -35,6 +35,24 @@ class RecordToolTestsScopeTest(unittest.TestCase):
         self.assertEqual(len(recorder.MENU_PLATFORM_CLASSES), 6)
         self.assertEqual(len(recorder.MENU_MODULES), 9)
 
+    def test_menu_navigation_scope_is_exact_and_keeps_the_original_menu_scope(self):
+        classes = recorder.MENU_NAVIGATION_PLATFORM_CLASSES
+        for selected in (classes, tuple(reversed(classes))):
+            command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))
+            self.assertEqual("menu-navigation-targeted", scope)
+            self.assertEqual(command, ["python3", "-B", "-m", "unittest", *recorder.MENU_NAVIGATION_MODULES, "-v"])
+        self.assertEqual(set(classes), {"app.daiyu.android." + name for name in (
+            "ChatMenuEntryActivityTest", "ModalRouteBackgroundActivityTest", "ChatChromeActivityTest", "ConversationPaneVisualTest")})
+        for selected in (classes[:-1], (*classes, classes[0]), (*classes, "app.daiyu.android.OtherTest")):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))[1])
+        workflow = (ROOT / ".github/workflows/build.yml").read_text()
+        self.assertIn("inputs.smoke_classes == '" + ",".join(classes) + "' && '-menu-navigation'", workflow)
+        script = (ROOT / "scripts/smoke_boot.sh").read_text()
+        target = script.split('menu_navigation_target = {', 1)[1].split('speech_source =', 1)[0]
+        for name in classes:
+            self.assertIn(name.rsplit(".", 1)[1], target)
+        self.assertIn('for name in (requested if menu_only else menu_target)', target)
+
     def test_partial_extended_duplicate_and_other_mode_menu_scopes_keep_full_contracts(self):
         menu = ",".join(recorder.MENU_PLATFORM_CLASSES)
         for classes in (",".join(recorder.MENU_PLATFORM_CLASSES[:-1]), menu + ",app.daiyu.android.OtherTest",

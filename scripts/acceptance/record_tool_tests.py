@@ -81,6 +81,16 @@ MENU_MODULES = (
 )
 
 
+MENU_NAVIGATION_PLATFORM_CLASSES = tuple("app.daiyu.android." + name for name in (
+    "ChatMenuEntryActivityTest", "ModalRouteBackgroundActivityTest", "ChatChromeActivityTest",
+    "ConversationPaneVisualTest",
+))
+MENU_NAVIGATION_MODULES = MENU_MODULES + (
+    "test_modal_route_background_contract", "test_sidebar_selection_contract",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 PAGE_BACK_PLATFORM_CLASSES = (
     'app.daiyu.android.ui.navigation.PageBackGesturesActivityTest',
     'app.daiyu.android.ui.navigation.PageBackStackActivityTest',
@@ -662,6 +672,9 @@ def command_for(python, env):
         return [python, "-B", "-m", "unittest", *SQLITE_TEXT_MODULES, "-v"], "sqlite-text-targeted"
     if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == SPEECH_PLATFORM_CLASS:
         return [python, "-B", "-m", "unittest", *SPEECH_MODULES, "-v"], "speech-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(MENU_NAVIGATION_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *MENU_NAVIGATION_MODULES, "-v"], "menu-navigation-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(MENU_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *MENU_MODULES, "-v"], "menu-targeted"

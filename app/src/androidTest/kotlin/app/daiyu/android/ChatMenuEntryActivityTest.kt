@@ -1,5 +1,6 @@
 package app.daiyu.android
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import android.app.Instrumentation
 import android.content.Intent
@@ -39,6 +40,50 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
         backToChat(activity)
         assertDraft("menu draft stays unsent")
+    }
+
+    fun testExternalPageEntryClosesRetainedOverflowAndReturnDoesNotReopenIt() {
+        selectDraft()
+        val before = fixture.database.exportBackup()
+        val controls = retainedControls(activity)
+        ui.onNodeWithContentDescription("更多").performTouchInput { click() }
+        node("chat-overflow-menu").assertIsDisplayed()
+        ui.onNodeWithContentDescription("更多").assertIsSelected()
+        // Navigate independently of ChatMenuItem's own dismissal callback.
+        mainThread { controls.onMenuAction(ChatMenuAction.SETTINGS) }
+        awaitUniqueTag("page:设置")
+        node("chat-overflow-menu").assertDoesNotExist()
+        backToChat(activity)
+        node("chat-overflow-menu").assertDoesNotExist()
+        ui.onNodeWithContentDescription("更多").assertIsNotSelected()
+        assertDraft("menu draft stays unsent")
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+        ui.onNodeWithContentDescription("更多").performTouchInput { click() }
+        node("chat-overflow-menu").assertIsDisplayed()
+    }
+
+    fun testOpeningSidebarClosesOverflowBeforeSettingsAndKeepsDraft() {
+        selectDraft()
+        val before = fixture.database.exportBackup()
+        ui.onNodeWithContentDescription("更多").performTouchInput { click() }
+        node("chat-overflow-menu").assertIsDisplayed()
+        // Semantics is an independent navigation entry, not the menu's outside scrim.
+        ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction())
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        node("chat-overflow-menu").assertDoesNotExist()
+        val settings = ui.onNode(hasContentDescription(activity.getString(R.string.route_settings)) and hasClickAction())
+        ui.waitUntil(5_000) { settings.isDisplayed() }
+        settings.performTouchInput { click() }
+        awaitUniqueTag("page:设置")
+        node("chat-overflow-menu").assertDoesNotExist()
+        backToChat(activity)
+        node("chat-overflow-menu").assertDoesNotExist()
+        ui.onNodeWithContentDescription("更多").assertIsNotSelected()
+        mainThread { assertEquals(false, invokeHost(activity, "getSidebarVisible")) }
+        assertDraft("menu draft stays unsent")
+        assertEquals(before, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testNewChatMenuCreatesEmptyConversationAndPreservesBothPreviousDrafts() {

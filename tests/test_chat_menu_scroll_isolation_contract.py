@@ -59,6 +59,25 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
         """), normalized_code(host))
         self.assertEqual(1, host.count('finishChatReturn('))
 
+    def test_retained_overflow_loses_ownership_on_navigation_not_lifecycle_pause(self):
+        activity = (APP / 'MainActivity.kt').read_text()
+        call = activity.split('DaiyuChatScreen(chatState.copy(', 1)[1].split('readAutomaticCompression = {', 1)[0]
+        self.assertIn('menuAvailable = retainedPage == "chat" && !sidebarVisible', call)
+        self.assertNotIn('menuAvailable = routeActive', call)
+        screen = (CHAT / 'ChatScreen.kt').read_text()
+        self.assertIn('menuAvailable: Boolean = true', screen)
+        self.assertIn('menuAvailable = menuAvailable', screen)
+        top = (CHAT / 'ChatTopBar.kt').read_text()
+        self.assertIn('remember(menuAvailable) { mutableStateOf(false) }', top)
+        self.assertIn('if (menuAvailable) ChatOverflowMenu(', top)
+        self.assertIn('enabled = menuAvailable', top)
+        self.assertIn('{ expanded = false; actions.onOpenSidebar() }', top)
+        self.assertIn('{ expanded = false; actions.onMenuAction(ChatMenuAction.COLLABORATION) }', top)
+        tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ChatMenuEntryActivityTest.kt').read_text()
+        self.assertIn('testExternalPageEntryClosesRetainedOverflowAndReturnDoesNotReopenIt', tests)
+        self.assertIn('testOpeningSidebarClosesOverflowBeforeSettingsAndKeepsDraft', tests)
+        self.assertIn('controls.onMenuAction(ChatMenuAction.SETTINGS)', tests)
+
     def test_page_passes_a_deferred_configuration_reader_to_the_menu_leaf(self):
         activity = (APP / 'MainActivity.kt').read_text()
         call = activity.split('DaiyuChatScreen(chatState.copy(', 1)[1].split('callUi =', 1)[0]

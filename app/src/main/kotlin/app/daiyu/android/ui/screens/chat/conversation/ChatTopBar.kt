@@ -48,12 +48,12 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 internal fun ChatTopBar(title: String, actions: ChatScreenActions, modifier: Modifier = Modifier, assistantLabel: String = "助手",
     interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true,
     automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false, modelLabel: String = "",
-    readAutomaticCompression: (() -> ChatAutomaticCompressionState)? = null) {
-    var expanded by remember { mutableStateOf(false) }
+    readAutomaticCompression: (() -> ChatAutomaticCompressionState)? = null, menuAvailable: Boolean = true) {
+    var expanded by remember(menuAvailable) { mutableStateOf(false) }
     val chrome = chatChromeColors()
     Row(modifier.testTag("chat-top-bar").fillMaxWidth().heightIn(min = 64.dp).padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        ChatIconButton(ChatPreviewIcons.Menu, "打开侧边栏", actions.onOpenSidebar,
+        ChatIconButton(ChatPreviewIcons.Menu, "打开侧边栏", { expanded = false; actions.onOpenSidebar() },
             Modifier.size(40.dp), tint = chrome.text, iconSize = 22.dp)
         val titleBlockHeight = with(LocalDensity.current) { 24.sp.toDp() + 18.sp.toDp() } + 4.dp
         Column(Modifier.weight(1f).heightIn(min = titleBlockHeight)) {
@@ -69,13 +69,13 @@ internal fun ChatTopBar(title: String, actions: ChatScreenActions, modifier: Mod
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
-        ChatIconButton(ChatPreviewIcons.SubAgents, "本会话协作", { actions.onMenuAction(ChatMenuAction.COLLABORATION) }, modifier = Modifier.size(40.dp), tint = assistantPreviewPalette().primary, iconSize = 22.dp)
+        ChatIconButton(ChatPreviewIcons.SubAgents, "本会话协作", { expanded = false; actions.onMenuAction(ChatMenuAction.COLLABORATION) }, modifier = Modifier.size(40.dp), tint = assistantPreviewPalette().primary, iconSize = 22.dp)
         Box {
             val moreShape = RoundedCornerShape(10.dp)
             ChatIconButton(ChatPreviewIcons.More, "更多", { actions.onMore(); expanded = true },
                 Modifier.size(40.dp).semantics { selected = expanded },
-                tint = if (expanded) chrome.accent else chrome.text, iconSize = 22.dp, shape = moreShape, indication = null)
-            ChatOverflowMenu(expanded, { expanded = false }, actions.onMenuAction,
+                tint = if (expanded) chrome.accent else chrome.text, iconSize = 22.dp, shape = moreShape, indication = null, enabled = menuAvailable)
+            if (menuAvailable) ChatOverflowMenu(expanded, { expanded = false }, actions.onMenuAction,
                 interactiveModeEnabled, interactiveModeChangeEnabled, automaticCompression, automaticCompressionPending,
                 readAutomaticCompression = readAutomaticCompression)
         }

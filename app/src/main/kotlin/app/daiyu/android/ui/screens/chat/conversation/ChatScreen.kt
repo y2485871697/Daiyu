@@ -111,6 +111,7 @@ internal fun DaiyuChatScreen(
     callActions: DoubaoCallActions = DoubaoCallActions(),
     readAutomaticCompression: (() -> ChatAutomaticCompressionState)? = null,
     speechPreparingMessageId: String? = null,
+    menuAvailable: Boolean = true,
 ) {
     val motionState = remember(callUi?.sessionKey) { DoubaoCallMotionState() }
     var voiceAnchor by remember(state.conversationKey) { mutableStateOf(Rect.Zero) }
@@ -144,7 +145,7 @@ internal fun DaiyuChatScreen(
             interactiveModeEnabled = state.interactiveModeEnabled,
             interactiveModeChangeEnabled = state.interactiveModeChangeEnabled,
             automaticCompression = state.automaticCompression, automaticCompressionPending = state.automaticCompressionPending,
-            readAutomaticCompression = readAutomaticCompression)
+            readAutomaticCompression = readAutomaticCompression, menuAvailable = menuAvailable)
         state.statusText?.let { status ->
             // 错误、恢复和准备进度使用独立状态行，与金额展示分开。
             top.yukonga.miuix.kmp.basic.Text(status,

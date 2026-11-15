@@ -89,9 +89,14 @@ menu_target = {"app.daiyu.android." + name for name in (
     "BackdropDrawIsolationTest", "ChatGlassMenuSurfaceTest", "ChatGlassBackdropActivityTest",
     "ChatMenuPlacementActivityTest", "ConversationPaneVisualTest", "PreviewDialogStatusBarActivityTest",
 )}
-menu_only = mode == "smoke" and sorted(raw_filter.split(",")) == sorted(menu_target)
+menu_navigation_target = {"app.daiyu.android." + name for name in (
+    "ChatMenuEntryActivityTest", "ModalRouteBackgroundActivityTest", "ChatChromeActivityTest",
+    "ConversationPaneVisualTest",
+)}
+menu_only = mode == "smoke" and sorted(raw_filter.split(",")) in (
+    sorted(menu_target), sorted(menu_navigation_target))
 menu_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
-                for name in menu_target}
+                for name in (requested if menu_only else menu_target)}
 speech_source = Path("app/src/androidTest/kotlin/app/daiyu/android/voice/SpeechAudioFileAndroidTest.kt")
 page_back_target = {
     'app.daiyu.android.ui.navigation.PageBackGesturesActivityTest',

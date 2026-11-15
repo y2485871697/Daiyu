@@ -2479,6 +2479,7 @@ class MainActivity : ComponentActivity() {
                                             QuestionCleanup(turn.id)
                                         }
                                     }, speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId,
+                                        menuAvailable = retainedPage == "chat" && !sidebarVisible,
                                         readAutomaticCompression = {
                                             app.daiyu.android.ui.screens.chat.conversation.ChatAutomaticCompressionState(
                                                 automaticCompression, automaticCompressionPending)

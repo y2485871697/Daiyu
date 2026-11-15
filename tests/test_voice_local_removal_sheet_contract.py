@@ -53,7 +53,7 @@ class VoiceLocalRemovalSheetContractTest(unittest.TestCase):
                       'checks_only.init.gradle', ':app:compileDebugKotlin', ':app:compileDebugAndroidTestKotlin'):
             self.assertIn(token, workflow)
         for token in ('VoiceLocalRemovalSheet(', 'listOf(false, true)', 'listOf(1f, 1.3f)',
-                      'captureToImage()', 'KEYCODE_BACK', 'preview-dialog-scrim',
+                      'captureScreenNode(node("dialog-confirm"))', 'KEYCODE_BACK', 'preview-dialog-scrim',
                       'confirmed.get()', 'dismissed.get()'):
             self.assertIn(token, visual)
 

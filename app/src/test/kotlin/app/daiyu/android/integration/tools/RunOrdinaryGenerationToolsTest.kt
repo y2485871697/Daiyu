@@ -31,6 +31,93 @@ class RunOrdinaryGenerationToolsTest {
     private fun rejected(action: () -> Unit) {
         try { action(); fail("invalid generation input accepted") } catch (_: IllegalArgumentException) { }
     }
+    @Test fun dynamicMediaToolsAndPaidEffectUseTheLatestTrustedConfiguration() {
+        val image = settings(GenerationProtocol.OPENAI_IMAGES_JSON)
+        val video = settings(GenerationProtocol.OPENAI_VIDEO_MULTIPART)
+        var current: GenerationSettingsSnapshot? = null
+        val scope = RunOrdinaryGenerationTools(owner, auth, null, null,
+            latestConfiguration = { current?.let { snapshot ->
+                OrdinaryGenerationConfiguration(snapshot) { MediaTaskAdmission({ true }) }
+            } }) { true }
+        try {
+            assertTrue(scope.tools.isEmpty())
+            current = image
+            assertEquals(RunGenerationTools.IMAGE_TOOL, scope.tools.single().definition.name)
+            current = video
+            assertEquals(RunGenerationTools.VIDEO_TOOL, scope.tools.single().definition.name)
+            val prepared = prepare(scope, """{"prompt":"animate"}""", video = true)
+            val batch = video.profiles.single().freeze("dynamic", listOf(GenerationRunConfig.Item("item_0", "animate")))
+            assertEquals(RunGenerationTools.writeEffect(video.accountScope, owner,
+                GenerationRunConfig(listOf(batch), video.maxPolls), batch), prepared.writeEffect)
+            current = null
+            assertTrue(scope.tools.isEmpty())
+        } finally { scope.close() }
+    }
+
+    @Test fun theSamePreparedMediaInvocationRefreshesItsExactEffectBeforeTheFirstReservation() {
+        val old = settings(GenerationProtocol.OPENAI_IMAGES_JSON)
+        val updated = GenerationSettingsSnapshot("account", "edited", GenerationSettingsValues(
+            old.values.profiles.map { it.copy(model = "updated-model") }, old.maxPolls, false, emptySet()))
+        var current = old
+        val scope = RunOrdinaryGenerationTools(owner, auth, null, null,
+            latestConfiguration = { OrdinaryGenerationConfiguration(current) { MediaTaskAdmission({ true }) } }) { true }
+        try {
+            val exposed = scope.tools.single()
+            val arguments = exposed.definition.schema.parse("""{"prompt":"same invocation"}""")
+            val original = exposed.prepare(arguments)
+            current = updated
+            var reservedEffect: String? = null
+            val ledger = ToolLedger(object : ToolLedgerStore {
+                override fun <T> transaction(block: (MutableList<LedgerEntry>) -> T): T {
+                    val rows = mutableListOf<LedgerEntry>(); block(rows)
+                    reservedEffect = rows.single().effectKey
+                    throw java.io.IOException("stop before execution")
+                }
+            })
+            val catalog = ToolRegistry().register(object : RegisteredTool {
+                override val definition = exposed.definition
+                override fun prepare(arguments: ToolArguments) = original
+            }).snapshot()
+            val result = ToolDispatcher(catalog, SessionCapabilities("s", setOf(RunGenerationTools.CAPABILITY)), ledger)
+                .dispatchOwned(auth, listOf(ToolInvocation(ToolCallId("same-call"), exposed.definition.name,
+                    arguments.canonicalJson())), owner).single().outcome
+            val batch = updated.profiles.single().freeze("dynamic", listOf(GenerationRunConfig.Item("item_0", "same invocation")))
+            val expected = RunGenerationTools.writeEffect(updated.accountScope, owner, GenerationRunConfig(listOf(batch), updated.maxPolls), batch)
+            var expectedKey: String? = null
+            val expectedLedger = ToolLedger(object : ToolLedgerStore {
+                override fun <T> transaction(block: (MutableList<LedgerEntry>) -> T): T {
+                    val rows = mutableListOf<LedgerEntry>(); block(rows)
+                    expectedKey = rows.single().effectKey
+                    throw java.io.IOException("stop before execution")
+                }
+            })
+            val expectedCatalog = ToolRegistry().register(object : RegisteredTool {
+                override val definition = exposed.definition
+                override fun prepare(arguments: ToolArguments) = PreparedTool.approvedWrite(expected,
+                    approve = { null }, admit = { null }, execute = { error("must not execute") })
+            }).snapshot()
+            ToolDispatcher(expectedCatalog, SessionCapabilities("s", setOf(RunGenerationTools.CAPABILITY)), expectedLedger)
+                .dispatchOwned(auth, listOf(ToolInvocation(ToolCallId("expected-call"), exposed.definition.name,
+                    arguments.canonicalJson())), owner)
+            assertNotNull(reservedEffect); assertEquals(expectedKey, reservedEffect)
+            assertNotEquals(original.writeEffect, expected)
+            assertEquals("ledger_unavailable", (result as DispatchOutcome.NotExecuted).code)
+        } finally { scope.close() }
+    }
+
+    @Test fun admissionBindsOnlyTheActuallySelectedMediaProfile() {
+        val snapshot = settings(GenerationProtocol.OPENAI_IMAGES_JSON, GenerationProtocol.OPENAI_IMAGES_JSON)
+        val selected = mutableListOf<String>()
+        val scope = RunOrdinaryGenerationTools(owner, auth, null, null,
+            latestConfiguration = { OrdinaryGenerationConfiguration(snapshot) { profile ->
+                selected.add(profile.id); MediaTaskAdmission({ true })
+            } }) { true }
+        try {
+            prepare(scope, """{"profile_id":"p1","prompt":"draw"}""")
+            assertEquals(listOf("p1"), selected)
+        } finally { scope.close() }
+    }
+
     @Test fun mediaDescriptionsExposeTrueRolesAndPathsWithoutGenerationOrCredentials() {
         val snapshot = settings(GenerationProtocol.OPENAI_IMAGES_JSON, GenerationProtocol.OPENAI_VIDEO_MULTIPART)
         val scope = leaf(snapshot)

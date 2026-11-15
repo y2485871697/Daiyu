@@ -18,13 +18,14 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
 
     fun tool(name: String = TOOL_NAME, capability: String = CAPABILITY): RegisteredTool = object : RegisteredTool {
         override val definition = ToolDefinition(name, if (name == TOOL_NAME) 1 else 2,
-            "提交后台子任务，可能产生模型费用。仅等待准入持久化，不等待子任务结果；返回后主代理继续独立工作，主回复结束后子任务继续。需要当前子代理配置时调用list_subagents，任务总数和状态汇总使用inspect_child_tasks；需要具体任务的进度和结果时按完整身份调用get_child_task，不连续空轮询。执行角色使用父任务允许的可委派工具；tool_names可收窄，空数组禁用；browser_access为full/read_only/disabled，默认full但不超过父权限。审查角色仅文本审查，不递归委派或自动重试；继续和追加保留原工具范围。" + SubAgentDescriptor.initialDescription(initialProfiles),
+            "提交后台子任务，可能产生模型费用。仅等待准入持久化，不等待子任务结果；返回后主代理继续独立工作，主回复结束后子任务继续。需要当前子代理配置时调用list_subagents，任务总数和状态汇总使用inspect_child_tasks；需要具体任务的进度和结果时按完整身份调用get_child_task，不连续空轮询。执行角色使用父任务允许的可委派工具；tool_names可收窄，空数组禁用；browser_access为full/read_only/disabled，默认full但不超过父权限。审查角色仅文本审查，不递归委派或自动重试；继续和追加保留原工具范围。有暂停任务时，替代它须先停止并确认真实排空；只有确实无关的独立新任务才显式传independent_of_paused_tasks=true，不得用于替代绕过。" + SubAgentDescriptor.initialDescription(initialProfiles),
             capability, ToolEffect.READ_ONLY,
             ToolSchema(listOf(ArgumentField("tasks", ArgumentType.ArrayValue(
                 ArgumentType.ObjectValue(ToolSchema(listOf(
                     ArgumentField("profile_id", ArgumentType.Text(200, minimumLength = 1)),
                     ArgumentField("prompt", ArgumentType.Text(4096, minimumLength = 1))
-                ) + ChildToolAccessArguments.fields)), minimumItems = 1, maximumItems = null)))))
+                ) + ChildToolAccessArguments.fields)), minimumItems = 1, maximumItems = null)),
+                ArgumentField("independent_of_paused_tasks", ArgumentType.BooleanValue, required = false))))
 
         override fun prepare(arguments: ToolArguments): PreparedTool {
             val tasks = arguments.array("tasks").map {
@@ -35,7 +36,8 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
             require(tasks.all { it.prompt.isNotBlank() && it.profileId in available }) { "invalid_arguments" }
             return PreparedTool.contextual { context ->
                 if (!refreshModels()) return@contextual ExecutionReceipt.NotExecuted("child_model_configuration_unavailable")
-                when (val result = supervisor.submit(binding, context, tasks)) {
+                when (val result = supervisor.submit(binding, context, tasks, independentOfPausedTasks =
+                    arguments.contains("independent_of_paused_tasks") && arguments.boolean("independent_of_paused_tasks"))) {
                     is ChildTaskAdmission.Rejected -> ExecutionReceipt.NotExecuted(result.code)
                     is ChildTaskAdmission.Unconfirmed -> ExecutionReceipt.Unknown(result.code)
                     is ChildTaskAdmission.Accepted -> {
@@ -65,7 +67,7 @@ internal class RunChildTasks(private val supervisor: RetainedChildTasks, private
 
     fun commandTool(): RegisteredTool = object : RegisteredTool {
         override val definition = ToolDefinition("direct_child_task", 1,
-            "定向追加、替换或失败新派。必须给出完整子任务身份与修订。追加等待原任务成功且真正排空，再以原输入/结果发起新请求；不会修改旧请求。UNKNOWN 或替换活跃任务只能在任务记录 UI 经用户单次确认后新派，模型参数不能代替确认。",
+            "定向追加、替换或失败新派。必须给出完整子任务身份与修订。追加等待原任务成功且真正排空，再以原输入/结果发起新请求；不会修改旧请求。UNKNOWN 或替换活跃任务只能在任务记录 UI 经用户单次确认后新派，模型参数不能代替确认。放弃暂停任务而新派前，必须先用control_child_task停止对应旧任务，再inspect确认settled且journal_unconfirmed=false；REQUESTED仅代表停止已受理。随后用最新修订发起带source身份的REPLACE，不得用无source的新委派绕过。接手继续旧任务不停止、不新派。",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("conversation_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("parent_run_id", ArgumentType.Text(200, minimumLength = 1)),

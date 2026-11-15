@@ -69,7 +69,8 @@ class PreparedTool private constructor(
     internal val isUserBarrier: Boolean = false,
     private val contextAdmission: ((ToolExecutionContext) -> ExecutionReceipt.NotExecuted?)? = null,
     internal val approveWrite: ((ToolExecutionContext) -> TaskAuthorization?)? = null,
-    internal val repeatConfirmed: Boolean = false
+    internal val repeatConfirmed: Boolean = false,
+    private val beforeReservation: (() -> PreparedTool)? = null
 ) {
     constructor(writeEffect: WriteEffect? = null, execute: () -> ExecutionReceipt) : this(writeEffect, execute, null)
     internal val requiresContext: Boolean get() = contextualExecution != null
@@ -77,6 +78,18 @@ class PreparedTool private constructor(
         contextAdmission?.invoke(checkNotNull(context) { "tool_execution_context_required" })
     internal fun execute(context: ToolExecutionContext?): ExecutionReceipt =
         contextualExecution?.invoke(checkNotNull(context) { "tool_execution_context_required" }) ?: execute()
+
+    /** Re-snapshot trusted configuration once at the request boundary, before any ledger access.
+     * The resolved plan still passes the full exact-effect and admission checks. A reserved
+     * request is immutable; this callback never retries execution or alters an old receipt.
+     */
+    fun refreshBeforeReservation(refresh: () -> PreparedTool): PreparedTool =
+        PreparedTool(writeEffect, execute, contextualExecution, isUserBarrier,
+            contextAdmission, approveWrite, repeatConfirmed, refresh)
+
+    internal fun forReservation(): PreparedTool = beforeReservation?.invoke()?.also {
+        check(it.beforeReservation == null) { "recursive_preparation_refresh" }
+    } ?: this
 
     companion object {
         /** A host consent callback for one exact effect; never mutates the run's frozen grant.

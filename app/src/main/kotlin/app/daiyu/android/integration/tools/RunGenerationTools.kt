@@ -54,6 +54,7 @@ internal data class GenerationRunItemResult(
 internal data class GenerationRunOutcome(
     val binding: GenerationAttemptBinding,
     val items: List<GenerationRunItemResult>,
+    val configurationPaused: Boolean = false,
 ) {
     override fun toString() = "GenerationRunOutcome(<redacted>)"
 }
@@ -84,6 +85,7 @@ internal class RunGenerationTools(
     // Production parent supplies Resources::createFence so readers share the owner gate.
     private val fenceFactory: (GenerationAssetOwner, (GenerationAssetOwner) -> Boolean) -> GenerationAssetFence =
         { assetOwner, validator -> GenerationAssetFence(assetOwner, validator) },
+    private val configurationCurrent: () -> Boolean = { true },
 ) : AutoCloseable {
     init {
         require(accountScope.isNotBlank() && accountScope.length <= 200)
@@ -91,6 +93,7 @@ internal class RunGenerationTools(
     }
     private val lock = Object()
     private var closed = false
+    private var configurationPaused = false
     private var closeStarted = false
     private var closing = false
     private var closeFailed = false
@@ -98,6 +101,22 @@ internal class RunGenerationTools(
     private val fences = mutableListOf<GenerationAssetFence>()
     private val outcomes = linkedMapOf<String, GenerationRunOutcome>()
     private val cancellation = GenerationCancellation()
+
+    internal val isConfigurationPaused: Boolean get() = synchronized(lock) { configurationPaused }
+
+    internal fun pauseForConfiguration() {
+        synchronized(lock) {
+            if (closed || (workers == 0 && outcomes.isNotEmpty())) return
+            configurationPaused = true
+            outcomes.keys.toList().forEach { key -> outcomes[key] = outcomes.getValue(key).copy(configurationPaused = true) }
+            lock.notifyAll()
+        }
+    }
+
+    private fun canStartRequest(): Boolean {
+        if (!runCatching(configurationCurrent).getOrDefault(false)) pauseForConfiguration()
+        return synchronized(lock) { !closed && !configurationPaused }
+    }
 
     val registeredTools: List<RegisteredTool> = config?.let { frozen ->
         listOf(false, true).mapNotNull { video ->
@@ -161,6 +180,7 @@ internal class RunGenerationTools(
         require(fence.owner.fields() == assetOwner.fields()) { "generation_fence_owner_mismatch" }
         synchronized(lock) {
             if (closed) return ExecutionReceipt.NotExecuted("generation_closed")
+            if (configurationPaused) return ExecutionReceipt.NotExecuted("generation_configuration_paused_redispatch_required")
             fences.add(fence)
             workers++
         }
@@ -170,7 +190,7 @@ internal class RunGenerationTools(
             val assets = assetsFactory(fence)
             val io = GenerationIo(assets, attemptStoreFactory(binding),
                 { url -> downloadAuthorization.allows(assetOwner, url) }, http,
-                { context.cancelled() || synchronized(lock) { closed } }, cancellation)
+                { context.cancelled() || synchronized(lock) { closed } }, cancellation, ::canStartRequest)
             val images = ImageGenerationClient(io)
             val videos = VideoGenerationClient(io)
             val isVideo = batch.protocol.isVideo
@@ -188,21 +208,32 @@ internal class RunGenerationTools(
             if (context.cancelled() || cancellation.isCancellationRequested)
                 return ExecutionReceipt.NotExecuted("generation_cancelled")
             // The original client also re-preflights the COMPLETE batch before its first POST.
-            val submitted = io.submitPlans(plans) { if (isVideo) videos.submit(it) else images.submit(it) }
+            val progress = arrayOfNulls<GenerationRunItemResult>(plans.size)
+            fun remember(index: Int, result: GenerationRunItemResult) = synchronized(lock) {
+                progress[index] = result
+                outcomes[binding.operationId] = GenerationRunOutcome(binding, progress.filterNotNull(), configurationPaused)
+            }
+            synchronized(lock) { outcomes[binding.operationId] = GenerationRunOutcome(binding, emptyList(), configurationPaused) }
+            val submitted = io.submitPlans(plans) { plan ->
+                (if (isVideo) videos.submit(plan) else images.submit(plan)).also { result ->
+                    remember(plans.indexOf(plan), GenerationRunItemResult(plan.identity, result, emptyList(), emptyMap()))
+                }
+            }
             val outputStore = SQLiteGenerationOutputStore(database, assetOwner, assets)
             val items = submitted.mapIndexed { index, item ->
                 val plan = plans[index]
                 var result = item.submission
                 var polls = 0
+                val refs = mutableListOf<GenerationOutputReference>()
+                val failures = linkedMapOf<Int, GenerationFailure>()
                 while (isVideo && result is Submission.Pending && polls < frozen.maxPolls &&
-                    !context.cancelled() && !cancellation.isCancellationRequested) {
+                    !context.cancelled() && !cancellation.isCancellationRequested && canStartRequest()) {
                     // Only GET on the original handle. Unknown ends polling; NEVER a second POST.
                     if (polls > 0 && !awaitPoll(context)) break
                     result = videos.poll(plan, result.handle)
                     polls++
+                    remember(index, GenerationRunItemResult(item.identity, result, refs.toList(), failures.toMap()))
                 }
-                val refs = mutableListOf<GenerationOutputReference>()
-                val failures = linkedMapOf<Int, GenerationFailure>()
                 if (result is Submission.Completed) result.outputs.forEach { output ->
                     if (output.failure != null) failures[output.index] = output.failure
                     else when (val committed = io.downloadAndCommit(plan, output)) {
@@ -216,6 +247,7 @@ internal class RunGenerationTools(
                             failures[output.index] = GenerationFailure.ASSET_REJECTED
                         }
                     }
+                    remember(index, GenerationRunItemResult(item.identity, result, refs.toList(), failures.toMap()))
                 }
                 val summary = if (isVideo) refs.joinToString("\n") { reference ->
                     "视频:${reference.width}x${reference.height} 时长:${reference.durationMs / 1000.0}秒"
@@ -233,9 +265,19 @@ internal class RunGenerationTools(
                 val countMismatch = if (!isVideo && result is Submission.Completed &&
                     refs.size != (plan.imageOptions?.count ?: 1)) "\nIMAGE_COUNT_MISMATCH" else ""
                 GenerationRunItemResult(item.identity, result, refs.toList(), failures.toMap(), summary + countMismatch)
+                    .also { remember(index, it) }
             }
-            val outcome = GenerationRunOutcome(binding, items)
-            synchronized(lock) { outcomes[binding.operationId] = outcome }
+            val outcome = synchronized(lock) {
+                GenerationRunOutcome(binding, items, configurationPaused).also { outcomes[binding.operationId] = it }
+            }
+            if (outcome.configurationPaused) {
+                if (items.all { it.submission is Submission.NotExecuted })
+                    return ExecutionReceipt.NotExecuted("generation_configuration_paused_redispatch_required")
+                if (items.any { (it.submission as? Submission.Unknown)?.reason?.let {
+                        reason -> reason != GenerationFailure.CONFIGURATION_PAUSED } == true })
+                    return ExecutionReceipt.Unknown("generation_pending_or_unconfirmed")
+                return ExecutionReceipt.Confirmed(payload(outcome))
+            }
             // Keep partial references in the DB and host outcome snapshot, even on UNKNOWN.
             if (items.any { it.submission is Submission.Pending || it.submission is Submission.Unknown || it.failures.isNotEmpty() })
                 return ExecutionReceipt.Unknown("generation_pending_or_unconfirmed")
@@ -311,7 +353,7 @@ internal class RunGenerationTools(
     private fun awaitPoll(context: ToolExecutionContext): Boolean {
         val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(4)
         synchronized(lock) {
-            while (!closed && !context.cancelled() && !cancellation.isCancellationRequested) {
+            while (!closed && !configurationPaused && !context.cancelled() && !cancellation.isCancellationRequested) {
                 val left = end - System.nanoTime()
                 if (left <= 0) return true
                 TimeUnit.NANOSECONDS.timedWait(lock, minOf(left, TimeUnit.MILLISECONDS.toNanos(100)))
@@ -326,10 +368,17 @@ internal class RunGenerationTools(
         return "${width / divisor}:${height / divisor}"
     }
 
-    private fun payload(outcome: GenerationRunOutcome): String = JSONObject().put("items", JSONArray().also { array ->
+    private fun payload(outcome: GenerationRunOutcome): String = JSONObject()
+        .put("configuration_paused", outcome.configurationPaused)
+        .put("items", JSONArray().also { array ->
         outcome.items.forEach { item ->
             array.put(JSONObject().put("item_id", item.identity.itemId)
-                .put("status", if (item.submission is Submission.Completed) "completed" else "not_executed")
+                .put("status", when (item.submission) {
+                    is Submission.Completed -> "completed"
+                    is Submission.Pending -> "pending"
+                    is Submission.Unknown -> "unknown"
+                    is Submission.NotExecuted -> "not_executed"
+                })
                 .put("summary", item.summary)
                 .put("assets", JSONArray().also { assets -> item.references.forEach {
                     assets.put(JSONObject().put("asset_id", it.receipt.assetId).put("output_index", it.outputIndex)

@@ -293,7 +293,7 @@ internal class RunCatalogTools(
                 terminalJobs?.tools(capabilities)?.forEach { registry.register(it) }
                 commands?.tools()?.forEach { registry.register(it) }
                 browserTools.forEach { registry.register(it) }
-                ordinary.flatMap { it.tools }.forEach { registry.register(it) }
+                ordinary.filterNot { it is RunOrdinaryGenerationTools }.flatMap { it.tools }.forEach { registry.register(it) }
                 gui?.let { GuiScreenToolFactory.create(it, screenImages).forEach { tool -> registry.register(tool) } }
                 mcp?.registeredTools()?.forEach { registry.register(it) }
                 generation?.registeredTools?.forEach { registry.register(it) }
@@ -307,7 +307,9 @@ internal class RunCatalogTools(
                     "gui_user_barrier_not_supported"
                 }
                 val result = CatalogModelBridge(snapshot, capabilities, ledger, conversationId, runId, authorization) {
-                    val latest = liveMcp?.let { snapshot.withAdditional(it.registeredTools()) } ?: snapshot
+                    val additional = liveMcp?.registeredTools().orEmpty() +
+                        ordinary.filterIsInstance<RunOrdinaryGenerationTools>().flatMap { it.tools }
+                    val latest = if (additional.isEmpty()) snapshot else snapshot.withAdditional(additional)
                     allowedToolNames?.let(latest::restrictedTo) ?: latest
                 }
                 result.bindOwner(bound)

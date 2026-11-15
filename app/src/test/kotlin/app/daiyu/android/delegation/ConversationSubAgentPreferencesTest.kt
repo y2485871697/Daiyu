@@ -7,6 +7,48 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class ConversationSubAgentPreferencesTest {
+    @Test fun activeMediaBindingIgnoresUnrelatedEditsAndKeepsCompatibleChanges() {
+        for (role in listOf("image_generation", "video_generation")) {
+            val repository = ConversationSubAgentPreferences(MemoryPreferences())
+            val owner = SubAgentConfigKey.Conversation("media-$role")
+            val selected = SubAgentProfile("selected", "Selected", role, providerId = "provider", modelId = "model")
+            val other = SubAgentProfile("other", "Other", "review")
+            repository.update(owner) { it.copy(enabled = true, profiles = listOf(selected, other)) }
+            val binding = CommittedMediaProfileBinding(repository.openRuntime(owner), selected)
+            repository.update(owner) { it.copy(enabled = false,
+                profiles = listOf(selected.copy(name = "Edited", providerId = "new-provider", modelId = "new-model"))) }
+            assertTrue(binding.current())
+        }
+    }
+
+    @Test fun committedMediaDeletionAndRoleRoundTripsNeverReviveAnOldTask() {
+        for (role in listOf("image_generation", "video_generation")) for (deletion in listOf(false, true)) {
+            val repository = ConversationSubAgentPreferences(MemoryPreferences())
+            val owner = SubAgentConfigKey.Conversation("media-$role-$deletion")
+            val selected = SubAgentProfile("selected", "Selected", role)
+            repository.update(owner) { it.copy(enabled = true, profiles = listOf(selected)) }
+            val binding = CommittedMediaProfileBinding(repository.openRuntime(owner), selected)
+            repository.update(owner) { it.copy(profiles = if (deletion) emptyList() else listOf(selected.copy(role = "review"))) }
+            repository.update(owner) { it.copy(profiles = listOf(selected)) }
+            assertFalse(binding.current())
+            assertFalse(binding.current())
+        }
+    }
+
+    @Test fun sameModelAndRoleMediaNeverBridgeACommittedGroupSwitch() {
+        for (role in listOf("image_generation", "video_generation")) {
+            val repository = ConversationSubAgentPreferences(MemoryPreferences())
+            val owner = SubAgentConfigKey.Conversation("media-$role")
+            val selected = SubAgentProfile("selected", "Selected", role, providerId = "provider", modelId = "model")
+            repository.update(owner) { it.copy(enabled = true, profiles = listOf(selected)) }
+            val binding = CommittedMediaProfileBinding(repository.openRuntime(owner), selected)
+            val preset = repository.addPreset("Replacement")
+            repository.update(SubAgentConfigKey.Preset(preset.id)) { it.copy(enabled = true, profiles = listOf(selected)) }
+            assertTrue(repository.applyPreset(owner, preset.id) is ConversationSubAgentPreferences.WriteResult.Saved)
+            assertFalse(binding.current())
+        }
+    }
+
     @Test fun oldDisabledProfileHasNoDisableStateAndWritesEnabledCompatibilityFlag() {
         val profile = SubAgentProfile("legacy", "Legacy", "review", providerId = "provider", modelId = "model")
         val old = profile.toJson().put("enabled", false)

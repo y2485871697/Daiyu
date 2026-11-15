@@ -30,6 +30,46 @@ class ToolDispatcherTest {
     private fun outcome(dispatcher: ToolDispatcher, task: TaskAuthorization = task(), call: ToolInvocation = call()) = dispatcher.dispatch(task, listOf(call)).single().outcome
     private fun code(outcome: DispatchOutcome) = (outcome as DispatchOutcome.NotExecuted).code
 
+    @Test fun trustedConfigurationRefreshesOnceAfterWholeBatchPreparationBeforeExactEffectReservation() {
+        var current = "old"; var refreshes = 0; var executions = 0
+        val fresh = effect(body = "new")
+        fun prepared(value: String) = PreparedTool(effect(body = value)) {
+            executions++; assertEquals("new", value); ExecutionReceipt.Confirmed(value)
+        }
+        val dynamic = object : RegisteredTool {
+            override val definition = write { error("definition only") }.definition
+            override fun prepare(arguments: ToolArguments) = prepared(current).refreshBeforeReservation {
+                refreshes++; prepared(current)
+            }
+        }
+        val changes = object : RegisteredTool {
+            override val definition = read { error("definition only") }.definition
+            override fun prepare(arguments: ToolArguments): PreparedTool {
+                current = "new"
+                return PreparedTool { ExecutionReceipt.Confirmed("read") }
+            }
+        }
+        val results = dispatcher(InMemoryToolLedgerStore(), dynamic, changes).dispatch(
+            task(setOf(effect(body = "old"), fresh)), listOf(call(), call("read", "read_note", "{}")))
+        assertTrue(results.all { it.outcome is DispatchOutcome.Confirmed })
+        assertEquals(1, refreshes); assertEquals(1, executions)
+    }
+
+    @Test fun refreshedEffectIsRevalidatedAndCannotBroadenTheFrozenGrant() {
+        var executions = 0
+        val tool = object : RegisteredTool {
+            override val definition = write { error("definition only") }.definition
+            override fun prepare(arguments: ToolArguments) = PreparedTool(effect()) {
+                executions++; ExecutionReceipt.Confirmed("old")
+            }.refreshBeforeReservation {
+                PreparedTool(effect(body = "not-authorized")) { executions++; ExecutionReceipt.Confirmed("new") }
+            }
+        }
+        val store = InMemoryToolLedgerStore()
+        assertEquals("task_write_not_authorized", code(outcome(dispatcher(store, tool))))
+        assertEquals(0, executions); assertTrue(store.transaction { it.isEmpty() })
+    }
+
     @Test fun adapterExceptionPreservesSafeCategoryStopsBatchAndNeverReplays() {
         var executions = 0; var reads = 0
         val dispatcher = dispatcher(InMemoryToolLedgerStore(),

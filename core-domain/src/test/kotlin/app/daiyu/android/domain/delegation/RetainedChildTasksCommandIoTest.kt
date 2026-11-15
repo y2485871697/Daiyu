@@ -22,6 +22,8 @@ class RetainedChildTasksCommandIoTest {
         var getHook: (() -> Unit)? = null
         var enqueueHook: (() -> Unit)? = null
         var afterCommit: (() -> Unit)? = null
+        var finishHook: (() -> Unit)? = null
+        var finishAfterCommit: (() -> Unit)? = null
         override fun enqueue(parent: RunExecutionOwner, tasks: List<ChildTaskRecord>) {
             synchronized(this) { tasks.forEach { rows[it.owner.childRunId] = it } }
         }
@@ -58,12 +60,15 @@ class RetainedChildTasksCommandIoTest {
             rows[task.owner.childRunId] = rows.getValue(task.owner.childRunId).copy(status = ChildTaskStatus.RUNNING)
         }
         @Synchronized override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) {
+            finishHook?.invoke()
             rows[task.owner.childRunId] = rows.getValue(task.owner.childRunId).copy(status = status, text = text, detail = detail)
+            finishAfterCommit?.invoke()
         }
         @Synchronized override fun list(conversationId: String, limit: Int) = rows.values.take(limit)
     }
 
-    private class Fixture(capacity: Int = 4, budget: Int = 8) {
+    private class Fixture(capacity: Int = 4, budget: Int = 8,
+        sourceGate: Block? = null, cancelGate: Block? = null) {
         val store = Journal()
         val opens = AtomicInteger()
         var deleted = false
@@ -78,12 +83,13 @@ class RetainedChildTasksCommandIoTest {
                 object : ModelPort {
                     override fun open(history: List<Message>): ModelSession = error("explicit definitions")
                     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
-                        opens.incrementAndGet()
+                        val openIndex = opens.incrementAndGet()
                         return object : ModelSession {
                             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                                if (openIndex == 1) sourceGate?.hold()
                                 sink(ModelEvent.TextFinal("answer", "done"))
                             }
-                            override fun cancel() = Unit
+                            override fun cancel() { if (openIndex == 1) cancelGate?.hold() }
                         }
                     }
                 }
@@ -92,7 +98,12 @@ class RetainedChildTasksCommandIoTest {
         init {
             val context = ToolExecutionContext(owner, ToolInvocation(ToolCallId("source"), "start_child_tasks", "{}"), authorization) { false }
             val accepted = supervisor.submit(binding, context, listOf(ChildModelTask("p", "source"))) as ChildTaskAdmission.Accepted
-            waitUntil { supervisor.snapshots(binding).any { it.record.owner == accepted.tasks.single().owner && it.settled } }
+            if (sourceGate == null) {
+                waitUntil { supervisor.snapshots(binding).any { it.record.owner == accepted.tasks.single().owner && it.settled } }
+            } else {
+                assertTrue(sourceGate.entered.await(3, TimeUnit.SECONDS))
+                assertEquals(ChildTaskControlReceipt.PENDING, supervisor.pause(binding, accepted.tasks.single().owner))
+            }
             source = store.get(accepted.tasks.single().owner)!!
         }
         fun command(call: String = "command") = ChildTaskCommand(call, source, ChildTaskCommandKind.APPEND, "p", "more")
@@ -102,6 +113,85 @@ class RetainedChildTasksCommandIoTest {
             supervisor.closeWhenIdle { done.countDown() }
             assertTrue("real drain", done.await(5, TimeUnit.SECONDS))
         }
+    }
+
+    @Test fun ordinaryAdmissionRequiresAnExplicitIndependentTaskWhileTheOldTaskIsPaused() {
+        val sourceGate = Block(); val f = Fixture(sourceGate = sourceGate)
+        try {
+            val context = ToolExecutionContext(f.owner, ToolInvocation(ToolCallId("new"), "start_child_tasks", "{}"), f.authorization) { false }
+            assertEquals(ChildTaskAdmission.Rejected("child_paused_source_requires_stop_or_explicit_independent_task"),
+                f.supervisor.submit(f.binding, context, listOf(ChildModelTask("p", "new"))))
+            assertEquals(1, f.supervisor.snapshots(f.binding).size)
+            assertTrue(f.supervisor.submit(f.binding, context, listOf(ChildModelTask("p", "independent")),
+                independentOfPausedTasks = true) is ChildTaskAdmission.Accepted)
+        } finally { sourceGate.release.countDown(); f.drain() }
+    }
+
+    @Test fun committedButUnconfirmedStopCannotBeReplacedThroughAnotherBinding() {
+        val sourceGate = Block(); val f = Fixture(sourceGate = sourceGate)
+        try {
+            f.store.finishAfterCommit = { throw IllegalStateException("lost terminal acknowledgement") }
+            f.supervisor.stop(f.binding, f.source.owner); sourceGate.release.countDown()
+            waitUntil { f.supervisor.snapshots(f.binding).any { it.record.owner == f.source.owner && it.settled } }
+            val terminal = f.store.get(f.source.owner)!!
+            assertTrue(terminal.status !in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING))
+            val nextOwner = RunExecutionOwner.issue(Message(MessageId("next-message"), ConversationId("conversation"),
+                RunId("next-parent"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
+            val next = f.supervisor.bind(nextOwner, SessionCapabilities("next-session", emptySet()),
+                TaskAuthorization("next-session", nextOwner.runId.value), checkNotNull(f.binding.resources).models)
+            val command = f.command("cross-binding").copy(source = terminal, kind = ChildTaskCommandKind.REPLACE,
+                acknowledgePossibleExecution = true)
+            assertEquals(ChildTaskCommandReceipt.Unconfirmed("child_source_journal_unconfirmed"),
+                f.supervisor.command(next, f.invocation, command))
+            assertEquals(0, f.store.writes.get())
+        } finally { sourceGate.release.countDown(); f.drain() }
+    }
+
+    @Test fun pausedReplacementRequiresStopAndRealDrainBeforeAnySuccessorReservation() {
+        val sourceGate = Block(); val cancelGate = Block()
+        val f = Fixture(sourceGate = sourceGate, cancelGate = cancelGate)
+        val replacement = f.command().copy(kind = ChildTaskCommandKind.REPLACE, acknowledgePossibleExecution = true)
+        val stopResult = AtomicReference<ChildTaskStop>()
+        var stopping: Thread? = null
+        try {
+            assertEquals(ChildTaskCommandReceipt.Rejected("child_source_stop_required"), f.send(replacement))
+            assertEquals(0, f.store.writes.get())
+            assertEquals(1, f.supervisor.snapshots(f.binding).size)
+            stopping = Thread { stopResult.set(f.supervisor.stop(f.binding, f.source.owner)) }
+                .apply { isDaemon = true; start() }
+            assertTrue(cancelGate.entered.await(3, TimeUnit.SECONDS))
+            assertEquals(ChildTaskCommandReceipt.Unconfirmed("child_source_stop_pending"), f.send(replacement))
+            assertEquals(0, f.store.writes.get())
+            assertEquals(1, f.supervisor.snapshots(f.binding).size)
+            sourceGate.release.countDown()
+            cancelGate.release.countDown(); stopping.join(3000)
+            assertFalse(stopping.isAlive)
+            assertEquals(ChildTaskStop.REQUESTED, stopResult.get())
+            waitUntil { f.supervisor.snapshots(f.binding).any { it.record.owner == f.source.owner && it.settled } }
+            val stopped = f.store.get(f.source.owner)!!
+            val accepted = f.send(replacement.copy(callId = "after-stop", source = stopped)) as ChildTaskCommandReceipt.Accepted
+            assertNotEquals(f.source.owner, accepted.task.owner)
+            assertEquals(f.source.owner.childRunId, accepted.task.sourceTaskId)
+            assertEquals(1, f.store.writes.get())
+        } finally {
+            sourceGate.release.countDown(); cancelGate.release.countDown()
+            stopping?.join(3000); f.drain()
+        }
+    }
+
+    @Test fun stoppedSourceWithUnconfirmedJournalCannotCreateAReplacement() {
+        val sourceGate = Block(); val f = Fixture(sourceGate = sourceGate)
+        try {
+            f.store.finishHook = { throw IllegalStateException("unconfirmed finish") }
+            assertEquals(ChildTaskStop.REQUESTED, f.supervisor.stop(f.binding, f.source.owner))
+            sourceGate.release.countDown()
+            waitUntil { f.supervisor.snapshots(f.binding).any { it.record.owner == f.source.owner && it.settled } }
+            assertTrue(f.supervisor.snapshots(f.binding).single().journalUnconfirmed)
+            assertEquals(ChildTaskCommandReceipt.Unconfirmed("child_source_journal_unconfirmed"),
+                f.send(f.command().copy(kind = ChildTaskCommandKind.REPLACE, acknowledgePossibleExecution = true)))
+            assertEquals(0, f.store.writes.get())
+            assertEquals(1, f.supervisor.snapshots(f.binding).size)
+        } finally { sourceGate.release.countDown(); f.store.finishHook = null; f.drain() }
     }
 
     @Test fun deletionBetweenRefreshAndFinalCommandReservationRejectsWithoutSuccessorWrite() {

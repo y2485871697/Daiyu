@@ -60,6 +60,7 @@ class ToolDispatcher(
         // Every definition, argument and authorization is checked before the first execution/reservation.
         val plans = mutableListOf<PreparedTool>()
         val requests = mutableListOf<LedgerRequest>()
+        val parsed = mutableListOf<ToolArguments>()
         for ((index, invocation) in invocations.withIndex()) {
             val (definition, tool) = definitions[index]
             if (definition.capability !in session.enabled) return rejected("capability_disabled")
@@ -75,7 +76,20 @@ class ToolDispatcher(
             if (plan.writeEffect != null && plan.writeEffect !in task.allowedWrites && plan.approveWrite == null)
                 return rejected("task_write_not_authorized")
             plans.add(plan)
-            requests.add(LedgerRequest(invocation.id.value, invocationKey(invocation, definition, arguments), plan.writeEffect?.key(), plan.repeatConfirmed))
+            parsed.add(arguments)
+        }
+        for ((index, invocation) in invocations.withIndex()) {
+            val definition = definitions[index].first
+            val plan = try { plans[index].forReservation() }
+                catch (_: Exception) { return rejected("preparation_refresh_failed") }
+            if (plan.requiresContext && owner == null) return rejected("tool_execution_context_required")
+            if ((definition.effect == ToolEffect.USER_BARRIER) != plan.isUserBarrier ||
+                (definition.effect == ToolEffect.WRITE) != (plan.writeEffect != null))
+                return rejected("effect_contract_violation")
+            if (plan.writeEffect != null && plan.writeEffect !in task.allowedWrites && plan.approveWrite == null)
+                return rejected("task_write_not_authorized")
+            plans[index] = plan
+            requests.add(LedgerRequest(invocation.id.value, invocationKey(invocation, definition, parsed[index]), plan.writeEffect?.key(), plan.repeatConfirmed))
         }
         val effects = requests.mapNotNull { it.effectKey }
         if (effects.distinct().size != effects.size) return rejected("duplicate_batch_effect")

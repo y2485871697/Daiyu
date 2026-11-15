@@ -115,6 +115,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     // its resources are released; dead owners need not be retained for the controller lifetime.
     private val seenOwners = WeakHashMap<RunExecutionOwner, Unit>()
     private val tasks = linkedMapOf<String, Task>()
+    private val unconfirmedSources = hashSetOf<ChildRunOwner>()
     // In-flight only, across bindings: a reentrant store must see pending, never join its own I/O.
     private val pendingCommands = mutableMapOf<String, ChildTaskCommandRequest>()
     private val progress = linkedMapOf<ChildRunOwner, String>()
@@ -156,7 +157,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         }
     }
 
-    fun submit(binding: ChildTaskBinding, context: ToolExecutionContext, input: List<ChildModelTask>): ChildTaskAdmission {
+    fun submit(binding: ChildTaskBinding, context: ToolExecutionContext, input: List<ChildModelTask>,
+        independentOfPausedTasks: Boolean = false): ChildTaskAdmission {
         requireBinding(binding)
         require(context.owner === binding.owner && context.authorization === binding.authorization.get()) {
             "child_parent_owner_mismatch"
@@ -184,6 +186,9 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             if (inputSnapshot.any { !resources.models.getValue(it.profileId).acceptsNewTask() })
                 return ChildTaskAdmission.Rejected("child_model_deleted")
             if (cancelled) return ChildTaskAdmission.Rejected("cancelled_before_admission")
+            if (!independentOfPausedTasks && tasks.values.any { it.initial.owner.conversationId == binding.owner.conversationId.value && (it.stopRequested ||
+                    it.pause.snapshot() in setOf(ChildTaskPauseState.PENDING, ChildTaskPauseState.PAUSED)) })
+                return ChildTaskAdmission.Rejected("child_paused_source_requires_stop_or_explicit_independent_task")
             // Old calls are resolved above even at this limit. Never drop a sent-call tombstone
             // to make room: that would turn a replay into a second provider request.
             if (binding.requests.size + binding.commandRequests.size >= maxRequestsPerBinding) return ChildTaskAdmission.Rejected("child_request_budget_exhausted")
@@ -315,6 +320,22 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         prepareAdmission: () -> Boolean = { true }): ChildTaskCommandReceipt =
         commandInternal(binding, invocation, command, prepareAdmission = prepareAdmission)
 
+    private fun replacementBarrier(binding: ChildTaskBinding, source: ChildTaskRecord,
+        kind: ChildTaskCommandKind): ChildTaskCommandReceipt? = synchronized(gate) {
+        if (kind == ChildTaskCommandKind.APPEND) return@synchronized null
+        val task = tasks[source.owner.childRunId]?.takeIf { it.initial.owner == source.owner }
+        val recent = binding.recent[source.owner.childRunId]?.takeIf { it.record.owner == source.owner }
+        if (source.owner in unconfirmedSources || task?.journalUnconfirmed == true || recent?.journalUnconfirmed == true)
+            return@synchronized ChildTaskCommandReceipt.Unconfirmed("child_source_journal_unconfirmed")
+        if (task != null) {
+            if (task.stopRequested || task.record.status !in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING))
+                return@synchronized ChildTaskCommandReceipt.Unconfirmed("child_source_stop_pending")
+            if (task.pause.snapshot() in setOf(ChildTaskPauseState.PENDING, ChildTaskPauseState.PAUSED))
+                return@synchronized ChildTaskCommandReceipt.Rejected("child_source_stop_required")
+        }
+        null
+    }
+
     private fun commandInternal(binding: ChildTaskBinding, invocation: ToolInvocation, command: ChildTaskCommand,
         modelCall: Boolean = false, cancelled: () -> Boolean = { false },
         prepareAdmission: () -> Boolean = { true }): ChildTaskCommandReceipt {
@@ -358,6 +379,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             }
             if (cancelled()) return ChildTaskCommandReceipt.Rejected("cancelled_before_admission")
             val source = store.get(command.source.owner) ?: return ChildTaskCommandReceipt.Rejected("child_source_stale")
+            replacementBarrier(binding, source, command.kind)?.let { return it }
             if (modelCall) {
                 if (snapshots(binding).none { it.record.owner == command.source.owner })
                     return ChildTaskCommandReceipt.Rejected("child_source_not_controlled")
@@ -371,6 +393,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             val task = synchronized(gate) {
                 if (closed || !binding.accepting) return ChildTaskCommandReceipt.Rejected("child_binding_closed")
                 if (wasCancelled) return ChildTaskCommandReceipt.Rejected("cancelled_before_admission")
+                replacementBarrier(binding, source, command.kind)?.let { return it }
                 if (tasks.size >= maxRetainedTasks) return ChildTaskCommandReceipt.Rejected("child_retention_limit")
                 if (source.status in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING) && tasks[source.owner.childRunId] == null)
                     return ChildTaskCommandReceipt.Rejected("child_source_not_controlled")
@@ -769,6 +792,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             task.settled = true
             task.pause.terminate()
             task.batch = null
+            if (task.journalUnconfirmed) unconfirmedSources.add(task.initial.owner)
             tasks.remove(task.initial.owner.childRunId)
             val binding = task.binding
             binding.recent[task.initial.owner.childRunId] =

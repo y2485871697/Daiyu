@@ -4350,30 +4350,27 @@ class ChatController internal constructor(private val application:Application,
             } else null
             val runMode = app.daiyu.android.runningmode.AndroidRunningModeStore.get(application).mode.value
             val androidCommands = RunCommandTools.androidConfiguration(application, workspace.resolved.hostDirectory, runMode)
-            val mediaStart = childPreferences.openRuntime(SubAgentConfigKey.Conversation(conversationId.value))
-            val captureMediaAdmission: () -> (() -> Boolean) = {
-                val cursor = mediaStart.cursor()
-                var baseline = mediaStart.config
-                cursor.drain { edge -> edge.after?.let { baseline = it } }
-                val media = baseline.profiles.filter { it.role in setOf("image_generation", "video_generation") }
-                var valid = true
-                val admission: () -> Boolean = { synchronized(cursor) {
-                    cursor.drain { edge ->
-                        if (edge.kind != ConversationSubAgentPreferences.CommitKind.EDIT || edge.after == null ||
-                            media.any { original -> edge.after.profiles.none { it.id == original.id && it.role == original.role } }) valid = false
+            val mediaOwner = SubAgentConfigKey.Conversation(conversationId.value)
+            val currentOrdinaryGeneration: () -> OrdinaryGenerationConfiguration? = {
+                if (!ordinaryRun) null else try {
+                    val start = childPreferences.openRuntime(mediaOwner)
+                    val profiles = if (start.config.enabled) start.config.profiles.filter { it.isMedia } else emptyList()
+                    val store = GenerationSettingsStore(application)
+                    val settings = if (profiles.isNotEmpty()) store.withMediaProfiles(profiles.map { profile ->
+                        app.daiyu.android.model.generation.SavedMediaGenerationBindings.profile(profile,
+                            readSavedChildProviderModel(profile.providerId, profile.modelId))
+                    }) else store.loadSnapshot()
+                    OrdinaryGenerationConfiguration(settings) { selected ->
+                        val original = profiles.singleOrNull { it.id == selected.id }
+                        if (original == null) MediaTaskAdmission({ true }) else {
+                            val binding = app.daiyu.android.delegation.CommittedMediaProfileBinding(start, original)
+                            MediaTaskAdmission(current = binding::current, subscribe = { changed ->
+                                childPreferences.observeChanges { owner, _ -> if (owner == mediaOwner) changed() }
+                            })
+                        }
                     }
-                    valid
-                } }
-                admission
+                } catch (_: Exception) { null }
             }
-            val ordinaryGeneration = if (ordinaryRun) {
-                val mediaProfiles = if (mediaStart?.config?.enabled == true) mediaStart.config.profiles.filter { it.isMedia }
-                    .map { profile -> app.daiyu.android.model.generation.SavedMediaGenerationBindings.profile(profile,
-                        readSavedChildProviderModel(profile.providerId, profile.modelId)) } else emptyList()
-                val store = GenerationSettingsStore(application)
-                if (mediaProfiles.isNotEmpty()) store.withMediaProfiles(mediaProfiles)
-                else try { store.loadSnapshot() } catch (_: GenerationSettingsException) { null }
-            } else null
             val ordinaryShizuku = if (ordinaryRun && androidCommands.backend == "shizuku" && application is ChatApplication) shizukuAccess.refresh() else null
             var ordinaryShizukuScope: RunOrdinaryShizukuTools? = null
             val liveMcp = if (!voiceConversation && mcpPreparation == null && virtualDisplay == null && gui == null && video == null &&
@@ -4438,7 +4435,7 @@ class ChatController internal constructor(private val application:Application,
                     (if (gui == null) emptySet() else setOf(app.daiyu.android.gui.GuiScreenToolFactory.CAPABILITY)) +
                     (if (!ordinaryRun) emptySet() else app.daiyu.android.platform.actions.PlatformActionKind.entries.map { it.capability }.toSet() +
                         setOf(app.daiyu.android.gui.GuiScreenToolFactory.CAPABILITY, TerminalJobSession.CAPABILITY) +
-                        (if (ordinaryGeneration == null) emptySet() else setOf(RunGenerationTools.CAPABILITY)) +
+                        setOf(RunGenerationTools.CAPABILITY) +
                         (if (ordinaryShizuku?.uid == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)) +
                         (if (ordinaryBrowserSettings?.access == app.daiyu.android.browser.session.BrowserAccess.DISABLED) emptySet()
                             else setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY))))
@@ -4492,9 +4489,7 @@ class ChatController internal constructor(private val application:Application,
                     val jobConfigurations = mutableMapOf("android" to androidCommands)
                     try { jobLinux?.let { jobConfigurations["linux"] = it.commandConfiguration() } }
                     finally { jobLinux?.close() }
-                    val generationInputs = if (ordinaryGeneration?.profiles?.any {
-                        it.protocol != app.daiyu.android.model.generation.GenerationProtocol.NOVELAI_IMAGE_JSON
-                    } == true) messageImages.generationInputs(user) else emptyMap()
+                    val generationInputs by lazy { messageImages.generationInputs(user) }
                     val scopes = mutableListOf<RunOwnedToolScope>()
                     try {
                         scopes.add(RunOrdinaryPlatformTools(realOwner, task,
@@ -4508,8 +4503,9 @@ class ChatController internal constructor(private val application:Application,
                             ordinaryShizukuScope = scope
                             scopes.add(scope)
                         }
-                        ordinaryGeneration?.let { settings -> scopes.add(RunOrdinaryGenerationTools(realOwner, task, settings,
-                            retainGenerationResources(settings.accountScope), generationInputs, captureAdmission = captureMediaAdmission) { isRunUnfenced(assistant) }) }
+                        scopes.add(RunOrdinaryGenerationTools(realOwner, task, null, null,
+                            latestConfiguration = currentOrdinaryGeneration, resourcesFor = ::retainGenerationResources,
+                            currentInputs = { generationInputs }) { isRunUnfenced(assistant) })
                         scopes.add(RunOrdinaryJobTools(application, realOwner, task, grants, jobConfigurations,
                             launch = { environment -> if (environment == "android") androidLaunch else {
                                 if (jobHost == null || jobReference == null || "linux" !in jobConfigurations) null else

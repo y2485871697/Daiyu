@@ -93,6 +93,94 @@ class RunGenerationToolsTest {
                 GenerationRunConfig.Item("last", "bad", parameters = mapOf("n" to "11")))
             else listOf(GenerationRunConfig.Item("first", "draw")))), polls)
 
+    @Test fun aReplacementCanClaimThePausedMediaSourceOnlyAfterConfirmedStopAndOnlyOnce() {
+        Fixture(config()).use { f ->
+            f.leaf.pauseForConfiguration()
+            val control = MediaTaskControl("profile", "image_generation", f.leaf, GenerationCatalogLeaf(f.leaf))
+            assertFalse(control.claimReplacement("new-call"))
+            assertFalse(control.stopConfirmed)
+            assertTrue(control.stop())
+            assertTrue(control.stopConfirmed)
+            assertTrue(control.claimReplacement("new-call"))
+            assertFalse(control.claimReplacement("other-call"))
+            assertEquals("new-call", control.replacementCallId)
+            assertTrue(f.attempts.rows.isEmpty()); assertEquals(0, f.reviews)
+        }
+    }
+
+    @Test fun pausedMediaReplacementWaitsForThePhysicalInFlightRequestToExit() {
+        val entered = CountDownLatch(1); val release = CountDownLatch(1)
+        Fixture(config(video = true), http = GenerationHttp {
+            entered.countDown(); check(release.await(5, TimeUnit.SECONDS))
+            GenerationHttpResponse(200, """{"id":"task_1","status":"queued"}""".toByteArray())
+        }).use { f ->
+            val worker = Thread { f.dispatch() }.apply { isDaemon = true; start() }
+            val control = MediaTaskControl("profile", "video_generation", f.leaf, GenerationCatalogLeaf(f.leaf))
+            try {
+                assertTrue(entered.await(3, TimeUnit.SECONDS)); f.leaf.pauseForConfiguration()
+                assertFalse(control.stop(10)); assertFalse(control.stopConfirmed)
+                assertFalse(control.claimReplacement("new"))
+                release.countDown(); worker.join(3000); assertFalse(worker.isAlive)
+                assertTrue(control.stop()); assertTrue(control.claimReplacement("new"))
+            } finally { release.countDown(); worker.join(3000) }
+        }
+    }
+
+    @Test fun configurationPauseBeforeDispatchDoesNotStartGeneration() {
+        var requests = 0
+        Fixture(config(), http = GenerationHttp { requests++; error("HTTP after configuration pause") }).use { f ->
+            f.leaf.pauseForConfiguration(); f.leaf.pauseForConfiguration()
+            assertTrue(f.dispatch() is DispatchOutcome.NotExecuted)
+            assertEquals(0, f.reviews); assertTrue(f.attempts.rows.isEmpty()); assertEquals(0, requests)
+        }
+    }
+
+    @Test fun configurationPauseDrainsTheIssuedPostAndRetainsItsHandleWithoutPollingOrReplaying() {
+        val calls = mutableListOf<String>()
+        var pause: () -> Unit = { error("fixture not bound") }
+        val http = object : GenerationHttp {
+            override fun execute(request: GenerationHttpRequest): GenerationHttpResponse = error("wrong overload")
+            override fun execute(request: GenerationHttpRequest, cancellation: GenerationCancellation): GenerationHttpResponse {
+                calls.add(request.method)
+                if (request.method == "POST") pause()
+                assertFalse(cancellation.isCancellationRequested)
+                return GenerationHttpResponse(200, """{"id":"task_1","status":"queued"}""".toByteArray())
+            }
+        }
+        Fixture(config(video = true), http = http).use { f ->
+            pause = f.leaf::pauseForConfiguration
+            assertTrue(f.dispatch() is DispatchOutcome.Confirmed)
+            assertEquals(listOf("POST"), calls); assertEquals(1, f.reviews)
+            val retained = f.leaf.outcomes().single()
+            assertTrue(retained.configurationPaused)
+            assertTrue(retained.items.single().submission is Submission.Pending)
+            assertEquals(retained.items.single().submission, f.attempts.rows.values.single().second)
+            f.leaf.pauseForConfiguration()
+            assertEquals(listOf(retained), f.leaf.outcomes())
+            assertEquals(listOf("POST"), calls)
+        }
+    }
+
+    @Test fun configurationPauseBlocksUnsentPaidSiblingsButKeepsTheOriginalAttempt() {
+        var pause: () -> Unit = { error("fixture not bound") }
+        var posts = 0
+        val frozen = GenerationRunConfig(listOf(GenerationRunConfig.Batch("batch", GenerationProtocol.OPENAI_VIDEO_MULTIPART,
+            "https://api.example/v1/videos", "fixture-key", "model",
+            listOf(GenerationRunConfig.Item("first", "draw"), GenerationRunConfig.Item("second", "draw")))), 2)
+        Fixture(frozen, http = GenerationHttp {
+            posts++; pause()
+            GenerationHttpResponse(200, """{"id":"task_1","status":"queued"}""".toByteArray())
+        }).use { f ->
+            pause = f.leaf::pauseForConfiguration
+            assertTrue(f.dispatch() is DispatchOutcome.Confirmed)
+            assertEquals(1, posts)
+            val retained = f.leaf.outcomes().single()
+            assertTrue(retained.items.first().submission is Submission.Pending)
+            assertEquals(Submission.NotExecuted(GenerationFailure.CONFIGURATION_PAUSED), retained.items.last().submission)
+            assertEquals(1, f.attempts.rows.size)
+        }
+    }
+
     @Test fun paidEffectUsesPersistentAccountOwnerAndConfigScopeNotRuntimeIdentity() {
         val frozen = config()
         val token = owner()

@@ -17,9 +17,11 @@ class GenerationIo(
     private val isCancelled: () -> Boolean = { false },
     /** Allocate a fresh handle for every parent-owned run; never reset/reuse a cancelled handle. */
     val cancellation: GenerationCancellation = GenerationCancellation(),
+    private val requestAllowed: () -> Boolean = { true },
 ) {
     internal fun submit(plan: GenerationRequestPlan, parse: (GenerationHttpResponse) -> Submission): Submission {
         if (cancelled()) return Submission.NotExecuted(GenerationFailure.CANCELLED)
+        if (!requestAllowed()) return Submission.NotExecuted(GenerationFailure.CONFIGURATION_PAUSED)
         // Construct every request byte/header before accounting and before any network operation.
         val request = GenerationHttpRequest("POST", plan.endpoint, headers(plan) +
             ("Content-Type" to plan.contentType), plan.body, plan.responseLimit)
@@ -35,7 +37,8 @@ class GenerationIo(
             GenerationReservation.Started -> Unit
         }
         // Once reserved, cancellation is ambiguous and must never reopen this identity for POST.
-        val result = if (cancelled()) Submission.Unknown(GenerationFailure.CANCELLED) else {
+        val result = if (cancelled()) Submission.Unknown(GenerationFailure.CANCELLED)
+        else if (!requestAllowed()) Submission.Unknown(GenerationFailure.CONFIGURATION_PAUSED) else {
             try {
                 // The only POST call site. A failure after durable reservation is always ambiguous.
                 val response = http.execute(request, cancellation)
@@ -63,10 +66,12 @@ class GenerationIo(
         parse: (GenerationHttpResponse) -> Submission,
     ): Submission {
         if (!matches(plan, handle)) return Submission.NotExecuted(GenerationFailure.INVALID_REQUEST)
+        if (!requestAllowed()) return Submission.Unknown(GenerationFailure.CONFIGURATION_PAUSED, handle = handle)
         if (cancelled()) return Submission.Unknown(GenerationFailure.CANCELLED, handle = handle)
         val result = try {
             var response: GenerationHttpResponse? = null
             for (url in plan.pollUrls(handle.taskId)) {
+                if (!requestAllowed()) return Submission.Unknown(GenerationFailure.CONFIGURATION_PAUSED, handle = handle)
                 if (cancelled()) return Submission.Unknown(GenerationFailure.CANCELLED, handle = handle)
                 try {
                     response = http.execute(GenerationHttpRequest("GET", url, headers(plan), null,
@@ -100,6 +105,7 @@ class GenerationIo(
 
     internal fun content(plan: GenerationRequestPlan, handle: GenerationHandle,
         parse: (GenerationHttpResponse) -> Submission): Submission {
+        if (!requestAllowed()) return Submission.Unknown(GenerationFailure.CONFIGURATION_PAUSED, handle = handle)
         if (!matches(plan, handle) || !authorizeDownload(handle.contentUrl))
             return Submission.Unknown(GenerationFailure.DOWNLOAD_DENIED, handle = handle)
         if (cancelled()) return Submission.Unknown(GenerationFailure.CANCELLED, handle = handle)
@@ -122,6 +128,7 @@ class GenerationIo(
         if (output.index < 0 || output.source == null || output.failure != null)
             return GenerationAssetResult.Failed(GenerationFailure.INVALID_REQUEST)
         if (cancelled()) return GenerationAssetResult.Failed(GenerationFailure.CANCELLED)
+        if (!requestAllowed()) return GenerationAssetResult.Failed(GenerationFailure.CONFIGURATION_PAUSED)
         val limit = if (plan.kind == GenerationKind.IMAGE) GenerationRequestPlan.MAX_IMAGE_BYTES
             else GenerationRequestPlan.MAX_VIDEO_BYTES
         val bytes: ByteArray
@@ -142,6 +149,7 @@ class GenerationIo(
                         require(validTaskId(id) && source.url == plan.taskUrls(id).second)
                     }
                 } catch (_: Exception) { return GenerationAssetResult.Failed(GenerationFailure.DOWNLOAD_DENIED) }
+                if (!requestAllowed()) return GenerationAssetResult.Failed(GenerationFailure.CONFIGURATION_PAUSED)
                 val response = try {
                     http.execute(GenerationHttpRequest("GET", source.url,
                         if (source.authenticated) headers(plan) + ("Accept" to "video/*, application/octet-stream")

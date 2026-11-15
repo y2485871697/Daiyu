@@ -89,7 +89,7 @@ internal class RunChildTaskAccess(
         }
     }, object : RegisteredTool {
         override val definition = ToolDefinition("control_child_task", 1,
-            "定向继续、暂停或停止本会话的现存子任务，允许控制旧主回复和旧配置的任务。继续不新建任务，不更换任务ID；已停止或排空任务不能重启。必须先inspect取得完整身份与修订，恢复主代理本身不会自动调用。配置暂停后可在continue中指定当前配置内同原职责的target_profile_id接手；无同职责候选则保持暂停。图片和视频生成不支持继续或接手，切组后即使模型相同也只能明确重新委派。",
+            "定向继续、暂停或停止本会话的现存子任务，允许控制旧主回复和旧配置的任务。继续不新建任务，不更换任务ID；已停止或排空任务不能重启。必须先inspect取得完整身份与修订，恢复主代理本身不会自动调用。配置暂停后可在continue中指定当前配置内同原职责的target_profile_id接手；无同职责候选则保持暂停。图片和视频生成不支持继续或接手，切组后即使模型相同也只能明确重新委派。若放弃暂停任务而重新委派，先stop对应旧任务；REQUESTED不是停止完成，须inspect确认settled且journal_unconfirmed=false后，才可用最新修订新派。不得留下暂停旧任务；同职责接手则保留原任务，不停止。",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("parent_run_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("task_group_id", ArgumentType.Text(200, minimumLength = 1)),

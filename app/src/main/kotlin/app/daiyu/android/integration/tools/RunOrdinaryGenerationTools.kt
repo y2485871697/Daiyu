@@ -8,12 +8,60 @@ import app.daiyu.android.model.generation.*
 
 /** Dynamic prompts use independent configured generation profiles, never the chat model. */
 internal class RunOrdinaryGenerationTools(owner: RunExecutionOwner, authorization: TaskAuthorization,
-    private val settings: GenerationSettingsSnapshot, private val resources: ControllerGenerationResources,
+    private val settings: GenerationSettingsSnapshot?, resources: ControllerGenerationResources?,
     inputAssets: Map<String, GenerationInput> = emptyMap(),
     private val captureAdmission: () -> (() -> Boolean) = { { true } },
+    private val latestConfiguration: (() -> OrdinaryGenerationConfiguration?)? = null,
+    private val resourcesFor: (String) -> ControllerGenerationResources = { checkNotNull(resources) },
+    private val currentInputs: (() -> Map<String, GenerationInput>)? = null,
     private val current: () -> Boolean) : RunOwnedToolScope(owner, authorization) {
     private val inputs = inputAssets.toMap()
-    override val tools = listOf(false, true).mapNotNull { video ->
+    private val calls = linkedMapOf<String, MediaTaskControl>()
+    private fun controlTools(): List<RegisteredTool> = if (synchronized(calls) { calls.isEmpty() }) emptyList() else listOf(object : RegisteredTool {
+        override val definition = ToolDefinition("control_generation_task", 1,
+            "查看或停止本主任务已发起的原媒体调用，按原tool_call_id定位。inspect保留已得结果引用，不暴露供应商URL或凭据。" +
+                "配置暂停不可继续或接手；放弃暂停调用而新派时先stop并确认stop_confirmed=true，再在生成工具中指定replaces_call_id。" +
+                "停止未确认不能新派；停止不代表撤回远端已受理的付费请求，UNKNOWN仍受原防重复付费门禁限制。",
+            RunGenerationTools.CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
+                ArgumentField("tool_call_id", ArgumentType.Text(200, minimumLength = 1)),
+                ArgumentField("action", ArgumentType.Text(16, setOf("inspect", "stop"))),
+            )))
+        override fun prepare(arguments: ToolArguments): PreparedTool = diagnosticRead {
+            val callId = arguments.text("tool_call_id")
+            val call = synchronized(calls) { calls[callId] }
+                ?: return@diagnosticRead ExecutionReceipt.NotExecuted("generation_source_not_found")
+            if (arguments.text("action") == "stop" && !call.stop())
+                return@diagnosticRead ExecutionReceipt.Unknown("generation_source_stop_unconfirmed")
+            val items = org.json.JSONArray()
+            call.runtime.outcomes().flatMap { it.items }.forEach { item ->
+                items.put(org.json.JSONObject().put("item_id", item.identity.itemId)
+                    .put("status", when (item.submission) {
+                        is Submission.Completed -> "completed"
+                        is Submission.Pending -> "pending"
+                        is Submission.Unknown -> "unknown"
+                        is Submission.NotExecuted -> "not_executed"
+                    }).put("summary", item.summary).put("assets", org.json.JSONArray().also { assets ->
+                        item.references.forEach { reference -> assets.put(org.json.JSONObject()
+                            .put("asset_id", reference.receipt.assetId).put("output_index", reference.outputIndex)
+                            .put("kind", reference.kind.name.lowercase()).put("mime_type", reference.mimeType)) }
+                    }))
+            }
+            ExecutionReceipt.Confirmed(org.json.JSONObject().put("tool_call_id", callId)
+                .put("profile_id", call.profileId).put("role", call.role)
+                .put("configuration_paused", call.runtime.isConfigurationPaused).put("stop_confirmed", call.stopConfirmed)
+                .put("replacement_call_id", call.replacementCallId ?: org.json.JSONObject.NULL)
+                .put("items", items).toString())
+        }
+    })
+    override val tools: List<RegisteredTool> get() {
+        val configuration = if (latestConfiguration != null) latestConfiguration.invoke() else settings?.let {
+            OrdinaryGenerationConfiguration(it) { MediaTaskAdmission(captureAdmission()) }
+        }
+        val selected = configuration ?: return controlTools()
+        val settings = selected.settings
+        val inputs = if (settings.profiles.any { it.protocol != GenerationProtocol.NOVELAI_IMAGE_JSON })
+            currentInputs?.invoke() ?: this.inputs else emptyMap()
+        return controlTools() + listOf(false, true).mapNotNull { video ->
         val sources = inputs
         val profiles = settings.profiles.filter { profile ->
             profile.protocol.isVideo == video && (profile.protocol !in setOf(
@@ -26,12 +74,14 @@ internal class RunOrdinaryGenerationTools(owner: RunExecutionOwner, authorizatio
                     "也可用image_options覆盖本次设置，不修改保存配置。source_asset_ids传本次消息参考图，mask_asset_id只能传同尺寸PNG遮罩；" +
                     "所选协议不支持输入或参数时明确失败，不丢弃、不换端点。视频参数按已配置协议发送。" +
                     "成功只给实际分辨率、比例/时长和asset引用；不要复述请求体。未知付费请求禁止重发。" +
+                    "若替代暂停的旧媒体调用，先control_generation_task停止并确认，再提供replaces_call_id；新调用不接手或复用旧付费请求。" +
                     SubAgentDescriptor.initialDescription(profiles.map { profile ->
                         SubAgentDescriptor(profile.id, profile.label,
                             if (video) "video_generation" else "image_generation", null, profile.model, profile.model)
                     }),
                 RunGenerationTools.CAPABILITY, ToolEffect.WRITE, ToolSchema(buildList {
                     add(ArgumentField("prompt", ArgumentType.Text(32768, minimumLength = 1)))
+                    add(ArgumentField("replaces_call_id", ArgumentType.Text(200, minimumLength = 1), required = false))
                     add(ArgumentField("profile_id", ArgumentType.Text(128, profiles.map { it.id }.toSet()), required = profiles.size > 1))
                     if (!video) add(ArgumentField("image_options", ArgumentType.ObjectValue(ToolSchema(listOf(
                         ArgumentField("aspect_ratio", ArgumentType.Text(32), false),
@@ -51,8 +101,12 @@ internal class RunOrdinaryGenerationTools(owner: RunExecutionOwner, authorizatio
                     }
                 }))
             override fun prepare(arguments: ToolArguments): PreparedTool {
-                val admitted = captureAdmission()
-                val profile = if (arguments.contains("profile_id")) profiles.single { it.id == arguments.text("profile_id") } else profiles.single()
+                val initialProfile = if (arguments.contains("profile_id")) profiles.single { it.id == arguments.text("profile_id") } else profiles.single()
+                val admission = selected.bind(initialProfile)
+                val admitted = admission::admitted
+                fun snapshot(configuration: OrdinaryGenerationConfiguration): PreparedTool {
+                val settings = configuration.settings
+                val profile = settings.profiles.single { it.id == initialProfile.id && it.protocol.isVideo == video }
                 require(!(arguments.contains("source_asset_id") && arguments.contains("source_asset_ids")))
                 val references = when {
                     arguments.contains("source_asset_ids") -> arguments.array("source_asset_ids").map { sources.getValue(it as String) }
@@ -69,33 +123,65 @@ internal class RunOrdinaryGenerationTools(owner: RunExecutionOwner, authorizatio
                     references = references, mask = mask, parameters = parameters)))
                 val config = GenerationRunConfig(listOf(batch), maxPolls = settings.maxPolls)
                 val effect = RunGenerationTools.writeEffect(settings.accountScope, owner, config, batch)
-                fun configurationDenial() = if (admitted()) null else
-                    ExecutionReceipt.NotExecuted("generation_configuration_paused_redispatch_required")
+                fun configurationDenial(): ExecutionReceipt.NotExecuted? {
+                    if (!admitted()) return ExecutionReceipt.NotExecuted("generation_configuration_paused_redispatch_required")
+                    return synchronized(calls) {
+                        if (!arguments.contains("replaces_call_id") && calls.values.any {
+                                it.runtime.isConfigurationPaused && it.replacementCallId == null })
+                            ExecutionReceipt.NotExecuted("generation_paused_source_requires_stop_and_replacement")
+                        else null
+                    }
+                }
                 return PreparedTool.approvedWrite(effect, approve = { context ->
                     if (denial(context) != null || configurationDenial() != null) null
                     else TaskAuthorization(authorization.sessionId, authorization.taskId, setOf(effect))
-                }, admit = { denial(it) ?: configurationDenial() }) execute@ { context ->
+                }, admit = { denial(it) ?: configurationDenial() },
+                    repeatConfirmed = arguments.contains("replaces_call_id")) execute@ { context ->
                     denial(context, original = false)?.let { return@execute it }
                     configurationDenial()?.let { return@execute it }
                     if (context.authorization.sessionId != authorization.sessionId || context.authorization.taskId != authorization.taskId ||
                         context.authorization.allowedWrites != setOf(effect)) return@execute ExecutionReceipt.NotExecuted("task_write_not_authorized")
+                    if (arguments.contains("replaces_call_id")) {
+                        val previous = synchronized(calls) { calls[arguments.text("replaces_call_id")] }
+                            ?: return@execute ExecutionReceipt.NotExecuted("generation_source_not_found")
+                        if (!previous.stopConfirmed) return@execute ExecutionReceipt.NotExecuted("generation_source_stop_required")
+                        if (!previous.claimReplacement(context.invocation.id.value))
+                            return@execute ExecutionReceipt.NotExecuted("generation_source_already_replaced")
+                    }
+                    beginCreation()
+                    val runtime: RunGenerationTools
+                    try {
+                    val resources = resourcesFor(settings.accountScope)
                     val network = resources.generationNetwork(GenerationDownloadAuthorization { assetOwner, url ->
                         current() && admitted() && resources.validateOwner(assetOwner) && settings.downloads.allows(url)
                     })
-                    val runtime = RunGenerationTools(config, owner, context.authorization, settings.accountScope,
+                    runtime = RunGenerationTools(config, owner, context.authorization, settings.accountScope,
                         resources::database, resources::assets,
-                        validateOwner = { assetOwner -> live() && current() && admitted() && resources.validateOwner(assetOwner) },
+                        validateOwner = { assetOwner -> live() && current() && resources.validateOwner(assetOwner) },
                         approval = GenerationRunApproval { review ->
                             if (live() && current() && admitted() && review.context === context && review.effect == effect &&
                                 context.authorization.allowedWrites == setOf(effect)) GenerationRunDecision.APPROVED else GenerationRunDecision.DENIED
                         }, downloadAuthorization = network.authorization, http = network.http,
-                        fenceFactory = resources::createFence)
+                        fenceFactory = resources::createFence, configurationCurrent = admitted)
                     val leaf = GenerationCatalogLeaf(runtime)
                     retain(leaf, leaf::observeClose)
-                    if (!live() || !current()) ExecutionReceipt.NotExecuted("generation_run_closed")
-                    else runtime.executeApproved(context, batch)
+                    synchronized(calls) {
+                        calls[context.invocation.id.value] = MediaTaskControl(profile.id,
+                            if (video) "video_generation" else "image_generation", runtime, leaf)
+                    }
+                    } finally { endCreation() }
+                    val observation = admission.observePause(runtime::pauseForConfiguration)
+                    try {
+                        if (!live() || !current()) ExecutionReceipt.NotExecuted("generation_run_closed")
+                        else runtime.executeApproved(context, batch)
+                    } finally { observation.close() }
+                }
+                }
+                return snapshot(selected).refreshBeforeReservation {
+                    snapshot(if (latestConfiguration != null) checkNotNull(latestConfiguration.invoke()) else selected)
                 }
             }
+        }
         }
     }
 }

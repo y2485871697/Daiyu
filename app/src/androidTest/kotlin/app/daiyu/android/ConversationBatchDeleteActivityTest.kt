@@ -4,6 +4,14 @@ import androidx.compose.ui.test.*
 import app.daiyu.android.domain.*
 
 class ConversationBatchDeleteActivityTest : WiredActivityTestCase() {
+    private val deleteNotice = java.util.concurrent.atomic.AtomicReference<String?>()
+
+    internal override fun createFixture() = super.createFixture().also { created ->
+        created.controller.observe {
+            created.controller.dataNotice?.let { deleteNotice.set(it) }
+        }
+    }
+
     private fun seed(): List<Conversation> {
         val conversations = (1..3).map { fixture.database.create("default") }
         conversations.forEachIndexed { index, conversation ->
@@ -61,9 +69,9 @@ class ConversationBatchDeleteActivityTest : WiredActivityTestCase() {
         openConfirmation(survivor)
         node("dialog-confirm").performClick()
         awaitControl("all selected owners deleted and data operation finished") {
-            !fixture.controller.dataBusy && fixture.controller.dataNotice != null
+            !fixture.controller.dataBusy && deleteNotice.get() != null
         }
-        assertEquals("删除已完成", fixture.controller.dataNotice)
+        assertEquals("删除已完成", deleteNotice.get())
         assertEquals(ids - setOf(first.id, second.id), fixture.database.conversations().map { it.id }.toSet())
         for (conversation in listOf(first, second)) {
             fixture.database.readableDatabase.rawQuery("SELECT 1 FROM messages WHERE conversation_id=? LIMIT 1",
@@ -95,9 +103,9 @@ class ConversationBatchDeleteActivityTest : WiredActivityTestCase() {
             openConfirmation(survivor)
             node("dialog-confirm").performClick()
             awaitControl("batch deletion failure reported") {
-                !fixture.controller.dataBusy && fixture.controller.dataNotice != null
+                !fixture.controller.dataBusy && deleteNotice.get() != null
             }
-            assertTrue(fixture.controller.dataNotice.orEmpty().startsWith("删除未确认"))
+            assertTrue(deleteNotice.get().orEmpty().startsWith("删除未确认"))
             assertEquals(before, fixture.database.exportBackup())
             node("drawer-selection-count").assertTextEquals("已选择 2 项")
             assertEquals(0, fixture.opens.get())

@@ -74,6 +74,10 @@ class ConversationBatchDeleteContractTest(unittest.TestCase):
                           "assertEquals(before, fixture.database.exportBackup())", "assertIsNotEnabled()",
                           "assertEquals(survivorMessages, fixture.database.messages(survivor.id))"):
             self.assertIn(assertion, tests)
+        self.assertIn("internal override fun createFixture()", tests)
+        self.assertIn("created.controller.observe", tests)
+        self.assertIn("deleteNotice.get() != null", tests)
+        self.assertNotIn("fixture.controller.dataNotice != null", tests)
 
     def test_smoke_discovery_only_reads_two_sources_and_allocates_each_class_once(self):
         import json

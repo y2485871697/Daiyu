@@ -904,7 +904,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
             else mount()
             finishOpening()
             mainThread { call = call!!.copy(reply = (1..40).joinToString("\n") { "第${it}行回答" }) }
-            advanceOverlayFrames(64)
+            advanceOverlayFrames(400)
             val caption = ui.onNodeWithTag("doubao-call-caption-area")
             fun position(): Pair<Float, Float> {
                 return scrollPosition(caption)

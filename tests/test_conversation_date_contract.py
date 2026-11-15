@@ -60,7 +60,8 @@ class ConversationDateContractTest(unittest.TestCase):
                      'testSchema32UpgradeThenContinuationRenameAndPinKeepTheOriginalDay',
                      'testEditingRegeneratingAndDeletingTailKeepTheStableDayButBranchGetsToday',
                      'testSelectingAnOldConversationKeepsTheOpenDrawerAndItsScrollPosition',
-                     'testDrawerConditionsSurviveRealConversationSelectionAndReopen'):
+                     'testDrawerConditionsSurviveRealConversationSelectionAndReopen',
+                     'testDrawerMenusExpandFromTheirActualButtonLeftEdges'):
             self.assertIn('fun ' + name + '()', device)
 
     def test_drawer_controls_use_compact_upward_menus_and_highlight_without_check_circles(self):
@@ -76,6 +77,8 @@ class ConversationDateContractTest(unittest.TestCase):
         self.assertNotIn('CircleShape', source)
         self.assertIn('ChatAnchoredMenu(expanded, onDismiss, preferAbove = true', source)
         self.assertIn('minWidth = 0.dp', source)
+        self.assertIn('anchorBounds = it.boundsInRoot()', source)
+        self.assertIn('anchorBounds = anchorBounds, alignStart = true', source)
         self.assertNotIn('DaiyuDropdownMenu(', source)
         self.assertIn('Modifier.width(IntrinsicSize.Max)', source)
         self.assertIn('TextAlign.Center', source)
@@ -83,6 +86,10 @@ class ConversationDateContractTest(unittest.TestCase):
         layer = (MAIN / 'ui/screens/chat/conversation/ChatMenuLayer.kt').read_text()
         self.assertIn('preferAbove: Boolean = false', layer)
         self.assertIn('minWidth: Dp = 156.dp', layer)
+        self.assertIn('alignStart: Boolean = false', layer)
+        self.assertIn('if (menu.alignStart) anchor.left.toInt() + offsetX', layer)
+        self.assertIn('if (menu.alignStart) TransformOrigin(0f', layer)
+        self.assertIn('else TransformOrigin(1f, if (menu.preferAbove) 1f else 0f)', layer)
         self.assertIn('menu.minWidth.roundToPx()', layer)
         self.assertIn('preferAbove = menu.preferAbove', layer)
         pane = (MAIN / 'ui/components/ConversationSidePaneScaffold.kt').read_text()

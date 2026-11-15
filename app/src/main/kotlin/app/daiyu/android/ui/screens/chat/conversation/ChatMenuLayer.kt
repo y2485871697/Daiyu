@@ -86,6 +86,7 @@ private class MenuOverlay(
     val screenMargin: Dp,
     val preferAbove: Boolean,
     val minWidth: Dp,
+    val alignStart: Boolean,
     val outsideClickFeedback: () -> Boolean,
     val content: @Composable () -> Unit,
 )
@@ -173,7 +174,8 @@ private fun BoxScope.ChatMenuOverlay(
                             val scale = 0.15f + 0.85f * motion.fraction.value
                             scaleX = scale
                             scaleY = scale
-                            transformOrigin = TransformOrigin(1f, if (menu.preferAbove) 1f else 0f)
+                            transformOrigin = if (menu.alignStart) TransformOrigin(0f, if (menu.preferAbove) 1f else 0f)
+                                else TransformOrigin(1f, if (menu.preferAbove) 1f else 0f)
                         }
                         .onGloballyPositioned { if (diagnostic != null) probe.surface = it }
                         .then(if (menu.expanded()) Modifier.semantics { paneTitle = "会话菜单" }
@@ -209,7 +211,9 @@ private fun BoxScope.ChatMenuOverlay(
                         else anchor.bottom.toInt() + offsetY
                     val y = wantedY.coerceIn(margin,
                         (height - surface.height - margin).coerceAtLeast(margin))
-                    val x = (anchor.right.toInt() + offsetX - surface.width).coerceIn(margin,
+                    val wantedX = if (menu.alignStart) anchor.left.toInt() + offsetX
+                        else anchor.right.toInt() + offsetX - surface.width
+                    val x = wantedX.coerceIn(margin,
                         (width - surface.width - margin).coerceAtLeast(margin))
                     if (diagnostic != null) {
                         probe.sequence++
@@ -237,6 +241,7 @@ internal fun ChatAnchoredMenu(
     outsideClickFeedback: Boolean = true,
     preferAbove: Boolean = false,
     minWidth: Dp = 156.dp,
+    alignStart: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val layer = LocalMenuLayer.current
@@ -258,9 +263,9 @@ internal fun ChatAnchoredMenu(
         anchor = coordinates.parentLayoutCoordinates?.boundsInRoot() ?: coordinates.boundsInRoot()
     })
     if ((expanded || mounted) && layer != null) {
-        val menu = remember(maxHeight, offset, screenMargin, preferAbove, minWidth) {
+        val menu = remember(maxHeight, offset, screenMargin, preferAbove, minWidth, alignStart) {
             MenuOverlay({ latestExpanded }, { latestAnchorBounds ?: anchor },
-                { if (latestExpanded) latestDismiss() }, maxHeight, offset, screenMargin, preferAbove, minWidth,
+                { if (latestExpanded) latestDismiss() }, maxHeight, offset, screenMargin, preferAbove, minWidth, alignStart,
                 { latestOutsideClickFeedback }) { Box(modifier) { latestContent() } }
         }
         LaunchedEffect(layer, menu, expanded) {

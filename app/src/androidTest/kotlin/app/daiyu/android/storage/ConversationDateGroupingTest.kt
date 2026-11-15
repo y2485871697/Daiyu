@@ -273,14 +273,89 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
         assertEquals(top, node("drawer-conversation:${wanted.id.value}").assertIsDisplayed().getUnclippedBoundsInRoot().top.value, 1f)
     }
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-    private fun screenBounds(tag: String): androidx.compose.ui.geometry.Rect {
-        val target = node(tag)
+    private fun screenBounds(tag: String) = screenBounds(node(tag))
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun screenBounds(target: SemanticsNodeInteraction): androidx.compose.ui.geometry.Rect {
         val semantics = target.fetchSemanticsNode()
         val view = (semantics.root as androidx.compose.ui.platform.ViewRootForTest).view
         return awaitStableWindowFrame(view) {
             val location = IntArray(2)
             view.getLocationOnScreen(location)
             semantics.boundsInRoot.translate(location[0].toFloat(), location[1].toFloat())
+        }
+    }
+
+    private fun drawerMenuSurface() = ui.onNode(
+        SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, "会话菜单"), useUnmergedTree = true)
+
+    private fun assertDrawerMenuAnchor(buttonTag: String, choiceTags: List<String>) {
+        val surface = drawerMenuSurface().assertIsDisplayed()
+        val bounds = screenBounds(surface)
+        val button = screenBounds(buttonTag)
+        val density = activity.resources.displayMetrics.density
+        assertEquals("menu starts at its actual button", button.left, bounds.left, density)
+        assertEquals("complete glass surface keeps the declared gap", 6f * density,
+            button.top - bounds.bottom, density)
+        val unclipped = surface.getUnclippedBoundsInRoot()
+        val semantics = surface.fetchSemanticsNode()
+        assertEquals("surface width is not clipped", unclipped.width.value * density,
+            semantics.boundsInRoot.width, density)
+        assertEquals("surface height is not clipped", unclipped.height.value * density,
+            semantics.boundsInRoot.height, density)
+        lateinit var safe: androidx.compose.ui.geometry.Rect
+        mainThread {
+            val decor = activity.window.decorView
+            val location = IntArray(2)
+            decor.getLocationOnScreen(location)
+            val insets = checkNotNull(androidx.core.view.ViewCompat.getRootWindowInsets(decor)).getInsets(
+                androidx.core.view.WindowInsetsCompat.Type.systemBars() or
+                    androidx.core.view.WindowInsetsCompat.Type.displayCutout() or
+                    androidx.core.view.WindowInsetsCompat.Type.ime())
+            safe = androidx.compose.ui.geometry.Rect(
+                (location[0] + insets.left).toFloat(), (location[1] + insets.top).toFloat(),
+                (location[0] + decor.width - insets.right).toFloat(),
+                (location[1] + decor.height - insets.bottom).toFloat())
+        }
+        assertTrue("menu left inside safe window: menu=$bounds safe=$safe", bounds.left >= safe.left - density)
+        assertTrue("menu right inside safe window: menu=$bounds safe=$safe", bounds.right <= safe.right + density)
+        assertTrue("menu top inside safe window: menu=$bounds safe=$safe", bounds.top >= safe.top - density)
+        assertTrue("menu bottom inside safe window: menu=$bounds safe=$safe", bounds.bottom <= safe.bottom + density)
+        choiceTags.forEach { tag ->
+            node(tag).assertIsDisplayed()
+            val choice = screenBounds(tag)
+            assertTrue("complete option $tag inside glass surface", choice.left >= bounds.left &&
+                choice.right <= bounds.right && choice.top >= bounds.top && choice.bottom <= bounds.bottom)
+        }
+    }
+
+    fun testDrawerMenusExpandFromTheirActualButtonLeftEdges() {
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        for (kind in listOf("filter", "sort")) {
+            val buttonTag = "drawer-$kind-button"
+            node(buttonTag).performClick()
+            val full = screenBounds(drawerMenuSurface())
+            val button = screenBounds(buttonTag)
+            androidx.test.espresso.Espresso.pressBack()
+            ui.waitForIdle()
+            ui.mainClock.autoAdvance = false
+            try {
+                node(buttonTag).performClick()
+                ui.mainClock.advanceTimeByFrame()
+                ui.mainClock.advanceTimeByFrame()
+                val partial = screenBounds(drawerMenuSurface())
+                val tolerance = activity.resources.displayMetrics.density
+                assertTrue("$kind sample is an actual opening frame: partial=$partial full=$full",
+                    partial.width < full.width - tolerance)
+                assertEquals("$kind opening pivot remains on the button left edge",
+                    button.left, partial.left, tolerance)
+                assertEquals("$kind opens upwards from its stable lower edge",
+                    full.bottom, partial.bottom, tolerance)
+            } finally {
+                ui.mainClock.autoAdvance = true
+                ui.waitForIdle()
+            }
+            androidx.test.espresso.Espresso.pressBack()
         }
     }
 
@@ -294,8 +369,8 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
         node("drawer-filter-button").performClick()
         node("drawer-choice-running").assertIsNotSelected()
         node("drawer-choice-completed").assertIsNotSelected()
-        assertTrue(screenBounds("drawer-filter-menu").bottom <= filter.top)
-        node("drawer-choice-running").performClick()
+        assertDrawerMenuAnchor("drawer-filter-button", listOf("drawer-choice-running", "drawer-choice-completed", "drawer-filter-reset"))
+        node("drawer-choice-running").performTouchInput { click(center) }
         node("drawer-choice-running").assertIsSelected()
         node("drawer-choice-completed").performClick()
         node("drawer-choice-running").assertIsSelected()
@@ -307,7 +382,7 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
         node("drawer-sort-button").performClick()
         node("drawer-choice-date").assertIsSelected()
         node("drawer-choice-forward").assertIsSelected()
-        assertTrue(screenBounds("drawer-sort-menu").bottom <= sort.top)
+        assertDrawerMenuAnchor("drawer-sort-button", listOf("drawer-choice-date", "drawer-choice-last-output", "drawer-choice-forward", "drawer-choice-reverse"))
         node("drawer-choice-last-output").performClick()
         node("drawer-choice-reverse").performClick()
         node("drawer-choice-last-output").assertIsSelected()

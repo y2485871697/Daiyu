@@ -9,6 +9,9 @@ import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -79,8 +82,8 @@ internal fun ConversationDrawerControls(
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
         DrawerControlButton("筛选", DrawerControlIcons.Filter, "filter", running || completed,
-            { if (canOpen()) menu = if (menu == "filter") null else "filter" }) {
-            DrawerControlsMenu(menu == "filter", { menu = null }, "filter") {
+            { if (canOpen()) menu = if (menu == "filter") null else "filter" }) { anchorBounds ->
+            DrawerControlsMenu(menu == "filter", { menu = null }, "filter", anchorBounds) {
                 DrawerControlChoice("正在运行", running, "running", checkbox = true) { onRunningChange(!running) }
                 DrawerControlChoice("已完成", completed, "completed", checkbox = true) { onCompletedChange(!completed) }
                 DrawerControlDivider()
@@ -95,8 +98,8 @@ internal fun ConversationDrawerControls(
             }
         }
         DrawerControlButton("排序", DrawerControlIcons.Sort, "sort", sortByLastOutput || reverse,
-            { if (canOpen()) menu = if (menu == "sort") null else "sort" }) {
-            DrawerControlsMenu(menu == "sort", { menu = null }, "sort") {
+            { if (canOpen()) menu = if (menu == "sort") null else "sort" }) { anchorBounds ->
+            DrawerControlsMenu(menu == "sort", { menu = null }, "sort", anchorBounds) {
                 DrawerControlChoice("按日期", !sortByLastOutput, "date") { onSortChange(false) }
                 DrawerControlChoice("按最后输出", sortByLastOutput, "last-output") { onSortChange(true) }
                 DrawerControlDivider()
@@ -114,12 +117,15 @@ private fun DrawerControlButton(
     tag: String,
     active: Boolean,
     onClick: () -> Unit,
-    menu: @Composable () -> Unit,
+    menu: @Composable (Rect?) -> Unit,
 ) {
     val colors = conversationPanePreviewPalette()
     val scale = conversationPanePreviewScale()
+    var anchorBounds by remember { mutableStateOf<Rect?>(null) }
     Box {
-        Row(Modifier.testTag("drawer-$tag-button").clip(RoundedCornerShape(10.dp))
+        Row(Modifier.testTag("drawer-$tag-button")
+            .onGloballyPositioned { anchorBounds = it.boundsInRoot() }
+            .clip(RoundedCornerShape(10.dp))
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .heightIn(min = 38.dp * scale).padding(horizontal = 6.dp * scale),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp * scale)) {
@@ -127,7 +133,7 @@ private fun DrawerControlButton(
             Icon(icon, null, Modifier.size(15.dp * scale), tint = tint)
             Text(title, color = tint, fontSize = (13f * scale).sp, lineHeight = (19f * scale).sp, maxLines = 1)
         }
-        menu()
+        menu(anchorBounds)
     }
 }
 
@@ -136,10 +142,12 @@ private fun DrawerControlsMenu(
     expanded: Boolean,
     onDismiss: () -> Unit,
     tag: String,
+    anchorBounds: Rect?,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     ChatAnchoredMenu(expanded, onDismiss, preferAbove = true,
-        offset = DpOffset(0.dp, 6.dp), minWidth = 0.dp) {
+        offset = DpOffset(0.dp, 6.dp), minWidth = 0.dp,
+        anchorBounds = anchorBounds, alignStart = true) {
         Column(Modifier.width(IntrinsicSize.Max).testTag("drawer-$tag-menu"), content = content)
     }
 }

@@ -374,6 +374,7 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
             node("drawer-filter-button").performClick()
             val filterLabels = listOf("drawer-label-running", "drawer-label-completed", "drawer-filter-reset")
             val filterWidth = assertCompactCenteredMenu("drawer-filter-menu", filterLabels)
+            val backgroundPixels = node("drawer-filter-menu").captureToImage().toPixelMap()
             node("drawer-choice-running").performClick()
             node("drawer-choice-completed").performClick()
             node("drawer-choice-running").assertIsSelected()
@@ -384,18 +385,35 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
             val first = node("drawer-choice-running").fetchSemanticsNode().boundsInRoot
             val second = node("drawer-choice-completed").fetchSemanticsNode().boundsInRoot
             val pixels = menu.captureToImage().toPixelMap()
-            fun pixel(x: Float, y: Float) = pixels[
-                (x - menuBounds.left).roundToInt().coerceIn(0, pixels.width - 1),
-                (y - menuBounds.top).roundToInt().coerceIn(0, pixels.height - 1)]
+            assertEquals(backgroundPixels.width, pixels.width)
+            assertEquals(backgroundPixels.height, pixels.height)
+            fun pixel(x: Float, y: Float, background: Boolean = false): Color {
+                val image = if (background) backgroundPixels else pixels
+                return image[
+                    (x - menuBounds.left).roundToInt().coerceIn(0, image.width - 1),
+                    (y - menuBounds.top).roundToInt().coerceIn(0, image.height - 1)]
+            }
             val fillX = menuBounds.left + 5f * density
-            assertTrue("first independent highlight", distance(pixel(fillX, first.center.y), selection) < .012f)
-            assertTrue("second independent highlight", distance(pixel(fillX, second.center.y), selection) < .012f)
-            assertTrue("visible strip between selections",
-                distance(pixel(fillX, (first.bottom + second.top) / 2f), selection) > .018f)
-            assertTrue("horizontal inset remains menu background",
-                distance(pixel(menuBounds.left + density, first.center.y), selection) > .018f)
-            assertTrue("each highlight keeps its own round corner",
-                distance(pixel(menuBounds.left + 3f * density, first.top + 3f * density), selection) > .018f)
+            val highlight = pixel(fillX, first.center.y)
+            fun assertBackground(label: String, x: Float, y: Float) {
+                val before = pixel(x, y, true)
+                val after = pixel(x, y)
+                assertTrue("$label distinguishes selected fill, dark=$dark font=$fontScale: background=$before highlight=$highlight",
+                    distance(before, highlight) > .004f)
+                assertTrue("$label, dark=$dark font=$fontScale: before=$before after=$after",
+                    distance(after, before) < .002f)
+            }
+            assertTrue("first independent highlight, dark=$dark font=$fontScale",
+                distance(pixel(fillX, first.center.y), selection) < .012f)
+            assertTrue("second independent highlight, dark=$dark font=$fontScale",
+                distance(pixel(fillX, second.center.y), selection) < .012f)
+            for (offset in listOf(-1f, 0f, 1f)) {
+                assertBackground("visible strip between selections", fillX,
+                    (first.bottom + second.top) / 2f + offset * density)
+            }
+            assertBackground("horizontal inset remains menu background", menuBounds.left + density, first.center.y)
+            assertBackground("each highlight keeps its own round corner",
+                menuBounds.left + 3f * density, first.top + 3f * density)
             androidx.test.espresso.Espresso.pressBack()
             node("drawer-sort-button").performClick()
             val sortLabels = listOf("date", "last-output", "forward", "reverse").map { "drawer-label-$it" }

@@ -26,6 +26,14 @@ class ConversationDateSmokeScopeTest(unittest.TestCase):
         self.assertIn("cancel-in-progress: false", concurrency)
         self.assertIn("'-search-history'", concurrency)
 
+    def test_exact_date_refresh_scope_has_its_own_pending_slot(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/test-refresh-regression.yml").read_text()
+        concurrency = workflow.split("concurrency:\n", 1)[1].split("\nenv:", 1)[0]
+        self.assertIn("group: daiyu-test-refresh-${{ github.ref }}", concurrency)
+        self.assertIn("inputs.smoke_classes == '" + CLASS + "' && '-conversation-date' || ''", concurrency)
+        self.assertIn("cancel-in-progress: false", concurrency)
+        self.assertIn("'-pane-receipts'", concurrency)
+
     def test_only_exact_smoke_scope_runs_storage_contracts_and_guards(self):
         command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=CLASS))
         self.assertEqual(CLASS, recorder.CONVERSATION_DATE_PLATFORM_CLASS)

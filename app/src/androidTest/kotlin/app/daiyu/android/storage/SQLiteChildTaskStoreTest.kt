@@ -516,8 +516,9 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
         assertEquals(ChildTaskStatus.FAILED, read.status); assertEquals("provider rejected", read.detail)
         rejects { store.started(record) }
         rejects { store.finished(record, ChildTaskStatus.COMPLETED, "must not overwrite") }
-        runtime.recoverPending()
-        assertEquals(read, store.list(owner.conversationId.value).single())
+        runtime.close()
+        val reopened = lease(db)
+        assertEquals(read, reopened.childTasks.list(owner.conversationId.value).single())
     }
     fun testAssignmentKeepsOriginalRoleAndUsesRevisionCas() {
         val db = fresh(); val runtime = lease(db); val owner = parent(db)

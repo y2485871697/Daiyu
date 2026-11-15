@@ -113,6 +113,13 @@ class ChildTaskCardContractTest(unittest.TestCase):
             self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=invalid))[1])
         for mode in ("", "build", "compile", "candidate", "daily", "release", "checks"):
             self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        canonical = ','.join(classes)
+        self.assertIn('if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "' + canonical +
+                      '"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi', workflow)
+        recorder_source = (ROOT / 'scripts/acceptance/record_tool_tests.py').read_text()
+        self.assertIn('scope == "child-task-cards-targeted" and sorted(os.environ.get("SMOKE_TEST_CLASSES", "").split(","))', recorder_source)
+        self.assertIn('== sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES)', recorder_source)
         helper = SpeechPlatformDiscoveryTest()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

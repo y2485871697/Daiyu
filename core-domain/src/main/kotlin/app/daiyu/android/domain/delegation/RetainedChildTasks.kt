@@ -157,8 +157,9 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         }
     }
 
+    /** Trusted host admission is independent; model tools must explicitly classify paused-task intent. */
     fun submit(binding: ChildTaskBinding, context: ToolExecutionContext, input: List<ChildModelTask>,
-        independentOfPausedTasks: Boolean = false): ChildTaskAdmission {
+        independentOfPausedTasks: Boolean = true): ChildTaskAdmission {
         requireBinding(binding)
         require(context.owner === binding.owner && context.authorization === binding.authorization.get()) {
             "child_parent_owner_mismatch"

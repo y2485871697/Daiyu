@@ -16,7 +16,7 @@ LEGACY = "package app.daiyu.android.voice\nclass SpeechAudioFileAndroidTest : Te
 
 class SpeechPlatformDiscoveryTest(unittest.TestCase):
     def select(self, root, shard=0, classes=CLASS, mode="smoke", count=4):
-        return subprocess.run([sys.executable, "-B", "-c", SCRIPT], cwd=root, text=True, capture_output=True,
+        return subprocess.run([sys.executable, "-B", "-"], input=SCRIPT, cwd=root, text=True, capture_output=True,
                               env=dict(os.environ, SMOKE_SCRIPT_DIR=str(ROOT / "scripts"), SMOKE_MODE=mode,
                                        SMOKE_TEST_CLASSES=classes, SMOKE_SHARD_COUNT=str(count), SMOKE_SHARD_INDEX=str(shard)))
 

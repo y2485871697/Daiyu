@@ -115,12 +115,12 @@ class RetainedChildTasksCommandIoTest {
         }
     }
 
-    @Test fun ordinaryAdmissionRequiresAnExplicitIndependentTaskWhileTheOldTaskIsPaused() {
+    @Test fun modelAdmissionRequiresAnExplicitIndependentTaskWhileTheOldTaskIsPaused() {
         val sourceGate = Block(); val f = Fixture(sourceGate = sourceGate)
         try {
             val context = ToolExecutionContext(f.owner, ToolInvocation(ToolCallId("new"), "start_child_tasks", "{}"), f.authorization) { false }
             assertEquals(ChildTaskAdmission.Rejected("child_paused_source_requires_stop_or_explicit_independent_task"),
-                f.supervisor.submit(f.binding, context, listOf(ChildModelTask("p", "new"))))
+                f.supervisor.submit(f.binding, context, listOf(ChildModelTask("p", "new")), independentOfPausedTasks = false))
             assertEquals(1, f.supervisor.snapshots(f.binding).size)
             assertTrue(f.supervisor.submit(f.binding, context, listOf(ChildModelTask("p", "independent")),
                 independentOfPausedTasks = true) is ChildTaskAdmission.Accepted)

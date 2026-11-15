@@ -124,29 +124,31 @@ class WorkspaceBindingDatabaseTest : InstrumentationTestCase() {
             assertEquals(if (retained) a else null, open(context).workspaceBinding(owner))
         }
     }
-    private fun rewrite(text: String, version: Int = 3, edit: (JSONObject) -> Unit): String {
+    private fun rewrite(text: String, version: Int = 4, edit: (JSONObject) -> Unit): String {
         val envelope = JSONObject(text); val payload = JSONObject(envelope.getString("payload"))
         edit(payload); val raw = payload.toString()
         val hash = MessageDigest.getInstance("SHA-256").digest(raw.toByteArray(Charsets.UTF_8))
             .joinToString("") { "%02x".format(it.toInt() and 255) }
         return envelope.put("version", version).put("payload", raw).put("sha256", hash).toString()
     }
-    fun testTextV3RoundTripOldVersionsAndStrictBindingValidation() {
+    fun testTextV4RoundTripOldVersionsAndStrictBindingValidation() {
         val (_, source) = fresh(); val owner = source.create("default", a)
         val text = source.exportBackup()
-        assertEquals(3, JSONObject(text).getInt("version"))
+        assertEquals(4, JSONObject(text).getInt("version"))
         val (_, target) = fresh(); target.bindWorkspace(null, null, b)
         target.importBackup(text)
         assertEquals(a, target.workspaceBinding(owner.id)); assertEquals(b, target.workspaceBinding(null))
         reject { target.importBackup(text) } // Collision must not replace a binding.
         assertEquals(a, target.workspaceBinding(owner.id))
-        for (version in listOf(1, 2)) {
+        for (version in listOf(1, 2, 3)) {
             val old = rewrite(text, version) { payload ->
                 val row = payload.getJSONArray("conversations").getJSONObject(0)
-                row.remove("workspace_binding"); if (version == 1) row.remove("assistant_id")
+                row.remove("sidebar_date"); if (version < 3) row.remove("workspace_binding"); if (version == 1) row.remove("assistant_id")
             }
             val (_, legacyTarget) = fresh(); legacyTarget.importBackup(old)
-            assertNull(legacyTarget.workspaceBinding(owner.id))
+            if (version < 3) assertNull(legacyTarget.workspaceBinding(owner.id))
+            else assertEquals(a, legacyTarget.workspaceBinding(owner.id))
+            assertEquals(legacyTarget.conversations().single().updatedAt, legacyTarget.conversations().single().sidebarDateMillis)
         }
         for (bad in listOf<Any>(" ", "汉".repeat(1366), 12, JSONObject())) {
             val corrupted = rewrite(text) { it.getJSONArray("conversations").getJSONObject(0).put("workspace_binding", bad) }

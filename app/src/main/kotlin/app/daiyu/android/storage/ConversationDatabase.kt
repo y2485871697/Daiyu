@@ -15,7 +15,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 32), ConversationStore {
+class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 33), ConversationStore {
     constructor(context: Context) : this(context, {})
     init {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -65,6 +65,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         AssistantReplyIdentities.install(db)
         app.daiyu.android.timeline.ChatTimelineStore.install(db)
         UsageStatisticsStore.install(db)
+        ConversationSidebarDates.install(db)
         MessageDisplayStore.install(db)
     }
     private fun installGenerationSchema(db: SQLiteDatabase) {
@@ -76,7 +77,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..31 && newVersion == 32) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..32 && newVersion == 33) { "不支持此数据库版本，保留原数据" }
         // Preserve installed receipts, including an authoritative empty v8 import.
         val needsUsageReceiptBackfill = !db.rawQuery(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
@@ -133,6 +134,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         ConversationUsageStore.installSchema(db)
         if (needsUsageReceiptBackfill) ConversationUsageStore.backfill(db)
         UsageStatisticsStore.install(db)
+        ConversationSidebarDates.install(db)
         installWorkspaceBindings(db)
         ConversationModelSelections.install(db)
         MessageDisplayStore.install(db)
@@ -270,8 +272,8 @@ class ConversationDatabase internal constructor(context: Context, private val af
         val conditions=mutableListOf<String>("id NOT GLOB 'voice-call-*'");val args=mutableListOf<String>()
         if(folder!=null) {conditions.add("folder=?");args.add(folder)}
         val where=if(conditions.isEmpty()) "" else " WHERE "+conditions.joinToString(" AND ")
-        val list=readableDatabase.rawQuery("SELECT id,title,draft,updated,folder,pinned,assistant_id,workspace_binding FROM conversations$where ORDER BY pinned DESC,updated DESC,id ASC",args.toTypedArray()).use {c->
-            buildList {while(c.moveToNext()) add(Conversation(ConversationId(c.getString(0)),c.getString(1),c.getString(2),c.getLong(3),c.getString(4),c.getInt(5)!=0,c.getString(6),c.getString(7)))}
+        val list=readableDatabase.rawQuery("SELECT id,title,draft,updated,folder,pinned,assistant_id,workspace_binding,sidebar_date FROM conversations$where ORDER BY pinned DESC,updated DESC,id ASC",args.toTypedArray()).use {c->
+            buildList {while(c.moveToNext()) add(Conversation(ConversationId(c.getString(0)),c.getString(1),c.getString(2),c.getLong(3),c.getString(4),c.getInt(5)!=0,c.getString(6),c.getString(7),c.getLong(8)))}
         }
         if(query.isEmpty()) return list
         val matches=mutableSetOf<String>()
@@ -493,7 +495,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             check(AssistantReplyIdentities.read(db, assistant) == replyIdentity) { "发送回复身份回执不一致" }
             validateRunHistory(db,user.conversationId,user.runId)
             app.daiyu.android.ControllerVideoHistory(this).assertAppended(db, videoHistory, user, assistant, videoInputs)
-            conversation=db.rawQuery("SELECT title,updated,folder,pinned,rowid,length(CAST(draft AS BLOB))=0,assistant_id,workspace_binding FROM conversations WHERE id=?",arrayOf(user.conversationId.value)).use {
+            conversation=db.rawQuery("SELECT title,updated,folder,pinned,rowid,length(CAST(draft AS BLOB))=0,assistant_id,workspace_binding,sidebar_date FROM conversations WHERE id=?",arrayOf(user.conversationId.value)).use {
                 check(it.moveToFirst() && (newConversationRowId==null || it.getLong(4)==newConversationRowId)) {"发送会话身份不匹配"}
                 val nextDraft = if (preserveDraft) db.rawQuery("SELECT draft FROM conversations WHERE id=?", arrayOf(user.conversationId.value)).use { c ->
                     check(c.moveToFirst()); c.getString(0)
@@ -502,7 +504,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 check(it.getString(6)==expectedAssistantId) { "发送助手绑定回执不匹配" }
                 requireAssistant(db, expectedAssistantId)
                 check(it.getString(7)==currentWorkspace) { "发送工作区绑定回执不匹配" }
-                Conversation(user.conversationId,it.getString(0),nextDraft,it.getLong(1),it.getString(2),it.getInt(3)!=0,it.getString(6),it.getString(7))
+                Conversation(user.conversationId,it.getString(0),nextDraft,it.getLong(1),it.getString(2),it.getInt(3)!=0,it.getString(6),it.getString(7),it.getLong(8))
             }
             check(ConversationModelSelections.read(db, user.conversationId) == expectedModel) { "发送模型绑定回执不匹配" }
             check(ConversationModelSelections.read(db, null) == composerModel) { "发送改变了新聊天模型绑定" }
@@ -635,9 +637,9 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 require(encodedBytes<=16*1024*1024) {"备份超过16MiB上限"}
             }
             val conversations=JSONArray()
-            db.rawQuery("SELECT id,title,updated,folder,pinned,assistant_id,workspace_binding FROM conversations$conversationWhere ORDER BY id",args).use {c->while(c.moveToNext()) {
+            db.rawQuery("SELECT id,title,updated,folder,pinned,assistant_id,workspace_binding,sidebar_date FROM conversations$conversationWhere ORDER BY id",args).use {c->while(c.moveToNext()) {
                 val draft=checkNotNull(SQLiteText.read(db, "conversations", "draft", "id", c.getString(0), 16L*1024*1024))
-                val value=JSONObject().put("id",c.getString(0)).put("title",c.getString(1)).put("draft",draft).put("updated",c.getLong(2)).put("folder",c.getString(3)).put("pinned",c.getInt(4)!=0).put("assistant_id",c.getString(5) ?: JSONObject.NULL).put("workspace_binding",c.getString(6) ?: JSONObject.NULL)
+                val value=JSONObject().put("id",c.getString(0)).put("title",c.getString(1)).put("draft",draft).put("updated",c.getLong(2)).put("folder",c.getString(3)).put("pinned",c.getInt(4)!=0).put("assistant_id",c.getString(5) ?: JSONObject.NULL).put("workspace_binding",c.getString(6) ?: JSONObject.NULL).put("sidebar_date",c.getLong(7))
                 reserve(value);conversations.put(value)
             }}
             val messages=JSONArray()
@@ -666,7 +668,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
             val draft=if(conversationId==null) composerDraft(db) else ""
             reserve(JSONObject().put("draft",draft))
             val payload=JSONObject().put("conversations",conversations).put("messages",messages).put("draft",draft).toString()
-            result=JSONObject().put("format","daiyu-neutral-text").put("version",3).put("conversation_count",conversations.length()).put("message_count",messages.length()).put("sha256",backupDigest(payload)).put("payload",payload).toString()
+            result=JSONObject().put("format","daiyu-neutral-text").put("version",4).put("conversation_count",conversations.length()).put("message_count",messages.length()).put("sha256",backupDigest(payload)).put("payload",payload).toString()
         }
         Utf8Payload.byteCount(result, 16L*1024*1024)
         parseBackup(result)
@@ -677,7 +679,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
         val envelope=backupObject(text)
         require(envelope.keys().asSequence().toSet()==setOf("format","version","conversation_count","message_count","sha256","payload"))
         val version=integer(envelope,"version")
-        require(string(envelope,"format")=="daiyu-neutral-text" && version in 1L..3L)
+        require(string(envelope,"format")=="daiyu-neutral-text" && version in 1L..4L)
         val payload=string(envelope,"payload");require(backupDigest(payload)==string(envelope,"sha256"))
         val data=backupObject(payload);require(data.keys().asSequence().toSet()==setOf("conversations","messages","draft"))
         val conversations=data.getJSONArray("conversations");val messages=data.getJSONArray("messages")
@@ -690,7 +692,8 @@ class ConversationDatabase internal constructor(context: Context, private val af
             require(c.keys().asSequence().toSet()==when(version) {
                 1L -> fields
                 2L -> fields+"assistant_id"
-                else -> fields+setOf("assistant_id", "workspace_binding")
+                3L -> fields+setOf("assistant_id", "workspace_binding")
+                else -> fields+setOf("assistant_id", "workspace_binding", "sidebar_date")
             })
             val id=identity(string(c,"id"));require(!id.startsWith("voice-call-"));require(ids.add(id));val folder=string(c,"folder");require(folder.length<=200)
             // v1 has no binding: keep NULL. v2 retains the exact ID, including a deleted ID;
@@ -699,7 +702,8 @@ class ConversationDatabase internal constructor(context: Context, private val af
             // This remains an unapproved description. Import never resolves it or touches a directory.
             val workspace = if(version < 3L || c.isNull("workspace_binding")) null else string(c,"workspace_binding")
             validateWorkspaceBinding(workspace)
-            Conversation(ConversationId(id),string(c,"title"),string(c,"draft"),integer(c,"updated"),folder,boolean(c,"pinned"),assistantId,workspace)
+            Conversation(ConversationId(id),string(c,"title"),string(c,"draft"),integer(c,"updated"),folder,boolean(c,"pinned"),assistantId,workspace,
+                if (version >= 4L) integer(c,"sidebar_date") else integer(c,"updated"))
         }
         val restored=(0 until messages.length()).map {i->val m=messages.getJSONObject(i)
             require((m.keys().asSequence().toSet() - MessageTimeCodec.FIELD - "reply_identity").let {it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol") || it==setOf("id","conversation_id","run_id","role","blocks","status","error","protocol","history_segments")})
@@ -770,7 +774,7 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 else emptyList()
             // Append only. Any identity collision aborts the entire transaction.
             imported.forEach {c->check(db.insertOrThrow("conversations",null,ContentValues().apply {
-                put("id",c.id.value);put("title",c.title);put("draft",c.draft);put("updated",c.updatedAt);put("folder",c.folder);put("pinned",if(c.pinned) 1 else 0);put("assistant_id",c.assistantId);put("workspace_binding",c.workspaceBinding)
+                put("id",c.id.value);put("title",c.title);put("draft",c.draft);put("updated",c.updatedAt);put("folder",c.folder);put("pinned",if(c.pinned) 1 else 0);put("assistant_id",c.assistantId);put("workspace_binding",c.workspaceBinding);put("sidebar_date",c.sidebarDateMillis)
             }) != -1L) { "备份会话未写入" }}
             restored.forEach {
                 check(db.insertOrThrow("messages",null,values(it)) != -1L) { "备份消息未写入" }
@@ -835,8 +839,8 @@ class ConversationDatabase internal constructor(context: Context, private val af
                 args += workspaceBinding
                 "workspace_binding IS ?"
             }
-            check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND title=? AND draft=? AND updated=? AND folder=? AND pinned=? AND $assistant AND $workspace",
-                args.toTypedArray()).use { it.moveToFirst() }) { "备份会话回执不匹配" }
+            check(db.rawQuery("SELECT 1 FROM conversations WHERE id=? AND title=? AND draft=? AND updated=? AND folder=? AND pinned=? AND $assistant AND $workspace AND sidebar_date=?",
+                (args + c.sidebarDateMillis.toString()).toTypedArray()).use { it.moveToFirst() }) { "备份会话回执不匹配" }
         }
         restored.forEach { message ->
             check(storedMessage(db, message.conversationId, message.id.value, verifyVideoWitness) == message) { "备份消息回执不匹配" }

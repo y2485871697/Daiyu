@@ -493,7 +493,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                 }
             }
         }
-        app.daiyu.android.storage.UsageStatisticsStore.created(db, copy.value, System.currentTimeMillis())
+        app.daiyu.android.storage.UsageStatisticsStore.created(db, copy.value, values.getAsLong("updated"))
         check(db.insertOrThrow("context_branches", null, ContentValues().apply { put("conversation_id", copy.value); put("parent_id", id.value)
             put("through_message", through.value); put("parent_revision", ContextRevision.digest(original.take(index + 1))) }) != -1L)
         val inheritedWorkspace = values.getAsString("workspace_binding")

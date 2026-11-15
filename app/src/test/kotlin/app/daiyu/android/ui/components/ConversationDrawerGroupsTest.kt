@@ -98,6 +98,38 @@ class ConversationDrawerGroupsTest {
         assertEquals(0, state.copy(searchQuery = "missing").searchResults().groupForDrawer(utc).size)
     }
 
+    @Test fun updatingAnOldConversationDoesNotMoveItsDayAheadOfNewerDays() {
+        val old = row("old", "2026-11-15T12:00:00Z").copy(
+            dateGroupMillis = Instant.parse("2026-10-29T08:00:00Z").toEpochMilli())
+        val recent = row("recent", "2026-11-14T08:00:00Z")
+        val today = row("today", "2026-11-15T10:00:00Z").copy(isToday = true)
+        val groups = listOf(old, today, recent).groupForDrawer(utc)
+        assertEquals(listOf(ConversationDrawerSection.Today, dated("2026-11-14"), dated("2026-10-29")),
+            groups.map { it.section })
+        assertEquals(listOf(old), groups.last().items)
+        assertEquals(groups.map { it.section }, listOf(old.copy(updatedAtMillis = old.updatedAtMillis + 1000),
+            today, recent).groupForDrawer(utc).map { it.section })
+    }
+
+    @Test fun groupingDateControlsLocalMidnightEvenWhenBothWereUpdatedToday() {
+        val updated = Instant.parse("2026-11-15T12:00:00Z").toEpochMilli()
+        val rows = listOf(row("earlier", "2026-10-29T15:59:59Z").let {
+            it.copy(dateGroupMillis = it.updatedAtMillis, updatedAtMillis = updated)
+        }, row("later", "2026-10-29T16:00:00Z").let {
+            it.copy(dateGroupMillis = it.updatedAtMillis, updatedAtMillis = updated)
+        })
+        assertEquals(listOf(dated("2026-10-30"), dated("2026-10-29")),
+            rows.groupForDrawer(ZoneId.of("Asia/Shanghai")).map { it.section })
+    }
+
+    @Test fun unpinningReturnsToTheStableDayWithoutDuplicatingTheConversation() {
+        val old = row("old", "2026-11-15T12:00:00Z").copy(
+            dateGroupMillis = Instant.parse("2026-10-29T08:00:00Z").toEpochMilli())
+        assertEquals(ConversationDrawerSection.Pinned, listOf(old.copy(isPinned = true)).groupForDrawer(utc).single().section)
+        assertEquals(dated("2026-10-29"), listOf(old).groupForDrawer(utc).single().section)
+        assertEquals(listOf("old"), listOf(old).groupForDrawer(utc).flatMap { it.items }.map { it.id })
+    }
+
     @Test fun emptyInputHasNoGroups() {
         assertEquals(emptyList<ConversationDrawerGroup>(), emptyList<ConversationSummaryUi>().groupForDrawer(utc))
     }

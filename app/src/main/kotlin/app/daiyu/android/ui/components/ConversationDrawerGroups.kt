@@ -25,17 +25,24 @@ internal sealed interface ConversationDrawerSection {
 internal fun List<ConversationSummaryUi>.groupForDrawer(
     zoneId: ZoneId = ZoneId.systemDefault(),
 ): List<ConversationDrawerGroup> {
-    // Preserve the database's newest-first order within and between calendar days.
+    // Keep update order within a day, but never move an older day ahead of newer days.
     val groups = linkedMapOf<ConversationDrawerSection, MutableList<ConversationSummaryUi>>()
     for (conversation in this) {
         val section = when {
             conversation.isPinned -> ConversationDrawerSection.Pinned
             conversation.isToday -> ConversationDrawerSection.Today
             else -> ConversationDrawerSection.Dated(
-                Instant.ofEpochMilli(conversation.updatedAtMillis).atZone(zoneId).toLocalDate(),
+                Instant.ofEpochMilli(conversation.dateGroupMillis).atZone(zoneId).toLocalDate(),
             )
         }
         groups.getOrPut(section) { mutableListOf() } += conversation
     }
-    return groups.map { (section, items) -> ConversationDrawerGroup(section, items.toList()) }
+    return groups.entries.sortedWith(compareBy<Map.Entry<ConversationDrawerSection, MutableList<ConversationSummaryUi>>> {
+        when (it.key) {
+            ConversationDrawerSection.Pinned -> 0
+            ConversationDrawerSection.Today -> 1
+            is ConversationDrawerSection.Dated -> 2
+        }
+    }.thenByDescending { (it.key as? ConversationDrawerSection.Dated)?.date })
+        .map { (section, items) -> ConversationDrawerGroup(section, items.toList()) }
 }

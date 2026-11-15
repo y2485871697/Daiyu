@@ -71,7 +71,7 @@ internal object BackupConversationMerge {
             repeat(rows.length()) { messages.put(rows.getJSONObject(it)) }
         }
         val payload = JSONObject().put("conversations", conversations).put("messages", messages).put("draft", "").toString()
-        val result = JSONObject().put("format", "daiyu-neutral-text").put("version", 3)
+        val result = JSONObject().put("format", "daiyu-neutral-text").put("version", 4)
             .put("conversation_count", conversations.length()).put("message_count", messages.length())
             .put("sha256", PrivateBlobs.digest(payload.toByteArray(Charsets.UTF_8))).put("payload", payload).toString()
         Utf8Payload.byteCount(result, 16L * 1024 * 1024)

@@ -39,6 +39,8 @@ import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -188,6 +190,7 @@ internal fun ConversationSidePaneScaffold(
     onOpenSkills: () -> Unit,
     onOpenPermissions: () -> Unit,
     modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
     content: @Composable () -> Unit,
 ) {
     val backdrop = rememberTopBarBackdrop()
@@ -295,6 +298,7 @@ internal fun ConversationSidePaneScaffold(
             drawerContent = {
                 ConversationPanePanel(
                     state = state,
+                    listState = listState,
                     width = paneWidth,
                     drawerShape = drawerShape,
                     backdrop = backdrop,
@@ -345,6 +349,7 @@ internal fun ConversationSidePaneScaffold(
 @Composable
 private fun ConversationPanePanel(
     state: ConversationPaneUiState,
+    listState: LazyListState,
     managing: Boolean,
     onManagingChange: (Boolean) -> Unit,
     width: androidx.compose.ui.unit.Dp,
@@ -467,6 +472,7 @@ private fun ConversationPanePanel(
                 fontSize = 12.sp, lineHeight = 17.sp,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp).testTag("drawer-selection-count"))
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .weight(1f)
                     .testTag("drawer-list")

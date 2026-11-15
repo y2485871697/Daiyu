@@ -8,18 +8,19 @@ import org.junit.Test
 
 class BackupConversationMergeTest {
     private fun text(id: String, messages: Int = 1, draft: String = ""): String {
-        val payload = JSONObject().put("conversations", JSONArray().put(JSONObject().put("id", id)))
+        val payload = JSONObject().put("conversations", JSONArray().put(JSONObject().put("id", id).put("sidebar_date", id.first().code.toLong())))
             .put("messages", JSONArray().apply { repeat(messages) { put(JSONObject().put("id", "$id-$it").put("conversation_id", id)) } })
             .put("draft", draft).toString()
         return JSONObject().put("payload", payload).toString()
     }
     @Test fun mergesOneTextEnvelopeWithCorrectCountsDigestAndNoGlobalDraft() {
         val result = JSONObject(BackupConversationMerge.text(listOf(text("A"), text("C", 2))))
-        assertEquals("daiyu-neutral-text", result.getString("format")); assertEquals(3, result.getInt("version"))
+        assertEquals("daiyu-neutral-text", result.getString("format")); assertEquals(4, result.getInt("version"))
         assertEquals(2, result.getInt("conversation_count")); assertEquals(3, result.getInt("message_count"))
         assertEquals(PrivateBlobs.digest(result.getString("payload").toByteArray(Charsets.UTF_8)), result.getString("sha256"))
         val payload = JSONObject(result.getString("payload"))
         assertEquals("", payload.getString("draft"))
+        assertEquals(listOf(65L, 67L), (0 until 2).map { payload.getJSONArray("conversations").getJSONObject(it).getLong("sidebar_date") })
         assertEquals(listOf("A", "C"), (0 until 2).map { payload.getJSONArray("conversations").getJSONObject(it).getString("id") })
         assertEquals(listOf("A", "C", "C"), (0 until 3).map { payload.getJSONArray("messages").getJSONObject(it).getString("conversation_id") })
     }

@@ -98,7 +98,7 @@ class MessageDisplayStoreTest {
         assertEquals(0, count())
         assertEquals(original, SQLiteText.read(database.readableDatabase, "messages", "blocks", "id", answer.id.value))
         assertEquals(2, database.displayMessages(user.conversationId).rows.size)
-        assertEquals(32, database.readableDatabase.version)
+        assertEquals(33, database.readableDatabase.version)
     }
     @Test fun damagedAndWrongOwnerCacheRebuildFromCanonicalOnce() {
         val (user, answer) = seed()

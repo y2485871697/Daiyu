@@ -32,9 +32,11 @@ internal class RetainedConversationData(private val database: ConversationDataba
     fun summaries(active: Message?): List<ConversationSummaryUi> = summaryRows(active?.conversationId)
 
     private fun summaryRows(activeConversationId: ConversationId?): List<ConversationSummaryUi> {
-        val today = LocalDate.now()
+        val zone = ZoneId.systemDefault()
+        val today = LocalDate.now(zone)
         return database.conversations().map { conversation ->
-            val date = Instant.ofEpochMilli(conversation.updatedAt).atZone(ZoneId.systemDefault())
+            val date = Instant.ofEpochMilli(conversation.updatedAt).atZone(zone)
+            val groupDate = Instant.ofEpochMilli(conversation.sidebarDateMillis).atZone(zone).toLocalDate()
             ConversationSummaryUi(
                 id = conversation.id.value, title = conversation.title,
                 preview = latestPreview(conversation.id),
@@ -43,7 +45,8 @@ internal class RetainedConversationData(private val database: ConversationDataba
                 isPinned = conversation.pinned, isActiveRun = activeConversationId == conversation.id,
                 hasCompletionMarker = app.daiyu.android.storage.ConversationCompletionMarkers.read(
                     database.readableDatabase, conversation.id) != null,
-                folderId = conversation.folder.takeIf { it.isNotEmpty() }, isToday = date.toLocalDate() == today,
+                folderId = conversation.folder.takeIf { it.isNotEmpty() }, isToday = groupDate == today,
+                dateGroupMillis = conversation.sidebarDateMillis,
             )
         }
     }

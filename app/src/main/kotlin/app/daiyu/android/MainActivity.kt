@@ -2334,6 +2334,7 @@ class MainActivity : ComponentActivity() {
                 androidx.activity.compose.BackHandler(enabled = retainedPage == "chat" && !sidebarVisible) {
                     handleRootBack { hideChatInputIme(focus, keyboard, view) }
                 }
+                val conversationDrawerListState = androidx.compose.foundation.lazy.rememberLazyListState()
                 val rootBodyRoute = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage
                 val chatBodyVisible = rootBodyRoute !in setOf(
                     "balance-settings", "pet-settings", "pet-model-settings", "vision-settings", "manage",
@@ -2345,6 +2346,7 @@ class MainActivity : ComponentActivity() {
                     "backup", "appearance", "subagents")
                 val rootChatContent: @Composable (Boolean) -> Unit = { routeActive ->
                     ConversationSidePaneScaffold(
+                        listState = conversationDrawerListState,
                         state = paneState, visible = retainedPage == "chat" && sidebarVisible, backHandlerEnabled = routeActive,
                         assistants = projectedAssistants, selectedAssistantId = if (selected == null) activeAssistant else selected?.assistantId.orEmpty(),
                         onOpen = { openSidebar() }, onDismiss = { dismissSidebar() },

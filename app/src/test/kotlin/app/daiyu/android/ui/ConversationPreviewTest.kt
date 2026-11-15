@@ -87,4 +87,25 @@ class ConversationPreviewTest {
         assertEquals("", rows.getValue(empty.value).preview)
         assertEquals("", rows.getValue(tool.value).preview)
     }
+    @Test fun sidebarDateAndTodayClassificationStaySeparateFromTheLastUpdate() {
+        val owner = database.create("default").id
+        val zone = java.time.ZoneId.systemDefault()
+        val old = java.time.LocalDate.now(zone).minusDays(5).atStartOfDay(zone).toInstant().toEpochMilli()
+        val updated = System.currentTimeMillis()
+        database.writableDatabase.execSQL("UPDATE conversations SET sidebar_date=?,updated=? WHERE id=?",
+            arrayOf(old, updated, owner.value))
+        val first = data.summaries(null).single()
+        assertEquals(old, first.dateGroupMillis)
+        assertEquals(updated, first.updatedAtMillis)
+        assertFalse(first.isToday)
+        database.rename(owner, "renamed")
+        database.organize(owner, "folder", true)
+        val second = data.paneSnapshot(owner).conversations.single()
+        assertEquals(old, second.dateGroupMillis)
+        assertFalse(second.isToday)
+        assertTrue(second.isPinned)
+        assertTrue(second.isActiveRun)
+        assertEquals("folder", second.folderId)
+    }
+
 }

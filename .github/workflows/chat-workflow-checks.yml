@@ -14,7 +14,7 @@ on:
       check_scope:
         description: 工作流程、环境圆点、发送状态、表格样式、冷启动、任务滚动、附件弹层、权限界面、终端输出或工具回执的定向检查范围
         type: choice
-        options: [workflow, environment-dots, composer-send, markdown-table, cold-start, task-scroll, attachment-contracts, permission-contracts, terminal-output, tool-receipts, page-performance, rendering, legacy-restore, search-history]
+        options: [workflow, environment-dots, composer-send, markdown-table, cold-start, task-scroll, attachment-contracts, permission-contracts, terminal-output, tool-receipts, page-performance, rendering, legacy-restore, search-history, conversation-date]
         default: workflow
 permissions:
   contents: read
@@ -119,6 +119,8 @@ jobs:
               patterns = ('test_message_display_contract.py',)
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'search-history':
               patterns = ('test_search_history_sheet_contract.py', 'test_search_host_start_contract.py', 'test_record_tool_tests_scope.py')
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'conversation-date':
+              patterns = ('test_conversation_date_contract.py', 'test_conversation_date_smoke_scope.py')
           for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               discovered = suite.countTestCases()
@@ -200,6 +202,13 @@ jobs:
                      --tests app.daiyu.android.ui.screens.search.SearchRequestStateTest
                      --tests app.daiyu.android.ui.screens.search.ConversationSearchResultsTest)
           fi
+          if [[ "$WORKFLOW_CHECK_SCOPE" == conversation-date ]]; then
+            classes=()
+            filters=(--tests app.daiyu.android.ui.components.ConversationDrawerGroupsTest
+                     --tests app.daiyu.android.ui.ConversationPreviewTest
+                     --tests app.daiyu.android.backup.BackupConversationMergeTest
+                     --tests app.daiyu.android.storage.MessageDisplayStoreTest)
+          fi
           for class in "${classes[@]}"; do
             filters+=(--tests "app.daiyu.android.ui.screens.chat.conversation.$class")
           done
@@ -252,6 +261,8 @@ jobs:
               expected = {'LegacyReconnectRestoreTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'search-history':
               expected = {'MessageImageContractTest', 'MessageSearchRequestStateTest', 'SearchRequestStateTest', 'ConversationSearchResultsTest'}
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'conversation-date':
+              expected = {'ConversationDrawerGroupsTest', 'ConversationPreviewTest', 'BackupConversationMergeTest', 'MessageDisplayStoreTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

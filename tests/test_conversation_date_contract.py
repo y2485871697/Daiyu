@@ -61,3 +61,32 @@ class ConversationDateContractTest(unittest.TestCase):
                      'testEditingRegeneratingAndDeletingTailKeepTheStableDayButBranchGetsToday',
                      'testSelectingAnOldConversationKeepsTheOpenDrawerAndItsScrollPosition'):
             self.assertIn('fun ' + name + '()', device)
+
+    def test_drawer_controls_use_compact_upward_menus_and_highlight_without_check_circles(self):
+        source = (MAIN / 'ui/components/ConversationDrawerControls.kt').read_text()
+        for label in ('筛选', '排序', '正在运行', '已完成', '重置', '按日期', '按最后输出', '正序', '倒序'):
+            self.assertIn('"' + label + '"', source)
+        self.assertIn('preferAbove = true', source)
+        self.assertIn('colors.selectionContainer', source)
+        self.assertIn('colors.selectionContent', source)
+        self.assertIn('colors.danger', source)
+        self.assertEqual(2, source.count('DrawerControlDivider()') - 1)
+        self.assertNotIn('DaiyuIcons.Check', source)
+        self.assertNotIn('CircleShape', source)
+        pane = (MAIN / 'ui/components/ConversationSidePaneScaffold.kt').read_text()
+        self.assertIn('var sortByLastOutput by rememberSaveable { mutableStateOf(false) }', pane)
+        self.assertIn('var reverse by rememberSaveable { mutableStateOf(false) }', pane)
+        self.assertIn('state.searchResults().filterDrawerStatus(filterRunning, filterCompleted)', pane)
+        self.assertIn('drawer-assistant-button', pane)
+
+    def test_last_output_projection_reads_only_tail_metadata_and_excludes_running(self):
+        source = (MAIN / 'storage/ConversationOutputTimes.kt').read_text()
+        self.assertIn('row.status != "RUNNING"', source)
+        self.assertIn('ORDER BY seq DESC LIMIT 1', source)
+        self.assertIn('created_at', source)
+        self.assertNotIn('MAX(', source)
+        self.assertNotIn('created_at IS NOT NULL', source)
+        self.assertIn('reader.skipValue()', source)
+        self.assertNotIn('MessageHistoryCodec.decode', source)
+        for event in ('INSERT', 'UPDATE', 'DELETE'):
+            self.assertIn('AFTER ' + event + ' ON messages', source)

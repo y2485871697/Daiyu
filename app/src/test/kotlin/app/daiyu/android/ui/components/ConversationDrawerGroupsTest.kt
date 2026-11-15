@@ -133,4 +133,59 @@ class ConversationDrawerGroupsTest {
     @Test fun emptyInputHasNoGroups() {
         assertEquals(emptyList<ConversationDrawerGroup>(), emptyList<ConversationSummaryUi>().groupForDrawer(utc))
     }
+    @Test fun statusFiltersFollowTheVisibleIndicatorAndActiveWinsOverCompletion() {
+        val base = row("ordinary", "2026-11-14T12:00:00Z")
+        val rows = listOf(base, base.copy(id = "running", isActiveRun = true),
+            base.copy(id = "done", hasCompletionMarker = true),
+            base.copy(id = "both", isActiveRun = true, hasCompletionMarker = true))
+        assertEquals(rows, rows.filterDrawerStatus(false, false))
+        assertEquals(listOf("running", "both"), rows.filterDrawerStatus(true, false).map { it.id })
+        assertEquals(listOf("done"), rows.filterDrawerStatus(false, true).map { it.id })
+        assertEquals(listOf("running", "done", "both"), rows.filterDrawerStatus(true, true).map { it.id })
+        assertEquals(4, rows.size)
+    }
+
+    @Test fun explicitDefaultIsIdenticalAndReverseReversesDaysAndRowsButKeepsPins() {
+        val rows = listOf(row("pin", "2026-11-14T12:00:00Z").copy(isPinned = true),
+            row("today-a", "2026-11-15T12:00:00Z").copy(isToday = true),
+            row("today-b", "2026-11-15T11:00:00Z").copy(isToday = true),
+            row("older", "2026-11-14T11:00:00Z"))
+        assertEquals(rows.groupForDrawer(utc), rows.groupForDrawer(utc, sortByLastOutput = false, reverse = false))
+        assertEquals(listOf("pin", "older", "today-b", "today-a"),
+            rows.groupForDrawer(utc, reverse = true).flatMap { it.items }.map { it.id })
+    }
+
+    @Test fun lastOutputSortUsesMessageTimeAcrossFrozenDaysAndStableEqualTimes() {
+        fun output(id: String, frozen: String, sent: String) = row(id, frozen).copy(
+            lastMessageAtMillis = Instant.parse(sent).toEpochMilli())
+        val rows = listOf(output("old-day", "2026-10-01T12:00:00Z", "2026-11-14T12:00:00Z"),
+            output("new-day", "2026-11-14T12:00:00Z", "2026-11-13T12:00:00Z"),
+            output("tie", "2026-11-14T13:00:00Z", "2026-11-13T12:00:00Z"))
+        val groups = rows.groupForDrawer(utc, sortByLastOutput = true)
+        assertEquals(listOf(dated("2026-11-14"), dated("2026-11-13")), groups.map { it.section })
+        assertEquals(listOf("old-day", "new-day", "tie"), groups.flatMap { it.items }.map { it.id })
+        assertEquals(listOf("tie", "new-day", "old-day"),
+            rows.groupForDrawer(utc, sortByLastOutput = true, reverse = true).flatMap { it.items }.map { it.id })
+    }
+
+    @Test fun unknownOutputTimesStayLastInBothDirectionsAndEpochZeroRemainsValid() {
+        val base = row("unknown", "2026-11-15T12:00:00Z")
+        val rows = listOf(base, base.copy(id = "zero", lastMessageAtMillis = 0L),
+            base.copy(id = "known", lastMessageAtMillis = 1000L))
+        assertEquals(listOf("known", "zero", "unknown"),
+            rows.groupForDrawer(utc, sortByLastOutput = true).flatMap { it.items }.map { it.id })
+        assertEquals(listOf("zero", "known", "unknown"),
+            rows.groupForDrawer(utc, sortByLastOutput = true, reverse = true).flatMap { it.items }.map { it.id })
+        assertEquals(ConversationDrawerSection.UnknownOutput,
+            rows.groupForDrawer(utc, sortByLastOutput = true).last().section)
+    }
+
+    @Test fun lastOutputTodayClassificationUsesCapturedMessageDateInsteadOfCreationDate() {
+        val row = row("continued", "2026-10-01T12:00:00Z").copy(lastMessageAtMillis = 1000L,
+            lastMessageIsToday = true)
+        assertEquals(ConversationDrawerSection.Today,
+            listOf(row).groupForDrawer(utc, sortByLastOutput = true).single().section)
+        assertEquals(dated("2026-10-01"), listOf(row).groupForDrawer(utc).single().section)
+    }
+
 }

@@ -244,4 +244,134 @@ class ConversationDateGroupingTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
         assertEquals(top, node("drawer-conversation:${wanted.id.value}").assertIsDisplayed().getUnclippedBoundsInRoot().top.value, 1f)
     }
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun screenBounds(tag: String): androidx.compose.ui.geometry.Rect {
+        val target = node(tag)
+        val semantics = target.fetchSemanticsNode()
+        val view = (semantics.root as androidx.compose.ui.platform.ViewRootForTest).view
+        return awaitStableWindowFrame(view) {
+            val location = IntArray(2)
+            view.getLocationOnScreen(location)
+            semantics.boundsInRoot.translate(location[0].toFloat(), location[1].toFloat())
+        }
+    }
+
+    fun testFilterAndSortMenusSitAboveTheirOwnButtonsAndOnlyHighlightSelection() {
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        val filter = screenBounds("drawer-filter-button")
+        val sort = screenBounds("drawer-sort-button")
+        val assistant = screenBounds("drawer-assistant-button")
+        assertTrue(filter.right <= sort.left + 1f)
+        assertTrue(sort.right <= assistant.left + 1f)
+        node("drawer-filter-button").performClick()
+        node("drawer-choice-running").assertIsNotSelected()
+        node("drawer-choice-completed").assertIsNotSelected()
+        assertTrue(screenBounds("drawer-filter-menu").bottom <= filter.top)
+        node("drawer-choice-running").performClick()
+        node("drawer-choice-running").assertIsSelected()
+        node("drawer-choice-completed").performClick()
+        node("drawer-choice-running").assertIsSelected()
+        node("drawer-choice-completed").assertIsSelected()
+        node("drawer-filter-reset").performClick()
+        node("drawer-choice-running").assertIsNotSelected()
+        node("drawer-choice-completed").assertIsNotSelected()
+        androidx.test.espresso.Espresso.pressBack()
+        node("drawer-sort-button").performClick()
+        node("drawer-choice-date").assertIsSelected()
+        node("drawer-choice-forward").assertIsSelected()
+        assertTrue(screenBounds("drawer-sort-menu").bottom <= sort.top)
+        node("drawer-choice-last-output").performClick()
+        node("drawer-choice-reverse").performClick()
+        node("drawer-choice-last-output").assertIsSelected()
+        node("drawer-choice-date").assertIsNotSelected()
+        node("drawer-choice-reverse").assertIsSelected()
+        node("drawer-choice-forward").assertIsNotSelected()
+        androidx.test.espresso.Espresso.pressBack()
+        node("drawer-sort-button").performClick()
+        node("drawer-choice-last-output").assertIsSelected()
+        node("drawer-choice-reverse").assertIsSelected()
+    }
+
+    private fun awaitPaneRows(vararg ids: ConversationId) {
+        awaitControl("sidebar captured seeded rows and message metadata") {
+            val field = MainActivity::class.java.getDeclaredField("paneState\$delegate").apply { isAccessible = true }
+            @Suppress("UNCHECKED_CAST")
+            val state = field.get(activity) as androidx.compose.runtime.MutableState<app.daiyu.android.ui.model.ConversationPaneUiState>
+            ids.all { id -> state.value.historyConversations.any { it.id == id.value } }
+        }
+    }
+
+    fun testCompletionFilterAndResetOperateOnFullDrawerWithoutOpeningAssistant() {
+        val db = fixture.database
+        val completed = db.create("default")
+        val ordinary = db.create("default")
+        val (user, reply) = pair(completed.id)
+        db.send(user, reply); db.save(reply.copy(status = RunStatus.COMPLETED))
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        awaitPaneRows(completed.id, ordinary.id)
+        node("drawer-conversation:${completed.id.value}").assertIsDisplayed()
+        node("drawer-conversation:${ordinary.id.value}").assertIsDisplayed()
+        node("drawer-filter-button").performClick()
+        node("drawer-choice-completed").performClick()
+        androidx.test.espresso.Espresso.pressBack()
+        node("drawer-conversation:${completed.id.value}").assertIsDisplayed()
+        node("drawer-conversation:${ordinary.id.value}").assertDoesNotExist()
+        node("drawer-filter-button").performClick()
+        node("drawer-filter-reset").performClick()
+        androidx.test.espresso.Espresso.pressBack()
+        node("drawer-conversation:${completed.id.value}").assertIsDisplayed()
+        node("drawer-conversation:${ordinary.id.value}").assertIsDisplayed()
+        node("drawer-filter-button").performClick()
+        node("drawer-choice-running").performClick()
+        androidx.test.espresso.Espresso.pressBack()
+        node("drawer-conversation:${completed.id.value}").assertDoesNotExist()
+        node("drawer-conversation:${ordinary.id.value}").assertDoesNotExist()
+        node("drawer-assistant-button").assertIsDisplayed().performClick()
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("assistant-sheet").fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
+        }
+        node("assistant-sheet").assertIsDisplayed()
+    }
+
+    fun testLastOutputSortingSkipsRunningReplyAndCanReverseWithoutChangingStoredDates() {
+        val db = fixture.database
+        fun seed(title: String, day: Long, userAt: Long, replyAt: Long, running: Boolean): Conversation {
+            val owner = db.create("default")
+            val (question, answer) = pair(owner.id)
+            db.send(question.copy(createdAt = userAt), answer.copy(createdAt = replyAt))
+            if (!running) db.save(answer.copy(createdAt = replyAt, status = RunStatus.COMPLETED))
+            db.rename(owner.id, title)
+            db.writableDatabase.execSQL("UPDATE conversations SET sidebar_date=? WHERE id=?", arrayOf(day, owner.id.value))
+            return owner
+        }
+        val older = seed("older-day-new-output", oldMillis(), 1000L, 3000L, false)
+        val newer = seed("newer-day-running", oldMillis() + 86400000L, 2000L, 9000L, true)
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        awaitPaneRows(older.id, newer.id)
+        assertTrue(screenBounds("drawer-conversation:${newer.id.value}").top < screenBounds("drawer-conversation:${older.id.value}").top)
+        node("drawer-sort-button").performClick()
+        node("drawer-choice-last-output").performClick()
+        androidx.test.espresso.Espresso.pressBack()
+        assertTrue(screenBounds("drawer-conversation:${older.id.value}").top < screenBounds("drawer-conversation:${newer.id.value}").top)
+        node("drawer-sort-button").performClick()
+        node("drawer-choice-reverse").performClick()
+        androidx.test.espresso.Espresso.pressBack()
+        assertTrue(screenBounds("drawer-conversation:${newer.id.value}").top < screenBounds("drawer-conversation:${older.id.value}").top)
+        assertEquals(oldMillis(), db.conversations().single { it.id == older.id }.sidebarDateMillis)
+    }
+
+    fun testClosingDrawerDismissesTheOpenMenuAndDoesNotReopenItOnNextVisit() {
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        node("drawer-filter-button").performClick()
+        node("drawer-filter-menu").assertIsDisplayed()
+        mainThread { MainActivity::class.java.getDeclaredMethod("dismissSidebar").apply { isAccessible = true }.invoke(activity) }
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("drawer-filter-menu").fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+        }
+        ui.onNodeWithContentDescription("打开侧边栏").performClick()
+        node("drawer-filter-button").assertIsDisplayed()
+        node("drawer-filter-menu").assertDoesNotExist()
+        node("drawer-sort-menu").assertDoesNotExist()
+    }
+
 }

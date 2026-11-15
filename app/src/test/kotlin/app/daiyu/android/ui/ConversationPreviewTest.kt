@@ -108,4 +108,118 @@ class ConversationPreviewTest {
         assertEquals("folder", second.folderId)
     }
 
+    private fun timed(userAt: Long?, replyAt: Long?, status: RunStatus): Pair<ConversationId, Message> {
+        val id = database.create("default").id
+        val user = Message(MessageId("u-${id.value}"), id, RunId("r-${id.value}"), Message.USER_ROLE,
+            listOf(MessageBlock.Text("q", "question")), RunStatus.COMPLETED, createdAt = userAt)
+        val reply = user.copy(id = MessageId("a-${id.value}"), role = Message.ASSISTANT_ROLE,
+            status = RunStatus.RUNNING, createdAt = replyAt)
+        database.send(user, reply)
+        if (status != RunStatus.RUNNING) database.save(reply.copy(status = status))
+        return id to reply
+    }
+
+    @Test fun outputTimeSkipsOnlyRunningAndUsesLastSequenceNotLargestTimestamp() {
+        val running = timed(500L, 900L, RunStatus.RUNNING).first
+        val terminal = listOf(RunStatus.COMPLETED, RunStatus.STOPPED, RunStatus.FAILED, RunStatus.INTERRUPTED)
+            .associateWith { timed(900L, 100L, it).first }
+        val rows = data.summaries(null).associateBy { it.id }
+        assertEquals(500L, rows.getValue(running.value).lastMessageAtMillis)
+        for (owner in terminal.values) assertEquals(100L, rows.getValue(owner.value).lastMessageAtMillis)
+        val first = terminal.getValue(RunStatus.COMPLETED)
+        database.rename(first, "renamed")
+        database.organize(first, "folder", true)
+        assertEquals(100L, data.summaries(null).single { it.id == first.value }.lastMessageAtMillis)
+    }
+
+    @Test fun outputTimeKeepsUnknownTailUnknownAndZeroValidAndRefreshesAfterDeletion() {
+        val unknown = timed(500L, null, RunStatus.COMPLETED).first
+        val (zero, reply) = timed(500L, 0L, RunStatus.COMPLETED)
+        val empty = database.create("default").id
+        var rows = data.summaries(null).associateBy { it.id }
+        assertNull(rows.getValue(unknown.value).lastMessageAtMillis)
+        assertNull(rows.getValue(empty.value).lastMessageAtMillis)
+        assertEquals(0L, rows.getValue(zero.value).lastMessageAtMillis)
+        database.writableDatabase.delete("messages", "id=?", arrayOf(reply.id.value))
+        rows = data.summaries(null).associateBy { it.id }
+        assertEquals(500L, rows.getValue(zero.value).lastMessageAtMillis)
+        database.close()
+        val context = RuntimeEnvironment.getApplication()
+        database = ConversationDatabase(context)
+        data = RetainedConversationData(database, ContextService(database, PrivateBlobs(context)))
+        assertEquals(500L, data.summaries(null).single { it.id == zero.value }.lastMessageAtMillis)
+        assertNull(data.summaries(null).single { it.id == unknown.value }.lastMessageAtMillis)
+    }
+
+    @Test fun appendedUserDoesNotReplaceTheTimeOfTheFinalVisibleAssistantSegment() {
+        val (id, reply) = timed(50L, 100L, RunStatus.RUNNING)
+        val supplement = Message(MessageId("extra-${id.value}"), id, reply.runId, Message.USER_ROLE,
+            listOf(MessageBlock.Text("extra", "more")), RunStatus.COMPLETED, createdAt = 300L)
+        val db = database.writableDatabase
+        db.beginTransaction()
+        try { database.insertRuntimeSupplement(db, reply, supplement); db.setTransactionSuccessful() }
+        finally { db.endTransaction() }
+        assertEquals(300L, data.summaries(null).single().lastMessageAtMillis)
+        val segments = listOf(
+            MessageHistorySegment(reply.id, Message.ASSISTANT_ROLE, reply.blocks, createdAt = 100L),
+            MessageHistorySegment(supplement.id, Message.USER_ROLE, supplement.blocks, createdAt = 300L),
+            MessageHistorySegment(reply.id, Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("final", "final")), createdAt = 100L))
+        database.save(reply.copy(status = RunStatus.COMPLETED, historySegments = segments))
+        assertEquals(100L, data.summaries(null).single().lastMessageAtMillis)
+        assertEquals(100L, MessageHistory.expand(database.messages(id).map { it.second }).last().createdAt)
+        val cached = db.rawQuery("SELECT created_at FROM conversation_output_times WHERE conversation_id=?", arrayOf(id.value)).use {
+            assertTrue(it.moveToFirst()); it.getLong(0)
+        }
+        assertEquals(100L, cached)
+        database.save(reply.copy(status = RunStatus.COMPLETED, historySegments = segments.dropLast(1)))
+        assertEquals(300L, data.summaries(null).single().lastMessageAtMillis)
+        db.beginTransaction()
+        try {
+            db.delete("messages", "id=?", arrayOf(reply.id.value))
+            assertEquals(300L, data.summaries(null).single().lastMessageAtMillis)
+        } finally { db.endTransaction() }
+        assertEquals(300L, data.summaries(null).single().lastMessageAtMillis)
+    }
+
+    @Test fun embeddedUserTailUsesItsOwnUnknownTimeAndOldDatabaseRebuildsProjectionWithoutChangingMessages() {
+        val (id, reply) = timed(50L, 100L, RunStatus.RUNNING)
+        val last = MessageHistorySegment(MessageId("embedded-extra"), Message.USER_ROLE,
+            listOf(MessageBlock.Text("extra", "extra")))
+        database.save(reply.copy(status = RunStatus.COMPLETED, historySegments = listOf(
+            MessageHistorySegment(reply.id, Message.ASSISTANT_ROLE, reply.blocks, createdAt = 100L), last)))
+        assertNull(data.summaries(null).single().lastMessageAtMillis)
+        val db = database.writableDatabase
+        val bytes = app.daiyu.android.storage.SQLiteText.read(db, "messages", "history_segments", "id", reply.id.value)
+        for (suffix in listOf("insert", "update", "delete")) db.execSQL("DROP TRIGGER conversation_output_$suffix")
+        db.execSQL("DROP TABLE conversation_output_times")
+        database.close()
+        val context = RuntimeEnvironment.getApplication()
+        database = ConversationDatabase(context)
+        data = RetainedConversationData(database, ContextService(database, PrivateBlobs(context)))
+        assertEquals(33, database.readableDatabase.version)
+        assertNull(data.summaries(null).single { it.id == id.value }.lastMessageAtMillis)
+        assertEquals(bytes, app.daiyu.android.storage.SQLiteText.read(database.readableDatabase, "messages", "history_segments", "id", reply.id.value))
+    }
+
+    @Test fun independentLaterRunStillWinsWhenThePhysicalTailWasAbsorbedByAnEarlierOwner() {
+        val (id, owner) = timed(50L, 100L, RunStatus.RUNNING)
+        val later = owner.copy(id = MessageId("later-run"), runId = RunId("later-run"),
+            blocks = listOf(MessageBlock.Text("later", "later")), createdAt = 200L, status = RunStatus.COMPLETED)
+        val extra = owner.copy(id = MessageId("interleaved-extra"), role = Message.USER_ROLE,
+            blocks = listOf(MessageBlock.Text("extra", "extra")), createdAt = 300L, status = RunStatus.COMPLETED)
+        val db = database.writableDatabase
+        // Exercise a valid imported row order that runtime sends do not normally produce.
+        db.execSQL("INSERT INTO messages(id,conversation_id,run_id,role,blocks,status,protocol,created_at) " +
+            "SELECT ?,conversation_id,?,'assistant',blocks,'COMPLETED','[]',? FROM messages WHERE id=?",
+            arrayOf<Any>(later.id.value, later.runId.value, 200L, owner.id.value))
+        db.beginTransaction()
+        try { database.insertRuntimeSupplement(db, owner, extra); db.setTransactionSuccessful() }
+        finally { db.endTransaction() }
+        database.save(owner.copy(status = RunStatus.COMPLETED, historySegments = listOf(
+            MessageHistorySegment(owner.id, Message.ASSISTANT_ROLE, owner.blocks, createdAt = 100L),
+            MessageHistorySegment(extra.id, Message.USER_ROLE, extra.blocks, createdAt = 300L))))
+        assertEquals(200L, MessageHistory.expand(database.messages(id).map { it.second }).last().createdAt)
+        assertEquals(200L, data.summaries(null).single().lastMessageAtMillis)
+    }
+
 }

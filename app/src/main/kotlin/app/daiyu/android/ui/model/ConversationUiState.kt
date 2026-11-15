@@ -36,6 +36,8 @@ data class ConversationSummaryUi(
     // Captured with dateGroupMillis; consumers must not classify it using a live clock.
     val isToday: Boolean = false,
     val dateGroupMillis: Long = updatedAtMillis,
+    val lastMessageAtMillis: Long? = null,
+    val lastMessageIsToday: Boolean = false,
 )
 
 @Immutable

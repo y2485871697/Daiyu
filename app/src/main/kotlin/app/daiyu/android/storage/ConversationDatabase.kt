@@ -41,6 +41,10 @@ class ConversationDatabase internal constructor(context: Context, private val af
             db.execSQL("PRAGMA synchronous=FULL")
         }
     }
+    override fun onOpen(db: SQLiteDatabase) {
+        super.onOpen(db)
+        app.daiyu.android.context.DatabaseTransactions { db }.run(ConversationOutputTimes::install)
+    }
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE conversations(id TEXT PRIMARY KEY,title TEXT NOT NULL,draft TEXT NOT NULL,updated INTEGER NOT NULL,folder TEXT NOT NULL DEFAULT '',pinned INTEGER NOT NULL DEFAULT 0,assistant_id TEXT,workspace_binding TEXT)")
         db.execSQL("CREATE TABLE messages(seq INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT UNIQUE NOT NULL,conversation_id TEXT NOT NULL,run_id TEXT NOT NULL,role TEXT NOT NULL,blocks TEXT NOT NULL,status TEXT NOT NULL,error TEXT,protocol TEXT NOT NULL,history_segments TEXT NOT NULL DEFAULT '[]',created_at INTEGER CHECK(created_at IS NULL OR (typeof(created_at)='integer' AND created_at>=0)))")

@@ -764,7 +764,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
     }
 
     fun testShortcutsStillDispatchTheirOriginalDestinations() {
-        for ((tag, expected) in listOf("drawer-new" to "new", "drawer-assistant" to "assistants",
+        for ((tag, expected) in listOf("drawer-new" to "new", "drawer-assistant-button" to "assistants",
             "drawer-dock-permissions" to "permissions", "drawer-dock-models" to "models",
             "drawer-dock-skills" to "skills", "drawer-dock-usage" to "usage", "drawer-dock-settings" to "settings")) {
             show()

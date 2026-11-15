@@ -59,6 +59,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
@@ -389,10 +390,16 @@ private fun ConversationPanePanel(
     val selectedExportIds = state.historyConversations.filter { it.id in selectedIds }.map { it.id }
     val batchExport = managing && selectedExportIds.size > 1
     val query = state.searchQuery.trim()
-    val visibleConversations = remember(state.conversations, query) {
-        state.searchResults()
+    var filterRunning by rememberSaveable { mutableStateOf(false) }
+    var filterCompleted by rememberSaveable { mutableStateOf(false) }
+    var sortByLastOutput by rememberSaveable { mutableStateOf(false) }
+    var reverse by rememberSaveable { mutableStateOf(false) }
+    val visibleConversations = remember(state.conversations, query, filterRunning, filterCompleted) {
+        state.searchResults().filterDrawerStatus(filterRunning, filterCompleted)
     }
-    val groups = remember(visibleConversations) { visibleConversations.groupForDrawer() }
+    val groups = remember(visibleConversations, sortByLastOutput, reverse) {
+        visibleConversations.groupForDrawer(sortByLastOutput = sortByLastOutput, reverse = reverse)
+    }
     val profiles = assistants
     val activeId = selectedAssistantId
     val activeAssistant = remember(profiles, activeId) {
@@ -484,7 +491,7 @@ private fun ConversationPanePanel(
             ) {
                 if (visibleConversations.isEmpty()) {
                     if (state.conversationsLoaded) item(contentType = "drawer-empty") {
-                        EmptyConversations(isSearching = query.isNotBlank())
+                        EmptyConversations(isSearching = query.isNotBlank() || filterRunning || filterCompleted)
                     }
                 } else {
                     groups.forEachIndexed { groupIndex, group ->
@@ -525,6 +532,13 @@ private fun ConversationPanePanel(
             Box(Modifier.fillMaxWidth().height(1.dp).background(colors.footerBorder).testTag("drawer-footer-border"))
             Spacer(Modifier.height(11.dp * scale))
             PaneAssistantBar(
+                controls = {
+                    ConversationDrawerControls(filterRunning, filterCompleted, sortByLastOutput, reverse,
+                        onRunningChange = { filterRunning = it }, onCompletedChange = { filterCompleted = it },
+                        onReset = { filterRunning = false; filterCompleted = false },
+                        onSortChange = { sortByLastOutput = it }, onReverseChange = { reverse = it },
+                        canOpen = enableSearchFocus)
+                },
                 name = activeAssistant?.name?.ifBlank { stringResource(R.string.app_name) }
                     ?: stringResource(R.string.app_name),
                 onClick = onOpenAssistants,
@@ -1152,6 +1166,7 @@ private fun EmptyConversations(isSearching: Boolean) {
 
 @Composable
 private fun PaneAssistantBar(
+    controls: @Composable () -> Unit,
     name: String,
     onClick: () -> Unit,
     avatar: @Composable () -> Unit,
@@ -1161,29 +1176,31 @@ private fun PaneAssistantBar(
         modifier = Modifier
             .fillMaxWidth()
             .testTag("drawer-assistant")
-            .heightIn(min = DrawerMetrics.AssistantBarHeight)
-            .clip(RoundedCornerShape(16.dp))
+            .heightIn(min = DrawerMetrics.AssistantBarHeight),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        controls()
+        Row(Modifier.weight(1f).testTag("drawer-assistant-button").clip(RoundedCornerShape(16.dp))
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                 TouchHaptics.click(view)
                 onClick()
-            }
-            .padding(horizontal = 8.dp, vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = name,
-            color = conversationPanePreviewPalette().text,
-            fontSize = (14f * conversationPanePreviewScale()).sp,
-            lineHeight = (20f * conversationPanePreviewScale()).sp,
-            fontWeight = FontWeight.Normal,
-            textAlign = TextAlign.End,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .weight(1f)
-                .padding(end = 10.dp),
-        )
-        avatar()
+            }.padding(start = 4.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = name,
+                color = conversationPanePreviewPalette().text,
+                fontSize = (14f * conversationPanePreviewScale()).sp,
+                lineHeight = (20f * conversationPanePreviewScale()).sp,
+                fontWeight = FontWeight.Normal,
+                textAlign = TextAlign.End,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(end = 10.dp),
+            )
+            avatar()
+        }
     }
 }
 
@@ -1314,6 +1331,7 @@ private fun DrawerState.applyDaiyuDrawerMotion() {
 @Composable
 private fun ConversationDrawerGroup.localizedLabel(): String = when (val value = section) {
     ConversationDrawerSection.Pinned -> stringResource(R.string.conversation_section_pinned)
+    ConversationDrawerSection.UnknownOutput -> "时间未知"
     ConversationDrawerSection.Today -> stringResource(R.string.conversation_section_today)
     is ConversationDrawerSection.Dated -> value.label
 }

@@ -34,9 +34,12 @@ internal class RetainedConversationData(private val database: ConversationDataba
     private fun summaryRows(activeConversationId: ConversationId?): List<ConversationSummaryUi> {
         val zone = ZoneId.systemDefault()
         val today = LocalDate.now(zone)
+        val lastMessages = DatabaseTransactions { database.readableDatabase }.run(
+            app.daiyu.android.storage.ConversationOutputTimes::read)
         return database.conversations().map { conversation ->
             val date = Instant.ofEpochMilli(conversation.updatedAt).atZone(zone)
             val groupDate = Instant.ofEpochMilli(conversation.sidebarDateMillis).atZone(zone).toLocalDate()
+            val lastMessageAt = lastMessages[conversation.id.value]
             ConversationSummaryUi(
                 id = conversation.id.value, title = conversation.title,
                 preview = latestPreview(conversation.id),
@@ -47,6 +50,10 @@ internal class RetainedConversationData(private val database: ConversationDataba
                     database.readableDatabase, conversation.id) != null,
                 folderId = conversation.folder.takeIf { it.isNotEmpty() }, isToday = groupDate == today,
                 dateGroupMillis = conversation.sidebarDateMillis,
+                lastMessageAtMillis = lastMessageAt,
+                lastMessageIsToday = lastMessageAt?.let {
+                    Instant.ofEpochMilli(it).atZone(zone).toLocalDate() == today
+                } ?: false,
             )
         }
     }

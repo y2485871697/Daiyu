@@ -52,6 +52,15 @@ class ChatImeLifecycleContractTest(unittest.TestCase):
         self.assertIn('!lifecycleDismissInProgress && !isInputDismissInProgress()', composer)
         self.assertIn('hideChatInputIme(focus, keyboard, view)', composer)
 
+    def test_drawer_focus_check_handles_only_disabled_missing_semantics(self):
+        text = self.read(ANDROID / 'ChatComposerImeActivityTest.kt')
+        check = text.split('private fun assertBackgroundDraftDoesNotOwnFocus()', 1)[1].split('fun testDrawerSearchIme', 1)[0]
+        self.assertIn('true -> false', check)
+        self.assertIn('null -> it.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled)', check)
+        search = text.split('fun testDrawerSearchIme', 1)[1].split('    @OptIn', 1)[0]
+        self.assertLess(search.index('node("drawer-search-input").assertIsFocused()'), search.index('performTextReplacement'))
+        self.assertIn('assertEquals(baseline.composerBottom, searching.composerBottom, 2f)', search)
+
     def test_stopped_editor_preserves_local_value_and_host_selection(self):
         composer = self.read(CHAT / 'ChatComposer.kt')
         change = composer.split('onValueChange = { value ->', 1)[1].split('enabled = state.enabled', 1)[0]

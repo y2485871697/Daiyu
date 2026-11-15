@@ -78,6 +78,29 @@ class ManagedInputContractTest(unittest.TestCase):
         self.assertIn('ViewCompat.getWindowInsetsController(view)', text)
         self.assertIn('hideSoftInputFromWindow(view.windowToken, 0)', text)
 
+    def test_window_keeps_ime_state_without_lifecycle_or_visibility_replay(self):
+        text = SOURCE.read_text().split('private class InputWindow(', 1)[1]
+        init = text.split('    init {', 1)[1].split('    private fun dismiss(', 1)[0]
+        self.assertIn('SOFT_INPUT_STATE_UNCHANGED', init)
+        self.assertIn('mode and LayoutParams.SOFT_INPUT_MASK_STATE.inv()', init)
+        self.assertNotIn('SOFT_INPUT_STATE_ALWAYS_HIDDEN', text)
+        self.assertNotIn('SOFT_INPUT_STATE_VISIBLE', text)
+        self.assertNotIn('OnPreDrawListener', text)
+        remove = text.split('    fun remove(entry:', 1)[1]
+        self.assertIn('== LayoutParams.SOFT_INPUT_STATE_UNCHANGED', remove)
+        self.assertIn('or originalImeState', remove)
+        self.assertIn('if (restored == 0) window.attributes = window.attributes.apply { softInputMode = restored }', remove)
+
+    def test_home_selection_is_prepared_after_back_and_verified_before_leaving(self):
+        text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ManagedInputActivityTest.kt').read_text()
+        home = text.split('private fun fieldHomeRoundTrip', 1)[1].split('fun testHomeReturnPreservesVisibleOrdinary', 1)[0]
+        self.assertLess(home.index('sendKeyDownUpSync'), home.index('SemanticsActions.SetSelection'))
+        self.assertLess(home.index('assertEquals(1, selection.end)'), home.index('GLOBAL_ACTION_HOME'))
+        self.assertNotIn('assertTrue(it(5, 1, true))', home)
+        self.assertIn('!= wantedSelection', home)
+        self.assertIn('testWindowImePolicyRestoresZeroAndKeepsLaterWindowModes', text)
+        self.assertIn('listOf(0 to null, resize to pan, resize to (pan or hidden), unchanged to null)', text)
+
     def test_registration_cleanup_preserves_later_window_wrappers(self):
         text = SOURCE.read_text()
         for token in ('onDispose { detach() }', 'removeOnAttachStateChangeListener(listener)',

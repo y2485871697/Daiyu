@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import androidx.compose.ui.semantics.getOrNull
+
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.Modifier
@@ -79,6 +81,17 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         return checkNotNull(result)
     }
 
+    private fun assertBackgroundDraftDoesNotOwnFocus() {
+        node("chat-draft").assert(androidx.compose.ui.test.SemanticsMatcher(
+            "Background draft is unfocused, or disabled without focus semantics") {
+            when (it.config.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.Focused)) {
+                true -> false
+                false -> true
+                null -> it.config.contains(androidx.compose.ui.semantics.SemanticsProperties.Disabled)
+            }
+        })
+    }
+
     fun testDrawerSearchImeDoesNotLiftBackgroundComposer() {
         dismissIme()
         val draft = " 侧栏不改聊天草稿 "
@@ -87,16 +100,20 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         repeat(2) {
             ui.onNodeWithContentDescription("打开侧边栏").performClick()
             node("conversation-drawer").assertIsDisplayed()
+            assertBackgroundDraftDoesNotOwnFocus()
             val baseline = settledFrame(visible = false)
             node("drawer-search").performTouchInput { click() }
             awaitImeFrame(node("drawer-search-input"), visible = true)
+            node("drawer-search-input").assertIsFocused()
+            assertBackgroundDraftDoesNotOwnFocus()
             node("drawer-search-input").performTextReplacement("查询")
             node("drawer-search-input").assertEditableText("查询")
+            node("drawer-search-input").assertIsFocused()
             val searching = rawFrame()
             assertTrue(searching.imeBottom > 0)
             assertEquals(baseline.composerBottom, searching.composerBottom, 2f)
             assertEquals(baseline.headerBottom, searching.headerBottom, 2f)
-            node("chat-draft").assertIsNotFocused()
+            assertBackgroundDraftDoesNotOwnFocus()
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             awaitImeFrame(node("drawer-search-input"), visible = false)
             assertEquals(baseline.composerBottom, rawFrame().composerBottom, 2f)

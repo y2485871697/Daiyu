@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import app.daiyu.android.ui.components.manageInput
+
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
@@ -322,14 +324,19 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
         val database = fixture.database.exportBackup()
         repeat(2) {
             tapField(tag)
-            node(tag).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetSelection) {
-                assertTrue(it(5, 1, true))
-            }
             if (hiddenBeforeHome) {
                 instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
                 awaitFieldIme(tag, visible = false)
             }
             node(tag).assertIsFocused()
+            val wantedSelection = androidx.compose.ui.text.TextRange(5, 1)
+            if (node(tag).fetchSemanticsNode().config[
+                    androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange] != wantedSelection) {
+                node(tag).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.SetSelection) {
+                    it(5, 1, true)
+                }
+            }
+            awaitFieldIme(tag, visible = !hiddenBeforeHome)
             val before = node(tag).fetchSemanticsNode()
             val text = before.config[androidx.compose.ui.semantics.SemanticsProperties.EditableText]
             val selection = before.config[androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange]
@@ -367,6 +374,39 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
             }
             assertEquals(database, fixture.database.exportBackup())
             assertEquals(0, fixture.opens.get())
+        }
+    }
+
+    fun testWindowImePolicyRestoresZeroAndKeepsLaterWindowModes() {
+        val stateMask = android.view.WindowManager.LayoutParams.SOFT_INPUT_MASK_STATE
+        val unchanged = android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_UNCHANGED
+        val resize = android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
+        val pan = android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
+        val hidden = android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN
+        mainThread {
+            for ((initial, later) in listOf(0 to null, resize to pan, resize to (pan or hidden), unchanged to null)) {
+                val dialog = android.app.Dialog(activity)
+                val box = android.widget.FrameLayout(activity)
+                dialog.setContentView(box)
+                dialog.show()
+                try {
+                    val window = checkNotNull(dialog.window)
+                    window.attributes = window.attributes.apply { softInputMode = initial }
+                    val field = android.widget.EditText(activity)
+                    field.manageInput(window)
+                    box.addView(field)
+                    assertEquals((initial and stateMask.inv()) or unchanged, window.attributes.softInputMode)
+                    if (later != null) window.setSoftInputMode(
+                        if ((later and stateMask) == 0) later or unchanged else later)
+                    box.removeView(field)
+                    val expected = when {
+                        later == null -> initial
+                        (later and stateMask) != 0 -> later
+                        else -> (later and stateMask.inv()) or (initial and stateMask)
+                    }
+                    assertEquals(expected, window.attributes.softInputMode)
+                } finally { dialog.dismiss() }
+            }
         }
     }
 

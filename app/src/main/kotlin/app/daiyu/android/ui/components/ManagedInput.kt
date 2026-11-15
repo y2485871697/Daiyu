@@ -9,6 +9,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.ViewConfiguration
 import android.view.Window
+import android.view.WindowManager.LayoutParams
 import android.view.ViewTreeObserver
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
@@ -319,6 +320,7 @@ private class InputWindow(private val window: Window) {
                 root.descendantFocusability = previous
         }
     }
+    private val originalImeState = window.attributes.softInputMode and LayoutParams.SOFT_INPUT_MASK_STATE
     private val original = window.callback
     private var candidate: InputEntry? = null
     private var nativeFocus: View? = null
@@ -362,6 +364,11 @@ private class InputWindow(private val window: Window) {
         }
     }
     init {
+        val mode = window.attributes.softInputMode
+        if (originalImeState != LayoutParams.SOFT_INPUT_STATE_UNCHANGED) {
+            window.setSoftInputMode((mode and LayoutParams.SOFT_INPUT_MASK_STATE.inv()) or
+                LayoutParams.SOFT_INPUT_STATE_UNCHANGED)
+        }
         window.callback = callback
     }
     private fun dismiss(entry: InputEntry) {
@@ -405,6 +412,14 @@ private class InputWindow(private val window: Window) {
         entries.remove(entry)
         if (candidate === entry) candidate = null
         if (entries.isEmpty()) {
+            val mode = window.attributes.softInputMode
+            if (originalImeState != LayoutParams.SOFT_INPUT_STATE_UNCHANGED &&
+                (mode and LayoutParams.SOFT_INPUT_MASK_STATE) == LayoutParams.SOFT_INPUT_STATE_UNCHANGED) {
+                val restored = (mode and LayoutParams.SOFT_INPUT_MASK_STATE.inv()) or originalImeState
+                window.setSoftInputMode(restored)
+                // setSoftInputMode(0) restores defaults but leaves the previous attributes value.
+                if (restored == 0) window.attributes = window.attributes.apply { softInputMode = restored }
+            }
             releaseRestingFocus()
             if (window.callback === callback) window.callback = original
             InputWindows.windows.remove(window, this)

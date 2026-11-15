@@ -7,6 +7,15 @@ CHAT = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 
 
 class ChildTaskCardContractTest(unittest.TestCase):
+    def test_completed_status_text_reuses_execution_receipt_color(self):
+        live = (CHAT / 'ChildTaskToolContent.kt').read_text()
+        receipt = (CHAT / 'ChildTaskCardContent.kt').read_text()
+        dialog = (CHAT / 'SubAgentStatusDialog.kt').read_text()
+        self.assertIn('else conversationColors().muted)', receipt)
+        self.assertIn('row.completed -> conversationColors().muted', live)
+        self.assertIn('color = if (row.completed) conversationColors().muted else stateColor', dialog)
+        self.assertIn('.background(stateColor, CircleShape)', dialog)
+
     def test_task_status_and_body_use_one_projection_without_protocol_fields(self):
         source = (CHAT / 'ToolRichDetails.kt').read_text()
         branch = source.split('"delegation", "child_control" -> {', 1)[1].split('"mcp" -> {', 1)[0]

@@ -112,7 +112,8 @@ internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolea
                                 maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
                                 Box(Modifier.size(5.dp).background(stateColor, CircleShape))
-                                Text(row.status, fontSize = 10.sp, color = stateColor)
+                                Text(row.status, fontSize = 10.sp,
+                                    color = if (row.completed) conversationColors().muted else stateColor)
                             }
                         }
                         if (expanded) androidx.compose.foundation.text.selection.SelectionContainer {

@@ -143,7 +143,7 @@ internal fun ChildTaskDisclosure(
             Text(taskTitle, Modifier.weight(1f).testTag("tool-child-name:${row.owner.childRunId}"), style = MiuixTheme.textStyles.footnote1,
                 maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(childTaskStatusText(row.status), Modifier.testTag("tool-child-status:${row.owner.childRunId}"), color = when {
-                row.completed -> colors.primary
+                row.completed -> conversationColors().muted
                 row.status in setOf("失败", "未执行", "结果未知", "状态未确认", "上下文超限") -> colors.error
                 else -> colors.onSurfaceVariantSummary
             },

@@ -10,10 +10,12 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.domain.delegation.*
 import app.daiyu.android.ui.app.AgentAppTheme
 
@@ -41,6 +43,52 @@ class ChildTaskListTest : WiredActivityTestCase() {
         assertEquals(lines, layout.lineCount)
         assertEquals(overflow, layout.hasVisualOverflow)
         assertEquals(overflow, layout.isLineEllipsized(lines - 1))
+    }
+
+    fun testCompletedStatusMatchesExecutionReceiptColorInBothThemes() {
+        val record = task(0)
+        val rows = subAgentStatusRows(listOf(record), emptyList())
+        val details = ToolCategoryDetails.project("child_control", "{}", org.json.JSONObject()
+            .put("agent_name", "审查").put("status", "COMPLETED")
+            .put("text", record.text).toString(), "get_child_task")
+        for (mode in listOf(AppearanceThemeMode.LIGHT, AppearanceThemeMode.DARK)) {
+            var expected = Color.Unspecified
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(themeMode = mode), applyInterfaceScale = false) {
+                    expected = conversationColors().muted
+                    Column {
+                        ChildTaskList(rows, listOf(record), { _, _ -> })
+                        ChildTaskReceiptContent(details)
+                    }
+                }
+            } }
+            ui.waitForIdle()
+            assertTrue(expected != Color.Unspecified)
+            val targets = listOf(
+                ui.onNodeWithTag("tool-child-status:internal-child-0", useUnmergedTree = true),
+                ui.onNode(hasText("已完成") and hasAnyAncestor(hasTestTag("tool-child-receipt:0")), useUnmergedTree = true),
+            )
+            for (target in targets) {
+                val layouts = mutableListOf<TextLayoutResult>()
+                target.assertTextEquals("已完成").performSemanticsAction(SemanticsActions.GetTextLayoutResult) {
+                    assertTrue(it(layouts))
+                }
+                assertEquals("completed status theme=$mode", expected, layouts.single().layoutInput.style.color)
+            }
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(themeMode = mode), applyInterfaceScale = false) {
+                    SubAgentStatusDialog(rows, loading = false, failed = false, onDismiss = {})
+                }
+            } }
+            ui.waitForIdle()
+            awaitDialogEnter(ui.onNodeWithTag("subagent-status", useUnmergedTree = true))
+            val layouts = mutableListOf<TextLayoutResult>()
+            ui.onNodeWithText("已完成", useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
+            assertEquals("completed dialog theme=$mode", expected, layouts.single().layoutInput.style.color)
+            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+            ui.waitForIdle()
+        }
     }
 
     fun testDelegationShowsPromptAndReadReceiptShowsResultForTheSameTask() {

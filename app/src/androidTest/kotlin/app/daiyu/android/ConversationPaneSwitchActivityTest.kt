@@ -515,6 +515,7 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
                         "# Atomic page $index\n\nDistinct formatted body.\n\n| left | right |\n|---|---|\n| $index | ready |")))
                 fixture.database.send(user, answer)
                 fixture.database.save(answer.copy(status = RunStatus.COMPLETED))
+                fixture.database.draft(conversation.id, "draft-$index")
             }
             activity.select(first)
         }

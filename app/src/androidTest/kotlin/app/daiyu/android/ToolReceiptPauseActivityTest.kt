@@ -305,7 +305,8 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         mainThread {
             key = checkNotNull(loadedKey())
             snapshot = checkNotNull(field("toolReceiptSnapshot").get(activity))
-            assertEquals(ExecutionPhase.PAUSED, key.execution?.phase)
+            assertEquals(ExecutionPhase.PAUSED, fixture.controller.runState(owner)?.phase)
+            assertTrue(key.canDisplayFor(currentKey()))
             assertTrue(fixture.controller.resume(owner))
         }
         assertTrue(second.entered.await(30, TimeUnit.SECONDS))

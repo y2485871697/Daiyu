@@ -11,8 +11,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.Density
@@ -202,6 +206,18 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         ui.onNodeWithTag("doubao-call-hang-up").assertIsEnabled()
     }
 
+    private fun advanceOverlayFrames(count: Int) {
+        repeat(count) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+        }
+    }
+
+    private fun scrollPosition(target: SemanticsNodeInteraction): Pair<Float, Float> {
+        val range = target.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+        return ui.runOnIdle { range.value() to range.maxValue() }
+    }
+
     private fun displayedSeconds(useUnmergedTree: Boolean = false): Long {
         val text = ui.onNodeWithTag("doubao-call-clock", useUnmergedTree = useUnmergedTree).fetchSemanticsNode()
             .config[SemanticsProperties.Text].single().text
@@ -232,12 +248,33 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
 
     fun testShortPanelKeepsControlsReachableByBodyScrollWithoutDraggingThePanel() {
         mount(430.dp); finishOpening()
-        val panel = ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot
-        ui.onNodeWithTag("doubao-call-hang-up").scrollToVisible().assertIsDisplayed()
-        ui.onNodeWithTag("doubao-call-speaker").scrollToVisible().assertIsDisplayed().performClick()
+        val panelNode = ui.onNodeWithTag("doubao-call-expanded")
+        val panel = panelNode.fetchSemanticsNode().boundsInRoot
+        val body = ui.onNodeWithTag("doubao-call-body")
+        val before = scrollPosition(body)
+        // Stay above the nested caption scroller and below the panel drag handle.
+        body.performTouchInput {
+            swipe(Offset(center.x, height * .45f), Offset(center.x, height * .10f), 400L)
+        }
+        advanceOverlayFrames(32)
+        val after = scrollPosition(body)
+        assertTrue("Short fixture must overflow: $after", after.second > 0f)
+        assertTrue("Body must scroll: before=$before after=$after", after.first > before.first + 1f)
+        val viewport = body.fetchSemanticsNode().boundsInRoot
+        fun fullyVisible(tag: String): SemanticsNodeInteraction {
+            val target = ui.onNodeWithTag(tag).assertIsDisplayed()
+            val node = target.fetchSemanticsNode()
+            val bounds = Rect(node.positionInRoot, Size(node.size.width.toFloat(), node.size.height.toFloat()))
+            assertTrue("$tag must fit inside body: target=$bounds viewport=$viewport",
+                bounds.left >= viewport.left - 1f && bounds.top >= viewport.top - 1f &&
+                    bounds.right <= viewport.right + 1f && bounds.bottom <= viewport.bottom + 1f)
+            return target
+        }
+        fullyVisible("doubao-call-hang-up")
+        fullyVisible("doubao-call-speaker").performTouchInput { click() }
         awaitVisualIdle()
         assertEquals(1, speakerToggles)
-        assertEquals(panel, ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot)
+        assertEquals(panel, panelNode.fetchSemanticsNode().boundsInRoot)
     }
 
     fun testConnectingBackendOpensWithListeningWavesInPanelAndCapsule() {
@@ -564,10 +601,22 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         ui.waitForIdle()
         ui.runOnIdle { assertTrue(motion.transforming) }
         val panel = ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot
-        val frozen = captureScreenNode(ui.onRoot()).toPixelMap()
+        val frozenImage = captureScreenNode(ui.onRoot())
         mainThread { motion.transforming = false }
         ui.waitForIdle()
-        val live = captureScreenNode(ui.onRoot()).toPixelMap()
+        val liveImage = captureScreenNode(ui.onRoot())
+        val diagnostics = java.io.File(instrumentation.targetContext.getExternalFilesDir(null),
+            "visual-diagnostics/doubao-shadow").apply { mkdirs() }
+        fun save(image: ImageBitmap, name: String) {
+            java.io.File(diagnostics, "$name.png").outputStream().use {
+                check(image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+            }
+        }
+        save(frozenImage, "frozen")
+        save(liveImage, "live")
+        val frozen = frozenImage.toPixelMap()
+        val live = liveImage.toPixelMap()
+        val samples = mutableListOf<String>("panel=$panel, frozen=${frozen.width}x${frozen.height}, live=${live.width}x${live.height}")
         val density = instrumentation.targetContext.resources.displayMetrics.density
         var compared = 0
         var visibleShadow = false
@@ -576,11 +625,20 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
             for (fraction in listOf(.15f, .35f, .5f, .65f, .85f)) {
                 val x = (panel.left + panel.width * fraction).toInt()
                 val a = frozen[x, y]; val b = live[x, y]
+                samples += "$x,$y frozen=$a live=$b"
+                if (b.red + b.green + b.blue < 2.985f) visibleShadow = true
+                compared++
+            }
+        }
+        java.io.File(diagnostics, "samples.txt").writeText(samples.joinToString("\n"))
+        for (gap in listOf(2f, 4f, 7f)) {
+            val y = (panel.bottom + gap * density).toInt().coerceAtMost(live.height - 1)
+            for (fraction in listOf(.15f, .35f, .5f, .65f, .85f)) {
+                val x = (panel.left + panel.width * fraction).toInt()
+                val a = frozen[x, y]; val b = live[x, y]
                 assertEquals("shadow red at $x,$y", a.red, b.red, .015f)
                 assertEquals("shadow green at $x,$y", a.green, b.green, .015f)
                 assertEquals("shadow blue at $x,$y", a.blue, b.blue, .015f)
-                if (b.red + b.green + b.blue < 2.985f) visibleShadow = true
-                compared++
             }
         }
         assertEquals(15, compared)
@@ -659,30 +717,33 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
 
     fun testBothCallKindsFollowCaptionTailWithoutOverridingManualScroll() {
         for (ordinary in listOf(false, true)) {
-            if (ordinary) mainThread { call = session().copy(modelSelectable = true) }
+            if (ordinary) {
+                mainThread { call = session().copy(modelSelectable = true) }
+                awaitMotionStart(1f)
+            }
             else mount()
             finishOpening()
             mainThread { call = call!!.copy(reply = (1..40).joinToString("\n") { "第${it}行回答" }) }
-            ui.mainClock.advanceTimeBy(1_000); ui.waitForIdle()
+            advanceOverlayFrames(64)
             val caption = ui.onNodeWithTag("doubao-call-caption-area")
             fun position(): Pair<Float, Float> {
-                val range = caption.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
-                return ui.runOnIdle { range.value() to range.maxValue() }
+                return scrollPosition(caption)
             }
             val tail = position()
-            assertTrue(tail.first >= tail.second - 1f)
+            assertTrue("ordinary=$ordinary: caption must overflow: $tail", tail.second > 0f)
+            assertTrue("ordinary=$ordinary: caption must follow tail: $tail", tail.first >= tail.second - 1f)
             caption.performTouchInput { swipeDown() }
-            ui.mainClock.advanceTimeBy(1_000); ui.waitForIdle()
+            advanceOverlayFrames(64)
             val manual = position()
             val held = manual.first
-            assertTrue(held < manual.second - 1f)
+            assertTrue("ordinary=$ordinary: manual scroll must leave tail: $manual", held < manual.second - 1f)
             mainThread { call = call!!.copy(reply = call!!.reply + "\n新增回答") }
-            ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
+            advanceOverlayFrames(32)
             assertEquals(held, position().first, 2f)
             ui.onNodeWithTag("doubao-call-minimize").performClick().also { awaitVisualIdle() }
-            ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
+            advanceOverlayFrames(32)
             ui.onNodeWithTag("doubao-call-expand").performClick().also { awaitVisualIdle() }
-            ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
+            advanceOverlayFrames(32)
             assertEquals(held, position().first, 2f)
         }
     }

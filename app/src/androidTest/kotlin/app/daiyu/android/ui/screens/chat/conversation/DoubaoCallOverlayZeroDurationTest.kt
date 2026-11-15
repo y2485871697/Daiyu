@@ -48,14 +48,17 @@ class DoubaoCallOverlayZeroDurationTest : ComposeActivityTestCase(object : Motio
             ui.waitUntil(10_000L) {
                 ui.mainClock.advanceTimeByFrame()
                 ui.waitForIdle()
-                ui.runOnIdle { !motion.transforming }
+                ui.runOnIdle { !motion.transforming } &&
+                    ui.onAllNodes(hasTestTag("doubao-call-hang-up") and isEnabled())
+                        .fetchSemanticsNodes().size == 1
             }
             val closingAt = ui.mainClock.currentTime
             ui.onNodeWithTag("doubao-call-hang-up").assertIsEnabled().performClick()
             ui.waitUntil(10_000L) {
                 ui.mainClock.advanceTimeByFrame()
                 ui.waitForIdle()
-                ui.runOnIdle { call == null }
+                ui.runOnIdle { call == null } &&
+                    ui.onAllNodesWithTag("zero-scale-entry").fetchSemanticsNodes().size == 1
             }
             assertTrue(ui.mainClock.currentTime - closingAt < DoubaoGenieGeometry.DURATION_MILLIS)
             ui.onNodeWithTag("zero-scale-entry").assertExists()

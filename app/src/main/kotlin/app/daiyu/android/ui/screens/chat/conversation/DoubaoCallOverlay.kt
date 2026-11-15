@@ -355,6 +355,11 @@ private fun DoubaoCallSession(
                     } else {
                         // Never replay the full live display list once per strip.
                         val bitmap = frozenBitmap ?: return@drawWithContent
+                        // At full size, composite the translucent raster once, without strip clips.
+                        if (progress.value == 1f) {
+                            drawImage(bitmap, dstOffset = IntOffset(-outset, -outset), dstSize = captureSize)
+                            return@drawWithContent
+                        }
                         val sourceWidth = bitmap.width.toFloat()
                         val sourceHeight = bitmap.height.toFloat()
                         val endpointSize = with(density) { 20.dp.toPx() }

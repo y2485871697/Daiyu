@@ -178,6 +178,8 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
         self.assertNotIn('progress.value', composition)
         morph = overlay.split('// Never replay the full live display list once per strip.', 1)[1].split('.callPanelShadow(', 1)[0]
         self.assertIn('drawImage(bitmap)', morph)
+        self.assertIn('if (progress.value == 1f)', morph)
+        self.assertIn('drawImage(bitmap, dstOffset = IntOffset(-outset, -outset), dstSize = captureSize)', morph)
         self.assertNotIn('drawLayer(', morph)
 
     def test_real_audio_starts_private_and_snapshot_tracks_only_live_routes(self):

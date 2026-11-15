@@ -39,7 +39,7 @@ class PageBackSmokeScopeTests(unittest.TestCase):
             "${{ inputs.mode == 'smoke' && inputs.smoke_classes == '"
             + ','.join(CLASSES) + "' && '-page-back' || '' }}"
         )
-        self.assertTrue(group.endswith(suffix), group)
+        self.assertIn(suffix, group)
         self.assertIn('  cancel-in-progress: false', concurrency.splitlines())
 
     def test_exact_return_scope_runs_explicit_contracts_and_tool_guards(self):

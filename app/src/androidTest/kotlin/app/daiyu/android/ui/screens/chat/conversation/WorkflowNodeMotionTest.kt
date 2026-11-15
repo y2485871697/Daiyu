@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.domain.ReportedReasoning
 import app.daiyu.android.ui.app.AgentAppTheme
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -38,19 +39,28 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
     private lateinit var density: Density
     private var background = Color.Unspecified
     private var success = Color.Unspecified
+    private var error = Color.Unspecified
+    private var flowRunning by mutableStateOf(true)
+    private var reasoning by mutableStateOf(ReportedReasoning("motion-r", "thinking", 0L, 1L))
     private var mounted by mutableStateOf(true)
+    private var motionEnabled by mutableStateOf(true)
 
-    private fun show() {
-        val initial = rows.map { MessageContentUi.Tool(it) }
+    private fun show(thought: Boolean = false) {
+        val initial = if (thought) listOf(MessageContentUi.Reasoning(reasoning)) else rows.map { MessageContentUi.Tool(it) }
         val motions = WorkflowNodeMotions(initial)
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current
             background = conversationColors().surface.copy(alpha = 1f)
             success = conversationColors().success
+            error = conversationColors().error
             Box(Modifier.width(300.dp).background(background).testTag("motion-raster")) {
-                CompositionLocalProvider(LocalWorkflowNodeMotions provides motions) {
-                    if (mounted) MessageContent(rows.map { MessageContentUi.Tool(it) }, ChatScreenActions(), null,
-                        markdown = false, flowRunning = true, workflowTimeline = true)
+                CompositionLocalProvider(LocalWorkflowNodeMotions provides motions, LocalWorkflowNodeMotionEnabled provides motionEnabled) {
+                    if (mounted) {
+                        if (thought) ReasoningStepRow("motion", reasoning, allowLiveTiming = flowRunning,
+                            generationComplete = !flowRunning, stopped = !flowRunning)
+                        else MessageContent(rows.map { MessageContentUi.Tool(it) }, ChatScreenActions(), null,
+                            markdown = false, flowRunning = flowRunning, workflowTimeline = true)
+                    }
                 }
             }
         } } }
@@ -65,7 +75,8 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
 
     private fun pixels() = ui.onNodeWithTag("motion-raster").captureToImage().toPixelMap()
     private fun distance(a: Color, b: Color) = maxOf(abs(a.red - b.red), abs(a.green - b.green), abs(a.blue - b.blue))
-    private fun green(p: PixelMap): Float {
+    private fun green(p: PixelMap) = coverage(p, success)
+    private fun coverage(p: PixelMap, color: Color): Float {
         val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().boundsInRoot
         val row = ui.onNodeWithTag("tool-step:motion-a").fetchSemanticsNode().boundsInRoot
         val x = row.left - raster.left
@@ -74,7 +85,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         var count = 0f
         for (j in ceil(y).toInt() until floor(y + size).toInt())
             for (i in ceil(x).toInt() until floor(x + size).toInt())
-                count += (1f - distance(p[i, j], success) / distance(background, success)).coerceIn(0f, 1f)
+                count += (1f - distance(p[i, j], color) / distance(background, color)).coerceIn(0f, 1f)
         return count
     }
 
@@ -169,4 +180,107 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             assertEquals(connected, line(pixels()))
         } finally { scale.factor = 1f; ui.mainClock.autoAdvance = true }
     }
+
+    private fun glyph(p: PixelMap, tag: String = "tool-step:motion-a"): List<Color> {
+        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().boundsInRoot
+        val row = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        val x = row.left - raster.left
+        val y = row.top - raster.top + with(density) { 17.dp.toPx() }
+        val size = with(density) { 10.dp.toPx() }
+        return (ceil(y).toInt() until floor(y + size).toInt()).flatMap { j ->
+            (ceil(x).toInt() until floor(x + size).toInt()).map { i -> p[i, j] }
+        }
+    }
+
+    private fun changed(before: List<Color>, after: List<Color>) =
+        before.zip(after).sumOf { (a, b) -> distance(a, b).toDouble() } > .1
+
+    fun testWaitingToolRotatesAndPausingStopsWhenPaused() {
+        ui.mainClock.autoAdvance = false
+        try {
+            show()
+            ui.onNodeWithTag("workflow-waiting:tool:motion-a").assertExists()
+            val before = glyph(pixels())
+            ui.mainClock.advanceTimeBy(160)
+            assertTrue("pending tool must rotate rather than show a solid ring", changed(before, glyph(pixels())))
+            change(listOf(first.copy(activity = ToolActivityUi.WAITING)))
+            val waiting = glyph(pixels())
+            ui.mainClock.advanceTimeBy(160)
+            assertTrue("waiting tool must rotate", changed(waiting, glyph(pixels())))
+            change(listOf(first.copy(activity = ToolActivityUi.PAUSED)))
+            ui.onNodeWithTag("workflow-waiting:tool:motion-a").assertDoesNotExist()
+            val paused = glyph(pixels())
+            ui.mainClock.advanceTimeBy(160)
+            assertFalse("paused tool must not keep spinning", changed(paused, glyph(pixels())))
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testActiveReasoningRotatesAndCompletionRemovesSpinner() {
+        ui.mainClock.autoAdvance = false
+        try {
+            show(thought = true)
+            ui.onNodeWithTag("workflow-waiting:reasoning:motion-r").assertExists()
+            val before = glyph(pixels(), "work-reasoning:motion-r")
+            ui.mainClock.advanceTimeBy(160)
+            assertTrue("active thought must rotate", changed(before, glyph(pixels(), "work-reasoning:motion-r")))
+            instrumentation.runOnMainSync { reasoning = reasoning.copy(activeSinceNanos = null) }
+            repeat(2) { ui.mainClock.advanceTimeByFrame() }
+            ui.mainClock.advanceTimeBy(1_000)
+            ui.onNodeWithTag("workflow-waiting:reasoning:motion-r").assertDoesNotExist()
+            val complete = glyph(pixels(), "work-reasoning:motion-r")
+            ui.mainClock.advanceTimeBy(160)
+            assertFalse(changed(complete, glyph(pixels(), "work-reasoning:motion-r")))
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testFailedToolPopsInAsRedCrossAndThenStaysStill() {
+        ui.mainClock.autoAdvance = false
+        try {
+            show()
+            change(listOf(first.copy(state = WorkStepState.FAILED, activity = ToolActivityUi.FAILED)))
+            ui.onNodeWithTag("workflow-waiting:tool:motion-a").assertDoesNotExist()
+            ui.onNodeWithContentDescription("执行失败").assertExists()
+            ui.mainClock.advanceTimeBy(48)
+            val middle = coverage(pixels(), error)
+            ui.mainClock.advanceTimeBy(1_000)
+            val complete = coverage(pixels(), error)
+            assertTrue("red failure glyph must have an animated intermediate frame, middle=$middle final=$complete",
+                middle > 0f && middle < complete)
+            val end = glyph(pixels())
+            ui.mainClock.advanceTimeBy(160)
+            assertFalse(changed(end, glyph(pixels())))
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testTerminalFlowAndZeroScaleDoNotKeepSpinnerMoving() {
+        scale.factor = 0f
+        ui.mainClock.autoAdvance = false
+        try {
+            show()
+            repeat(4) { ui.mainClock.advanceTimeByFrame() }
+            val disabled = glyph(pixels())
+            ui.mainClock.advanceTimeBy(160)
+            assertFalse("zero motion scale must draw a static loading arc", changed(disabled, glyph(pixels())))
+            instrumentation.runOnMainSync { flowRunning = false }
+            repeat(2) { ui.mainClock.advanceTimeByFrame() }
+            ui.onNodeWithTag("workflow-waiting:tool:motion-a").assertDoesNotExist()
+        } finally { scale.factor = 1f; ui.mainClock.autoAdvance = true }
+    }
+
+    fun testFailureArrivingDuringDisclosureExitIsConsumedWithoutReplay() {
+        ui.mainClock.autoAdvance = false
+        try {
+            show()
+            instrumentation.runOnMainSync { motionEnabled = false }
+            change(listOf(first.copy(state = WorkStepState.FAILED, activity = ToolActivityUi.FAILED)))
+            val immediate = coverage(pixels(), error)
+            assertTrue(immediate > 0f)
+            instrumentation.runOnMainSync { motionEnabled = true }
+            repeat(2) { ui.mainClock.advanceTimeByFrame() }
+            assertEquals(immediate, coverage(pixels(), error), .01f)
+            ui.mainClock.advanceTimeBy(160)
+            assertEquals(immediate, coverage(pixels(), error), .01f)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
 }

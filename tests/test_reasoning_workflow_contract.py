@@ -6,6 +6,26 @@ CHAT = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 DOMAIN = ROOT / 'core-domain/src/main/kotlin/app/daiyu/android/domain'
 
 class ReasoningWorkflowContractTest(unittest.TestCase):
+    def test_workflow_waiting_rotates_and_failure_uses_animated_red_cross(self):
+        work = (CHAT / 'WorkProcessCard.kt').read_text()
+        thought = (CHAT / 'ReportedReasoningCard.kt').read_text()
+        motion = (CHAT / 'WorkflowNodeMotion.kt').read_text()
+        self.assertIn('val spinning = flowRunning && !terminal', work)
+        self.assertIn('expanded && !stopped && work.controlActivity != ToolActivityUi.PAUSED', work)
+        self.assertIn('fresh && enabled', motion)
+        self.assertIn('ToolActivityUi.WAITING', work)
+        self.assertIn('if (spinning) WorkflowWaitingIndicator', work)
+        self.assertIn('!complete && allowLiveTiming && !generationComplete && !stopped', thought)
+        self.assertIn('if (spinning) WorkflowWaitingIndicator', thought)
+        self.assertIn('CircularProgressIndicator(Modifier.size(10.dp)', motion)
+        self.assertIn('strokeWidth = 1.5.dp', motion)
+        self.assertIn('failed = step.state == WorkStepState.FAILED', work)
+        self.assertIn('Icon(DaiyuIcons.Close, "执行失败"', work)
+        self.assertNotIn('Text("!"', work)
+        self.assertIn('step.state == WorkStepState.FAILED -> colors.error', work)
+        self.assertIn('fun fail(key: String) = failed.add(key)', motion)
+        self.assertIn('failed.add(item.workflowKey(index))', motion)
+
     def test_captured_position_is_display_metadata_not_protocol(self):
         source = (DOMAIN / 'Conversation.kt').read_text()
         self.assertIn('val blockOffset: Int? = null', source)

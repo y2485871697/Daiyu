@@ -69,4 +69,16 @@ class WorkflowConnectorsTest {
         assertEquals(1f, head.fraction(), 0f)
     }
 
+    @Test fun failureEventsAreIndependentAndInitialOrHiddenFailuresAreSilent() {
+        val failure = MessageContentUi.Tool(WorkStepUi("failed", "failed", "", WorkStepState.FAILED))
+        val motions = WorkflowNodeMotions(listOf(failure))
+        assertFalse(motions.fail("tool:failed"))
+        assertTrue(motions.fail("tool:new"))
+        assertFalse(motions.fail("tool:new"))
+        assertTrue(motions.complete("tool:new"))
+        assertFalse(motions.complete("tool:new"))
+        motions.suppress(listOf(MessageContentUi.Tool(WorkStepUi("hidden", "hidden", "", WorkStepState.FAILED))))
+        assertFalse(motions.fail("tool:hidden"))
+    }
+
 }

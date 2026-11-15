@@ -87,7 +87,8 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     val title = work.title
     val progressSummary = work.progressSummary
     val shape = RoundedCornerShape(12.dp)
-    CompositionLocalProvider(LocalWorkflowNodeMotions provides motions) {
+    CompositionLocalProvider(LocalWorkflowNodeMotions provides motions,
+        LocalWorkflowNodeMotionEnabled provides (expanded && !stopped && work.controlActivity != ToolActivityUi.PAUSED)) {
     Column(modifier.fillMaxWidth().clip(shape).background(colors.surface).drawWithContent {
         drawContent()
         drawLine(if (colors.dark) Color(0x05FFFFFF) else Color(0x40FFFFFF),
@@ -204,13 +205,20 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
                 27.dp.toPx() + (size.height + lineMotion.spacingAfter.toPx() - 27.dp.toPx()) * (lineMotion.outgoing?.fraction() ?: 1f))), 1.dp.toPx())
     }, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.padding(top = 17.dp).width(12.dp), contentAlignment = Alignment.TopStart) {
-            val ring = running && step.state != WorkStepState.OK && step.state != WorkStepState.FAILED
-            Box(Modifier.size(10.dp).workflowCompletion("tool:${step.renderKey}", step.state == WorkStepState.OK).clip(CircleShape).then(
-                if (ring) Modifier.border(1.5.dp, tint, CircleShape) else Modifier.background(tint)),
-                contentAlignment = Alignment.Center) {
-                if (step.state == WorkStepState.OK) Icon(DaiyuIcons.Check, null, Modifier.size(8.dp), tint = Color.White)
-                else if (step.state == WorkStepState.FAILED) Text("!", color = Color.White,
-                    style = MiuixTheme.textStyles.footnote1.copy(fontSize = 9.sp, lineHeight = 10.sp))
+            val terminal = step.state == WorkStepState.OK || step.state == WorkStepState.FAILED
+            val spinning = flowRunning && !terminal && LocalWorkflowNodeMotionEnabled.current && step.activity in setOf(ToolActivityUi.PENDING,
+                ToolActivityUi.QUEUED, ToolActivityUi.PREPARING, ToolActivityUi.RUNNING, ToolActivityUi.WAITING,
+                ToolActivityUi.PAUSING, ToolActivityUi.STOPPING)
+            val ring = running && !terminal
+            Box(Modifier.size(10.dp).workflowCompletion("tool:${step.renderKey}", step.state == WorkStepState.OK,
+                failed = step.state == WorkStepState.FAILED).clip(CircleShape).then(when {
+                    spinning -> Modifier
+                    ring -> Modifier.border(1.5.dp, tint, CircleShape)
+                    else -> Modifier.background(tint)
+                }), contentAlignment = Alignment.Center) {
+                if (spinning) WorkflowWaitingIndicator("tool:${step.renderKey}", tint)
+                else if (step.state == WorkStepState.OK) Icon(DaiyuIcons.Check, null, Modifier.size(8.dp), tint = Color.White)
+                else if (step.state == WorkStepState.FAILED) Icon(DaiyuIcons.Close, "执行失败", Modifier.size(8.dp), tint = Color.White)
             }
         }
         Column(Modifier.weight(1f)) {

@@ -256,12 +256,17 @@ internal fun ReasoningStepRow(
     }, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.padding(top = 17.dp).width(12.dp)) {
             val complete = reported.activeSinceNanos == null
+            val spinning = !complete && allowLiveTiming && !generationComplete && !stopped && LocalWorkflowNodeMotionEnabled.current
             Box(Modifier.size(10.dp).testTag("reasoning-step-state:${reported.itemId}")
                 .semantics { stateDescription = if (complete) "已思考" else "正在思考" }
                 .workflowCompletion("reasoning:${reported.itemId}", complete)
-                .clip(CircleShape).then(if (complete) Modifier.background(colors.success)
-                    else Modifier.border(1.5.dp, colors.accent, CircleShape)), contentAlignment = Alignment.Center) {
-                if (complete) Icon(DaiyuIcons.Check, "思考完成", Modifier.size(8.dp), tint = Color.White)
+                .clip(CircleShape).then(when {
+                    complete -> Modifier.background(colors.success)
+                    spinning -> Modifier
+                    else -> Modifier.border(1.5.dp, colors.accent, CircleShape)
+                }), contentAlignment = Alignment.Center) {
+                if (spinning) WorkflowWaitingIndicator("reasoning:${reported.itemId}", colors.accent)
+                else if (complete) Icon(DaiyuIcons.Check, "思考完成", Modifier.size(8.dp), tint = Color.White)
             }
         }
         Column(Modifier.weight(1f)) {

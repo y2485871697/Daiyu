@@ -84,6 +84,17 @@ class TestRefreshContract(unittest.TestCase):
                           'core-domain/src/test/kotlin/app/daiyu/android/domain/delegation/RetainedChildTasksPauseTest.kt',
                           'docs/重构清单.md', '.github/workflows/test-refresh-regression.yml'])
 
+    def test_generation_checks_metadata_is_an_exact_validation_path(self):
+        path = '.github/workflows/generation-port-checks.yml'
+        validate_changes([path, 'tests/example.py'])
+        for forbidden in (path + '.bak', path + '/extra',
+                          '.github/workflows/unknown-generation-checks.yml',
+                          '.github/workflows/build.yml', 'app/build.gradle.kts',
+                          'settings.gradle.kts', 'app/src/main/Example.kt'):
+            for changes in ([path, forbidden], [forbidden, path]):
+                with self.subTest(changes=changes), self.assertRaises(ValueError):
+                    validate_changes(changes)
+
     def test_chat_checks_metadata_does_not_allow_other_workflows(self):
         validate_changes(['.github/workflows/compression-dialog-checks.yml',
                           '.github/workflows/chat-workflow-checks.yml',

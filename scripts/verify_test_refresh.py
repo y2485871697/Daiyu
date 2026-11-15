@@ -16,6 +16,7 @@ from verify_smoke_source import verify as verify_source
 
 VALIDATION_FILES = {
     '.github/workflows/compression-dialog-checks.yml',
+    '.github/workflows/generation-port-checks.yml',
     'docs/重构清单.md', '更新说明.md',
     '.github/workflows/test-refresh-regression.yml',
     '.github/workflows/chat-workflow-checks.yml',

@@ -7557,7 +7557,7 @@ class MainActivity : ComponentActivity() {
             val visibleDisplayReceipts = { owner: WorkStepOwnerUi, block: MessageBlock.Tool ->
                 retainedDisplayReceipts?.invoke(owner, block) ?: if (receiptsReady || block.result == null) null
                 else app.daiyu.android.ui.screens.chat.conversation.ToolReceiptUi(WorkStepState.PENDING,
-                    app.daiyu.android.ui.screens.chat.conversation.ToolActivityUi.READING)
+                    app.daiyu.android.ui.screens.chat.conversation.ToolActivityUi.RUNNING)
             }
             val visibleChildNames = toolReceiptKey?.takeIf { loaded -> loaded.canDisplayFor(currentReceipts) }
                 ?.let { toolReceiptSnapshot?.childAgentNames }.orEmpty()

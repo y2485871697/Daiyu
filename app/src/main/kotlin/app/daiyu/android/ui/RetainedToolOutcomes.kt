@@ -202,10 +202,10 @@ internal object RetainedToolOutcomes {
         }
     }
 
-    /** 等待同一来源的持久化回执时，已有返回文本的工具先显示“读取结果”。 */
+    /** 等待同一来源的持久化回执时，沿用“执行中”，直到精确最终回执就绪。 */
     fun pendingProjection(message: Message, block: MessageBlock.Tool): ToolReceiptUi? =
         if (message.role == Message.ASSISTANT_ROLE && block.result != null)
-            ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.READING) else null
+            ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING) else null
 
     fun projectionReader(database: ConversationDatabase, messages: List<Message>,
         liveState: (Message) -> ExecutionState? = { null },

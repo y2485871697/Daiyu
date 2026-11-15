@@ -78,20 +78,20 @@ class ToolReceiptSourceTest {
                 val returned = (message.blocks.single() as MessageBlock.Tool).copy(result = result)
                 val source = message.copy(status = status, blocks = listOf(returned))
                 val pending = RetainedToolOutcomes.pendingProjection(source, returned)!!
-                assertEquals(ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.READING), pending)
+                assertEquals(ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING), pending)
                 val turn = ChatTurnMapper.map(listOf(source), toolReceipt = { owner, tool ->
                     RetainedToolOutcomes.pendingProjection(owner, tool)
                 }).single() as ChatTurnUi.Assistant
                 val flow = turn.workProcess!!
                 val step = flow.segments.flatMap { it.steps }.single()
                 assertEquals(WorkStepState.PENDING, step.state)
-                assertEquals(ToolActivityUi.READING, step.activity)
+                assertEquals(ToolActivityUi.RUNNING, step.activity)
                 assertEquals(0, flow.unconfirmedStepCount)
                 assertEquals(0, flow.completedStepCount)
             }
         }
     }
-    @Test fun noReturnedResultAndUserMessagesCannotInventAReadingActivity() {
+    @Test fun noReturnedResultAndUserMessagesCannotInventARunningActivity() {
         val pending = message.blocks.single() as MessageBlock.Tool
         assertNull(RetainedToolOutcomes.pendingProjection(message, pending))
         assertNull(RetainedToolOutcomes.pendingProjection(message.copy(role = Message.USER_ROLE), pending.copy(result = "done")))

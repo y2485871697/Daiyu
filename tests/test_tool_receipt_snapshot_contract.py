@@ -19,9 +19,21 @@ class ReceiptSnapshotContract(unittest.TestCase):
         projection = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/RetainedToolOutcomes.kt').read_text()
         pending = projection.split('fun pendingProjection(', 1)[1].split('fun projectionReader(database:', 1)[0]
         self.assertIn('block.result != null', pending)
-        self.assertIn('ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.READING)', pending)
+        self.assertIn('ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING)', pending)
         self.assertNotIn('WorkStepState.OK', pending)
         self.assertNotIn('JSONObject', pending)
+    def test_pending_tools_keep_executing_without_a_separate_reading_status(self):
+        activity = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolActivityUi.kt').read_text()
+        self.assertNotIn('READING', activity)
+        self.assertNotIn('读取结果', activity)
+        host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
+        display = host.split('val visibleDisplayReceipts =', 1)[1].split('val visibleChildNames', 1)[0]
+        self.assertIn('retainedDisplayReceipts?.invoke(owner, block)', display)
+        self.assertIn('receiptsReady || block.result == null', display)
+        self.assertIn('ToolReceiptUi(WorkStepState.PENDING,', display)
+        self.assertIn('ToolActivityUi.RUNNING)', display)
+        self.assertNotIn('WorkStepState.OK', display)
+
     def test_the_ui_publisher_uses_only_a_worker_prepared_immutable_snapshot(self):
         text = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         publish = text.split('private fun publishChat(rowsChanged:', 1)[1].split('private fun requestScroll', 1)[0]

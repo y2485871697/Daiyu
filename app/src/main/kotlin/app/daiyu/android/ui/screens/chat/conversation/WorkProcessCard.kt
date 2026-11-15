@@ -176,7 +176,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
 internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowRunning: Boolean = false, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     val colors = conversationColors()
     var expanded by rememberSaveable(step.renderKey) { mutableStateOf(false) }
-    val running = step.activity in setOf(ToolActivityUi.RUNNING, ToolActivityUi.PREPARING, ToolActivityUi.READING, ToolActivityUi.PAUSING, ToolActivityUi.PAUSED)
+    val running = step.activity in setOf(ToolActivityUi.RUNNING, ToolActivityUi.PREPARING, ToolActivityUi.PAUSING, ToolActivityUi.PAUSED)
     val tint = when {
         step.state == WorkStepState.FAILED -> colors.error
         step.state == WorkStepState.OK -> colors.success

@@ -77,9 +77,9 @@ class ChatTurnMapperTest {
         assertEquals(expected.map { it.activity }, steps.map { it.activity })
         assertEquals(3, steps.map { it.renderKey }.distinct().size)
         val pending = ChatTurnMapper.mapDisplay(window, toolReceipt = { _, block ->
-            if (block.result != null) ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.READING) else null
+            if (block.result != null) ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING) else null
         }).single() as ChatTurnUi.Assistant
-        assertEquals(listOf(ToolActivityUi.READING, ToolActivityUi.READING, ToolActivityUi.UNKNOWN),
+        assertEquals(listOf(ToolActivityUi.RUNNING, ToolActivityUi.RUNNING, ToolActivityUi.UNKNOWN),
             pending.workProcess!!.segments.flatMap { it.steps }.map { it.activity })
     }
 

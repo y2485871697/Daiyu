@@ -84,7 +84,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                 assertEquals(states, steps().map { it.state })
             }
             assertEquals(if (states == expected) listOf(ToolActivityUi.SUCCESS, ToolActivityUi.FAILED,
-                ToolActivityUi.NOT_EXECUTED, ToolActivityUi.INTERRUPTED) else listOf(ToolActivityUi.READING, ToolActivityUi.READING, ToolActivityUi.READING, ToolActivityUi.UNKNOWN),
+                ToolActivityUi.NOT_EXECUTED, ToolActivityUi.INTERRUPTED) else listOf(ToolActivityUi.RUNNING, ToolActivityUi.RUNNING, ToolActivityUi.RUNNING, ToolActivityUi.UNKNOWN),
                 steps().map { it.activity })
             assertEquals(currentKey(), field("toolReceiptRequested").get(activity))
             assertSame(pending, field("toolReceiptRead").get(activity))
@@ -138,7 +138,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                 repeat(3) {
                     call("publishChat")
                     assertEquals(List(3) { WorkStepState.PENDING } + WorkStepState.UNKNOWN, steps().map { it.state })
-                    assertEquals(List(3) { ToolActivityUi.READING } + ToolActivityUi.UNKNOWN, steps().map { it.activity })
+                    assertEquals(List(3) { ToolActivityUi.RUNNING } + ToolActivityUi.UNKNOWN, steps().map { it.activity })
                 }
                 assertEquals(ComposerPhase.IDLE, state.composer.phase)
                 assertNull(state.composer.controlOwnerKey)
@@ -183,7 +183,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
             }
             mainThread {
                 assertEquals(List(3) { WorkStepState.PENDING } + WorkStepState.UNKNOWN, steps().map { it.state })
-                assertEquals(List(3) { ToolActivityUi.READING } + ToolActivityUi.UNKNOWN, steps().map { it.activity })
+                assertEquals(List(3) { ToolActivityUi.RUNNING } + ToolActivityUi.UNKNOWN, steps().map { it.activity })
                 activity.toolReceiptReader = receiptReader
                 call("publishChat")
             }
@@ -214,7 +214,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                     assertSame("live phase must not cancel the exact-source read", pending,
                         field("toolReceiptRead").get(activity))
                     assertTrue(pending.isActive)
-                    assertEquals(List(3) { ToolActivityUi.READING } + ToolActivityUi.UNKNOWN, steps().map { it.activity })
+                    assertEquals(List(3) { ToolActivityUi.RUNNING } + ToolActivityUi.UNKNOWN, steps().map { it.activity })
                 }
                 MainActivity::class.java.declaredMethods.single { it.name == "completeToolReceipts" }
                     .apply { isAccessible = true }.invoke(activity, request, scheduled, snapshot)
@@ -346,7 +346,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         }
         awaitReceipts()
     }
-    fun testFirstReturnedSearchShowsReadingUntilTheExactReceiptArrives() {
+    fun testReturnedToolsStayRunningThenShowTheirExactFinalStatus() {
         mainThread { activity.select(fixture.database.conversations().single()) }
         awaitReceipts()
         val pending = Job()
@@ -363,7 +363,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                     val search = steps().first()
                     assertEquals("search_apps", search.toolName)
                     assertEquals(WorkStepState.PENDING, search.state)
-                    assertEquals(ToolActivityUi.READING, search.activity)
+                    assertEquals(ToolActivityUi.RUNNING, search.activity)
                     assertEquals(ToolActivityUi.UNKNOWN, steps().last().activity)
                 }
                 assertSame(pending, field("toolReceiptRead").get(activity))
@@ -372,8 +372,8 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
             val header = ui.onNodeWithTag("work-process-header")
             if (header.fetchSemanticsNode().config[androidx.compose.ui.semantics.SemanticsProperties.StateDescription] == "已折叠")
                 header.performClick()
-            ui.onNodeWithTag("tool-step-header:receipt-0").assert(SemanticsMatcher("receipt is being read, not unknown") {
-                it.config[androidx.compose.ui.semantics.SemanticsProperties.StateDescription].startsWith("读取结果 ·")
+            ui.onNodeWithTag("tool-step-header:receipt-0").assert(SemanticsMatcher("tool stays executing until its exact final receipt") {
+                it.config[androidx.compose.ui.semantics.SemanticsProperties.StateDescription].startsWith("执行中 ·")
             })
         } finally {
             mainThread {
@@ -390,9 +390,15 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
             assertEquals(WorkStepState.OK, steps().first().state)
             assertEquals(0, fixture.opens.get())
         }
+        for ((index, label) in listOf("成功", "失败", "未执行").withIndex()) {
+            ui.onNodeWithTag("tool-step-header:receipt-$index").assert(SemanticsMatcher("exact final status is visible") {
+                it.config[androidx.compose.ui.semantics.SemanticsProperties.StateDescription].startsWith("$label ·")
+            })
+        }
+        ui.onAllNodesWithText("读取结果").assertCountEquals(0)
     }
 
-    fun testNewToolResultOnlyMarksItsOwnRowReadingDuringTheActualHostPendingFrame() {
+    fun testNewToolResultKeepsItsOwnRowRunningWithoutResettingFinalRows() {
         mainThread { activity.select(fixture.database.conversations().single()) }
         awaitReceipts()
         val pending = Job()
@@ -416,7 +422,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                     call("publishChat")
                     assertEquals(expected + WorkStepState.PENDING, steps().map { it.state })
                     assertEquals(listOf(ToolActivityUi.SUCCESS, ToolActivityUi.FAILED, ToolActivityUi.NOT_EXECUTED,
-                        ToolActivityUi.UNKNOWN, ToolActivityUi.READING), steps().map { it.activity })
+                        ToolActivityUi.UNKNOWN, ToolActivityUi.RUNNING), steps().map { it.activity })
                 }
                 assertSame(pending, field("toolReceiptRead").get(activity))
                 assertTrue(pending.isActive)

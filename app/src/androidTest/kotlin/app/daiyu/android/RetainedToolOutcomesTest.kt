@@ -220,7 +220,7 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
             }).single() as ChatTurnUi.Assistant
             val steps = turn.workProcess!!.segments.flatMap { it.steps }
             assertEquals(List(33) { WorkStepState.OK } + WorkStepState.PENDING, steps.map { it.state })
-            assertEquals(List(33) { ToolActivityUi.SUCCESS } + ToolActivityUi.READING, steps.map { it.activity })
+            assertEquals(List(33) { ToolActivityUi.SUCCESS } + ToolActivityUi.RUNNING, steps.map { it.activity })
             assertNull(snapshot.displayReader(loaded, current.copy(data = 5))(next, next.blocks.first() as MessageBlock.Tool))
             val changed = next.copy(blocks = listOf((next.blocks.first() as MessageBlock.Tool).copy(result = "changed")))
             assertNull(snapshot.displayReader(loaded, current.copy(sources = RetainedToolOutcomes.sources(listOf(changed))))(

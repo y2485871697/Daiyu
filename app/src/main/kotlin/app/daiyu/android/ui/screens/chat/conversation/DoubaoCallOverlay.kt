@@ -622,8 +622,7 @@ private fun CallCaptionArea(state: DoubaoCallUi, enabled: Boolean,
         .drawWithContent {
             drawContent()
             drawLine(Color(0x4DECE6F2), Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx())
-        }.padding(top = 7.dp, bottom = 5.dp)
-        .pointerInput(follow, enabled, state.captionsEnabled) {
+        }.pointerInput(follow, enabled, state.captionsEnabled) {
             if (!enabled || !state.captionsEnabled) return@pointerInput
             awaitEachGesture {
                 awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
@@ -636,7 +635,7 @@ private fun CallCaptionArea(state: DoubaoCallUi, enabled: Boolean,
                     follow.touching = false
                 }
             }
-        }.nestedScroll(containment).verticalScroll(scroll, enabled = enabled)) {
+        }.padding(top = 7.dp, bottom = 5.dp).nestedScroll(containment).verticalScroll(scroll, enabled = enabled)) {
         if (state.captionsEnabled) {
             if (state.transcript.isNotBlank()) CaptionLine("我", captions.first)
             if (state.reply.isNotBlank()) CaptionLine(state.responseLabel, captions.second, reply = true)

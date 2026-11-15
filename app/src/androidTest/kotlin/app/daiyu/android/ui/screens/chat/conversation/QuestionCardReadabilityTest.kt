@@ -13,7 +13,10 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextMeasurer
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.WiredActivityTestCase
@@ -77,10 +80,35 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
         val target = ui.onNodeWithText(text, useUnmergedTree = true).assertIsDisplayed()
         val layouts = mutableListOf<TextLayoutResult>()
         target.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
-        return layouts.single().also {
+        val raw = layouts.single()
+        assertEquals(text, raw.layoutInput.text.text)
+        return measuredTextLayout(raw).also {
+            assertEquals(raw.size, it.size)
             assertEquals(size.sp, it.layoutInput.style.fontSize)
-            assertFalse("Text must wrap without clipping: $text", it.hasVisualOverflow)
+            assertFalse("Text must wrap without clipping: $text constraints=${raw.layoutInput.constraints} raw=${raw.size} " +
+                "paragraph=${raw.multiParagraph.width}x${raw.multiParagraph.height} " +
+                "measured=${it.size} paragraph=${it.multiParagraph.width}x${it.multiParagraph.height} " +
+                "width=${it.didOverflowWidth} height=${it.didOverflowHeight}", it.hasVisualOverflow)
+            assertEquals(0, it.getLineStart(0))
+            assertEquals(text.length, it.getLineEnd(it.lineCount - 1, visibleEnd = true))
         }
+    }
+
+    private fun measuredTextLayout(result: TextLayoutResult, size: IntSize = result.size): TextLayoutResult {
+        val input = result.layoutInput
+        return TextMeasurer(input.fontFamilyResolver, input.density, input.layoutDirection, cacheSize = 0).measure(
+            text = input.text, style = input.style, overflow = input.overflow, softWrap = input.softWrap,
+            maxLines = input.maxLines, placeholders = input.placeholders,
+            constraints = Constraints.fixed(size.width, size.height))
+    }
+
+    fun testMeasuredTextStillRejectsWidthAndHeightClipping() {
+        show(dark = false, fontScale = 1.3f)
+        val result = layout(prompt, 16)
+        assertTrue("One-pixel width must overflow",
+            measuredTextLayout(result, IntSize(1, result.size.height)).hasVisualOverflow)
+        assertTrue("One-pixel height must overflow",
+            measuredTextLayout(result, IntSize(result.size.width, 1)).hasVisualOverflow)
     }
 
     private fun assertArchived(selected: Int) {

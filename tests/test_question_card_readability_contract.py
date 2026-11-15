@@ -77,6 +77,15 @@ class QuestionCardReadabilityContractTest(unittest.TestCase):
                       'if (!editable) return', 'Reply.SAVED || reply == Reply.SAVED_REFRESH_FAILED'):
             self.assertIn(token, text)
 
+    def test_text_measurement_keeps_real_bounds_and_rejects_clipping(self):
+        device = DEVICE.read_text()
+        for token in ('measuredTextLayout(raw)', 'assertEquals(raw.size, it.size)',
+                      'TextMeasurer(input.fontFamilyResolver, input.density, input.layoutDirection, cacheSize = 0)',
+                      'constraints = Constraints.fixed(size.width, size.height)',
+                      'IntSize(1, result.size.height)', 'IntSize(result.size.width, 1)',
+                      'it.hasVisualOverflow', 'it.getLineEnd(it.lineCount - 1, visibleEnd = true)'):
+            self.assertIn(token, device)
+
     def test_exact_cloud_scope_and_real_device_assertions_cover_new_behaviors(self):
         workflow = WORKFLOW.read_text()
         self.assertIn('message-actions, question-card]', workflow)

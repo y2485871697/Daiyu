@@ -17,6 +17,15 @@ MODULES = ('test_conversation_date_contract', 'test_conversation_date_smoke_scop
 
 
 class ConversationDateSmokeScopeTest(unittest.TestCase):
+    def test_exact_date_scope_has_its_own_pending_smoke_slot(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/build.yml").read_text()
+        condition = "inputs.mode == 'smoke' && inputs.smoke_classes == '" + CLASS + "' && '-conversation-date' || ''"
+        concurrency = workflow.split("concurrency:\n", 1)[1].split("\njobs:", 1)[0]
+        self.assertIn("group: daiyu-${{ inputs.mode }}-${{ github.ref }}", concurrency)
+        self.assertIn(condition, concurrency)
+        self.assertIn("cancel-in-progress: false", concurrency)
+        self.assertIn("'-search-history'", concurrency)
+
     def test_only_exact_smoke_scope_runs_storage_contracts_and_guards(self):
         command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=CLASS))
         self.assertEqual(CLASS, recorder.CONVERSATION_DATE_PLATFORM_CLASS)

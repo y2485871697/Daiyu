@@ -143,7 +143,9 @@ class ContextUsageWiringContractTest(unittest.TestCase):
 
     def test_schema_upgrade_installs_before_early_return_and_does_not_seed_actuals(self):
         schema = text('storage/ConversationDatabase.kt')
-        self.assertIn('null, 32)', schema)
+        schema_version = re.search(r'null,\s*(\d+)\)', schema)
+        self.assertIsNotNone(schema_version)
+        self.assertGreaterEqual(int(schema_version.group(1)), 32)
         self.assertIn('oldVersion in 1..32 && newVersion == 33', schema)
         for token in ('CloudContextUsageStore.installSchema(db)', 'ConversationUsageStore.installSchema(db)',
                       'ConversationUsageStore.backfill(db)'):

@@ -142,7 +142,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                 }
                 assertEquals(ComposerPhase.IDLE, state.composer.phase)
                 assertNull(state.composer.controlOwnerKey)
-                assertTrue((field("questionCards").get(activity) as Map<*, *>).isEmpty())
+                assertTrue(((field("questionCards\$delegate").get(activity) as State<*>).value as Map<*, *>).isEmpty())
             }
             receiptRelease.countDown()
             awaitReceipts()

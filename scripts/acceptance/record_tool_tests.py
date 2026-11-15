@@ -208,7 +208,7 @@ PANE_RECEIPT_PLATFORM_CLASSES = (
 )
 PANE_RECEIPT_MODULES = (
     "test_sidebar_selection_contract", "test_tool_receipt_snapshot_contract", "test_message_display_contract",
-    "test_tool_receipt_pause_contract", "test_pause_receipt_smoke_scope",
+    "test_tool_receipt_pause_contract", "test_pause_receipt_smoke_scope", "test_test_refresh_contract",
     "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
     "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
 )

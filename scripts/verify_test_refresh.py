@@ -30,8 +30,41 @@ VALIDATION_FILES = {
 VALIDATION_DIRS = ('tests/', 'app/src/test/', 'app/src/androidTest/', 'core-domain/src/test/')
 
 
-def validate_changes(changed):
+BUILD_WORKFLOW = '.github/workflows/build.yml'
+
+
+def validate_build_group_only(before, after):
+    def locate(data):
+        if not isinstance(data, bytes):
+            raise ValueError('Raw workflow bytes required')
+        lines = data.splitlines(keepends=True)
+        headers = [i for i, line in enumerate(lines) if re.match(rb'^\s*concurrency:', line)]
+        groups = [i for i, line in enumerate(lines) if re.match(rb'^\s*group:', line)]
+        cancels = [i for i, line in enumerate(lines) if re.match(rb'^\s*cancel-in-progress:', line)]
+        if len(headers) != 1 or len(groups) != 1 or len(cancels) != 1:
+            raise ValueError('Missing or ambiguous build concurrency')
+        h, g, c = headers[0], groups[0], cancels[0]
+        if (g != h + 1 or c != g + 1 or lines[h] != b'concurrency:\n' or
+                lines[c] != b'  cancel-in-progress: false\n' or
+                not re.fullmatch(rb'  group: daiyu-[^\r\n]+\n', lines[g])):
+            raise ValueError('Unsupported build concurrency layout')
+        return lines, g
+
+    old, i = locate(before)
+    new, j = locate(after)
+    suffix = new[j][len(old[i]) - 1:-1] if new[j].startswith(old[i][:-1]) else b''
+    if i != j or not re.fullmatch(rb'\$\{\{[^\r\n]+\}\}', suffix):
+        raise ValueError('Only an appended concurrency expression is allowed')
+    new[j] = old[i]
+    if old != new:
+        raise ValueError('Other build workflow inputs changed')
+
+
+def validate_changes(changed, *, build_pair=None):
     for name in changed:
+        if name == BUILD_WORKFLOW and build_pair is not None:
+            validate_build_group_only(*build_pair)
+            continue
         if (not isinstance(name, str) or '\\' in name or
                 any(part in ('', '.', '..') for part in name.split('/')) or
                 not (name in VALIDATION_FILES or name.startswith(VALIDATION_DIRS))):
@@ -67,7 +100,11 @@ def verify_origin(env, record, directory, record_path, local_apks=None):
     command('git', 'merge-base', '--is-ancestor', sha, env['GITHUB_SHA'])
     changed = command('git', 'diff', '--no-renames', '--name-only', '-z', sha, env['GITHUB_SHA']).split('\0')
     changed = [name for name in changed if name]
-    validate_changes(changed)
+    pair = None
+    if BUILD_WORKFLOW in changed:
+        pair = tuple(subprocess.check_output(['git', 'show', f'{tree}:{BUILD_WORKFLOW}'])
+                     for tree in (sha, env['GITHUB_SHA']))
+    validate_changes(changed, build_pair=pair)
     for tree in (sha, env['GITHUB_SHA']):
         for entry in command('git', 'ls-tree', '-r', '-z', tree, '--', *changed).split('\0') if changed else []:
             if entry and entry.split(' ', 1)[0] not in ('100644', '100755'):

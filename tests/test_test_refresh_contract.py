@@ -10,10 +10,62 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from verify_test_refresh import validate_changes, validate_graph, verify_archive
+from verify_test_refresh import validate_changes, validate_graph, verify_archive, validate_build_group_only, VALIDATION_FILES
 
 
 class TestRefreshContract(unittest.TestCase):
+    def build_group_fixture(self):
+        before = (b'name: build\nconcurrency:\n'
+                  b'  group: daiyu-${{ inputs.mode }}-${{ github.ref }}\n'
+                  b'  cancel-in-progress: false\njobs:\n  build:\n'
+                  b'    env: {SIGNING: fixed}\n    steps:\n      - run: ./gradlew :app:assembleRelease\n')
+        after = before.replace(b'${{ github.ref }}\n',
+                               b"${{ github.ref }}${{ inputs.mode == 'smoke' && '-conversation-date' || '' }}\n")
+        return before, after
+
+    def test_build_workflow_only_accepts_a_reviewed_queue_expression_append(self):
+        before, after = self.build_group_fixture()
+        validate_build_group_only(before, after)
+        validate_changes(['.github/workflows/build.yml'], build_pair=(before, after))
+        self.assertNotIn('.github/workflows/build.yml', VALIDATION_FILES)
+        with self.assertRaises(ValueError):
+            validate_changes(['.github/workflows/build.yml'])
+
+    def test_queue_exception_cannot_change_build_commands_signing_or_other_bytes(self):
+        before, after = self.build_group_fixture()
+        for damaged in (after.replace(b'assembleRelease', b'assembleDebug'),
+                        after.replace(b'SIGNING: fixed', b'SIGNING: other'),
+                        after.replace(b'cancel-in-progress: false', b'cancel-in-progress: true'),
+                        after.replace(b'name: build', b'name: changed'),
+                        after.replace(b'jobs:', b'# extra comment\njobs:'),
+                        after.replace(b'\n', b'\r\n'), after.rstrip(b'\n')):
+            with self.subTest(damaged=damaged), self.assertRaises(ValueError):
+                validate_build_group_only(before, damaged)
+
+    def test_queue_exception_rejects_missing_or_ambiguous_group_sections(self):
+        before, after = self.build_group_fixture()
+        for text in (before, after):
+            lines = text.splitlines(keepends=True)
+            group = next(line for line in lines if line.startswith(b'  group: '))
+            for damaged in (text.replace(group, b''), text.replace(group, group + group),
+                            text.replace(b'concurrency:\n', b'concurrency:\nconcurrency:\n'),
+                            text.replace(b'concurrency:\n', b'')):
+                for pair in ((damaged, after), (before, damaged)):
+                    with self.subTest(pair=pair), self.assertRaises(ValueError):
+                        validate_build_group_only(*pair)
+        for damaged in (after.replace(b'daiyu-', b'other-'), before,
+                        after.replace(b" && '-conversation-date' || '' }}", b' invalid-suffix')):
+            with self.subTest(damaged=damaged), self.assertRaises(ValueError):
+                validate_build_group_only(before, damaged)
+
+    def test_valid_queue_exception_never_allows_other_application_inputs(self):
+        before, after = self.build_group_fixture()
+        for forbidden in ('app/src/main/Example.kt', 'app/build.gradle.kts', 'settings.gradle.kts',
+                          'signing.properties', '.github/workflows/unknown.yml'):
+            for names in (['.github/workflows/build.yml', forbidden], [forbidden, '.github/workflows/build.yml']):
+                with self.subTest(names=names), self.assertRaises(ValueError):
+                    validate_changes(names, build_pair=(before, after))
+
     def test_only_reviewed_validation_paths_are_allowed(self):
         validate_changes(['app/src/androidTest/kotlin/app/daiyu/android/ConversationPaneSwitchActivityTest.kt',
                           'app/src/test/kotlin/ExampleTest.kt', 'tests/example.py',

@@ -27,7 +27,7 @@ class ImeFrameContractTest(unittest.TestCase):
 
     def test_composer_reads_geometry_with_insets_and_independent_keyboard_edge(self):
         text = (TEST / 'ChatComposerImeActivityTest.kt').read_text()
-        sample = text.split('return awaitStableWindowFrame(view) {', 1)[1].split('private fun assertRealApi26ImeBinding', 1)[0]
+        sample = text.split('return awaitStableWindowFrame(view) {', 1)[1].split('    @OptIn(', 1)[0]
         for fragment in ['ViewCompat.getRootWindowInsets(view)', 'decor.getLocationOnScreen(location)',
                          'bottom(surface), bottom(header)', 'checkNotNull(before).decorBottom - imeBottom',
                          'imeBottom > 0', 'imeBottom == 0']:

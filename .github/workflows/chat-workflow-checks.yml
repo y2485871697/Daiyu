@@ -254,7 +254,7 @@ jobs:
                           'MarkdownPreparationCompositionTest', 'MarkdownRevealTest', 'ChatTurnMapperTest',
                           'ChatInitialPositionPolicyTest', 'ContextTimelineColdStartTest', 'AssistantWorkflowCompositionTest',
                           'SQLiteTextTest', 'SQLiteTextChunksTest', 'ConversationPreviewTest', 'MessageDisplayStoreTest',
-                          'StreamingHistoryRefreshTest'}
+                          'StreamingHistoryRefreshTest', 'ToolReceiptSourceTest', 'ToolActivityUiTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'task-scroll':
               expected = {'MarkdownRevealTest', 'MarkdownRevealInvalidationTest', 'MarkdownRevealHapticsTest',
                           'AssistantWorkflowCompositionTest', 'WorkflowNarrationCompositionTest', 'ReasoningStreamCompositionTest'}

@@ -506,6 +506,18 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
     fun testWholePageKeepsCommittedVisitUntilLatestCandidateIsReady() {
         val conversations = prepareConversations()
         val (first, second, third) = conversations
+        mainThread {
+            conversations.forEachIndexed { index, conversation ->
+                val user = Message(MessageId("atomic-user-$index"), conversation.id, RunId("atomic-run-$index"),
+                    Message.USER_ROLE, listOf(MessageBlock.Text("q", "atomic question $index")), RunStatus.COMPLETED)
+                val answer = user.copy(id = MessageId("atomic-answer-$index"), role = Message.ASSISTANT_ROLE,
+                    status = RunStatus.RUNNING, blocks = listOf(MessageBlock.Text("a",
+                        "# Atomic page $index\n\nDistinct formatted body.\n\n| left | right |\n|---|---|\n| $index | ready |")))
+                fixture.database.send(user, answer)
+                fixture.database.save(answer.copy(status = RunStatus.COMPLETED))
+            }
+            activity.select(first)
+        }
         val blocked = androidx.compose.runtime.mutableStateMapOf(second.id.value to true)
         data class Draw(val owner: Any?, val root: Any, val visit: Any)
         val draws = java.util.concurrent.CopyOnWriteArrayList<Draw>()

@@ -16,8 +16,8 @@ class MessageConfirmationContractTest(unittest.TestCase):
 
     def test_both_callers_use_only_confirm_cancel_and_local_close_opt_out(self):
         for start, end, title, action, argument in (
-            ("onDeleteTurn = { id ->", "}, onRetryStep =", "删除这条消息及后面的内容？", "onDeleteTurn", "firstSourceKey"),
-            ("onRegenerate = { id ->", "}, onSpeak =", "重新生成将删除此回复及后面的消息", "onRegenerate", "id"),
+            ("onDeleteTurn = delete@{ id ->", "}, onRetryStep =", "删除这条消息及后面的内容？", "onDeleteTurn", "firstSourceKey"),
+            ("onRegenerate = regenerate@{ id ->", "}, onSpeak =", "重新生成将删除此回复及后面的消息", "onRegenerate", "id"),
         ):
             with self.subTest(action=action):
                 caller = self.callback(start, end)
@@ -35,7 +35,7 @@ class MessageConfirmationContractTest(unittest.TestCase):
                     self.assertNotIn(forbidden, caller)
 
     def test_regeneration_condition_and_immediate_branch_are_unchanged(self):
-        caller = self.callback("onRegenerate = { id ->", "}, onSpeak =")
+        caller = self.callback("onRegenerate = regenerate@{ id ->", "}, onSpeak =")
         for token in ("actionSnapshot?.renderedTargets?.get(id) ?: actionSnapshot?.targets?.get(id)",
                       "val index = chatState.turns.indexOfFirst { it.matchesKey(id) }", "target != null && index >= 0",
                       "chatState.turns.drop(index + 1).any { it is ChatTurnUi.User }",

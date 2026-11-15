@@ -39,7 +39,7 @@ class MessageActionScrollContract(unittest.TestCase):
                       'data != controller.dataRevision', 'owner != loadedHistoryOwner(id)'):
             self.assertIn(guard, refresh)
         consume = refresh.index('if (reloadTail) refreshHistoryTailConversation = null')
-        self.assertLess(refresh.index('if (rows == null)'), consume)
+        self.assertLess(refresh.index('if (prepared == null)'), consume)
         self.assertLess(refresh.index('content != chatState.contentRevision'), consume)
         self.assertNotIn('jumpToBottom()', refresh)
         reader = self.source.split('private fun readAcceptedWindow(', 1)[1].split('private fun applyAcceptedHistory', 1)[0]

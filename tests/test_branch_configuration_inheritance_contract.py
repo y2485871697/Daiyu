@@ -26,7 +26,7 @@ class BranchConfigurationInheritanceContractTest(unittest.TestCase):
     def test_child_config_uses_a_source_snapshot_and_never_copies_tasks(self):
         source = (SRC / 'ChatController.kt').read_text().split('internal fun messageAction(action:', 1)[1].split('internal fun skillManagement()', 1)[0]
         capture = source.index('childPreferences.export(SubAgentConfigKey.Conversation(target.conversationId.value))')
-        self.assertLess(capture, source.index('messageActionStore.branch(target)'))
+        self.assertLess(capture, source.index('(if (stableBranch) runningBranchStore else messageActionStore).branch(target)'))
         self.assertIn('childPreferences.importOwner(SubAgentConfigKey.Conversation(id.value), checkNotNull(branchChildren))', source)
         self.assertIn('retainBranchConfiguration(copy.id)', source)
         self.assertIn('retainBranchConfiguration(failure.locator.conversationId)', source)

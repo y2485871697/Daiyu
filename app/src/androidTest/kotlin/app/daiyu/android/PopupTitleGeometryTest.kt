@@ -155,8 +155,8 @@ class PopupTitleGeometryTest : WiredActivityTestCase() {
     }
 
     fun testVoiceRemovalHeadingIsCenteredWithoutExtraDividerGap() {
-        show("voice-local-removal-sheet") { VoiceLocalRemovalSheet({}, {}) }
-        assertCentered("确认本次操作", "voice-local-removal-sheet")
+        show("delete-confirm-dialog") { VoiceLocalRemovalSheet({}, {}) }
+        assertCentered("移除这个音色？", "delete-confirm-dialog")
     }
 
     fun testSubAgentStatusHeadingIsCentered() {

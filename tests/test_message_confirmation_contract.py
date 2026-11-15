@@ -21,12 +21,17 @@ class MessageConfirmationContractTest(unittest.TestCase):
         ):
             with self.subTest(action=action):
                 caller = self.callback(start, end)
-                self.assertIn(f'ConfirmPrompt("{title}", "", "确定",', caller)
+                label = '删除' if action == 'onDeleteTurn' else '确定'
+                self.assertIn(f'ConfirmPrompt("{title}", "", "{label}",', caller)
                 self.assertIn(f"action = {{ messageCallbacks.{action}({argument}) }}", caller)
                 if action == "onDeleteTurn":
                     self.assertIn("val firstSourceKey = chatState.turns.firstOrNull { it.matchesKey(id) }?.listKey ?: id", caller)
-                self.assertIn("showCloseButton = false, secondaryCancel = true", caller)
-                for forbidden in ("ChoicePrompt(", "listOf(", "destructive = true", "deletionAppearance"):
+                if action == "onDeleteTurn":
+                    self.assertIn("showCloseButton = false, deletionAppearance = true", caller)
+                else:
+                    self.assertIn("showCloseButton = false, secondaryCancel = true", caller)
+                    self.assertNotIn("deletionAppearance", caller)
+                for forbidden in ("ChoicePrompt(", "listOf(", "destructive = true"):
                     self.assertNotIn(forbidden, caller)
 
     def test_regeneration_condition_and_immediate_branch_are_unchanged(self):

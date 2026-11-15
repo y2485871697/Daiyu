@@ -41,10 +41,12 @@ class PopupTitleContractTest(unittest.TestCase):
             self.assertIn("TextAlign.Center", "\n".join(text))
 
     def test_custom_workspace_skill_and_mcp_headers_cannot_bypass_centering(self):
-        paths = ("VoiceLocalRemovalSheet.kt", "ui/components/ConversationWorkspaceSheet.kt",
+        paths = ("ui/components/ConversationWorkspaceSheet.kt",
                  "ui/screens/settings/SkillManagementScreen.kt", "ui/screens/settings/McpSettingsScreen.kt")
         for path in paths:
             self.assertIn("TextAlign.Center", (SRC / path).read_text(), path)
+        self.assertIn("DaiyuDeleteConfirmDialog(", (SRC / "VoiceLocalRemovalSheet.kt").read_text())
+        self.assertIn("TextAlign.Center", (SRC / "ui/components/DaiyuDeleteConfirmDialog.kt").read_text())
         skills = (SRC / "ui/screens/settings/SkillManagementScreen.kt").read_text()
         self.assertIn("Text(entry.skill.name, modifier = Modifier.fillMaxWidth(), textAlign =", skills)
         self.assertIn("Text(title, modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp)", skills)

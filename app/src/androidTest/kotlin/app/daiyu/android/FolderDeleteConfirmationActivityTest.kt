@@ -37,8 +37,8 @@ class FolderDeleteConfirmationActivityTest : WiredActivityTestCase() {
                 }
             }
         } }
-        awaitUniqueTag("chat-selection-sheet")
-        awaitNodeWindowFocus(node("chat-selection-sheet"))
+        awaitUniqueTag("delete-confirm-dialog")
+        awaitNodeWindowFocus(node("delete-confirm-dialog"))
         ui.waitForIdle()
     }
 
@@ -51,28 +51,32 @@ class FolderDeleteConfirmationActivityTest : WiredActivityTestCase() {
             mount(dark, fontScale)
             ui.onAllNodesWithContentDescription("关闭").assertCountEquals(0)
             val title = ui.onNodeWithText(titleText).fetchSemanticsNode().boundsInRoot
-            val message = bounds("folder-delete-message")
+            val icon = bounds("delete-confirm-icon")
             val cancel = bounds("dialog-cancel")
             val confirm = bounds("dialog-confirm")
-            val sheet = bounds("chat-selection-sheet")
-            node("folder-delete-message").assertIsDisplayed()
+            val sheet = bounds("delete-confirm-dialog")
+            val viewport = bounds("preview-dialog-viewport")
+            node("folder-delete-message").assertDoesNotExist()
+            ui.onNodeWithText(instrumentation.targetContext.getString(R.string.drawer_delete_folder_message)).assertDoesNotExist()
             node("dialog-cancel").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
             node("dialog-confirm").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
-            assertEquals(title.left, message.left, 1f)
-            assertEquals(12f * sheetDensity, message.top - title.bottom, 2f)
-            assertEquals(20f * sheetDensity, cancel.top - message.bottom, 2f)
+            assertEquals(sheet.center.x, title.center.x, 1f)
+            assertEquals(21f * sheetDensity, title.top - icon.bottom, 2f)
+            assertEquals(27f * sheetDensity, cancel.top - title.bottom, 2f)
             assertEquals(cancel.top, confirm.top, 1f)
             assertEquals(cancel.width, confirm.width, 1f)
-            assertTrue("no overlap or excessive space below buttons", sheet.bottom - cancel.bottom in
-                0f..(17f * sheetDensity + 1f))
-            assertTrue("height follows text, not a fixed workspace", sheet.height <=
-                title.height + message.height + maxOf(cancel.height, confirm.height) + 80f * sheetDensity)
+            assertEquals(23f * sheetDensity, sheet.bottom - maxOf(cancel.bottom, confirm.bottom), 2f)
+            assertEquals(viewport.center.x, sheet.center.x, 2f)
+            assertTrue("dialog is vertically centered inside safe drawing area",
+                kotlin.math.abs(viewport.center.y - sheet.center.y) <= 32f * sheetDensity)
+            assertTrue("height follows icon, title and actions", sheet.height <=
+                icon.height + title.height + maxOf(cancel.height, confirm.height) + 105f * sheetDensity)
             val layouts = mutableListOf<TextLayoutResult>()
-            node("folder-delete-message").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+            node("delete-confirm-title").performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
             assertEquals(1, layouts.size)
-            assertEquals(15.sp, layouts.single().layoutInput.style.fontSize)
-            assertEquals(23.sp, layouts.single().layoutInput.style.lineHeight)
-            assertEquals(TextAlign.Start, layouts.single().layoutInput.style.textAlign)
+            assertEquals(20.sp, layouts.single().layoutInput.style.fontSize)
+            assertEquals(28.sp, layouts.single().layoutInput.style.lineHeight)
+            assertEquals(TextAlign.Center, layouts.single().layoutInput.style.textAlign)
         }
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
@@ -92,7 +96,7 @@ class FolderDeleteConfirmationActivityTest : WiredActivityTestCase() {
             }
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeByFrame()
-                ui.onAllNodesWithTag("chat-selection-sheet").fetchSemanticsNodes().isEmpty()
+                ui.onAllNodesWithTag("delete-confirm-dialog").fetchSemanticsNodes().isEmpty()
             }
             assertEquals(if (action == "confirm") 1 else 0, confirmations.get())
         }

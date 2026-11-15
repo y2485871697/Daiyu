@@ -84,7 +84,7 @@ internal fun rememberSettingsDiagnostics(store: DiagnosticLogStore?, isCurrent: 
             finally { busy = false }
         }
     }
-    if (confirming) DaiyuConfirmDialog(title = "清除诊断日志", confirmText = "清除", destructive = true,
+    if (confirming) DaiyuConfirmDialog(title = "清除诊断日志？", confirmText = "清除", destructive = true, deletionAppearance = true,
         message = "仅清除本机诊断日志，不删除聊天、通知、终端输出或执行防重记录；已导出的文件不受影响。" +
             if (state.unavailable) "日志不可用，清除后记录开关重置为关闭。" else "记录开关保持不变。",
         onDismiss = { confirming = false }, onConfirm = {

@@ -13,14 +13,15 @@ class AssistantPickerFrameContractTest(unittest.TestCase):
         picker = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/assistants/AssistantPickerDialogs.kt').read_text()
         body = picker.split('internal fun AssistantDeleteDialog(', 1)[1].split('\n@Composable', 1)[0]
         self.assertNotIn('assistant_delete_body', body)
-        self.assertIn('showCloseButton = false', body)
-        for token in ('assistant_delete_title', 'AssistantDialogIdentity(profile, assets)',
-                      'onDismiss = onDismiss', 'onBack = onDismiss', 'onOutsideDismiss = onOutsideDismiss',
-                      'R.string.action_cancel', 'R.string.action_delete', 'onConfirm', 'enabled = canDelete'):
+        self.assertIn('DaiyuDeleteConfirmDialog(', body)
+        self.assertNotIn('AssistantDialogIdentity(profile, assets)', body)
+        for token in ('assistant_delete_title',
+                      'onDismiss = onDismiss', 'onOutsideDismiss = onOutsideDismiss',
+                      'onConfirm = onConfirm', 'confirmEnabled = canDelete'):
             self.assertIn(token, body)
         visual = SOURCE.read_text().split('fun testDeleteSheetOmitsPromptAndCloseButKeepsCancelBackAndConfirm()', 1)[1].split('fun testSearchStillFilters', 1)[0]
         for token in ('assistant_delete_body', 'assertDoesNotExist()', 'onNodeWithContentDescription("关闭")',
-                      'R.string.action_cancel', 'onNodeWithContentDescription("返回").performClick()',
+                      'R.string.action_cancel', 'KeyEvent.KEYCODE_BACK',
                       'R.string.action_delete', 'assertNull(deleted)', 'assertEquals("visual-a", deleted)'):
             self.assertIn(token, visual)
 

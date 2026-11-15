@@ -305,13 +305,15 @@ internal fun SkillManagementScreen(
     }
     controller.removal?.let { removal ->
         val cancel: () -> Unit = { if (controller.removal === removal) controller.cancelRemoval() }
-        SkillConfirmationSheet("删除技能", cancel, "删除", "skills-confirm-remove",
-            deletionAppearance = true,
-            confirmEnabled = !controller.busy, cancelEnabled = !controller.busy,
+        app.daiyu.android.ui.components.DaiyuDeleteConfirmDialog(
+            title = "删除这个技能？",
+            confirmEnabled = !controller.busy,
+            cancelEnabled = !controller.busy,
+            onDismiss = cancel,
             onConfirm = { controller.remove(removal) },
-            cancelModifier = Modifier.semantics { this[RetainedSkillRemovalCancel] = cancel }) {
-            Text("删除 ${removal.entry.skill.name}？当前运行保留已冻结的正文，新运行不再加载该技能。")
-        }
+            confirmModifier = Modifier.testTag("skills-confirm-remove"),
+            cancelModifier = Modifier.semantics { this[RetainedSkillRemovalCancel] = cancel },
+        )
     }
 
 }

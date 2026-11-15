@@ -17,7 +17,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.daiyu.android.ui.haptics.clickable
 import app.daiyu.android.ui.icons.DaiyuIcons
-import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
 import app.daiyu.android.ui.screens.chat.conversation.ChatSelectionSheet
 import app.daiyu.android.workspace.WorkspaceEntryPolicy
 import top.yukonga.miuix.kmp.basic.Text
@@ -36,18 +35,12 @@ internal fun WorkspaceEntryDialogs(name: String, directory: Boolean, enabled: ()
                 if (runCatching { WorkspaceEntryPolicy.requireName(value) }.isFailure) invalidName = true
                 else { stage = "submitted"; onRename(value) }
             }, onDismiss = onDismiss, enabled = enabled)
-        "delete" -> ChatSelectionSheet(
-            title = "删除${if (directory) "文件夹" else "文件"}",
+        "delete" -> DaiyuDeleteConfirmDialog(
+            title = if (directory) "删除这个文件夹？" else "删除这个文件？",
             onDismiss = { if (enabled()) onDismiss() },
-            showCloseButton = false,
-            footer = {
-                AssistantPreviewButton("取消", { if (enabled()) onDismiss() },
-                    Modifier.weight(1f).testTag("dialog-cancel"))
-                AssistantPreviewButton("删除", { if (enabled()) { stage = "submitted"; onDelete() } },
-                    Modifier.weight(1f).testTag("dialog-confirm"), primary = false,
-                    danger = true, deletionAppearance = true)
-            },
-        ) {}
+            confirmEnabled = enabled(),
+            onConfirm = { if (enabled()) { stage = "submitted"; onDelete() } },
+        )
         "actions" -> ChatSelectionSheet(name, onDismiss = onDismiss, showCloseButton = false, titleFontSize = 20.sp) {
             val finishSelection = rememberBottomSheetAction()
             Column(Modifier.fillMaxWidth().heightIn(max = 440.dp).verticalScroll(rememberScrollState())

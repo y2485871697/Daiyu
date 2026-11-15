@@ -273,12 +273,12 @@ internal fun <T> LocalCatalogModelsScreen(
             }, onDismiss = { if (editing === selection) editing = null })
     }
     deleting?.let { selection ->
-        DaiyuConfirmDialog("删除本地模型", "删除 ${selection.record.displayName} 的本地记录，不会删除远端模型；空闲会话立即清理，执行中的绑定在本次任务结束后清理。", "删除", true, deletionAppearance = true,
+        DaiyuConfirmDialog("删除这个本地模型？", "删除 ${selection.record.displayName} 的本地记录，不会删除远端模型；空闲会话立即清理，执行中的绑定在本次任务结束后清理。", "删除", true, deletionAppearance = true,
             onConfirm = { if (deleting === selection && current() && matches(selection)) submit(selection, null) },
             onDismiss = { if (deleting === selection) deleting = null })
     }
     deletingSelected?.let { selections ->
-        DaiyuConfirmDialog("删除本地模型", "确定删除选中的 ${selections.size} 个本地模型？不会删除远端模型；空闲会话立即清理，执行中的绑定在本次任务结束后清理。", "删除", true,
+        DaiyuConfirmDialog("删除选中的 ${selections.size} 个本地模型？", "确定删除选中的 ${selections.size} 个本地模型？不会删除远端模型；空闲会话立即清理，执行中的绑定在本次任务结束后清理。", "删除", true,
             deletionAppearance = true, onConfirm = { submitSelected(selections) },
             onDismiss = { if (deletingSelected === selections) deletingSelected = null })
     }

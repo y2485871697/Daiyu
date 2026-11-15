@@ -23,12 +23,12 @@
   <string name="drawer_folder_name">資料夾名稱</string>
   <string name="drawer_create_folder_title">新建資料夾</string>
   <string name="drawer_rename_folder_title">重新命名資料夾</string>
-  <string name="drawer_delete_folder_title">刪除資料夾？</string>
+  <string name="drawer_delete_folder_title">刪除這個資料夾？</string>
   <string name="drawer_delete_folder_message">資料夾中的對話會移回「聊天」，資料夾將被刪除。</string>
   <string name="drawer_move_to_folder">移動到資料夾</string>
   <string name="history_page_title">管理聊天</string>
   <string name="history_page_delete_all">全部刪除</string>
-  <string name="history_page_delete_all_title">刪除全部對話？</string>
+  <string name="history_page_delete_all_title">刪除全部會話？</string>
   <string name="history_page_delete_all_message">所有對話及其中的訊息將被永久刪除。</string>
   <string name="history_page_empty">尚無對話</string>
   <string name="conversation_pin">置頂</string>

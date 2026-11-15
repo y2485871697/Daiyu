@@ -15,6 +15,39 @@ import subprocess
 import sys
 
 
+DELETE_CONFIRM_PLATFORM_CLASSES = tuple("app.daiyu.android." + name for name in (
+    'DeleteConfirmDialogActivityTest',
+    'FolderDeleteConfirmationActivityTest',
+    'VoiceLocalRemovalSheetActivityTest',
+    'ConversationBatchDeleteActivityTest',
+    'WorkspaceEntryActionsActivityTest',
+    'DeletionButtonAppearanceTest',
+    'ConversationPaneManagementActivityTest',
+    'SharedSheetSpacingActivityTest',
+    'MessageConfirmationActivityTest',
+    'ProviderDirectorySelectionActivityTest',
+    'AssistantPickerVisualTest',
+))
+DELETE_CONFIRM_MODULES = (
+    'test_delete_confirm_dialog_contract',
+    'test_folder_delete_confirmation_contract',
+    'test_voice_local_removal_sheet_contract',
+    'test_deletion_vivid_red_contract',
+    'test_conversation_batch_delete_contract',
+    'test_conversation_delete_close_contract',
+    'test_shared_sheet_spacing_contract',
+    'test_message_confirmation_contract',
+    'test_assistant_picker_frame_contract',
+    'test_popup_title_contract',
+    'test_workspace_entry_mutations_contract',
+    'test_deleted_model_session_contract',
+    'test_model_bulk_selection_contract',
+    'test_record_tool_tests_scope',
+    'test_acceptance_tool_receipt',
+    'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope',
+)
+
+
 BATCH_DELETE_PLATFORM_CLASSES = (
     "app.daiyu.android.ConversationBatchDeleteActivityTest",
     "app.daiyu.android.SharedSheetSpacingActivityTest",
@@ -516,6 +549,9 @@ IME_MODULES = (
 
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(DELETE_CONFIRM_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *DELETE_CONFIRM_MODULES, "-v"], "delete-confirm-targeted"
     if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == USAGE_STATS_PLATFORM_CLASS:
         return [python, "-B", "-m", "unittest", *USAGE_STATS_MODULES, "-v"], "usage-statistics-targeted"
     if (env.get("SMOKE_MODE") == "smoke"

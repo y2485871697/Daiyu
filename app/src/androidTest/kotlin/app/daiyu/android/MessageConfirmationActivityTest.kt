@@ -53,16 +53,18 @@ class MessageConfirmationActivityTest : WiredActivityTestCase() {
             if (regenerate) retainedControls(activity).onRegenerate(messages[1].id.value)
             else retainedControls(activity).onDeleteTurn(messages[2].id.value)
         }
-        awaitUniqueTag("chat-selection-sheet")
-        awaitNodeWindowFocus(node("chat-selection-sheet"))
+        val surface = if (regenerate) "chat-selection-sheet" else "delete-confirm-dialog"
+        awaitUniqueTag(surface)
+        awaitNodeWindowFocus(node(surface))
         ui.onNodeWithText(if (regenerate) "重新生成将删除此回复及后面的消息" else "删除这条消息及后面的内容？")
             .assertIsDisplayed()
-        assertActions()
+        assertActions(if (regenerate) "确定" else "删除",
+            if (regenerate) "取消" else instrumentation.targetContext.getString(R.string.action_cancel))
     }
 
-    private fun assertActions() {
-        ui.onAllNodesWithText("取消").assertCountEquals(1)
-        ui.onAllNodesWithText("确定").assertCountEquals(1)
+    private fun assertActions(confirmText: String = "确定", cancelText: String = "取消") {
+        ui.onAllNodesWithText(cancelText).assertCountEquals(1)
+        ui.onAllNodesWithText(confirmText).assertCountEquals(1)
         ui.onAllNodesWithContentDescription("关闭").assertCountEquals(0)
         ui.onAllNodesWithTag("prompt-choice:0").assertCountEquals(0)
         ui.onAllNodesWithTag("prompt-choice:1").assertCountEquals(0)
@@ -78,7 +80,7 @@ class MessageConfirmationActivityTest : WiredActivityTestCase() {
     private fun awaitClosed() {
         ui.waitUntil(5_000) {
             ui.mainClock.advanceTimeByFrame()
-            ui.onAllNodesWithTag("chat-selection-sheet").fetchSemanticsNodes().isEmpty()
+            ui.onAllNodesWithTag("dialog-confirm").fetchSemanticsNodes().isEmpty()
         }
     }
 

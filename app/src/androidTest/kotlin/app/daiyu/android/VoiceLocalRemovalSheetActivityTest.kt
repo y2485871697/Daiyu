@@ -15,7 +15,6 @@ import androidx.compose.ui.unit.dp
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
-import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 import java.util.concurrent.atomic.AtomicInteger
 
 class VoiceLocalRemovalSheetActivityTest : WiredActivityTestCase() {
@@ -32,7 +31,7 @@ class VoiceLocalRemovalSheetActivityTest : WiredActivityTestCase() {
                     applyInterfaceScale = false) {
                     val local = LocalDensity.current
                     density = local.density
-                    expectedPrimary = assistantPreviewPalette().primary
+                    expectedPrimary = Color(if (dark) 0xFFCB6B70 else 0xFFBB5358)
                     CompositionLocalProvider(LocalDensity provides Density(local.density, fontScale)) {
                         var open by remember { mutableStateOf(true) }
                         if (open) VoiceLocalRemovalSheet(
@@ -42,15 +41,15 @@ class VoiceLocalRemovalSheetActivityTest : WiredActivityTestCase() {
                 }
             }
         } }
-        awaitUniqueTag("voice-local-removal-sheet")
-        awaitNodeWindowFocus(node("voice-local-removal-sheet"))
+        awaitUniqueTag("delete-confirm-dialog")
+        awaitNodeWindowFocus(node("delete-confirm-dialog"))
         ui.waitForIdle()
     }
 
     private fun awaitClosed() {
         ui.waitUntil(5_000) {
             ui.mainClock.advanceTimeByFrame()
-            ui.onAllNodesWithTag("voice-local-removal-sheet").fetchSemanticsNodes().isEmpty()
+            ui.onAllNodesWithTag("delete-confirm-dialog").fetchSemanticsNodes().isEmpty()
         }
     }
 
@@ -58,7 +57,7 @@ class VoiceLocalRemovalSheetActivityTest : WiredActivityTestCase() {
         val before = fixture.database.exportBackup()
         for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) {
             mount(dark, fontScale)
-            val sheet = node("voice-local-removal-sheet").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            val sheet = node("delete-confirm-dialog").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
             val viewport = node("preview-dialog-viewport").fetchSemanticsNode().boundsInRoot
             assertTrue("confirmation wraps its content", sheet.height < viewport.height * .6f)
             val cancel = node("dialog-cancel").assertIsDisplayed().assertHeightIsAtLeast(48.dp)
@@ -70,8 +69,10 @@ class VoiceLocalRemovalSheetActivityTest : WiredActivityTestCase() {
             assertEquals(cancel.width, confirm.width, 1f)
             assertEquals(cancel.height, confirm.height, 1f)
             assertTrue(cancel.right < confirm.left)
-            val title = ui.onNodeWithText("确认本次操作").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-            assertEquals("title aligns with the left action", cancel.left, title.left, 1f)
+            val title = ui.onNodeWithText("移除这个音色？").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+            assertEquals("title is centered on the glass card", sheet.center.x, title.center.x, 1f)
+            assertEquals(viewport.center.x, sheet.center.x, 2f)
+            assertTrue(kotlin.math.abs(viewport.center.y - sheet.center.y) <= 32f * density)
             ui.onNodeWithText("仅移除本机记录，不删除云端音色或任务，不退款、不释放名额").assertDoesNotExist()
             ui.onAllNodesWithContentDescription("关闭").assertCountEquals(0)
             val beforeConfirm = confirmed.get()
@@ -84,7 +85,7 @@ class VoiceLocalRemovalSheetActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testPrimaryUsesTheSameAccentAsTheCollaborationDoneButton() {
+    fun testRemovalUsesSoftRedInBothThemes() {
         for (dark in listOf(false, true)) {
             mount(dark)
             val pixels = node("dialog-confirm").captureToImage().toPixelMap()

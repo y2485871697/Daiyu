@@ -1,5 +1,7 @@
 package app.daiyu.android
 
+import android.view.KeyEvent
+
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -243,20 +245,20 @@ class AssistantPickerVisualTest : WiredActivityTestCase() {
             ui.onNodeWithTag("assistant-item-visual-a").performTouchInput { longClick() }
             awaitDialogEnter(ui.onNodeWithTag("assistant-action-delete"))
             ui.onNodeWithTag("assistant-action-delete").performClick()
-            awaitDialogEnter(ui.onNodeWithText(text(R.string.assistant_delete_title)))
+            awaitNodeTouchReady(ui.onNodeWithText(text(R.string.assistant_delete_title)))
         }
         openDelete()
         ui.onNodeWithText(text(R.string.assistant_delete_body, "Visual A")).assertDoesNotExist()
         ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
-        ui.onNodeWithText("Visual A").assertIsDisplayed()
-        ui.onNodeWithText("First description").assertIsDisplayed()
-        ui.onNodeWithContentDescription("返回").assertHasClickAction()
+        ui.onNode(hasText("Visual A") and hasAnyAncestor(hasTestTag("delete-confirm-dialog"))).assertDoesNotExist()
+        ui.onNode(hasText("First description") and hasAnyAncestor(hasTestTag("delete-confirm-dialog"))).assertDoesNotExist()
+        ui.onNodeWithContentDescription("返回").assertDoesNotExist()
         ui.onNodeWithText(text(R.string.action_delete)).assertIsEnabled().assertHasClickAction()
         ui.onNodeWithText(text(R.string.action_cancel)).performClick()
         awaitDialogEnter(ui.onNodeWithTag("assistant-item-visual-a"))
         assertNull(deleted)
         openDelete()
-        ui.onNodeWithContentDescription("返回").performClick()
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         awaitDialogEnter(ui.onNodeWithTag("assistant-item-visual-a"))
         assertNull(deleted)
         openDelete()

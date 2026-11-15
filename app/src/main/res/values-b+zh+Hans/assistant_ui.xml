@@ -12,7 +12,7 @@
   <string name="assistant_search">搜索助手</string>
   <string name="assistant_current">当前</string>
   <string name="assistant_empty">没有匹配的助手</string>
-  <string name="assistant_delete_title">删除助手</string>
+  <string name="assistant_delete_title">删除这个助手？</string>
   <string name="assistant_delete_body">确定删除 %1$s？此操作无法撤销。</string>
   <string name="assistant_preview">预览</string>
   <string name="assistant_identity">身份</string>

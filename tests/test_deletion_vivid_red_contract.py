@@ -27,9 +27,8 @@ class DeletionOriginalRedContractTest(unittest.TestCase):
         self.assertIn('val deletion = deletionAppearance && !actionRow', preview)
 
     def test_all_filled_delete_entry_points_stop_borrowing_general_error_containers(self):
-        for path in ('ui/SubAgentSettingsScreen.kt', 'ui/components/SubAgentProfileConfigDialog.kt',
-                     'ui/screens/settings/ProviderInlineEditors.kt', 'ui/screens/settings/SkillManagementScreen.kt',
-                     'ui/screens/chat/ManageChatsScreen.kt'):
+        for path in ('ui/components/SubAgentProfileConfigDialog.kt',
+                     'ui/screens/settings/ProviderInlineEditors.kt', 'ui/screens/settings/SkillManagementScreen.kt'):
             text = source(path)
             self.assertIn('destructiveColors().container', text, path)
             self.assertIn('destructiveColors().content', text, path)
@@ -38,7 +37,9 @@ class DeletionOriginalRedContractTest(unittest.TestCase):
         for path in ('ui/screens/settings/ModelSettingsScreen.kt', 'ui/screens/settings/CatalogModelEditorDialog.kt',
                      'ui/screens/settings/ProviderDirectoryPage.kt', 'ui/screens/settings/LocalCatalogModelsScreen.kt'):
             self.assertIn('deletionButtonColors()', source(path), path)
-        self.assertIn('deletionAppearance = true', source('ui/components/FolderDeleteConfirmation.kt'))
+        for path in ('ui/SubAgentSettingsScreen.kt', 'ui/screens/chat/ManageChatsScreen.kt',
+                     'ui/components/FolderDeleteConfirmation.kt'):
+            self.assertIn('DaiyuDeleteConfirmDialog(', source(path), path)
 
     def test_workspace_selection_delete_uses_red_without_recoloring_errors(self):
         text = source('ui/components/ConversationWorkspaceSheet.kt')
@@ -72,7 +73,7 @@ class DeletionOriginalRedContractTest(unittest.TestCase):
         self.assertIn('AssistantPreviewButton(', shared)
         selected = (android / 'ProviderDirectorySelectionActivityTest.kt').read_text()
         self.assertIn('assertOriginalRed("provider-delete-selected")', selected)
-        self.assertIn('assertOriginalRed("dialog-confirm")', selected)
+        self.assertIn('assertOriginalRed("dialog-confirm", Color(0xFFBB5358))', selected)
         self.assertIn('assertEquals(before, fixture.controller.providers.snapshot())', selected)
 
 if __name__ == '__main__': unittest.main()

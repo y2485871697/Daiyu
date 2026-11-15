@@ -49,23 +49,23 @@ class SharedSheetSpacingActivityTest : WiredActivityTestCase() {
 
     private fun bounds(tag: String) = node(tag).fetchSemanticsNode().boundsInRoot
 
-    private fun assertConversationDeleteAppearance() {
-        ui.onNodeWithText("删除会话").assertIsDisplayed()
+    private fun assertConversationDeleteAppearance(dark: Boolean = false) {
+        ui.onNodeWithText("删除这个会话？").assertIsDisplayed()
         ui.onNodeWithText("确认删除此会话及其消息？").assertDoesNotExist()
-        ui.onNodeWithText("取消").assertIsDisplayed()
+        ui.onNodeWithText(instrumentation.targetContext.getString(R.string.action_cancel)).assertIsDisplayed()
         ui.onNodeWithText("删除").assertIsDisplayed()
         ui.onAllNodesWithContentDescription("关闭").assertCountEquals(0)
         val cancel = bounds("dialog-cancel")
         val confirm = bounds("dialog-confirm")
-        val sheet = bounds("chat-selection-sheet")
-        val title = ui.onNodeWithText("删除会话").fetchSemanticsNode().boundsInRoot
+        val sheet = bounds("delete-confirm-dialog")
+        val title = ui.onNodeWithText("删除这个会话？").fetchSemanticsNode().boundsInRoot
         assertEquals(cancel.width, confirm.width, 1f)
         assertEquals(cancel.top, confirm.top, 1f)
         assertEquals(sheet.center.x, title.center.x, 1f)
-        val density = node("chat-selection-sheet").fetchSemanticsNode().layoutInfo.density.density
-        assertEquals("no description or empty-body gap", 12f * density, cancel.top - title.bottom, 2f)
+        val density = node("delete-confirm-dialog").fetchSemanticsNode().layoutInfo.density.density
+        assertEquals("no description or empty-body gap", 27f * density, cancel.top - title.bottom, 2f)
         val pixels = captureScreenNode(node("dialog-confirm")).toPixelMap()
-        val expected = Color(0xFF92454F)
+        val expected = Color(if (dark) 0xFFCB6B70 else 0xFFBB5358)
         var red = 0
         var white = 0
         for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
@@ -86,18 +86,18 @@ class SharedSheetSpacingActivityTest : WiredActivityTestCase() {
         val dismissals = AtomicInteger()
         for (dark in listOf(false, true)) for (fontScale in listOf(1f, 1.3f)) {
             val open = mutableStateOf(true)
-            mount(dark, fontScale) {
-                if (open.value) DaiyuConfirmDialog("删除会话", "", "删除", true,
+            mount(dark, fontScale, surface = "delete-confirm-dialog") {
+                if (open.value) DaiyuConfirmDialog("删除这个会话？", "", "删除", true,
                     onConfirm = { fail("appearance must not confirm") },
                     onDismiss = { dismissals.incrementAndGet(); open.value = false },
                     preview = true, deletionAppearance = true, showCloseButton = false)
             }
-            assertConversationDeleteAppearance()
-            assertEquals(8f * menuDensity, bounds("dialog-confirm").left - bounds("dialog-cancel").right, 2f)
-            assertGap(bounds("chat-selection-sheet").bottom - bounds("dialog-confirm").bottom, 17f)
+            assertConversationDeleteAppearance(dark)
+            assertEquals(11f * menuDensity, bounds("dialog-confirm").left - bounds("dialog-cancel").right, 2f)
+            assertGap(bounds("delete-confirm-dialog").bottom - bounds("dialog-confirm").bottom, 24f)
             node("dialog-cancel").performClick()
             ui.waitForIdle()
-            node("chat-selection-sheet").assertDoesNotExist()
+            node("delete-confirm-dialog").assertDoesNotExist()
         }
         assertEquals(4, dismissals.get())
         assertEquals(before, fixture.database.exportBackup())
@@ -122,8 +122,8 @@ class SharedSheetSpacingActivityTest : WiredActivityTestCase() {
         mainThread { invokeHost(activity, "openSidebar") }
         for (action in listOf("cancel", "back", "outside", "confirm")) {
             mainThread { invokeHost(activity, "confirmDelete", target.id.value) }
-            awaitUniqueTag("chat-selection-sheet")
-            awaitNodeWindowFocus(node("chat-selection-sheet"))
+            awaitUniqueTag("delete-confirm-dialog")
+            awaitNodeWindowFocus(node("delete-confirm-dialog"))
             ui.waitForIdle()
             assertConversationDeleteAppearance()
             when (action) {
@@ -133,7 +133,7 @@ class SharedSheetSpacingActivityTest : WiredActivityTestCase() {
                 "confirm" -> node("dialog-confirm").performClick()
             }
             ui.waitForIdle()
-            node("chat-selection-sheet").assertDoesNotExist()
+            node("delete-confirm-dialog").assertDoesNotExist()
             if (action != "confirm") assertEquals(before, fixture.database.exportBackup())
         }
         awaitControl("only the confirmed conversation is removed") {

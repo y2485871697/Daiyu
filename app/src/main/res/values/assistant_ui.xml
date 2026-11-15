@@ -12,7 +12,7 @@
   <string name="assistant_search">Search assistants</string>
   <string name="assistant_current">Current</string>
   <string name="assistant_empty">No matching assistants</string>
-  <string name="assistant_delete_title">Delete assistant</string>
+  <string name="assistant_delete_title">Delete this assistant?</string>
   <string name="assistant_delete_body">Delete %1$s? This cannot be undone.</string>
   <string name="assistant_preview">Preview</string>
   <string name="assistant_identity">Identity</string>

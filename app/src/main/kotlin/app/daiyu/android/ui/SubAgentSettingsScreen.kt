@@ -1,6 +1,5 @@
 package app.daiyu.android.ui
 
-import app.daiyu.android.ui.app.destructiveColors
 
 import app.daiyu.android.ui.navigation.PageBackStack
 
@@ -13,7 +12,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.*
-import app.daiyu.android.ui.components.DaiyuAlertDialog as AlertDialog
 import androidx.compose.material3.*
 import app.daiyu.android.ui.haptics.material.TextButton
 import app.daiyu.android.ui.haptics.material.FilledTonalButton
@@ -128,14 +126,14 @@ internal fun SubAgentSettingsScreen(
                         }) { add = false; rename = null }
                     })
                 delete?.let { preset ->
-                    AlertDialog(onDismissRequest = { delete = null }, title = { Text("删除子代理组？") },
-                        text = { Text("删除“${preset.name}”不会改变已应用此组的会话配置。") },
-                        dismissButton = { TextButton(onClick = { delete = null }) { Text("取消") } },
-                        confirmButton = { TextButton(enabled = editable,
-                            colors = ButtonDefaults.textButtonColors(containerColor = destructiveColors().container,
-                                contentColor = destructiveColors().content), onClick = {
+                    app.daiyu.android.ui.components.DaiyuDeleteConfirmDialog(
+                        title = "删除这个子代理组？",
+                        onDismiss = { delete = null },
+                        confirmEnabled = editable,
+                        onConfirm = {
                             if (directory.change { check(repository.removePreset(preset.id)) { "子代理组不存在，请重试" } }) delete = null
-                        }) { Text("删除") } })
+                        },
+                    )
                 }
             }
         }
@@ -240,14 +238,14 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
                 })
         }
         delete?.let { profile ->
-            if (editable) AlertDialog(onDismissRequest = { delete = null }, title = { Text("删除代理？") },
-                text = { Text("将删除“${profile.name}”的配置，不会删除提供商或模型。") },
-                dismissButton = { TextButton(onClick = { delete = null }) { Text("取消") } },
-                confirmButton = { TextButton(enabled = editable,
-                    colors = ButtonDefaults.textButtonColors(containerColor = destructiveColors().container,
-                        contentColor = destructiveColors().content), onClick = {
+            if (editable) app.daiyu.android.ui.components.DaiyuDeleteConfirmDialog(
+                title = "删除这个子代理？",
+                onDismiss = { delete = null },
+                confirmEnabled = editable,
+                onConfirm = {
                     if (editor.enabled && editor.remove(profile.id) is ConversationSubAgentPreferences.WriteResult.Saved) delete = null
-                }) { Text("删除") } })
+                },
+            )
         }
     }
     }

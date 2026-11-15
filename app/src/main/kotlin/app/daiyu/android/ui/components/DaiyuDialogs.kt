@@ -108,6 +108,10 @@ internal fun DaiyuConfirmDialog(
     showCloseButton: Boolean = true,
     secondaryCancel: Boolean = false,
 ) {
+    if (deletionAppearance) {
+        DaiyuDeleteConfirmDialog(title = title, onConfirm = onConfirm, onDismiss = onDismiss, confirmText = confirmText)
+        return
+    }
     if (preview) {
         ChatSelectionSheet(title, onDismiss, showCloseButton = showCloseButton, footer = {
             AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f).testTag("dialog-cancel"), secondary = secondaryCancel)

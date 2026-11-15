@@ -573,7 +573,7 @@ internal fun VoiceSettingsPanel(
         }
         }
         removing?.let { id ->
-            DaiyuConfirmDialog("删除参考声音？", "删除本机录音与记录。若正在用于朗读，需要重新选择。", "删除", true,
+            DaiyuConfirmDialog("删除这个参考声音？", "", "删除", true, deletionAppearance = true,
                 onConfirm = {
                     removing = null
                     if (current() && !busy && stopAudio()) {

@@ -31,25 +31,20 @@ class VoiceLocalRemovalSheetContractTest(unittest.TestCase):
         self.assertIn('preview.stop(); withContext(Dispatchers.IO) { resources.voices.removeLocal(latestVoice) }', self.panel)
         self.assertIn('previewGuard.execute(::operationCurrent, { latestStrictStop() })', self.panel)
 
-    def test_shell_is_the_reference_component_with_content_height(self):
-        for token in ('ConversationAgentTypography {', 'ConversationAgentSheet(onDismiss)',
-                      'ConversationAgentHandle()', 'paneTitle = "确认本次操作"',
-                      'style = MaterialTheme.typography.titleLarge',
-                      'padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 16.dp)',
-                      'HorizontalDivider(Modifier.padding(top = 10.dp), color = conversationAgentColors().line)',
-                      'horizontalArrangement = Arrangement.spacedBy(12.dp)'):
+    def test_shell_is_the_shared_centered_bodyless_confirmation(self):
+        for token in ('DaiyuDeleteConfirmDialog(', 'title = "移除这个音色？"', 'confirmText = "移除"',
+                      'onConfirm = onConfirm', 'onDismiss = onDismiss'):
             self.assertIn(token, self.sheet)
-        for token in ('useDefaultHeight = true', 'fillMaxSize()', 'WindowDialog', 'Text(message',
-                      '不退款', '不释放名额', 'showCloseButton'):
+        for token in ('ConversationAgentSheet', 'ConversationAgentHandle', 'HorizontalDivider', 'Text(message', 'removeLocal('):
             self.assertNotIn(token, self.sheet)
 
-    def test_buttons_reuse_primary_and_secondary_reference_tokens(self):
-        self.assertIn('ConversationAgentButton("取消", modifier = Modifier.weight(1f).fillMaxHeight().testTag("dialog-cancel"),', self.sheet)
-        self.assertIn('onClick = onDismiss', self.sheet)
-        self.assertIn('ConversationAgentButton("确认", primary = true,', self.sheet)
-        self.assertIn('Modifier.weight(1f).fillMaxHeight().testTag("dialog-confirm"), onClick = onConfirm', self.sheet)
-        for token in ('Color(', 'primaryColor =', 'onPrimaryColor =', 'MiuixTheme', 'resources.', 'removeLocal('):
-            self.assertNotIn(token, self.sheet)
+    def test_shared_card_owns_buttons_without_recoloring_account_operations(self):
+        card = (SRC / 'ui/components/DaiyuDeleteConfirmDialog.kt').read_text()
+        for token in ('DeleteConfirmButton(stringResource(R.string.action_cancel), onDismiss', 'DeleteConfirmButton(confirmText, onConfirm',
+                      'testTag("dialog-confirm")', 'testTag("dialog-cancel")', '0xFFBB5358', '0xFFCB6B70'):
+            self.assertIn(token, card)
+        self.assertNotIn('Color(', self.sheet)
+        self.assertNotIn('resources.', self.sheet)
 
     def test_cloud_scope_and_real_ui_fixture_are_present(self):
         workflow = (ROOT / '.github/workflows/voice-selector-checks.yml').read_text()

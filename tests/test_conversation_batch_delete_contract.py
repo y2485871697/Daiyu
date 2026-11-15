@@ -32,7 +32,7 @@ class ConversationBatchDeleteContractTest(unittest.TestCase):
         confirmation = activity.split("private fun confirmDeleteConversations(", 1)[1].split("private fun editRetainedConversation", 1)[0]
         self.assertIn("val owners = ids.toSet()", confirmation)
         self.assertIn("if (owners.isEmpty()) return", confirmation)
-        self.assertIn('ConfirmPrompt("批量删除", "", "批量删除", true,', confirmation)
+        self.assertIn('ConfirmPrompt("删除选中的 ${owners.size} 个会话？", "", "删除", true,', confirmation)
         self.assertIn("deleteRetainedConversations(owners)", confirmation)
         self.assertIn("showCloseButton = false, deletionAppearance = true", confirmation)
         deletion = activity.split("private fun deleteRetainedConversations(", 1)[1].split("private fun confirmDelete(id:", 1)[0]

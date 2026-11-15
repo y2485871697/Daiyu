@@ -88,9 +88,8 @@ class ProviderDirectorySelectionActivityTest : WiredActivityTestCase() {
         val before = addRows()
         openProviderManagement()
         select(ProviderRegistry.PRIMARY)
-        fun assertOriginalRed(tag: String) {
+        fun assertOriginalRed(tag: String, expected: Color = Color(0xFF92454F)) {
             val pixels = captureScreenNode(node(tag).assertIsEnabled()).toPixelMap()
-            val expected = Color(0xFF92454F)
             var red = 0
             var white = 0
             for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
@@ -105,7 +104,7 @@ class ProviderDirectorySelectionActivityTest : WiredActivityTestCase() {
         assertOriginalRed("provider-delete-selected")
         node("provider-delete-selected").performClick()
         awaitUniqueTag("dialog-confirm")
-        assertOriginalRed("dialog-confirm")
+        assertOriginalRed("dialog-confirm", Color(0xFFBB5358))
         node("dialog-cancel").performClick()
         assertEquals(before, fixture.controller.providers.snapshot())
         assertEquals(0, fixture.opens.get())

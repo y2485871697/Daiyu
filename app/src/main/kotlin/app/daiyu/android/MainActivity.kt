@@ -3500,8 +3500,8 @@ class MainActivity : ComponentActivity() {
         } },
         onDeleteTurn = { id ->
             val firstSourceKey = chatState.turns.firstOrNull { it.matchesKey(id) }?.listKey ?: id
-            prompt = ConfirmPrompt("删除这条消息及后面的内容？", "", "确定",
-                action = { messageCallbacks.onDeleteTurn(firstSourceKey) }, showCloseButton = false, secondaryCancel = true)
+            prompt = ConfirmPrompt("删除这条消息及后面的内容？", "", "删除", true,
+                action = { messageCallbacks.onDeleteTurn(firstSourceKey) }, showCloseButton = false, deletionAppearance = true)
         }, onRetryStep = messageCallbacks.onRetryStep,
         onOpenSidebar = { openSidebar() }, onTextChange = { text -> if (editorMatches() && currentDictationProjection() == null) {
             val editor = inlineMessageEditor
@@ -6669,13 +6669,13 @@ class MainActivity : ComponentActivity() {
         }, mutation = { controller.database.deleteConversations(conversations.map { it.id }.toSet()) })
     }
     private fun confirmDelete(id: String) {
-        prompt = ConfirmPrompt("删除会话", "", "删除", true,
+        prompt = ConfirmPrompt("删除这个会话？", "", "删除", true,
             action = { guard { deleteRetainedConversation(id) } }, showCloseButton = false, deletionAppearance = true)
     }
     private fun confirmDeleteConversations(ids: List<String>) {
         val owners = ids.toSet()
         if (owners.isEmpty()) return
-        prompt = ConfirmPrompt("批量删除", "", "批量删除", true,
+        prompt = ConfirmPrompt("删除选中的 ${owners.size} 个会话？", "", "删除", true,
             action = { guard { deleteRetainedConversations(owners) } }, showCloseButton = false, deletionAppearance = true)
     }
     private fun editRetainedConversation(item: ConversationSummaryUi, folder: Boolean) { guard { editConversation(item.id, folder) } }

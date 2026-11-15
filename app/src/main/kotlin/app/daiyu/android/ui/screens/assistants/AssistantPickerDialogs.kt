@@ -252,14 +252,13 @@ internal fun AssistantActionsDialog(profile: AssistantProfile, assets: Assistant
 @Composable
 internal fun AssistantDeleteDialog(profile: AssistantProfile, assets: AssistantAssets, canDelete: Boolean, onDismiss: () -> Unit, onConfirm: () -> Unit,
     onOutsideDismiss: () -> Unit = onDismiss) {
-    AssistantPreviewDialog(show = true, title = stringResource(R.string.assistant_delete_title),
-        onDismiss = onDismiss, onBack = onDismiss, showCloseButton = false,
-        onOutsideDismiss = onOutsideDismiss, footer = {
-            AssistantPreviewButton(stringResource(R.string.action_cancel), onDismiss, Modifier.weight(1f))
-            AssistantPreviewButton(stringResource(R.string.action_delete), onConfirm, Modifier.weight(1f), danger = true, deletionAppearance = true, enabled = canDelete)
-        }) {
-        AssistantDialogIdentity(profile, assets)
-    }
+    app.daiyu.android.ui.components.DaiyuDeleteConfirmDialog(
+        title = stringResource(R.string.assistant_delete_title),
+        onDismiss = onDismiss,
+        onOutsideDismiss = onOutsideDismiss,
+        onConfirm = onConfirm,
+        confirmEnabled = canDelete,
+    )
 }
 
 @Composable

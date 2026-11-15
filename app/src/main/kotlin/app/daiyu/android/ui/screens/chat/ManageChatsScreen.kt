@@ -51,7 +51,6 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.R
 import app.daiyu.android.ui.haptics.TouchHaptics
-import app.daiyu.android.ui.components.MiuixDialogActions
 import app.daiyu.android.ui.components.MiuixScaffoldPage
 import app.daiyu.android.ui.model.ConversationSummaryUi
 import kotlinx.coroutines.delay
@@ -62,7 +61,6 @@ import app.daiyu.android.ui.haptics.miuix.IconButton
 import top.yukonga.miuix.kmp.basic.Text
 import app.daiyu.android.ui.haptics.miuix.TextButton
 import top.yukonga.miuix.kmp.theme.MiuixTheme
-import top.yukonga.miuix.kmp.window.WindowDialog
 
 
 /** 管理页列表顺序。已有会话保持原位；新会话按当前列表里的相对顺序插到最前。置顶变化才整表重排。 */
@@ -171,23 +169,14 @@ internal fun ManageChatsScreen(
     }
 
     if (showDeleteAll) {
-        WindowDialog(
-            show = true,
+        app.daiyu.android.ui.components.DaiyuDeleteConfirmDialog(
             title = stringResource(R.string.history_page_delete_all_title),
-            summary = stringResource(R.string.history_page_delete_all_message),
-            onDismissRequest = { showDeleteAll = false },
-        ) {
-            app.daiyu.android.diagnostics.ObserveDialogFrames("dialog")
-            MiuixDialogActions(
-                confirmText = stringResource(R.string.action_delete),
-                destructive = true, deletionAppearance = true,
-                onCancel = { showDeleteAll = false },
-                onConfirm = {
-                    onDeleteAll()
-                    showDeleteAll = false
-                },
-            )
-        }
+            onDismiss = { showDeleteAll = false },
+            onConfirm = {
+                onDeleteAll()
+                showDeleteAll = false
+            },
+        )
     }
 }
 

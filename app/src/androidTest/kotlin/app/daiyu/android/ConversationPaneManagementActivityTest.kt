@@ -179,13 +179,13 @@ class ConversationPaneManagementActivityTest : WiredActivityTestCase() {
             node(tag).performTouchInput { longClick() }
             ui.onNodeWithText(instrumentation.targetContext.getString(R.string.action_delete)).performClick()
             awaitUniqueTag("dialog-confirm")
-            awaitDialogEnter(node("dialog-confirm"))
-            ui.onNodeWithText("删除会话").assertIsDisplayed()
+            awaitNodeTouchReady(node("dialog-confirm"))
+            ui.onNodeWithText("删除这个会话？").assertIsDisplayed()
             ui.onNodeWithText("确认删除此会话及其消息？").assertDoesNotExist()
             ui.onNodeWithContentDescription("关闭", useUnmergedTree = true).assertDoesNotExist()
             node("dialog-cancel").assertIsDisplayed().assertHasClickAction()
             node("dialog-confirm").assertIsDisplayed().assertHasClickAction()
-            awaitNodeWindowFocus(node("chat-selection-sheet"))
+            awaitNodeWindowFocus(node("delete-confirm-dialog"))
             when (action) {
                 "cancel" -> node("dialog-cancel").performClick()
                 "back" -> instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)

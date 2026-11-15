@@ -47,9 +47,10 @@ class ConversationBatchDeleteActivityTest : WiredActivityTestCase() {
         batchMenu(conversation)
         ui.onNodeWithText(instrumentation.targetContext.getString(R.string.conversation_batch_delete)).performClick()
         awaitUniqueTag("dialog-confirm")
-        awaitDialogEnter(node("dialog-confirm"))
-        awaitNodeWindowFocus(node("chat-selection-sheet"))
+        awaitNodeTouchReady(node("dialog-confirm"))
+        awaitNodeWindowFocus(node("delete-confirm-dialog"))
         ui.onNodeWithText("确认删除此会话及其消息？").assertDoesNotExist()
+        ui.onNodeWithText("删除选中的 2 个会话？").assertIsDisplayed()
         ui.onNodeWithContentDescription("关闭", useUnmergedTree = true).assertDoesNotExist()
     }
 

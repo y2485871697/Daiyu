@@ -625,7 +625,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 })
             val delete: () -> Unit = {
                 if (live() && enabled && busy == null && !controller.dataBusy && registry === d.registry) {
-                    confirmation = ProviderConfirm("删除提供商", "确定删除“${d.name}”？若为当前提供商，将清空当前选择，不会自动切换。", true, deletionAppearance = true) {
+                    confirmation = ProviderConfirm("删除这个提供商？", "确定删除“${d.name}”？若为当前提供商，将清空当前选择，不会自动切换。", true, deletionAppearance = true) {
                         if (live() && enabled && busy == null && !controller.dataBusy && registry === d.registry) {
                             closeDetail()
                             mutate(d.registry, p, completed = {
@@ -711,7 +711,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     val expected = displayedRegistry
                     val selected = selection
                     if (current(p) && enabled && registry === expected && selectedSlots === selected && expected != null && !selected.isNullOrEmpty()) {
-                        confirmation = ProviderConfirm("删除提供商", "确定删除选中的 ${selected.size} 个提供商？若包含当前提供商，将清空当前选择，不会自动切换。", true, deletionAppearance = true) {
+                        confirmation = ProviderConfirm("删除选中的 ${selected.size} 个提供商？", "确定删除选中的 ${selected.size} 个提供商？若包含当前提供商，将清空当前选择，不会自动切换。", true, deletionAppearance = true) {
                             if (selectedSlots === selected) mutate(expected, p, completed = {
                                 selectedSlots = null; refresh()
                             }) { repo, revision, admit -> repo.deleteSelected(revision, selected, admit) }
@@ -727,7 +727,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 onConfirm = dismissError, onDismiss = dismissError)
         }
         val confirm = confirmation
-        if (confirm != null) DaiyuConfirmDialog(confirm.title, confirm.message, "确认", confirm.destructive, deletionAppearance = confirm.deletionAppearance,
+        if (confirm != null) DaiyuConfirmDialog(confirm.title, confirm.message, if (confirm.deletionAppearance) "删除" else "确认", confirm.destructive, deletionAppearance = confirm.deletionAppearance,
             onConfirm = { if (confirmation === confirm && current(p) && enabled) { confirmation = null; confirm.action() } },
             onDismiss = { if (confirmation === confirm) confirmation = null })
     }

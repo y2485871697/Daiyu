@@ -23,7 +23,7 @@
   <string name="drawer_folder_name">Folder name</string>
   <string name="drawer_create_folder_title">New folder</string>
   <string name="drawer_rename_folder_title">Rename folder</string>
-  <string name="drawer_delete_folder_title">Delete folder?</string>
+  <string name="drawer_delete_folder_title">Delete this folder?</string>
   <string name="drawer_delete_folder_message">Conversations in this folder will be moved back to Chats. The folder will be deleted.</string>
   <string name="drawer_move_to_folder">Move to folder</string>
   <string name="history_page_title">Manage chats</string>

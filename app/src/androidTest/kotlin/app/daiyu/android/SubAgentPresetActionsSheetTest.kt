@@ -10,7 +10,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -33,7 +32,6 @@ class SubAgentPresetActionsSheetTest : WiredActivityTestCase() {
     private var motionWindow = IntSize.Zero
     private var largeScreen = false
     private val tag = "subagent-preset-actions-sheet"
-    private var expectedBadgeBackground = Color.Unspecified
     private var expectedGlyph = Color.Unspecified
 
     private fun installClosed(appearance: AppearanceSettings = AppearanceSettings()) {
@@ -44,13 +42,9 @@ class SubAgentPresetActionsSheetTest : WiredActivityTestCase() {
             deletes = 0
             activity.setContent {
                 AgentAppTheme(appearance, applyInterfaceScale = false) {
-                    val badgeBackground = MaterialTheme.colorScheme.surface
-                    val glyphColor = assistantPreviewPalette().primary
                     val window = LocalWindowInfo.current.containerSize
                     val density = LocalDensity.current.density
                     SideEffect {
-                        expectedBadgeBackground = badgeBackground
-                        expectedGlyph = glyphColor
                         motionWindow = window
                         largeScreen = window.width / density >= 840f && window.height / density >= 480f
                     }
@@ -192,43 +186,35 @@ class SubAgentPresetActionsSheetTest : WiredActivityTestCase() {
         ui.onNodeWithText("删除组").performClick()
         assertClosed(0, 0, 1)
     }
-    fun testHeaderIconIsCompactAndActionsKeepTheirTouchHeight() {
+    private fun assertHeaderAbsent() {
+        ui.onNodeWithText("Motion fixture").assertDoesNotExist()
+        node("subagent-preset-badge").assertDoesNotExist()
+        ui.onNodeWithTag("subagent-preset-glyph", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    fun testHeaderIsAbsentAndActionsKeepTheirTouchHeight() {
         showSettled()
-        node("subagent-preset-badge").assertWidthIsEqualTo(40.dp).assertHeightIsEqualTo(40.dp)
-        ui.onNodeWithTag("subagent-preset-glyph", useUnmergedTree = true)
-            .assertWidthIsEqualTo(24.dp).assertHeightIsEqualTo(24.dp)
+        assertHeaderAbsent()
         listOf("重命名组", "删除组").forEach { label ->
-            ui.onNodeWithText(label).assertHasClickAction().assertHeightIsAtLeast(64.dp)
+            ui.onNodeWithText(label).assertIsDisplayed().assertHasClickAction().assertHeightIsAtLeast(64.dp)
         }
         assertEquals(listOf(0, 0, 0), listOf(dismisses, renames, deletes))
     }
 
-    fun testHeaderHasNoBackgroundAndUsesPrimaryInLightDarkAndPureBlackThemes() {
+    fun testHeaderStaysAbsentInLightDarkAndPureBlackThemes() {
         for (dark in listOf(false, true)) for (pureBlack in listOf(false, true)) {
             installClosed(AppearanceSettings(
                 themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT,
                 pureBlackEnabled = pureBlack,
-
             ))
             ui.runOnIdle { open = true }
             ui.waitForIdle()
-            val badge = node("subagent-preset-badge").assertIsDisplayed()
-            awaitNodeWindowFocus(badge)
-            instrumentation.uiAutomation.waitForIdle(100, 5_000)
-            val density = badge.fetchSemanticsNode().layoutInfo.density.density
-            val pixels = captureScreenNode(badge).toPixelMap()
-            val actual = pixels[pixels.width / 2, (3f * density).toInt()]
-            assertEquals("Badge background red", expectedBadgeBackground.red, actual.red, .01f)
-            assertEquals("Badge background green", expectedBadgeBackground.green, actual.green, .01f)
-            assertEquals("Badge background blue", expectedBadgeBackground.blue, actual.blue, .01f)
-            val glyph = captureScreenNode(ui.onNodeWithTag("subagent-preset-glyph", useUnmergedTree = true)).toPixelMap()
-            val hasPrimaryPixel = (0 until glyph.width).any { x -> (0 until glyph.height).any { y ->
-                val color = glyph[x, y]
-                kotlin.math.abs(expectedGlyph.red - color.red) < .01f &&
-                    kotlin.math.abs(expectedGlyph.green - color.green) < .01f &&
-                    kotlin.math.abs(expectedGlyph.blue - color.blue) < .01f
-            } }
-            assertTrue("Group glyph uses the reference primary accent", hasPrimaryPixel)
+            node(tag).assertIsDisplayed()
+            awaitNodeWindowFocus(node(tag))
+            assertHeaderAbsent()
+            listOf("重命名组", "删除组").forEach { label ->
+                ui.onNodeWithText(label).assertIsDisplayed().assertHasClickAction()
+            }
             assertEquals(listOf(0, 0, 0), listOf(dismisses, renames, deletes))
             ui.runOnIdle { open = false }
             ui.waitForIdle()

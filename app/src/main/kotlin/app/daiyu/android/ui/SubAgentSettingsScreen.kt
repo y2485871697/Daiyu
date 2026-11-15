@@ -183,13 +183,13 @@ private fun SubAgentPresetDetail(editor: ConversationSubAgentEditor, groupName: 
             Box(Modifier.fillMaxSize().padding(padding).horizontalCutoutPadding(), contentAlignment = Alignment.TopCenter) {
                 LazyColumn(Modifier.widthIn(max = 640.dp).fillMaxSize(),
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp)) {
-                    item {
-                        Text(when (state) {
-                            is SubAgentEditorState.Error -> "子代理配置读取或保存失败：${state.reason}"
-                            SubAgentEditorState.Loading -> "正在读取子代理组配置…"
-                            else -> if (!editable) "当前子代理组暂不可修改。"
-                                else "配置属于此预设组；会话应用时复制，后续修改互不影响。"
-                        }, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface,
+                    val notice = when (state) {
+                        is SubAgentEditorState.Error -> "子代理配置读取或保存失败：${state.reason}"
+                        SubAgentEditorState.Loading -> "正在读取子代理组配置…"
+                        else -> if (!editable) "当前子代理组暂不可修改。" else null
+                    }
+                    if (notice != null) item {
+                        Text(notice, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.padding(bottom = 4.dp))
                         if (state is SubAgentEditorState.Error) TextButton(onClick = { editor.retry() }) { Text("重试恢复配置") }
                     }

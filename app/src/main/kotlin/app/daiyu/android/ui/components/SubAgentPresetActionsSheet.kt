@@ -7,7 +7,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.AccountTree
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material3.*
@@ -25,13 +24,11 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.delegation.SubAgentPreset
-import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun SubAgentPresetActionsSheet(preset: SubAgentPreset, onDismiss: () -> Unit, onRename: () -> Unit, onDelete: () -> Unit) {
     val density = LocalDensity.current
-    val palette = assistantPreviewPalette()
     // 从展开锚点开始，由 dialogEnterMotion 负责入场，避免叠加 Material 的位移动画。
     
     val sheetState = remember(preset.id, density) {
@@ -48,17 +45,6 @@ internal fun SubAgentPresetActionsSheet(preset: SubAgentPreset, onDismiss: () ->
         contentColor = MaterialTheme.colorScheme.onSurface, tonalElevation = 0.dp, dragHandle = { BottomSheetDefaults.DragHandle() }) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(bottom = 16.dp)
             .semantics { contentDescription = "子代理组操作面板" }) {
-            Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, bottom = 12.dp),
-                verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                Box(Modifier.testTag("subagent-preset-badge")) {
-                    Icon(Icons.Rounded.AccountTree, null,
-                        Modifier.padding(8.dp).size(24.dp).testTag("subagent-preset-glyph"), tint = palette.primary)
-                }
-                Text(preset.name, Modifier.weight(1f), style = MaterialTheme.typography.titleLarge,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center)
-                Spacer(Modifier.size(40.dp))
-            }
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f))
             SubAgentPresetActionRow("重命名组", Icons.Rounded.Edit, MaterialTheme.colorScheme.onSurface, onRename)
             SubAgentPresetActionRow("删除组", Icons.Rounded.DeleteOutline, MaterialTheme.colorScheme.error, onDelete)
         }

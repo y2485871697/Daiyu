@@ -67,6 +67,10 @@ class SubAgentSettingsProfileSheetTest : WiredActivityTestCase() {
         ui.waitUntil(5_000) {
             ui.onAllNodes(hasText("添加子代理") and hasClickAction()).fetchSemanticsNodes().size == 1
         }
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithContentDescription("Existing worker更多操作").fetchSemanticsNodes().size == 1
+        }
+        ui.onNodeWithText("配置属于此预设组；会话应用时复制，后续修改互不影响。").assertDoesNotExist()
         return repository to owner
     }
 

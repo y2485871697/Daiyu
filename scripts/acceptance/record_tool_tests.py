@@ -426,6 +426,19 @@ VOICE_REFRESH_MODULES = (
 )
 
 
+SUBAGENT_PRESET_PLATFORM_CLASSES = (
+    "app.daiyu.android.SubAgentPresetActionsSheetTest",
+    "app.daiyu.android.SubAgentSettingsProfileSheetTest",
+)
+SUBAGENT_PRESET_MODULES = (
+    "test_subagent_preset_actions_theme_contract", "test_subagent_profile_delete_contract",
+    "test_subagent_add_button_contract", "test_subagent_always_enabled_contract",
+    "test_settings_copy_cleanup_contract.SettingsCopyCleanupContractTest.test_subagent_intro_removed_without_hiding_directory_status_or_card_summary",
+    "test_subagent_preset_scope", "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 PROVIDER_SAVE_PLATFORM_CLASSES = (
     "app.daiyu.android.ProviderSavePositionActivityTest",
     "app.daiyu.android.ControllerProviderSaveNoticeTest",
@@ -494,6 +507,9 @@ IME_MODULES = (
 
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(SUBAGENT_PRESET_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *SUBAGENT_PRESET_MODULES, "-v"], "subagent-presets-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(BATCH_DELETE_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *BATCH_DELETE_MODULES, "-v"], "conversation-batch-delete-targeted"

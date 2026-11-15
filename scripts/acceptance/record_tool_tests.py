@@ -149,6 +149,15 @@ SESSION_ENTRY_MODULES = MARKDOWN_ENTRY_MODULES + (
 )
 
 
+USAGE_STATS_PLATFORM_CLASS = "app.daiyu.android.UsagePresentationActivityTest"
+USAGE_STATS_MODULES = (
+    "test_chat_usage_ready_contract", "test_context_usage_wiring_contract",
+    "test_usage_tab_retention_contract", "test_usage_heatmap_contract",
+    "test_usage_statistics_smoke_scope", "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 GUI_PARSER_PLATFORM_CLASS = "app.daiyu.android.gui.GuiVisualWindowParserAndroidTest"
 GUI_PARSER_MODULES = (
     "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
@@ -507,6 +516,8 @@ IME_MODULES = (
 
 
 def command_for(python, env):
+    if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == USAGE_STATS_PLATFORM_CLASS:
+        return [python, "-B", "-m", "unittest", *USAGE_STATS_MODULES, "-v"], "usage-statistics-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(SUBAGENT_PRESET_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *SUBAGENT_PRESET_MODULES, "-v"], "subagent-presets-targeted"

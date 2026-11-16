@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.SemanticsActions
@@ -338,6 +339,21 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         fun displayed(layouts: List<Pair<SemanticsNode, androidx.compose.ui.text.TextLayoutResult>>) =
             layouts.joinToString("") { it.second.layoutInput.text.text }
         assertEquals(expectedSeed, displayed(textLayouts()))
+        fun saveDiagnostic(image: androidx.compose.ui.graphics.ImageBitmap, name: String, detail: String) {
+            val directory = java.io.File(activity.getExternalFilesDir(null),
+                "visual-diagnostics/streaming-blank/${if (withTools) "tool" else "plain"}-${resumeAtFrame ?: -1}-${full.hashCode()}")
+                .apply { mkdirs() }
+            java.io.File(directory, "$name.png").outputStream().use {
+                image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+            }
+            java.io.File(directory, "$name.txt").writeText(detail)
+        }
+        fun frameDiagnostic(index: Int, gap: Float, layouts: List<Pair<SemanticsNode, androidx.compose.ui.text.TextLayoutResult>>) =
+            "frame=$index clock=${ui.mainClock.currentTime} gap=$gap density=$density ready=${ready.get()} active=$contentActive " +
+                "length=${displayed(layouts).length} viewport=${geometry()} nodes=" + layouts.joinToString(" | ") { (node, result) ->
+                    "position=${node.positionInRoot} size=${node.size} bounds=${node.boundsInRoot} " +
+                        "lines=${result.lineCount} lineBottom=${result.getLineBottom(result.lineCount - 1)}"
+                }
         fun pixels(layouts: List<Pair<SemanticsNode, androidx.compose.ui.text.TextLayoutResult>> = emptyList()): IntArray {
             val host = ui.onNodeWithTag("paced-host")
             val bounds = host.fetchSemanticsNode().boundsInRoot
@@ -357,6 +373,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     val color = image[x, y]
                     if (color.red < .8f && color.green < .8f && color.blue < .8f) ink++
                 }
+                if (ink <= 2) saveDiagnostic(image, "ink-${ui.mainClock.currentTime}",
+                    "ink=$ink roi=$left,$top,$right,$bottom " + frameDiagnostic(-1, Float.NaN, layouts))
                 assertTrue("The latest revealed line must actually paint in its own bounds: ${geometry()}", ink > 2)
             }
             return IntArray(image.width * image.height) { index ->
@@ -373,6 +391,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var paintedGrowth = 0
         var finished = false
         var resumed = false
+        val gapProblems = mutableListOf<String>()
+        var firstGapFrame: Int? = null
         ui.mainClock.autoAdvance = false
         try {
             ui.runOnUiThread {
@@ -410,9 +430,19 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 val composerTop = ui.onNodeWithTag("paced-composer").fetchSemanticsNode().boundsInRoot.top
                 val gap = (composerTop - bottom) / density
                 val settled = ready.get() && displayed == expectedFull
-                assertTrue("Actual text must clear the composer: frame=$index gap=$gap", gap >= ChatTailClearance.value - 2f / density)
-                assertTrue("Large blank after actual text: frame=$index gap=$gap ready=${ready.get()} ${geometry()}",
-                    gap <= ChatTailClearance.value + if (settled) 64f else 26f)
+                val minimumGap = ChatTailClearance.value - 2f / density
+                val maximumGap = ChatTailClearance.value + if (settled) 64f else 26f
+                if (gap < minimumGap || gap > maximumGap) {
+                    if (gapProblems.size < 8) gapProblems += frameDiagnostic(index, gap, layouts)
+                    if (firstGapFrame == null) firstGapFrame = index
+                }
+                firstGapFrame?.let { first ->
+                    if (index == first || index == first + 16 || index == first + 60 ||
+                        index == resumeAtFrame?.plus(1) || settled) {
+                        saveDiagnostic(ui.onNodeWithTag("paced-host").captureToImage(), "frame-$index",
+                            frameDiagnostic(index, gap, layouts))
+                    }
+                }
                 if (displayed.length >= capturedLength + 30) {
                     val nextPixels = pixels(layouts)
                     assertFalse("Text grew but the displayed page froze at frame=$index", previousPixels.contentEquals(nextPixels))
@@ -431,6 +461,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             assertTrue("Exercise the requested foreground recovery", resumeAtFrame == null || resumed)
             assertTrue("Finish within the same visit without remounting", finished)
             assertEquals(expectedFull, displayed(textLayouts()))
+            assertTrue("Every measured endpoint must retain the original composer gap; samples=" +
+                gapProblems.joinToString(" ; "), gapProblems.isEmpty())
         } finally { ui.mainClock.autoAdvance = true }
         ui.waitForIdle()
         assertEquals(0, fixture.opens.get())

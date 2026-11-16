@@ -48,6 +48,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
     private var speakerToggles = 0
     private var captionToggles = 0
     private var outsideClicks = 0
+    private var backdrop by mutableStateOf(Color.White)
     private val completed = mutableListOf<Long>()
     private var nextKey = 10L
     private var composerTopPx = 0f
@@ -287,7 +288,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
             call = initialState ?: session()
             activity.setContent {
                 MaterialTheme {
-                    BoxWithConstraints(if (height == null) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(height)) {
+                    BoxWithConstraints((if (height == null) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(height)).background(backdrop)) {
                         val density = LocalDensity.current
                         val w = constraints.maxWidth.toFloat()
                         val h = constraints.maxHeight.toFloat()
@@ -806,7 +807,39 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         ui.runOnIdle { assertTrue(motion.transforming) }
         val panel = ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot
         val frozenImage = captureScreenNode(ui.onRoot())
-        mainThread { motion.transforming = false }
+        mainThread { backdrop = Color.Black }
+        ui.mainClock.advanceTimeByFrame()
+        ui.waitForIdle()
+        ui.runOnIdle {
+            assertTrue(motion.transforming)
+            assertFalse(motion.progress.isRunning)
+            assertEquals(1f, motion.progress.value, 0f)
+        }
+        val darkBackdrop = captureScreenNode(ui.onRoot()).toPixelMap()
+        val lightBackdrop = frozenImage.toPixelMap()
+        val outsideX = lightBackdrop.width / 2
+        val outsideY = 1
+        assertTrue(outsideY < panel.top - 28 * ui.density.density)
+        val lightOutside = lightBackdrop[outsideX, outsideY]
+        val darkOutside = darkBackdrop[outsideX, outsideY]
+        assertEquals(1f, lightOutside.red, .015f)
+        assertEquals(1f, lightOutside.green, .015f)
+        assertEquals(1f, lightOutside.blue, .015f)
+        assertEquals(0f, darkOutside.red, .015f)
+        assertEquals(0f, darkOutside.green, .015f)
+        assertEquals(0f, darkOutside.blue, .015f)
+        for (fx in listOf(.15f, .35f, .65f, .85f)) {
+            for (fy in listOf(.2f, .5f, .7f)) {
+                val x = (panel.left + panel.width * fx).toInt()
+                val y = (panel.top + panel.height * fy).toInt()
+                val light = lightBackdrop[x, y]; val dark = darkBackdrop[x, y]
+                assertEquals("frozen panel must not reveal the backdrop red at $x,$y", light.red, dark.red, .015f)
+                assertEquals("frozen panel must not reveal the backdrop green at $x,$y", light.green, dark.green, .015f)
+                assertEquals("frozen panel must not reveal the backdrop blue at $x,$y", light.blue, dark.blue, .015f)
+            }
+        }
+        mainThread { backdrop = Color.White; motion.transforming = false }
+        ui.mainClock.advanceTimeByFrame()
         ui.waitForIdle()
         val liveImage = captureScreenNode(ui.onRoot())
         val diagnostics = java.io.File(instrumentation.targetContext.getExternalFilesDir(null),
@@ -846,6 +879,27 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
             }
         }
         assertEquals(15, compared)
+        var ringSamples = 0
+        for (gap in listOf(2f, 4f, 7f)) {
+            for (fraction in listOf(.15f, .35f, .5f, .65f, .85f)) {
+                val x = panel.left + panel.width * fraction
+                val y = panel.top + panel.height * fraction
+                val points = listOf(
+                    x to panel.top - gap * density, x to panel.bottom + gap * density,
+                    panel.left - gap * density to y, panel.right + gap * density to y,
+                )
+                for ((px, py) in points) {
+                    val ix = px.toInt(); val iy = py.toInt()
+                    assertTrue(ix in 0 until live.width && iy in 0 until live.height)
+                    ringSamples++
+                    val a = frozen[ix, iy]; val b = live[ix, iy]
+                    assertEquals("preserved shadow red at $ix,$iy", a.red, b.red, .015f)
+                    assertEquals("preserved shadow green at $ix,$iy", a.green, b.green, .015f)
+                    assertEquals("preserved shadow blue at $ix,$iy", a.blue, b.blue, .015f)
+                }
+            }
+        }
+        assertEquals(60, ringSamples)
         assertTrue("The padded raster must retain the shadow below the panel", visibleShadow)
     }
 

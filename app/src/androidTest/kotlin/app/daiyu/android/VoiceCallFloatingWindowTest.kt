@@ -16,6 +16,7 @@ import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import kotlin.math.roundToInt
 
 class VoiceCallFloatingWindowTest {
     private val instrumentation = InstrumentationRegistry.getInstrumentation()
@@ -34,6 +35,7 @@ class VoiceCallFloatingWindowTest {
         val removals = mutableListOf<View>()
         var failAdd = false
         var failUpdate = false
+        var onDraw: ((View) -> Unit)? = null
         override fun updateViewLayout(view: View, params: ViewGroup.LayoutParams) {
             if (failUpdate) throw SecurityException("synthetic overlay update rejection")
             actual.updateViewLayout(view, params)
@@ -41,6 +43,7 @@ class VoiceCallFloatingWindowTest {
         override fun addView(view: View, params: ViewGroup.LayoutParams) {
             if (failAdd) throw SecurityException("synthetic overlay rejection")
             assertFalse("a new call window must not overlap an existing one", added.any { it.isAttachedToWindow })
+            view.viewTreeObserver.addOnDrawListener { onDraw?.invoke(view) }
             actual.addView(view, params); added.add(view)
         }
         override fun removeViewImmediate(view: View) { removals.add(view); actual.removeViewImmediate(view) }
@@ -364,11 +367,11 @@ class VoiceCallFloatingWindowTest {
         var x = 0f
         var y = 0f
         main {
-            val origin = IntArray(2)
-            root.getLocationOnScreen(origin)
+            val panel = root.javaClass.getDeclaredMethod("getPanelBounds").apply { isAccessible = true }
+                .invoke(root) as androidx.compose.ui.geometry.Rect
             val inset = 38f * context.resources.displayMetrics.density
-            x = origin[0] + root.width - inset
-            y = origin[1] + inset
+            x = panel.right - inset
+            y = panel.top + inset
         }
         val now = SystemClock.uptimeMillis()
         val down = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN, x, y, 0)
@@ -390,16 +393,62 @@ class VoiceCallFloatingWindowTest {
         var minimizes = 0
         val callbacks = actions.copy(onPresentationReady = { if (it == state.sessionKey) ready = true },
             onMinimize = { minimizes++ })
-        main { assertTrue(host.update(state, callbacks, anchor, motion, inApp = true)) }
+        val drawnOrigins = mutableListOf<Pair<Int, Int>>()
+        var drewIntermediateGenie = false
+        var settledFrame: android.graphics.Rect? = null
+        var invalidDraw: String? = null
+        main {
+            windows.onDraw = { root ->
+                val screen = IntArray(2)
+                val local = IntArray(2)
+                root.getLocationOnScreen(screen)
+                root.getLocationInWindow(local)
+                val origin = intArrayOf(screen[0] - local[0], screen[1] - local[1])
+                drawnOrigins += origin[0] to origin[1]
+                if (motion.transforming && motion.progress.value > 0f && motion.progress.value < 1f)
+                    drewIntermediateGenie = true
+                val composition = (root as ViewGroup).getChildAt(0)
+                val params = root.layoutParams as WindowManager.LayoutParams
+                if (origin[0] != params.x || origin[1] != params.y)
+                    invalidDraw = "a native frame was drawn before placement was committed"
+                if (!motion.transforming && motion.progress.value == 1f &&
+                    params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE == 0 &&
+                    root.width == params.width && root.height == params.height)
+                    settledFrame = android.graphics.Rect(params.x, params.y, params.x + params.width, params.y + params.height)
+                if (root.alpha != 1f || params.alpha != 1f || root.scaleX != 1f || root.scaleY != 1f)
+                    invalidDraw = "native alpha or scale changed during Genie"
+                if (kotlin.math.abs(composition.translationX + origin[0]) > .5f ||
+                    kotlin.math.abs(composition.translationY + origin[1]) > .5f)
+                    invalidDraw = "composition origin did not match the drawn native origin"
+            }
+            assertTrue(host.update(state, callbacks, anchor, motion, inApp = true))
+        }
         await("in-app entry returns the same window to a touchable bounded frame") {
             windows.added.singleOrNull()?.let { root ->
                 val params = root.layoutParams as WindowManager.LayoutParams
-                ready && root.isLaidOut && root.width == params.width && root.height == params.height &&
+                ready && settledFrame != null && root.isLaidOut && root.width == params.width && root.height == params.height &&
                     motion.progress.value == 1f && !motion.transforming &&
                     params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE == 0
             } == true
         }
         val root = windows.added.single()
+        main {
+            assertTrue("the original Genie must draw intermediate frames", drewIntermediateGenie)
+            assertNull(invalidDraw)
+            assertTrue("entry and live frames were observed", drawnOrigins.size > 1)
+            assertEquals("settling must not move the native surface", 1, drawnOrigins.distinct().size)
+            val panel = root.javaClass.getDeclaredMethod("getPanelBounds").apply { isAccessible = true }
+                .invoke(root) as androidx.compose.ui.geometry.Rect
+            val shadow = (28 * context.resources.displayMetrics.density).roundToInt().toFloat()
+            val expected = panel.inflate(shadow)
+            val actual = checkNotNull(settledFrame)
+            assertEquals(expected.left.roundToInt().coerceAtLeast(0), actual.left)
+            assertEquals(expected.top.roundToInt().coerceAtLeast(0), actual.top)
+            assertEquals("settled viewport must retain exactly the original shadow, not the large animation envelope",
+                expected.right.roundToInt(), actual.right)
+            assertEquals(expected.bottom.roundToInt(), actual.bottom)
+            windows.onDraw = null
+        }
         tapMinimize(root)
         await("real minimize tap reaches the settled Compose control") { minimizes == 1 }
         main {

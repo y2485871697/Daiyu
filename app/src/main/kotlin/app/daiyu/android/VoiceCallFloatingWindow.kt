@@ -204,7 +204,7 @@ internal class VoiceCallFloatingWindow(context: Context,
         val anchor = current.anchor?.bounds
         val frame = if (morphing && anchor != null) Rect(
             minOf(panel.left, anchor.left) - dp(28), minOf(panel.top, anchor.top) - dp(28),
-            maxOf(panel.right, anchor.right) + dp(28), maxOf(panel.bottom, anchor.bottom) + dp(28)) else panel
+            maxOf(panel.right, anchor.right) + dp(28), maxOf(panel.bottom, anchor.bottom) + dp(28)) else panel.inflate(dp(28).toFloat())
         val left = frame.left.roundToInt().coerceAtLeast(0)
         val top = frame.top.roundToInt().coerceAtLeast(0)
         val width = (frame.right.roundToInt() - left).coerceAtLeast(1)
@@ -279,10 +279,7 @@ internal class VoiceCallFloatingWindow(context: Context,
         override val lifecycle: Lifecycle get() = ownerLifecycle
         override val savedStateRegistry: SavedStateRegistry get() = savedState.savedStateRegistry
         private val composition: ComposeView
-        private val syncOrigin = ViewTreeObserver.OnPreDrawListener {
-            syncCompositionOrigin()
-            true
-        }
+        private val syncOrigin = ViewTreeObserver.OnPreDrawListener { syncCompositionOrigin() }
         private var released = false
         private val releaseAfterDetach = Runnable {
             if (departing && !removed) remove(this, completed = true) else release()
@@ -321,11 +318,18 @@ internal class VoiceCallFloatingWindow(context: Context,
             super.onLayout(changed, left, top, right, bottom)
             syncCompositionOrigin()
         }
-        private fun syncCompositionOrigin() {
-            val origin = IntArray(2)
-            getLocationOnScreen(origin)
-            composition.translationX = -origin[0].toFloat()
-            composition.translationY = -origin[1].toFloat()
+        private fun syncCompositionOrigin(): Boolean {
+            val screen = IntArray(2)
+            val local = IntArray(2)
+            getLocationOnScreen(screen)
+            getLocationInWindow(local)
+            val x = screen[0] - local[0]
+            val y = screen[1] - local[1]
+            composition.translationX = -x.toFloat()
+            composition.translationY = -y.toFloat()
+            val placed = fading || x == params.x && y == params.y
+            if (!placed) postInvalidateOnAnimation()
+            return placed
         }
         override fun onAttachedToWindow() {
             super.onAttachedToWindow()

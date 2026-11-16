@@ -60,8 +60,8 @@ class ProviderSnapshot private constructor(
         defaultVisionSupported = defaultVisionSupported,
     )
 
-    internal fun withoutNativeSearch(): ProviderSnapshot = if (!requestOptions.openAiWebSearchEnabled) this else
-        capture(asModelSettings().copy(requestOptions = requestOptions.copy(openAiWebSearchEnabled = false)),
+    internal fun withoutNativeSearch(): ProviderSnapshot = if (!requestOptions.nativeSearchRequested) this else
+        capture(asModelSettings().copy(requestOptions = requestOptions.copy(preferNativeSearch = false)),
             protocol, imageInputSupported)
 
     override fun toString(): String =

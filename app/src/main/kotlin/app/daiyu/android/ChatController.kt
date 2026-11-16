@@ -4467,6 +4467,7 @@ class ChatController internal constructor(private val application:Application,
             val shizuku=shizukuPreparation?.open(shizukuAccess)
             fun ordinaryBrowserScope(realOwner: app.daiyu.android.domain.runtime.RunExecutionOwner,
                 task: app.daiyu.android.domain.tools.TaskAuthorization): RunOwnedToolScope? {
+                if (!requestProvider.requestOptions.searchToolsEnabled) return null
                 val settings = ordinaryBrowserSettings ?: return null
                 if (settings.access == app.daiyu.android.browser.session.BrowserAccess.DISABLED) return null
                 return RunOrdinaryBrowserTools(application, realOwner, task, checkNotNull(ordinaryAssistant), assistant.id,

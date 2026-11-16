@@ -66,9 +66,9 @@ data class ModelSettings(val endpoint: String, val model: String, val apiKey: St
             require(apiKey.isEmpty()) { "OAuth 不使用 API Key" }
             customHeaders.validateCodexRouting()
         }
-        requestOptions.validate(protocol)
+        requestOptions.validate(protocol, requestOptions.nativeSearchEnabled(protocol, model, endpoint))
         require(contextWindowOverride == null || contextWindowOverride > 0) { "上下文窗口必须为正整数" }
-        if ((hasModelOverrides || requestOptions.openAiWebSearchEnabled) && requestOptions.customBody.isNotEmpty()) {
+        if ((hasModelOverrides || requestOptions.nativeSearchRequested) && requestOptions.customBody.isNotEmpty()) {
             val body = app.daiyu.android.model.MessagesRequest.jsonObject(requestOptions.customBody)
             require(!body.has("model") || body.opt("model") == model) { "自定义请求体 model 与能力声明所选模型冲突" }
         }
@@ -147,7 +147,8 @@ class ModelSettingsStore internal constructor(
         val selected = modelCatalog.readRegisteredModel(modelId ?: current.model)
         if (modelId == null) current.copy(
             requestOptions = current.requestOptions.copy(openAiWebSearchEnabled =
-                selected?.settings?.requestOptions?.openAiWebSearchEnabled ?: current.requestOptions.openAiWebSearchEnabled),
+                selected?.settings?.requestOptions?.openAiWebSearchEnabled ?: current.requestOptions.openAiWebSearchEnabled,
+                preferNativeSearch = selected?.settings?.requestOptions?.preferNativeSearch ?: current.requestOptions.preferNativeSearch),
             contextWindowOverride = selected?.settings?.contextWindowOverride,
             reasoningOverride = selected?.settings?.reasoningOverride, visionOverride = selected?.settings?.visionOverride,
             defaultVisionSupported = true)
@@ -345,7 +346,7 @@ class ModelSettingsStore internal constructor(
         val options = try {
             readRequestOptions().also {
                 val protocol = readProtocol()
-                if (protocol != ProviderProtocol.UNKNOWN) it.validate(protocol)
+                if (protocol != ProviderProtocol.UNKNOWN) it.validate(protocol, it.nativeSearchEnabled(protocol, preferences.getString("model", "") ?: "", preferences.getString("endpoint", "") ?: ""))
             }
         } catch (_: Exception) {
             optionsUnavailable = true; ProviderRequestOptions()
@@ -368,7 +369,8 @@ class ModelSettingsStore internal constructor(
         val values=preferences.all
         var unavailable=false
         var optionsUnavailable = false
-        val options=try { readRequestOptions().also {it.validate(readProtocol())} }
+        val options=try { readRequestOptions().also { it.validate(readProtocol(), it.nativeSearchEnabled(readProtocol(),
+            values["model"] as? String ?: "", values["endpoint"] as? String ?: "")) } }
         catch (_:Exception) {unavailable=true;optionsUnavailable=true;ProviderRequestOptions()}
         val apiKey=try {
             val encrypted=values["key"] as? String
@@ -425,7 +427,8 @@ class ModelSettingsStore internal constructor(
         val previousOptionsValid = try {
             val previousOptions = readRequestOptions()
             val previousProtocol = readProtocol()
-            if (previousProtocol != ProviderProtocol.UNKNOWN) previousOptions.validate(previousProtocol)
+            if (previousProtocol != ProviderProtocol.UNKNOWN) previousOptions.validate(previousProtocol, previousOptions.nativeSearchEnabled(
+                previousProtocol, previousConnection.model, previousConnection.endpoint))
             true
         } catch (_: Exception) { false }
         require(!previousEditing.headersUnavailable ||

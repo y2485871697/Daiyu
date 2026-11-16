@@ -150,7 +150,7 @@ class ResponsesModel internal constructor(
                 conn.setRequestProperty("Accept", "text/event-stream")
                 checkCancelled()
                 configuringRequest = false
-                if (settings.requestOptions.voiceTextOnly || settings.requestOptions.openAiWebSearchEnabled) voiceSearch = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, null)
+                if (settings.requestOptions.voiceTextOnly || settings.requestOptions.nativeSearchEnabled(ProviderProtocol.RESPONSES, settings.model, settings.endpoint, tools)) voiceSearch = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, null)
                 val status = conn.responseCode { trace.phase = ModelTransportPhase.WAITING_HEADERS }
                 trace.headersReceived()
                 voiceSearch?.sent()
@@ -324,7 +324,8 @@ class ResponsesModel internal constructor(
                 }
             }
             var request = ResponsesRequest.withAssistantInstructions(
-                settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools, settings.requestOptions.openAiWebSearchEnabled, settings.endpoint), ProviderProtocol.RESPONSES),
+                settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools, settings.requestOptions.nativeSearchEnabled(ProviderProtocol.RESPONSES, settings.model, settings.endpoint, tools), settings.endpoint), ProviderProtocol.RESPONSES,
+                    settings.requestOptions.nativeSearchEnabled(ProviderProtocol.RESPONSES, settings.model, settings.endpoint, tools)),
                 assistantInstructions,
             )
             val screenInput = ScreenToolImageInput.prepare(request, input, settings, capability,
@@ -447,7 +448,7 @@ class ResponsesModel internal constructor(
                 checkCancelled()
                 configuringRequest = false
                 trace.phase = ModelTransportPhase.SENDING
-                if (settings.requestOptions.voiceTextOnly || settings.requestOptions.openAiWebSearchEnabled) voiceSearch = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, wireRequest)
+                if (settings.requestOptions.voiceTextOnly || settings.requestOptions.nativeSearchEnabled(ProviderProtocol.RESPONSES, settings.model, settings.endpoint, tools)) voiceSearch = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, wireRequest)
                 conn.send(requestBytes.size.toLong()) { requestBytes.writeTo(it, cancelled::get) }
                 checkCancelled()
                 val status = conn.responseCode {

@@ -41,7 +41,7 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
     private var deletions = 0
 
     private fun show(dark: Boolean = false, scale: Float = 1f, fontScale: Float = 1f,
-        canDelete: Boolean = true, isNew: Boolean = false, holdSave: Boolean = false,
+        nativeSupported: Boolean = false, canDelete: Boolean = true, isNew: Boolean = false, holdSave: Boolean = false,
         initial: CatalogModelEdit = CatalogModelEdit("layout-model", "布局模型", "8192")) {
         mainThread {
             visible = false
@@ -63,7 +63,7 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
                         }
                         if (visible) CatalogModelEditorDialog(
                             initial,
-                            isNew = isNew, enabled = enabled, canDelete = canDelete, saving = saving, errorText = errorText,
+                            nativeSearchSupported = { nativeSupported }, isNew = isNew, enabled = enabled, canDelete = canDelete, saving = saving, errorText = errorText,
                             onSave = { saved = it; saves++; if (holdSave) saving = true }, onDelete = { deletions++ },
                             onDismiss = { dismissals++; visible = false })
                     }
@@ -245,7 +245,7 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
                 ui.onNodeWithText(summary).assertDoesNotExist()
             node("settings-switch:支持推理").assertDoesNotExist()
             ui.onNodeWithText("支持推理").assertDoesNotExist()
-            for ((title, on) in listOf("支持视觉" to true, "原生搜索" to false)) {
+            for ((title, on) in listOf("支持视觉" to true, "搜索工具" to false)) {
                 val control = revealEditor("settings-switch:$title")
                 if (on) control.assertIsOn() else control.assertIsOff()
                 val row = control.fetchSemanticsNode().boundsInRoot
@@ -254,21 +254,50 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
                 assertEquals("$title vertical center", row.center.y, label.center.y, 1f)
                 assertTrue("$title fits row", label.left >= row.left && label.right <= row.right)
             }
-            revealEditor("settings-switch:原生搜索").assertIsOff().performClick().assertIsOn()
+            revealEditor("settings-switch:搜索工具").assertIsOff().performClick().assertIsOn()
             revealEditor("settings-switch:支持视觉").performClick().assertIsOff()
             node("dialog-confirm").performClick()
             val configured = checkNotNull(saved)
             assertEquals(reasoning, configured.reasoning)
             assertFalse(configured.vision)
-            assertTrue(configured.nativeSearch)
+            assertTrue(configured.searchTools)
             node("dialog-cancel").performClick()
             show(dark = dark, fontScale = fontScale, initial = configured)
             open()
             node("settings-switch:支持推理").assertDoesNotExist()
             revealEditor("settings-switch:支持视觉").assertIsOff()
-            revealEditor("settings-switch:原生搜索").assertIsOn()
+            revealEditor("settings-switch:搜索工具").assertIsOn()
             node("dialog-cancel").performClick()
         }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testSearchDisclosureIsSupportedOnlyAndIndependentFromMaster() {
+        show(nativeSupported = true)
+        open()
+        revealEditor("settings-switch:搜索工具").assertIsOff()
+        revealEditor("catalog-model-search-expand").performClick()
+        revealEditor("settings-switch:搜索工具").assertIsOff()
+        revealEditor("settings-switch:原生搜索").assertIsOn().assertIsNotEnabled()
+        revealEditor("settings-switch:搜索工具").performClick().assertIsOn()
+        revealEditor("settings-switch:原生搜索").assertIsEnabled().performClick().assertIsOff()
+        revealEditor("settings-switch:搜索工具").performClick().assertIsOff()
+        revealEditor("settings-switch:原生搜索").assertIsOff().assertIsNotEnabled()
+        node("dialog-confirm").performClick()
+        val configured = checkNotNull(saved)
+        assertFalse(configured.searchTools)
+        assertFalse(configured.preferNativeSearch)
+        node("dialog-cancel").performClick()
+        show(nativeSupported = true, initial = configured)
+        open()
+        revealEditor("catalog-model-search-expand").performClick()
+        revealEditor("settings-switch:原生搜索").assertIsOff().assertIsNotEnabled()
+        node("dialog-cancel").performClick()
+        show(nativeSupported = false, initial = configured)
+        open()
+        revealEditor("settings-switch:搜索工具").assertIsOff()
+        node("catalog-model-search-expand").assertDoesNotExist()
+        node("settings-switch:原生搜索").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
 
@@ -333,10 +362,10 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
         revealEditor("local-model-delete:layout-model").assertIsNotEnabled()
         revealEditor("settings-field:上下文窗口").performTextReplacement("16.384")
         mainThread { enabled = false }
-        for (tag in listOf("local-model-delete:layout-model", "settings-switch:支持视觉", "settings-switch:原生搜索"))
+        for (tag in listOf("local-model-delete:layout-model", "settings-switch:支持视觉", "settings-switch:搜索工具"))
             revealEditor(tag).assertIsNotEnabled().performTouchInput { click(center) }
         revealEditor("settings-switch:支持视觉").assertIsOn()
-        revealEditor("settings-switch:原生搜索").assertIsOff()
+        revealEditor("settings-switch:搜索工具").assertIsOff()
         for (tag in listOf("dialog-confirm", "dialog-cancel"))
             node(tag).assertIsNotEnabled().performTouchInput { click(center) }
         assertEquals(1, saves)

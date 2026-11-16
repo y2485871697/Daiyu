@@ -13,7 +13,7 @@ import javax.net.ssl.HttpsURLConnection
 
 class ResponsesWebSearchTest {
     private val options = ProviderRequestOptions(openAiWebSearchEnabled = true)
-    private val settings = ModelSettings("https://api.openai.com/v1", "search-fixture", "synthetic-key", false, requestOptions = options)
+    private val settings = ModelSettings("https://api.openai.com/v1", "gpt-4.1", "synthetic-key", false, requestOptions = options)
     private fun reject(work: () -> Unit) { try { work(); fail("must reject") } catch (_: IllegalArgumentException) {} }
     private fun search(status: String = "completed") = JSONObject().put("type", "web_search_call").put("id", "ws")
         .put("status", status).put("action", JSONObject().put("type", "search").put("queries", JSONArray().put("fixture")))
@@ -179,7 +179,7 @@ class ResponsesWebSearchTest {
         reject { ResponsesSearchProtocol.validateItem(message(citation("https://example.org:0/source"))) }
         val snapshot = settings.requestSnapshot()
         val auxiliary = snapshot.withoutNativeSearch()
-        assertFalse(auxiliary.requestOptions.openAiWebSearchEnabled)
+        assertFalse(auxiliary.requestOptions.nativeSearchRequested)
         assertTrue(snapshot.requestOptions.openAiWebSearchEnabled)
         assertEquals(snapshot.customHeaders, auxiliary.customHeaders)
         assertEquals(snapshot.imageInputSupported, auxiliary.imageInputSupported)

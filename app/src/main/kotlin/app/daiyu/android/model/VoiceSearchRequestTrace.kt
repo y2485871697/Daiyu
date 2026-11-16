@@ -66,7 +66,7 @@ internal class VoiceSearchRequestTrace(protocol: ProviderProtocol, request: JSON
         // Numeric policy only: bit 0 voice, bit 1 native-search enabled, remaining bits protocol.
         fun policy(protocol: ProviderProtocol, options: ProviderRequestOptions, wire: JSONObject? = null) {
             val flags = (protocol.ordinal.toLong() shl 2) or
-                (if (options.voiceTextOnly) 1L else 0L) or (if (options.openAiWebSearchEnabled) 2L else 0L)
+                (if (options.voiceTextOnly) 1L else 0L) or (if (options.nativeSearchRequested) 2L else 0L)
             RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.VOICE_SEARCH,
                 if (wire == null) RuntimeDiagnostics.Code.SEARCH_POLICY_FROZEN else RuntimeDiagnostics.Code.SEARCH_POLICY_WIRE,
                 count = flags, size = if (wire == null) -1L else wire.optJSONArray("tools")?.length()?.toLong() ?: 0L)

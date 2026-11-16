@@ -68,6 +68,7 @@ internal class LocalCatalogModelActions<T>(
     val update: ((CatalogModelSelection<T>, CatalogModelEdit, () -> Boolean, (CatalogLocalEditResult) -> Unit) -> Unit)? = null,
     val add: ((SavedModelCatalogSnapshot<T>, CatalogModelEdit, () -> Boolean, (CatalogLocalEditResult) -> Unit) -> Unit)? = null,
     val deleteSelected: ((List<CatalogModelSelection<T>>, () -> Boolean, (CatalogLocalEditResult) -> Unit) -> Unit)? = null,
+    val nativeSearchSupported: (String) -> Boolean = { false },
 )
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -253,11 +254,13 @@ internal fun <T> LocalCatalogModelsScreen(
     val addVisit = adding
     if (addVisit != null) CatalogModelEditorDialog(CatalogModelEdit("", "自定义模型"), isNew = true,
         enabled = editorEnabled, canSave = !editorStale && editingEnabled, errorText = notice, saving = savingEditor,
+        nativeSearchSupported = actions.nativeSearchSupported,
         onSave = { if (adding === addVisit) saveForm(it, null) }, onDismiss = { if (request == null && adding === addVisit) adding = null })
     editing?.let { selection ->
         val form = actions.form
         if (form != null) CatalogModelEditorDialog(form(selection.record), isNew = false,
             enabled = editorEnabled, canSave = !editorStale && editingEnabled, errorText = notice, saving = savingEditor,
+        nativeSearchSupported = actions.nativeSearchSupported,
             canDelete = !editorStale,
             onDelete = { if (editing === selection && current() && currentEnabled && request == null && matches(selection)) { editing = null; deleting = selection.copy() } },
             onSave = { if (editing === selection) saveForm(it, selection) },
@@ -367,7 +370,7 @@ internal fun <T> LocalCatalogModelsScreen(
                                     val labels = listOfNotNull(
                                         modelContextWindowLabel(context),
                                         "支持视觉".takeIf { form?.vision == true },
-                                        "原生搜索".takeIf { form?.nativeSearch == true })
+                                        (if (form?.preferNativeSearch == true && actions.nativeSearchSupported(model.id)) "原生搜索" else "搜索工具").takeIf { form?.searchTools == true })
                                     labels.forEach { label ->
                                         Text(label, style = MiuixTheme.textStyles.body2, color = MiuixTheme.colorScheme.onPrimary,
                                             modifier = Modifier.clip(RoundedCornerShape(6.dp))

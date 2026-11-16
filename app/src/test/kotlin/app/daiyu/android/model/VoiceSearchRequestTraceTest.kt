@@ -54,7 +54,8 @@ class VoiceSearchRequestTraceTest {
 
     private fun request(protocol: ProviderProtocol, enabled: Boolean, connection: Connection, sink: (ModelEvent) -> Unit = {},
                         voiceOnly: Boolean = true, beforeNext: (ModelSession) -> Unit = {}) {
-        val settings = ModelSettings("https://wire.invalid/v1", "search-fixture", "private-credential", false,
+        val settings = ModelSettings("https://api.openai.com/v1",
+            if (protocol == ProviderProtocol.RESPONSES) "gpt-4.1" else "gpt-4o-search-preview", "private-credential", false,
             protocol = protocol, requestOptions = ProviderRequestOptions(openAiWebSearchEnabled = enabled, voiceTextOnly = voiceOnly))
         val model = if (protocol == ProviderProtocol.RESPONSES) ResponsesModel(settings) { connection }
             else NativeCompletionModel(settings, { connection })

@@ -17,11 +17,21 @@ data class ProviderRequestOptions(
     val promptCacheRetention: DaiyuPromptCacheRetention = DaiyuPromptCacheRetention.ONE_HOUR,
     /** Run-only policy; never persisted into the model configuration. */
     internal val voiceTextOnly: Boolean = false,
+    val preferNativeSearch: Boolean = true,
 ) {
+    // Keep the legacy storage key while the UI uses the model-level search-tools master.
+    val searchToolsEnabled: Boolean get() = openAiWebSearchEnabled
+    internal val nativeSearchRequested: Boolean get() = searchToolsEnabled && preferNativeSearch
+
+    internal fun nativeSearchEnabled(protocol: ProviderProtocol, model: String, endpoint: String?,
+        tools: List<app.daiyu.android.domain.ToolDefinition> = emptyList()): Boolean =
+        nativeSearchRequested && ModelNativeSearchSupport.supports(protocol, model, endpoint) &&
+            ModelNativeSearchSupport.canMixTools(protocol, endpoint, tools)
+
     override fun toString(): String =
         "ProviderRequestOptions(customBody=<redacted>, speedMode=$speedMode, codex=$codex)"
 
-    fun validate(protocol: ProviderProtocol) {
+    fun validate(protocol: ProviderProtocol, nativeSearchEnabled: Boolean = nativeSearchRequested) {
         sessionGateway.validate()
         // Endpoint-specific preferences remain stored; only their matching transport applies them.
         if (anthropicVersion != null) {
@@ -36,7 +46,7 @@ data class ProviderRequestOptions(
         if (customBody.isNotEmpty()) {
             val body = parseBody()
             require(body.keys().asSequence().none { it in OWNED_FIELDS }) { "自定义请求体不能覆盖会话协议字段" }
-            require(!openAiWebSearchEnabled || body.keys().asSequence().none { it in NATIVE_SEARCH_FIELDS }) { "自定义请求体不能覆盖已开启的原生搜索" }
+            require(!nativeSearchEnabled || body.keys().asSequence().none { it in NATIVE_SEARCH_FIELDS }) { "自定义请求体不能覆盖已开启的原生搜索" }
             if (protocol == ProviderProtocol.GEMINI) require(body.keys().asSequence().all { it in setOf("generationConfig", "safetySettings") }) {
                 "Gemini 自定义请求体仅支持 generationConfig 与 safetySettings"
             }
@@ -44,9 +54,9 @@ data class ProviderRequestOptions(
         }
     }
 
-    internal fun apply(base: JSONObject, protocol: ProviderProtocol): JSONObject {
-        if (customBody.isEmpty() && speedMode == null && !codex && anthropicVersion == null && !openAiWebSearchEnabled && !voiceTextOnly) return base
-        validate(protocol)
+    internal fun apply(base: JSONObject, protocol: ProviderProtocol, nativeSearchEnabled: Boolean = nativeSearchRequested): JSONObject {
+        if (customBody.isEmpty() && speedMode == null && !codex && anthropicVersion == null && !nativeSearchEnabled && !voiceTextOnly) return base
+        validate(protocol, nativeSearchEnabled)
         val merged = if (customBody.isEmpty()) base else RequestBodyMerge.merge(base, parseBody())
         if (protocol == ProviderProtocol.RESPONSES) GptServiceTier.apply(merged, speedMode, codex)
         if (voiceTextOnly) {
@@ -125,6 +135,7 @@ data class ProviderRequestOptions(
         .also {
             if (anthropicVersion != null) it.put("anthropic_version", anthropicVersion)
             if (openAiWebSearchEnabled) it.put("openai_web_search_enabled", true)
+            if (!preferNativeSearch) it.put("prefer_native_search", false)
         }.toString()
 
     private fun parseBody(): JSONObject = try {
@@ -149,7 +160,7 @@ data class ProviderRequestOptions(
                 val value = MessagesRequest.jsonObject(raw, 3)
                 val keys = value.keys().asSequence().toSet()
                 val legacyKeys = setOf("custom_body", "speed_mode", "codex")
-                require(keys.containsAll(legacyKeys) && keys.all { it in legacyKeys + setOf("session_gateway", "anthropic_version", "openai_web_search_enabled", DaiyuPromptCacheRetention.STORAGE_KEY) })
+                require(keys.containsAll(legacyKeys) && keys.all { it in legacyKeys + setOf("session_gateway", "anthropic_version", "openai_web_search_enabled", "prefer_native_search", DaiyuPromptCacheRetention.STORAGE_KEY) })
                 val body = value.get("custom_body") as? String ?: error("body")
                 val codex = value.get("codex") as? Boolean ?: error("codex")
                 val speed = value.get("speed_mode")
@@ -162,7 +173,9 @@ data class ProviderRequestOptions(
                     value.get("openai_web_search_enabled") as? Boolean ?: error("web search") else false
                 val retention = if (value.has(DaiyuPromptCacheRetention.STORAGE_KEY))
                     DaiyuPromptCacheRetention.decode(value.get(DaiyuPromptCacheRetention.STORAGE_KEY)) else DaiyuPromptCacheRetention.ONE_HOUR
-                ProviderRequestOptions(body, mode, codex, rule, version, search, retention)
+                val nativePreference = if (value.has("prefer_native_search"))
+                    value.get("prefer_native_search") as? Boolean ?: error("native search preference") else true
+                ProviderRequestOptions(body, mode, codex, rule, version, search, retention, preferNativeSearch = nativePreference)
             } catch (_: Exception) {
                 throw IllegalStateException("模型请求配置无效；请重新保存")
             }

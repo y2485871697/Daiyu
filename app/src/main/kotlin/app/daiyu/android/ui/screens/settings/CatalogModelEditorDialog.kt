@@ -25,6 +25,8 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import app.daiyu.android.ui.icons.DaiyuIcon
+import app.daiyu.android.ui.icons.DaiyuIcons
 import app.daiyu.android.model.catalog.CatalogModelEdit
 import app.daiyu.android.ui.components.MiuixDialogActions
 import app.daiyu.android.ui.components.PreviewDialog
@@ -43,10 +45,14 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
     onSave: (CatalogModelEdit) -> Unit, onDismiss: () -> Unit,
     canSave: Boolean = true, canDelete: Boolean = false, onDelete: () -> Unit = {}, errorText: String? = null,
     saving: Boolean = false,
+    nativeSearchSupported: (String) -> Boolean = { false },
 ) {
     val interactive = enabled && !saving
+    var searchExpanded by remember(initial) { mutableStateOf(false) }
     var value by remember(initial) { mutableStateOf(initial) }
     var contextInput by remember(initial) { mutableStateOf(ModelContextWindowInput.fromTokens(initial.contextWindow)) }
+    val nativeSupported = nativeSearchSupported(value.id)
+    LaunchedEffect(nativeSupported) { if (!nativeSupported) searchExpanded = false }
     val editedValue = contextInput.tokenText()?.let { value.copy(contextWindow = it) }
     val formValid = editedValue != null && runCatching { editedValue.validate() }.isSuccess
     val accent = assistantPreviewPalette()
@@ -87,7 +93,24 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
                         Column(Modifier.fillMaxWidth().testTag("catalog-model-capabilities")
                             .clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerHigh)) {
                             SettingsSwitchRow("支持视觉", value.vision, interactive) { value = value.copy(vision = it) }
-                            SettingsSwitchRow("原生搜索", value.nativeSearch, interactive) { value = value.copy(nativeSearch = it) }
+                            SettingsSwitchRow("搜索工具", value.searchTools, interactive,
+                                accessory = if (!nativeSupported) null else ({
+                                    Box(Modifier.size(32.dp).testTag("catalog-model-search-expand")
+                                        .clip(RoundedCornerShape(8.dp)).semantics {
+                                            contentDescription = if (searchExpanded) "收起原生搜索选项" else "展开原生搜索选项"
+                                            stateDescription = if (searchExpanded) "已展开" else "已收起"
+                                        }.clickable(enabled = interactive, role = Role.Button) { searchExpanded = !searchExpanded },
+                                        contentAlignment = Alignment.Center) {
+                                        DaiyuIcon(DaiyuIcons.ChevronRight, null, size = 16.dp,
+                                            modifier = Modifier.settingsDisclosureRotation(searchExpanded))
+                                    }
+                                })) { value = value.copy(searchTools = it) }
+                            SettingsExpandableContent(nativeSupported && searchExpanded) {
+                                SettingsSwitchRow("原生搜索", value.preferNativeSearch,
+                                    interactive && value.searchTools && nativeSupported && searchExpanded) {
+                                    value = value.copy(preferNativeSearch = it)
+                                }
+                            }
                         }
                         if (!isNew) {
                             Spacer(Modifier.height(12.dp))

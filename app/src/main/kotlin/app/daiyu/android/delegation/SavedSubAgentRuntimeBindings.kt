@@ -58,7 +58,7 @@ internal class SavedSubAgentRuntimeBindings(
                 model.supportsGptSpeed && GptServiceTier.isGptSpeedModel(model.modelId)) { "Child GPT policy is unsupported" }
             val childBase = ModelFactory.snapshot(saved.asModelSettings().copy(batteryEnabled = false, deviceStatusEnabled = false,
                 usageIdentity = app.daiyu.android.model.UsageModelIdentity(provider.id, provider.name),
-                requestOptions = options.copy(speedMode = speed, openAiWebSearchEnabled = false)))
+                requestOptions = options.copy(speedMode = speed, preferNativeSearch = false)))
             Binding(profile, saved, ReasoningRequestPolicy.freeze(childBase, effort), model.displayName.ifBlank { saved.model })
         }
         val current = {

@@ -72,7 +72,9 @@ class NativeSearchAdaptersTest {
             protocol = ProviderProtocol.GEMINI, requestOptions = ProviderRequestOptions(openAiWebSearchEnabled = true))
         val request = NativeCompletionRequest.body(settings, JSONArray(), emptyList(), null)
         assertTrue(request.getJSONArray("tools").getJSONObject(0).has("googleSearch"))
-        rejected { NativeCompletionRequest.body(settings, JSONArray(), listOf(lookup), null) }
+        val mixed = NativeCompletionRequest.body(settings, JSONArray(), listOf(lookup), null)
+        assertTrue(mixed.getJSONArray("tools").getJSONObject(0).has("functionDeclarations"))
+        assertFalse(mixed.toString().contains("googleSearch"))
         val disabled = NativeCompletionRequest.body(settings.copy(requestOptions = ProviderRequestOptions()), JSONArray(), listOf(lookup), null)
         assertTrue(disabled.getJSONArray("tools").getJSONObject(0).has("functionDeclarations"))
     }

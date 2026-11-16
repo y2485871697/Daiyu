@@ -66,7 +66,7 @@ class MessagesModel internal constructor(
         private var lastServerPause: String? = null
 
         init { MessagesRequest.body(settings.model, messages, tools, maxTokens,
-            settings.requestOptions.openAiWebSearchEnabled, settings.endpoint) }
+            settings.requestOptions.nativeSearchEnabled(ProviderProtocol.MESSAGES, settings.model, settings.endpoint, tools), settings.endpoint) }
         private fun checkCancelled() { if (cancelled.get()) throw InterruptedException() }
 
         @Synchronized
@@ -134,7 +134,8 @@ class MessagesModel internal constructor(
             }
             var request = MessagesRequest.withAssistantInstructions(
                 settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens,
-                    settings.requestOptions.openAiWebSearchEnabled, settings.endpoint), ProviderProtocol.MESSAGES),
+                    settings.requestOptions.nativeSearchEnabled(ProviderProtocol.MESSAGES, settings.model, settings.endpoint, tools), settings.endpoint), ProviderProtocol.MESSAGES,
+                    settings.requestOptions.nativeSearchEnabled(ProviderProtocol.MESSAGES, settings.model, settings.endpoint, tools)),
                 assistantInstructions,
             )
             val screenInput = ScreenToolImageInput.prepare(request, messages, settings, capability,
@@ -184,7 +185,7 @@ class MessagesModel internal constructor(
                 trace.phase = ModelTransportPhase.READING_STREAM
                 trace.reader(conn.inputStream).useProviderResponse { reader ->
                     val raw = MessagesStream.readWithStopReason(reader, cancelled::get, deliver,
-                        if (settings.requestOptions.openAiWebSearchEnabled)
+                        if (settings.requestOptions.nativeSearchEnabled(ProviderProtocol.MESSAGES, settings.model, settings.endpoint, tools))
                             { reason: String -> serverContinuation = reason == "pause_turn" } else null)
                     trace.completionReceived()
                     checkCancelled()

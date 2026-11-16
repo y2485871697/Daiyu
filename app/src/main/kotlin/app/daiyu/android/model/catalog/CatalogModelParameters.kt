@@ -39,7 +39,9 @@ internal data class CatalogModelParameters(
                 parameters.copy(batteryEnabled = settings.batteryEnabled,
                     deviceStatusEnabled = settings.deviceStatusEnabled, requestOptions = settings.requestOptions.copy(
                         openAiWebSearchEnabled = previous?.settings?.requestOptions?.openAiWebSearchEnabled
-                            ?: settings.requestOptions.openAiWebSearchEnabled)))
+                            ?: settings.requestOptions.openAiWebSearchEnabled,
+                        preferNativeSearch = previous?.settings?.requestOptions?.preferNativeSearch
+                            ?: settings.requestOptions.preferNativeSearch)))
         }
 
         /** Preserve the loadForEditing error flag: its fallback options are NOT saved policy. */

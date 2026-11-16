@@ -71,7 +71,7 @@ internal fun projectSubAgentProvider(
 ): SubAgentProvider {
     require(snapshot.models.map { it.settings.localIdentity }.distinct().size == snapshot.models.size)
     return SubAgentProvider(snapshot.providerIdentity, "主模型服务商", snapshot.models.map { record ->
-        val enabled = try { record.settings.requestOptions.validate(protocol); true } catch (_: Exception) { false }
+        val enabled = try { record.settings.requestOptions.validate(protocol, nativeSearchEnabled = false); true } catch (_: Exception) { false }
         val body = runCatching {
             if (record.settings.requestOptions.customBody.isBlank()) org.json.JSONObject() else
                 org.json.JSONObject(record.settings.requestOptions.customBody)

@@ -66,7 +66,7 @@ class CatalogModelEditTest {
         for (search in listOf(false, true)) {
             val original = SavedCatalogModel("a", "A", CatalogModelParameters(batteryEnabled = true,
                 requestOptions = app.daiyu.android.model.ProviderRequestOptions(customBody = "{\"temperature\":0.5}")))
-            val form = CatalogModelEdit.from(original).copy(nativeSearch = search)
+            val form = CatalogModelEdit.from(original).copy(searchTools = search)
             val edited = form.applyTo(original)
             assertEquals(original.settings.localIdentity, edited.settings.localIdentity)
             assertEquals(original.settings.requestOptions.copy(openAiWebSearchEnabled = search), edited.settings.requestOptions)
@@ -74,17 +74,17 @@ class CatalogModelEditTest {
             val file = File(temporary.root, "search-$search")
             FileSavedModelCatalogPersistence(file, CatalogModelParametersCodec).register(listOf(edited))
             val reopened = FileSavedModelCatalogPersistence(file, CatalogModelParametersCodec).current()!!.models.single()
-            assertEquals(search, CatalogModelEdit.from(reopened).nativeSearch)
+            assertEquals(search, CatalogModelEdit.from(reopened).searchTools)
             val stale = app.daiyu.android.storage.ModelSettings("https://example.invalid", "a", "key", false,
                 requestOptions = app.daiyu.android.model.ProviderRequestOptions(openAiWebSearchEnabled = !search))
             assertEquals(search, CatalogModelParameters.updated(stale, reopened).settings.requestOptions.openAiWebSearchEnabled)
             assertEquals(search, reopened.settings.applyTo(stale, "a").requestOptions.openAiWebSearchEnabled)
             assertFalse(CatalogModelParameters.newModel(RemoteModel("b")).settings.requestOptions.openAiWebSearchEnabled)
         }
-        assertFalse(CatalogModelEdit("new", "New").nativeSearch)
+        assertFalse(CatalogModelEdit("new", "New").searchTools)
         val legacy = app.daiyu.android.storage.ModelSettings("https://example.invalid", "a", "key", false,
             requestOptions = app.daiyu.android.model.ProviderRequestOptions(openAiWebSearchEnabled = true))
-        assertTrue(CatalogModelEdit.from(CatalogModelParameters.fromCurrent(legacy)).nativeSearch)
+        assertTrue(CatalogModelEdit.from(CatalogModelParameters.fromCurrent(legacy)).searchTools)
         assertTrue(CatalogModelParameters.updated(legacy, null).settings.requestOptions.openAiWebSearchEnabled)
     }
 

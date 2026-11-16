@@ -106,7 +106,8 @@ class NativeCompletionModel internal constructor(
                     rows.put(row); ownItems.add(row.toString())
                 }
             }
-            var request = settings.requestOptions.apply(NativeCompletionRequest.body(settings, rows, tools, instructions), settings.protocol)
+            var request = settings.requestOptions.apply(NativeCompletionRequest.body(settings, rows, tools, instructions), settings.protocol,
+                settings.requestOptions.nativeSearchEnabled(settings.protocol, settings.model, settings.endpoint, tools))
             val screenInput = ScreenToolImageInput.prepare(request, rows, settings, imageInputSupported,
                 imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get, sessionContext?.screenImageReader, outputs.map { it.callId.value }.toSet())
             request = screenInput.request
@@ -147,7 +148,7 @@ class NativeCompletionModel internal constructor(
                 headers.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 configuringRequest = false
                 trace.phase = ModelTransportPhase.SENDING
-                if (settings.requestOptions.voiceTextOnly || settings.requestOptions.openAiWebSearchEnabled) voiceSearch = VoiceSearchRequestTrace(settings.protocol, request)
+                if (settings.requestOptions.voiceTextOnly || settings.requestOptions.nativeSearchEnabled(settings.protocol, settings.model, settings.endpoint, tools)) voiceSearch = VoiceSearchRequestTrace(settings.protocol, request)
                 conn.send(bytes.size.toLong()) { bytes.writeTo(it, cancelled::get) }
                 checkCancelled()
                 val status = conn.responseCode {
@@ -162,7 +163,7 @@ class NativeCompletionModel internal constructor(
                 trace.phase = ModelTransportPhase.READING_STREAM
                 trace.reader(conn.inputStream).useProviderResponse { reader ->
                     val row = NativeCompletionStream.read(settings.protocol, reader, cancelled::get, deliver,
-                        if (settings.requestOptions.openAiWebSearchEnabled) NativeSearchPolicy.family(endpoint) else null)
+                        if (settings.requestOptions.nativeSearchEnabled(settings.protocol, settings.model, settings.endpoint, tools)) NativeSearchPolicy.family(endpoint) else null)
                     trace.completionReceived()
                     voiceSearch?.completed()
                     checkCancelled()

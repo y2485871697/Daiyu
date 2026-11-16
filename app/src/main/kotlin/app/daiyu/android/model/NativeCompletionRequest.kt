@@ -23,7 +23,7 @@ internal object NativeCompletionRequest {
         return when (settings.protocol) {
             ProviderProtocol.CHAT_COMPLETIONS -> {
                 require(!path.endsWith("/responses") && !path.endsWith("/messages") && !path.contains(":streamGenerateContent")) { "请求地址与所选协议不匹配" }
-                when { path.isEmpty() -> "$base/${if (settings.requestOptions.openAiWebSearchEnabled && NativeSearchPolicy.family(base) == NativeSearchPolicy.Family.BAIDU) "v2" else "v1"}/chat/completions"; path.endsWith("/chat/completions") -> base; else -> "$base/chat/completions" }
+                when { path.isEmpty() -> "$base/${if (settings.requestOptions.nativeSearchEnabled(settings.protocol, settings.model, settings.endpoint) && NativeSearchPolicy.family(base) == NativeSearchPolicy.Family.BAIDU) "v2" else "v1"}/chat/completions"; path.endsWith("/chat/completions") -> base; else -> "$base/chat/completions" }
             }
             ProviderProtocol.GEMINI -> {
                 val model = settings.model.removePrefix("models/")
@@ -235,6 +235,6 @@ internal object NativeCompletionRequest {
             request.put("tools", if (gemini) JSONArray().put(JSONObject().put("functionDeclarations", declarations)) else declarations)
         }
         return NativeSearchPolicy.apply(request, settings.protocol, settings.model, settings.endpoint,
-            settings.requestOptions.openAiWebSearchEnabled, tools)
+            settings.requestOptions.nativeSearchEnabled(settings.protocol, settings.model, settings.endpoint, tools), tools)
     }
 }

@@ -13,7 +13,7 @@ import javax.net.ssl.HttpsURLConnection
 
 class NativeCompletionWebSearchTest {
     private fun settings(enabled: Boolean, protocol: ProviderProtocol = ProviderProtocol.CHAT_COMPLETIONS) =
-        ModelSettings("https://gateway.example.invalid/v1", "relay/search-model", "synthetic", false,
+        ModelSettings("https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus", "synthetic", false,
             protocol = protocol, requestOptions = ProviderRequestOptions(openAiWebSearchEnabled = enabled))
     private fun frame(value: Any) = "data: $value\n\n"
     private fun chunk(delta: JSONObject, reason: String? = null, message: Boolean = false) = JSONObject().put("choices",
@@ -87,16 +87,16 @@ class NativeCompletionWebSearchTest {
         for (enabled in listOf(false, true)) {
             val value = settings(enabled)
             val body = NativeCompletionRequest.body(value, JSONArray(), listOf(tool), null)
-            assertEquals(enabled, body.has("web_search_options"))
-            if (enabled) assertEquals(0, body.getJSONObject("web_search_options").length())
+            assertEquals(enabled, body.has("enable_search"))
+            if (enabled) assertTrue(body.getBoolean("enable_search"))
             assertEquals("function", body.getJSONArray("tools").getJSONObject(0).getString("type"))
             val responses = ResponsesRequest.body(value.model, JSONArray(), listOf(tool), enabled)
             assertEquals(if (enabled) 2 else 1, responses.getJSONArray("tools").length())
             val snapshot = value.requestSnapshot()
             assertEquals(enabled, snapshot.asModelSettings().requestOptions.openAiWebSearchEnabled)
-            assertFalse(snapshot.withoutNativeSearch().requestOptions.openAiWebSearchEnabled)
+            assertFalse(snapshot.withoutNativeSearch().requestOptions.nativeSearchRequested)
             assertEquals(enabled, snapshot.requestOptions.openAiWebSearchEnabled)
-            val gemini = NativeCompletionRequest.body(value.copy(protocol = ProviderProtocol.GEMINI), JSONArray(),
+            val gemini = NativeCompletionRequest.body(value.copy(protocol = ProviderProtocol.GEMINI, endpoint = "https://generativelanguage.googleapis.com/v1beta", model = "gemini-2.5-flash"), JSONArray(),
                 if (enabled) emptyList() else listOf(tool), null)
             assertFalse(gemini.has("web_search_options"))
             assertFalse(gemini.toString().contains("web_search"))
@@ -141,12 +141,12 @@ class NativeCompletionWebSearchTest {
             assertTrue(events.filterIsInstance<ModelEvent.TextFinal>().single().text.contains("](<https://example.org/source>)"))
             assertTrue(events.indexOfFirst { it is ModelEvent.TextFinal } < events.indexOfFirst { it is ModelEvent.ToolReady })
             session.next(listOf(ToolOutput(ToolCallId("call"), "result")), events::add)
-            assertEquals(listOf("https://gateway.example.invalid/v1/chat/completions",
-                "https://gateway.example.invalid/v1/chat/completions"), urls)
+            assertEquals(listOf("https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+                "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"), urls)
             for (connection in listOf(first, second)) {
                 assertTrue(connection.closed)
-                assertEquals(search, connection.body().has("web_search_options"))
-                if (search) assertEquals(0, connection.body().getJSONObject("web_search_options").length())
+                assertEquals(search, connection.body().has("enable_search"))
+                if (search) assertTrue(connection.body().getBoolean("enable_search"))
                 assertEquals("function", connection.body().getJSONArray("tools").getJSONObject(0).getString("type"))
             }
             val history = second.body().getJSONArray("messages")
@@ -162,7 +162,7 @@ class NativeCompletionWebSearchTest {
         val connection = Connection(frame(chunk(JSONObject().put("content", "summary"), "stop")) + frame("[DONE]"))
         SummaryProviderFactory.create(snapshot, 64, "Summarize only", connect = { connection })
             .open(emptyList(), emptyList<ToolDefinition>()).next(emptyList()) {}
-        assertFalse(connection.body().has("web_search_options"))
+        assertFalse(connection.body().has("enable_search"))
         assertFalse(connection.body().has("tools"))
         assertTrue(snapshot.requestOptions.openAiWebSearchEnabled)
         assertTrue(connection.closed)

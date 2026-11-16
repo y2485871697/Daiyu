@@ -61,6 +61,12 @@ jobs:
             :core-domain:test --tests 'app.daiyu.android.domain.runtime.RunnerControlTest' \
             :app:prepareOfflineSpeechRuntime :app:compileDebugKotlin :app:testDebugUnitTest \
             --tests 'app.daiyu.android.model.NativeSearchAdaptersTest' \
+            --tests 'app.daiyu.android.model.ModelNativeSearchSupportTest' \
+            --tests 'app.daiyu.android.model.VoiceSearchRequestTraceTest' \
+            --tests 'app.daiyu.android.model.RuntimeModelOverridesTest' \
+            --tests 'app.daiyu.android.model.catalog.CatalogModelEditTest' \
+            --tests 'app.daiyu.android.model.catalog.CatalogModelParametersTest' \
+            --tests 'app.daiyu.android.delegation.SavedSubAgentRuntimeBindingsTest' \
             --tests 'app.daiyu.android.model.MessagesWebSearchTest' \
             --tests 'app.daiyu.android.model.NativeCompletionWebSearchTest' \
             --tests 'app.daiyu.android.model.ResponsesWebSearchTest' \
@@ -85,7 +91,7 @@ jobs:
           python3 - <<'PY'
           import json, os, re, xml.etree.ElementTree as ET
           from pathlib import Path
-          expected = ['AllProtocolRequestRetryTest', 'MessagesFactoryContractTest', 'MessagesHistoryContractTest', 'MessagesProtocolCompatibilityTest', 'MessagesWebSearchTest', 'NativeCompletionWebSearchTest', 'NativeProtocolCompatibilityTest', 'NativeSearchAdaptersTest', 'ProviderFailureBoundaryTest', 'ProviderHeadersTest', 'ProviderRequestWireTest', 'ResponsesProtocolCompatibilityTest', 'ResponsesWebSearchTest', 'RikkaHubReasoningTest', 'BrowserQueuedExecutionPortTest', 'BrowserToolSessionTest', 'LeaseBrowserHostTest', 'RunBrowserToolsTest', 'BrowserConfirmedCatalogTest', 'RunnerControlTest']
+          expected = ['VoiceSearchRequestTraceTest', 'ModelNativeSearchSupportTest', 'RuntimeModelOverridesTest', 'CatalogModelEditTest', 'CatalogModelParametersTest', 'SavedSubAgentRuntimeBindingsTest', 'AllProtocolRequestRetryTest', 'MessagesFactoryContractTest', 'MessagesHistoryContractTest', 'MessagesProtocolCompatibilityTest', 'MessagesWebSearchTest', 'NativeCompletionWebSearchTest', 'NativeProtocolCompatibilityTest', 'NativeSearchAdaptersTest', 'ProviderFailureBoundaryTest', 'ProviderHeadersTest', 'ProviderRequestWireTest', 'ResponsesProtocolCompatibilityTest', 'ResponsesWebSearchTest', 'RikkaHubReasoningTest', 'BrowserQueuedExecutionPortTest', 'BrowserToolSessionTest', 'LeaseBrowserHostTest', 'RunBrowserToolsTest', 'BrowserConfirmedCatalogTest', 'RunnerControlTest']
           suites = [ET.parse(path).getroot() for path in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           suites += [ET.parse(path).getroot() for path in Path('core-domain/build/test-results/test').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}

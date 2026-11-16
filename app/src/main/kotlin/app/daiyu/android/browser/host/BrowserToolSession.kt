@@ -6,6 +6,8 @@ import app.daiyu.android.browser.bridge.BrowserExecutionResult
 import app.daiyu.android.browser.bridge.BrowserHostBridge
 import app.daiyu.android.browser.bridge.BrowserOutcome
 import app.daiyu.android.browser.session.BrowserGrant
+import app.daiyu.android.browser.session.BrowserAccess
+import app.daiyu.android.browser.session.BrowserOwnerKind
 import app.daiyu.android.browser.session.BrowserSessionRegistry
 import app.daiyu.android.browser.session.BrowserTabLease
 import app.daiyu.android.browser.session.BrowserTakeoverToken
@@ -51,6 +53,8 @@ class BrowserToolTakeoverToken internal constructor(
  * new_tab accepts NO tabId/arguments and creates only a blank tab (also in read-only mode).
  * list_tabs accepts NO tabId/arguments; close_tab accepts only optional tabId. Unsupported
  * new_tab navigation/options are rejected, not ignored or split into another action.
+ * Ordinary navigation defaults may create the first tab for navigate, or open new_tab with
+ * an initial URL. Exact-confirmation callers keep the strict blank-tab/explicit-target contract.
  * tabId accepts Int, bounded Long, or canonical "0"/"1"/"2"; explicit null is not omission.
  * A successful new_tab selects it. An ordinary action selects its tab when entering the port,
  * even if execution subsequently fails. Closing current selects the lowest READY id, or none;
@@ -116,7 +120,7 @@ class BrowserToolSession(
         sessions.publishTakenOver(token.lease) { block(slot.allocation, token.lease) }
     }
 
-    fun execute(parameters: Map<String, Any?>): BrowserOutcome {
+    fun execute(parameters: Map<String, Any?>, navigationDefaults: Boolean = false): BrowserOutcome {
         var entered = false
         return try {
             // Snapshot top-level arguments. Bridge performs all ordinary-action validation.
@@ -127,8 +131,16 @@ class BrowserToolSession(
             synchronized(lock) { checkOpen() }
             val result = when (action) {
                 "new_tab" -> {
-                    require(id == null && arguments.isEmpty()) { "BROWSER_TAB_ARGUMENTS" }
-                    newTab { entered = true }
+                    require(id == null && (arguments.isEmpty() || navigationDefaults && "url" in arguments)) {
+                        "BROWSER_TAB_ARGUMENTS"
+                    }
+                    val navigation = if (arguments.isEmpty()) null else BrowserCommand("navigate", null, arguments).also {
+                        validateNavigation(it)
+                    }
+                    val lease = newTab { entered = true }
+                    if (navigation != null) executeCommand(lease,
+                        BrowserCommand("navigate", lease.tabId, navigation.arguments)) { entered = true }
+                    tabResult(lease)
                 }
                 "list_tabs" -> {
                     require(id == null && arguments.isEmpty()) { "BROWSER_TAB_ARGUMENTS" }
@@ -150,23 +162,22 @@ class BrowserToolSession(
                     }
                 }
                 else -> {
-                    val expected = synchronized(lock) { resolve(id).lease }
+                    val initial = BrowserCommand(action, id, arguments)
+                    val expected = if (navigationDefaults && action == "navigate" &&
+                        (id == null || grant.owner.kind == BrowserOwnerKind.CHILD && id == 0)) {
+                        validateNavigation(initial)
+                        val (selected, allocation) = synchronized(lock) {
+                            checkOpen()
+                            if (current != null) resolve(id).lease to null else {
+                                check(slots.isEmpty()) { "BROWSER_TAB_BUSY" }
+                                null to allocateTab()
+                            }
+                        }
+                        selected ?: createTab(checkNotNull(allocation)) { entered = true }
+                    } else synchronized(lock) { resolve(id).lease }
                     val command = BrowserCommand(action, expected.tabId, arguments)
                     preflight(command)
-                    // Bridge resolves by integer id. Pin the resolved generation at the port
-                    // boundary so a concurrent close/reuse cannot redirect this call to a new tab.
-                    val bridge = BrowserHostBridge(sessions, object : BrowserExecutionPort {
-                        override fun execute(command: BrowserCommand, lease: BrowserTabLease): BrowserExecutionResult {
-                            check(lease == expected) { "BROWSER_STALE_TAB" }
-                            val reservation = synchronized(lock) {
-                                current = requireReady(expected)
-                                sessions.reserveOperation(expected)
-                            }
-                            entered = true
-                            return try { port.execute(command, lease) } finally { reservation.close() }
-                        }
-                    })
-                    bridge.execute(grant.owner, command)
+                    executeCommand(expected, command) { entered = true }
                 }
             }
             BrowserOutcome.Confirmed(result)
@@ -176,11 +187,40 @@ class BrowserToolSession(
         }
     }
 
-    private fun newTab(entering: () -> Unit): BrowserExecutionResult {
-        val slot = synchronized(lock) {
-            checkOpen()
-            Slot(sessions.newTab(grant.owner)).also { slots[it.lease.tabId] = it }
-        }
+    private fun validateNavigation(command: BrowserCommand) {
+        check(grant.access == BrowserAccess.FULL) { "BROWSER_READ_ONLY" }
+        BrowserHostBridge(sessions, port).validate(command)
+        preflight(command)
+    }
+
+    private fun executeCommand(expected: BrowserTabLease, command: BrowserCommand,
+                               entering: () -> Unit): BrowserExecutionResult {
+        val bridge = BrowserHostBridge(sessions, object : BrowserExecutionPort {
+            override fun execute(command: BrowserCommand, lease: BrowserTabLease): BrowserExecutionResult {
+                check(lease == expected) { "BROWSER_STALE_TAB" }
+                val reservation = synchronized(lock) {
+                    current = requireReady(expected)
+                    sessions.reserveOperation(expected)
+                }
+                entering()
+                return try { port.execute(command, lease) } finally { reservation.close() }
+            }
+        })
+        return bridge.execute(grant.owner, command)
+    }
+
+    private fun tabResult(lease: BrowserTabLease) = BrowserExecutionResult(
+        "{\"tabId\":${lease.tabId},\"currentTabId\":${lease.tabId}}")
+
+    private fun allocateTab(): Slot {
+        checkOpen()
+        return Slot(sessions.newTab(grant.owner)).also { slots[it.lease.tabId] = it }
+    }
+
+    private fun newTab(entering: () -> Unit): BrowserTabLease =
+        createTab(synchronized(lock) { allocateTab() }, entering)
+
+    private fun createTab(slot: Slot, entering: () -> Unit): BrowserTabLease {
         try {
             sessions.registerCleanup(slot.allocation) { requestCleanup(slot) }
             synchronized(lock) {
@@ -196,7 +236,7 @@ class BrowserToolSession(
                 slot.phase = Phase.READY
                 current = slot
             }
-            return BrowserExecutionResult("{\"tabId\":${slot.lease.tabId},\"currentTabId\":${slot.lease.tabId}}")
+            return slot.allocation
         } catch (e: Exception) {
             // Exact lease only: never close a replacement that reused the integer slot.
             try { sessions.closeTab(slot.allocation) } catch (cleanup: Exception) { e.addSuppressed(cleanup) }

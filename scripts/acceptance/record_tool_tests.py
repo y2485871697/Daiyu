@@ -15,6 +15,21 @@ import subprocess
 import sys
 
 
+BROWSER_PLATFORM_CLASSES = (
+    "app.daiyu.android.BrowserPageLifecycleActivityTest",
+    "app.daiyu.android.browser.BrowserProductionCompositionTest",
+    "app.daiyu.android.browser.BrowserUiInputTest",
+    "app.daiyu.android.browser.CatalogBrowserBindingAndroidTest",
+)
+BROWSER_MODULES = (
+    "test_browser_navigation_defaults_contract", "test_browser_port_contract",
+    "test_browser_manual_state_contract", "test_browser_download_cleanup_contract",
+    "test_browser_gesture_resume_contract", "test_browser_original_ui_contract",
+    "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 DELETE_CONFIRM_PLATFORM_CLASSES = tuple("app.daiyu.android." + name for name in (
     'DeleteConfirmDialogActivityTest',
     'FolderDeleteConfirmationActivityTest',
@@ -764,6 +779,9 @@ PANE_QUESTION_MODULES = (
 
 def command_for(python, env):
     if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(BROWSER_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *BROWSER_MODULES, "-v"], "browser-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
             and child_hot_configuration_scope(env.get("SMOKE_TEST_CLASSES", ""))):
         return [python, "-B", "-m", "unittest", *CHILD_HOT_CONFIGURATION_MODULES, "-v"], "child-hot-configuration-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
@@ -998,7 +1016,7 @@ def record(python):
         child_env = os.environ.copy()
         child_env["PYTHONPATH"] = str(Path("tests").resolve()) + os.pathsep + child_env.get("PYTHONPATH", "")
     validation_cwd = None
-    if scope in ("doubao-motion-targeted", "child-hot-configuration-targeted", "child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted") or (
+    if scope in ("browser-targeted", "doubao-motion-targeted", "child-hot-configuration-targeted", "child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted") or (
             scope == "child-task-cards-targeted" and sorted(os.environ.get("SMOKE_TEST_CLASSES", "").split(","))
             == sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES)):
         validation_cwd = Path(__file__).resolve().parents[2]

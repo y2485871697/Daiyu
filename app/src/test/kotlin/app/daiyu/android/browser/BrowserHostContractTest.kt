@@ -62,12 +62,26 @@ class BrowserHostContractTest {
         rejects { r.open(BrowserGrant(main, BrowserAccess.READ_ONLY)) }
     }
     @Test fun disabledDoesNotCreateSession() { rejects { BrowserSessionRegistry().open(BrowserGrant(main, BrowserAccess.DISABLED)) } }
-    @Test fun ownersEachHaveThreeTabsAndNoFourth() {
-        val r = registry(); r.open(BrowserGrant(child, BrowserAccess.FULL))
+    @Test fun mainHasThreeTabsAndEachChildHasOneIndependentTab() {
+        val r = registry()
+        val sibling = BrowserOwner("sibling", BrowserOwnerKind.CHILD)
+        listOf(child, sibling).forEach { r.open(BrowserGrant(it, BrowserAccess.FULL)) }
         assertEquals(listOf(0,1,2), (1..3).map { r.newTab(main).tabId })
-        assertEquals(listOf(0,1,2), (1..3).map { r.newTab(child).tabId })
-        rejects { r.newTab(main) }
-        r.close(main); r.assertCurrent(r.lease(child, 0))
+        val childLease = r.newTab(child)
+        val siblingLease = r.newTab(sibling)
+        assertEquals(0, childLease.tabId)
+        assertEquals(0, siblingLease.tabId)
+        for (owner in listOf(main, child, sibling)) rejects { r.newTab(owner) }
+        r.closeTab(childLease)
+        val replacement = r.newTab(child)
+        assertEquals(0, replacement.tabId)
+        assertNotEquals(childLease.tabGeneration, replacement.tabGeneration)
+        rejects { r.assertCurrent(childLease) }
+        r.close(main)
+        r.assertCurrent(replacement)
+        r.assertCurrent(siblingLease)
+        r.close(child)
+        r.assertCurrent(siblingLease)
     }
     @Test fun reusedSlotInvalidatesOldLease() {
         val r = registry(); val old = r.newTab(main); r.closeTab(old)

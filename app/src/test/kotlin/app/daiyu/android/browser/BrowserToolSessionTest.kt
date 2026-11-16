@@ -139,24 +139,25 @@ class BrowserToolSessionTest {
         f.session.close()
     }
 
-    @Test fun eachOwnerGetsExactlyZeroOneTwoWithIndependentCurrentAndCleanup() {
+    @Test fun mainGetsThreeAndChildGetsOneWithIndependentCurrentAndCleanup() {
         val registry = BrowserSessionRegistry()
         val a = Fixture(main, registry = registry)
         val b = Fixture(child, registry = registry)
-        repeat(3) { confirmed(call(a.session, "new_tab")); confirmed(call(b.session, "new_tab")) }
+        repeat(3) { confirmed(call(a.session, "new_tab")) }
+        confirmed(call(b.session, "new_tab"))
         assertEquals(listOf(0, 1, 2), a.resources.created.map { it.tabId })
-        assertEquals(listOf(0, 1, 2), b.resources.created.map { it.tabId })
+        assertEquals(listOf(0), b.resources.created.map { it.tabId })
         rejected(call(a.session, "new_tab"), "BROWSER_TAB_LIMIT")
         rejected(call(b.session, "new_tab"), "BROWSER_TAB_LIMIT")
         confirmed(call(a.session, "get_text", "tabId" to 0))
         assertEquals(0, a.session.currentTab!!.tabId)
-        assertEquals(2, b.session.currentTab!!.tabId)
+        assertEquals(0, b.session.currentTab!!.tabId)
         throwsState { a.session.closeTab(b.session.currentTab!!) }
         rejected(call(a.session, "get_text", "owner" to child))
         rejected(call(a.session, "new_tab", "owner" to child))
         a.session.close()
         assertTrue(a.resources.live.isEmpty())
-        assertEquals(3, b.resources.live.size)
+        assertEquals(1, b.resources.live.size)
         confirmed(call(b.session, "get_text"))
         assertEquals(child, b.port.calls.last().second.owner)
         b.session.close()
@@ -513,6 +514,89 @@ class BrowserToolSessionTest {
         throwsState { f.session.withTakenOverTab(token) { _, _ -> fail("consumed token") } }
         f.session.close()
         foreign.session.close()
+    }
+
+    private fun ordinary(session: BrowserToolSession, action: String, vararg args: Pair<String, Any?>) =
+        session.execute(mapOf("action" to action, *args), navigationDefaults = true)
+
+    @Test fun ordinaryNavigateCreatesOnlyTheFirstTabAndReopensAfterLastClose() {
+        val f = Fixture(main)
+        confirmed(ordinary(f.session, "navigate", "url" to "https://example.invalid/first"))
+        val first = f.session.currentTab!!
+        assertEquals(listOf(first), f.resources.created)
+        assertEquals(first, f.port.calls.single().second)
+        confirmed(ordinary(f.session, "navigate", "url" to "https://example.invalid/second"))
+        assertEquals(first, f.session.currentTab)
+        assertEquals(1, f.resources.created.size)
+        confirmed(call(f.session, "close_tab"))
+        confirmed(ordinary(f.session, "navigate", "url" to "https://example.invalid/reopened"))
+        val reopened = f.session.currentTab!!
+        assertEquals(first.tabId, reopened.tabId)
+        assertNotEquals(first, reopened)
+        assertEquals(2, f.resources.created.size)
+        assertEquals(reopened, f.port.calls.last().second)
+        f.session.close()
+    }
+
+    @Test fun ordinaryInvalidNavigationAndEmptyReadsNeverAllocate() {
+        val f = Fixture(main)
+        for (args in listOf(
+            arrayOf("url" to "file:///private"),
+            arrayOf("url" to "https://example.invalid", "unexpected" to true),
+            arrayOf("url" to "https://example.invalid", "tabId" to 2),
+            arrayOf("url" to "https://example.invalid", "tabId" to null),
+        )) rejected(ordinary(f.session, "navigate", *args))
+        rejected(ordinary(f.session, "get_text"), "BROWSER_CURRENT_TAB_MISSING")
+        confirmed(ordinary(f.session, "list_tabs"))
+        assertTrue(f.resources.created.isEmpty())
+        assertTrue(f.port.calls.isEmpty())
+        f.session.close()
+    }
+
+    @Test fun ordinaryInitialNavigationPreflightsBeforeAllocation() {
+        val resources = Resources()
+        val port = Port()
+        val session = BrowserToolSession(BrowserGrant(main, BrowserAccess.FULL), BrowserSessionRegistry(), resources, port) {
+            error("BROWSER_BACKEND_UNSUPPORTED")
+        }
+        rejected(ordinary(session, "navigate", "url" to "https://example.invalid"), "BROWSER_BACKEND_UNSUPPORTED")
+        rejected(ordinary(session, "new_tab", "url" to "https://example.invalid"), "BROWSER_BACKEND_UNSUPPORTED")
+        assertTrue(resources.created.isEmpty())
+        assertTrue(port.calls.isEmpty())
+        session.close()
+    }
+
+    @Test fun ordinaryConcurrentFirstNavigationDoesNotAllocateBehindCreatingSlot() {
+        val f = Fixture(main)
+        val entered = CountDownLatch(1)
+        val resume = CountDownLatch(1)
+        f.resources.onCreate = { entered.countDown(); check(resume.await(3, TimeUnit.SECONDS)) }
+        val result = AtomicReference<BrowserOutcome>()
+        val worker = thread { result.set(ordinary(f.session, "navigate", "url" to "https://example.invalid/first")) }
+        try {
+            assertTrue(entered.await(3, TimeUnit.SECONDS))
+            assertTrue(f.session.visibleTabs.isEmpty())
+            rejected(ordinary(f.session, "navigate", "url" to "https://example.invalid/racing"), "BROWSER_TAB_BUSY")
+            assertEquals(1, f.resources.created.size)
+        } finally { resume.countDown(); worker.join(3000) }
+        assertFalse(worker.isAlive)
+        confirmed(result.get())
+        assertEquals(1, f.port.calls.size)
+        f.session.close()
+    }
+
+    @Test fun ordinaryFailedOrRevokedCreationNeverNavigatesOrReplays() {
+        for (revoke in listOf(false, true)) {
+            val f = Fixture(main)
+            if (revoke) f.resources.onCreate = { f.session.close() } else f.resources.failCreate = true
+            assertEquals(BrowserOutcome.Unknown,
+                ordinary(f.session, "navigate", "url" to "https://example.invalid/first"))
+            assertEquals(1, f.resources.created.size)
+            assertEquals(1, f.resources.closed.size)
+            assertTrue(f.resources.live.isEmpty())
+            assertTrue(f.port.calls.isEmpty())
+            f.session.close()
+        }
     }
 
 }

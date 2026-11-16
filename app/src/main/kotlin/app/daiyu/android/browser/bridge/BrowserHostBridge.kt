@@ -53,7 +53,7 @@ class BrowserHostBridge(
         return sessions.publish(lease) { result }
     }
 
-    private fun validate(command: BrowserCommand) {
+    internal fun validate(command: BrowserCommand) {
         require(command.tabId == null || command.tabId in 0..2) { "BROWSER_TAB_ID" }
         val allowed = argumentsByAction[command.action] ?: error("BROWSER_ACTION_UNKNOWN")
         require(command.arguments.keys.all { it in allowed }) { "BROWSER_ARGUMENT_UNKNOWN" }

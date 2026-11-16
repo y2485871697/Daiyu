@@ -224,12 +224,15 @@ internal class BrowserRunAuthorization internal constructor(
         require(json is JSONObject && parser.nextClean() == '\u0000') { "browser_arguments_invalid" }
         val action = json.get("action")
         require(action is String && action in preview.allowedActions) { "browser_action_not_confirmed" }
+        require(action != "new_tab" || !json.has("url") || "navigate" in preview.defaultPermission?.actions.orEmpty()) {
+            "browser_action_not_confirmed"
+        }
         if (toolName == RunBrowserTools.READ_TOOL_NAME) {
             require(action in BrowserSessionRegistry.readOnlyActions || action == "list_tabs") { "browser_tool_mismatch" }
             // Full read schema validation remains the production catalog's responsibility.
         } else {
             require(toolName == RunBrowserTools.WRITE_TOOL_NAME) { "browser_tool_mismatch" }
-            val effect = RunBrowserTools.writeEffect(session, arguments)
+            val effect = RunBrowserTools.writeEffect(session, arguments, navigationDefaults = preview.defaultPermission != null)
             require(effect in effects || action in preview.defaultPermission?.actions.orEmpty()) { "browser_effect_not_confirmed" }
         }
     }
@@ -241,7 +244,7 @@ internal class BrowserRunAuthorization internal constructor(
         session: BrowserToolSession, authorization: TaskAuthorization, arguments: String): TaskAuthorization? {
         checkInvocation(owner, assistantId, session, RunBrowserTools.WRITE_TOOL_NAME, arguments)
         require(authorization === boundAuthorization) { "browser_task_authorization_mismatch" }
-        val effect = RunBrowserTools.writeEffect(session, arguments)
+        val effect = RunBrowserTools.writeEffect(session, arguments, navigationDefaults = preview.defaultPermission != null)
         if (effect.operation !in preview.defaultPermission?.actions.orEmpty()) return null
         return TaskAuthorization(taskSessionId, preview.identity.runId.value, setOf(effect))
     }

@@ -41,7 +41,8 @@ class BrowserSessionRegistry(private val release: (BrowserTabLease) -> Unit = {}
     }
     fun newTab(owner: BrowserOwner): BrowserTabLease = synchronized(lock) {
         val session = session(owner)
-        val id = (0..2).firstOrNull { it !in session.tabs } ?: error("BROWSER_TAB_LIMIT")
+        val ids = if (owner.kind == BrowserOwnerKind.CHILD) 0..0 else 0..2
+        val id = ids.firstOrNull { it !in session.tabs } ?: error("BROWSER_TAB_LIMIT")
         val tab = Tab(++session.tabGeneration)
         session.tabs[id] = tab
         lease(session, id, tab)

@@ -71,19 +71,21 @@ internal class RunOrdinaryBrowserTools private constructor(
     }
     override val tools = if (settings.access == BrowserAccess.DISABLED) emptyList() else listOf(false, true).map { write ->
         object : RegisteredTool {
-            override val definition = RunBrowserTools.definition(write, permission.actions)
+            override val definition = RunBrowserTools.definition(write, permission.actions, navigationDefaults = true)
             override fun prepare(arguments: ToolArguments): PreparedTool {
-                RunBrowserTools.validate(arguments.canonicalJson(), write)
+                RunBrowserTools.validate(arguments.canonicalJson(), write, navigationDefaults = true)
                 require(arguments.text("action") in permission.actions) { "browser_action_not_authorized" }
+                require(arguments.text("action") != "new_tab" || !arguments.contains("url") ||
+                    "navigate" in permission.actions) { "browser_action_not_authorized" }
                 val execute: (ToolExecutionContext) -> ExecutionReceipt = { invocation ->
                     val host = ensureOpen()
                     if (host == null || !live() || invocation.cancelled()) ExecutionReceipt.NotExecuted("browser_run_unavailable")
                     else {
                         confirmed.checkInvocation(owner, assistant.id, host.session, definition.name, invocation.invocation.arguments)
-                        RunBrowserTools.executeBound(host.session, invocation, host.screenshotStore, write)
+                        RunBrowserTools.executeBound(host.session, invocation, host.screenshotStore, write, navigationDefaults = true)
                     }
                 }
-                return if (write) this@RunOrdinaryBrowserTools.write(RunBrowserTools.writeEffect(grant, arguments.canonicalJson()), execute) else read(execute)
+                return if (write) this@RunOrdinaryBrowserTools.write(RunBrowserTools.writeEffect(grant, arguments.canonicalJson(), navigationDefaults = true), execute) else read(execute)
             }
         }
     }

@@ -516,4 +516,47 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
             }
         } finally { super.tearDown() }
     }
+    fun testOrdinaryChildFirstZeroUsesOneRealWebViewAndRejectsAnExtraTab() {
+        val child = host(BrowserAccess.FULL, BrowserOwnerKind.CHILD)
+        val first = child.session.execute(mapOf("action" to "navigate", "tabId" to 0,
+            "url" to "https://browser-fixture.invalid/child-first"), navigationDefaults = true)
+        assertTrue(first is BrowserOutcome.Confirmed)
+        val lease = requireNotNull(child.currentTab)
+        assertEquals(0, lease.tabId)
+        assertTrue(confirmed(child, "action" to "get_text", "selector" to "body").result.text.contains("0123456789"))
+        val extra = child.session.execute(mapOf("action" to "new_tab",
+            "url" to "https://browser-fixture.invalid/child-extra"), navigationDefaults = true)
+        assertEquals(BrowserOutcome.NotExecuted("BROWSER_TAB_LIMIT"), extra)
+        assertEquals(lease, child.currentTab)
+        assertEquals(1, child.session.visibleTabs.size)
+        child.close()
+    }
+
+    fun testOrdinaryFirstNavigationAndNewTabUrlUseRealWebViews() {
+        val host = host()
+        assertNull(host.currentTab)
+        fun ordinary(vararg args: Pair<String, Any?>): BrowserOutcome.Confirmed {
+            val result = host.session.execute(mapOf(*args), navigationDefaults = true)
+            assertTrue("ordinary navigation must be confirmed: $result", result is BrowserOutcome.Confirmed)
+            return result as BrowserOutcome.Confirmed
+        }
+        ordinary("action" to "navigate", "url" to "https://browser-fixture.invalid/first-ordinary")
+        val first = requireNotNull(host.currentTab)
+        assertEquals(0, first.tabId)
+        assertTrue(confirmed(host, "action" to "get_text", "selector" to "body").result.text.contains("0123456789"))
+        val created = ordinary("action" to "new_tab", "url" to "https://browser-fixture.invalid/second-ordinary")
+        assertTrue(created.result.text.contains("\"tabId\":1"))
+        assertEquals(1, requireNotNull(host.currentTab).tabId)
+        assertEquals("https://browser-fixture.invalid/second-ordinary", main { host.webHost.currentUrl(requireNotNull(host.currentTab)) })
+        assertTrue(confirmed(host, "action" to "get_text", "selector" to "body").result.text.contains("0123456789"))
+        confirmed(host, "action" to "close_tab")
+        confirmed(host, "action" to "close_tab")
+        assertNull(host.currentTab)
+        ordinary("action" to "navigate", "url" to "https://browser-fixture.invalid/reopened-ordinary")
+        val reopened = requireNotNull(host.currentTab)
+        assertEquals(first.tabId, reopened.tabId)
+        assertFalse(first == reopened)
+        assertEquals("https://browser-fixture.invalid/reopened-ordinary", main { host.webHost.currentUrl(reopened) })
+    }
+
 }

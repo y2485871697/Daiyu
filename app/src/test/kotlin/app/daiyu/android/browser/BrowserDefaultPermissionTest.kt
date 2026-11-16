@@ -118,15 +118,14 @@ class BrowserDefaultPermissionTest {
 
     @Test fun schemaUrlTabAndUnavailableActionsStillFailBeforeExecution() {
         Fixture(main()).use { f ->
-            for ((index, raw) in listOf(navigation.replace("\"tab_id\":0,", ""),
-                navigation.replace("\"tab_id\":0", "\"tab_id\":3"),
+            for ((index, raw) in listOf(navigation.replace("\"tab_id\":0", "\"tab_id\":3"),
                 navigation.replace("https://example.invalid/dynamic", "javascript:alert(1)"),
                 """{"action":"fetch","tab_id":0,"url":"https://example.invalid/","headers":{"Cookie":"secret"}}""",
                 """{"action":"get_cookies","tab_id":0}""",
                 """{"action":"history","tab_id":0}""").withIndex()) {
                 assertTrue(f.dispatch(raw, "bad-$index") is DispatchOutcome.NotExecuted)
             }
-            // Permission doesn't invent a tab or borrow a moving current-tab target.
+            // An explicit missing target never borrows or creates another tab.
             assertTrue(f.dispatch(navigation, "missing-tab") is DispatchOutcome.NotExecuted)
             assertEquals(0, f.creates)
             assertEquals(0, f.executions)
@@ -262,4 +261,140 @@ class BrowserDefaultPermissionTest {
             BrowserGrant(BrowserOwner("sibling", BrowserOwnerKind.CHILD), BrowserAccess.FULL), childScope,
             checkNotNull(parent.preview.defaultPermission)) }
     }
+    @Test fun ordinaryFirstNavigationAcceptsMissingTabAndRetainsLedgerReplay() {
+        Fixture(main()).use { f ->
+            val first = navigation.replace("\"tab_id\":0,", "")
+            assertTrue(f.dispatch(first, "first-navigation") is DispatchOutcome.Confirmed)
+            assertEquals(1, f.creates)
+            assertEquals(1, f.executions)
+            assertEquals(f.leases.first(), f.leases.last())
+            assertTrue((f.dispatch(first, "first-navigation-replay") as DispatchOutcome.Confirmed).replayed)
+            assertEquals(1, f.creates)
+            assertEquals(1, f.executions)
+            assertTrue(f.dispatch(first.replace("dynamic", "next"), "next-navigation") is DispatchOutcome.Confirmed)
+            assertEquals(1, f.creates)
+            assertEquals(2, f.executions)
+        }
+    }
+
+    @Test fun ordinaryNewTabWithUrlNavigatesOnceAndStopsAtThreeTabs() {
+        Fixture(main()).use { f ->
+            repeat(3) { index ->
+                val raw = """{"action":"new_tab","url":"https://example.invalid/page-$index"}"""
+                assertTrue(f.dispatch(raw, "tab-$index") is DispatchOutcome.Confirmed)
+            }
+            assertEquals(3, f.creates)
+            assertEquals(3, f.executions)
+            val selected = f.session.currentTab
+            assertEquals(DispatchOutcome.NotExecuted("BROWSER_TAB_LIMIT"),
+                f.dispatch("""{"action":"new_tab","url":"https://example.invalid/fourth"}""", "fourth"))
+            assertEquals(selected, f.session.currentTab)
+            assertEquals(3, f.creates)
+            assertEquals(3, f.executions)
+        }
+    }
+
+    @Test fun navigationDefaultsDoNotAllocateForInvalidTargetsReadonlyOrRevokedCalls() {
+        Fixture(main()).use { f ->
+            for ((index, raw) in listOf(
+                navigation.replace("\"tab_id\":0", "\"tab_id\":null"),
+                navigation.replace("\"tab_id\":0", "\"tab_id\":2"),
+                navigation.replace("\"tab_id\":0,", "").replace("https://example.invalid/dynamic", "file:///private"),
+                """{"action":"new_tab","url":"javascript:alert(1)"}""").withIndex()) {
+                assertTrue(f.dispatch(raw, "invalid-navigation-$index") is DispatchOutcome.NotExecuted)
+            }
+            f.token.revoke()
+            assertTrue(f.dispatch(navigation.replace("\"tab_id\":0,", ""), "revoked-navigation") is DispatchOutcome.NotExecuted)
+            assertEquals(0, f.creates)
+            assertEquals(0, f.executions)
+        }
+        Fixture(main(BrowserAccess.READ_ONLY)).use { f ->
+            assertTrue(f.dispatch("""{"action":"new_tab","url":"https://example.invalid/"}""", "readonly-url") is DispatchOutcome.NotExecuted)
+            assertEquals(0, f.creates)
+            assertEquals(0, f.executions)
+        }
+    }
+
+    @Test fun initialNavigationFailureIsUnknownAndNeverRepeatedByAnotherCallId() {
+        Fixture(main()).use { f ->
+            f.uncertain = true
+            val raw = navigation.replace("\"tab_id\":0,", "")
+            assertTrue(f.dispatch(raw, "uncertain-first") is DispatchOutcome.Unknown)
+            assertTrue(f.dispatch(raw, "uncertain-replay") is DispatchOutcome.Unknown)
+            assertEquals(1, f.creates)
+            assertEquals(1, f.executions)
+        }
+    }
+
+    @Test fun inheritedReadonlyCeilingRejectsNewTabUrlEvenWhenChildGrantIsFull() {
+        val parent = main(BrowserAccess.READ_ONLY)
+        val childScope = scope("restricted-child")
+        Fixture(child(parent, childScope), scope = childScope).use { f ->
+            assertTrue(f.dispatch("""{"action":"new_tab","url":"https://example.invalid/"}""", "escape") is DispatchOutcome.NotExecuted)
+            assertEquals(0, f.creates)
+            assertEquals(0, f.executions)
+            assertTrue(f.dispatch(newTab, "blank-tab") is DispatchOutcome.Confirmed)
+            assertEquals(1, f.creates)
+        }
+    }
+
+    @Test fun exactChildNavigationDoesNotTurnBlankTabPermissionIntoArbitraryNavigation() {
+        val parent = main(BrowserAccess.READ_ONLY)
+        val childOwner = ChildRunOwner(identity.conversationId.value, identity.runId.value, "group", 1,
+            "mixed-child", "reply-mixed-child")
+        val grant = BrowserGrant(BrowserOwner(childOwner.childRunId, BrowserOwnerKind.CHILD), BrowserAccess.FULL)
+        val effect = RunBrowserTools.writeEffect(grant, navigation)
+        val captured = ChildRunScope.capture(childOwner, SessionCapabilities(identity.runId.value, caps),
+            TaskAuthorization(identity.runId.value, identity.runId.value, setOf(effect)), caps, setOf(effect))
+        val preparation = BrowserRunPreparation.prepareChild(captured, assistant.id, full, grant,
+            setOf("list_tabs", "navigate"), writeArguments = listOf(navigation),
+            defaultPermission = BrowserDefaultPermission.child(grant, captured, checkNotNull(parent.preview.defaultPermission)))
+        Fixture(preparation, scope = captured).use { f ->
+            assertTrue("navigate" in preparation.preview.allowedActions)
+            assertFalse("navigate" in checkNotNull(preparation.preview.defaultPermission).actions)
+            assertTrue(f.dispatch("""{"action":"new_tab","url":"https://example.invalid/not-approved"}""",
+                "arbitrary-url") is DispatchOutcome.NotExecuted)
+            assertEquals(0, f.creates)
+            assertEquals(0, f.executions)
+            assertTrue(f.dispatch(newTab, "blank") is DispatchOutcome.Confirmed)
+            assertTrue(f.dispatch(navigation, "exact-navigation") is DispatchOutcome.Confirmed)
+            assertEquals(1, f.creates)
+            assertEquals(1, f.executions)
+        }
+    }
+
+    @Test fun ordinaryChildMayStartAtExplicitZeroWithoutRelaxingExactApprovals() {
+        val childScope = scope("explicit-first-child")
+        Fixture(child(main(), childScope), scope = childScope).use { f ->
+            assertTrue(f.dispatch(navigation, "explicit-zero-first") is DispatchOutcome.Confirmed)
+            assertEquals(1, f.creates)
+            assertEquals(0, f.session.currentTab!!.tabId)
+            assertTrue(f.dispatch(navigation.replace("dynamic", "next"), "explicit-zero-next") is DispatchOutcome.Confirmed)
+            assertEquals(1, f.creates)
+            assertEquals(2, f.executions)
+        }
+    }
+
+    @Test fun ordinaryChildFirstNavigationUsesOneTemporaryTabUntilExplicitClose() {
+        val childScope = scope("single-tab-child")
+        Fixture(child(main(), childScope), scope = childScope).use { f ->
+            val raw = navigation.replace("\"tab_id\":0,", "")
+            assertTrue(f.dispatch(raw, "first-child-navigation") is DispatchOutcome.Confirmed)
+            assertEquals(0, f.session.currentTab!!.tabId)
+            assertEquals(DispatchOutcome.NotExecuted("BROWSER_TAB_LIMIT"),
+                f.dispatch("""{"action":"new_tab","url":"https://example.invalid/extra"}""", "extra-child-tab"))
+            assertEquals(1, f.creates)
+            assertEquals(1, f.executions)
+            val first = f.session.currentTab!!
+            assertTrue(f.dispatch(raw.replace("dynamic", "next"), "next-child-navigation") is DispatchOutcome.Confirmed)
+            assertEquals(first, f.session.currentTab)
+            assertTrue(f.dispatch("""{"action":"close_tab","tab_id":0}""", "close-child-tab") is DispatchOutcome.Confirmed)
+            assertTrue(f.dispatch(raw.replace("dynamic", "reopen"), "reopen-child-navigation") is DispatchOutcome.Confirmed)
+            assertEquals(0, f.session.currentTab!!.tabId)
+            assertNotEquals(first, f.session.currentTab)
+            assertEquals(2, f.creates)
+            assertEquals(3, f.executions)
+        }
+    }
+
 }

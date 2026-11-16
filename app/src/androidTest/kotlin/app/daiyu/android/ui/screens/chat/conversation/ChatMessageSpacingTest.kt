@@ -78,7 +78,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     val displayed = ui.onNodeWithText(marker, substring = true).isDisplayed()
                     lastGeometry = "tailTop=${tail.positionInRoot().y} tailHeight=${tail.size.height} " +
                         "surface=$surface viewport=$viewport density=$density outerGapDp=$gap surfaceGapDp=${(surface.top - fullTailBottom) / density} markerDisplayed=$displayed"
-                    displayed && gap in 30f..40f
+                    displayed && gap in (ChatTailClearance.value - 2f)..(ChatTailClearance.value + 2f)
                 }
             }
         } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
@@ -94,7 +94,9 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         val fullTailBottom = tail.positionInRoot().y + tail.size.height
         val composerOuterTop = surface.top - 10f * density
         val gap = (composerOuterTop - fullTailBottom) / density
-        assertTrue("Tail must retain compact clearance above the outer composer: gap=${gap}dp", gap in 30f..40f)
+        assertTrue("Tail must retain compact clearance above the outer composer: gap=${gap}dp", gap in (ChatTailClearance.value - 2f)..(ChatTailClearance.value + 2f))
+        val visibleGap = (surface.top - fullTailBottom) / density
+        assertTrue("Visible reply-to-composer spacing stays near 18dp: gap=${visibleGap}dp", visibleGap in 16f..20f)
         ui.onNodeWithContentDescription("上一条用户消息").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }

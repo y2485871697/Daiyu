@@ -21,6 +21,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.semantics.SemanticsNode
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -178,7 +180,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     val row = ui.onNodeWithTag("chat-turn:${tail.id}").fetchSemanticsNode()
                     val list = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot
                     assertTrue("This regression must remain shorter than a full reading viewport",
-                        row.size.height < composer.top - list.top - 35f * density)
+                        row.size.height < composer.top - list.top - ChatTailClearance.value * density)
                     val range = viewport.config[SemanticsProperties.VerticalScrollAxisRange]
                     assertEquals("A short workflow must never scroll its identity out of its own viewport",
                         0f, range.value(), 1f)
@@ -374,6 +376,60 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testProtectedTailClipsItsOwnBottomButManualReadingKeepsBackdrop() {
+        var protectBottom by mutableStateOf(true)
+        var hostCoordinates: LayoutCoordinates? = null
+        val state = StreamingTailViewport(true)
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    density = LocalDensity.current.density
+                    Box(Modifier.size(320.dp, 300.dp).background(Color.White).clipToBounds()
+                        .onPlaced { hostCoordinates = it }.testTag("bottom-clip-host")) {
+                        StreamingTailContainer(state, { hostCoordinates }, "bottom-clip-probe",
+                            userScrollEnabled = false, follows = { false },
+                            protectClearance = { protectBottom },
+                            clearance = { (20f * density).toInt() },
+                            viewportHeight = { (120f * density).toInt() },
+                            listViewportHeight = { (300f * density).toInt() }) {
+                            Box(Modifier.fillMaxWidth().height(240.dp).background(Color.Cyan))
+                        }
+                    }
+                }
+            }
+        }
+        ui.waitForIdle()
+        fun sampleBelowViewport(): Color {
+            val host = ui.onNodeWithTag("bottom-clip-host")
+            val hostBounds = host.fetchSemanticsNode().boundsInRoot
+            val viewport = ui.onNodeWithTag("chat-stream-viewport:bottom-clip-probe").fetchSemanticsNode()
+            val coordinates = viewport.layoutInfo.coordinates
+            val bottom = coordinates.positionInRoot().y + coordinates.size.height
+            val pixels = host.captureToImage().toPixelMap()
+            val x = (viewport.boundsInRoot.center.x - hostBounds.left).toInt()
+            val insideY = (bottom - hostBounds.top - 12f * density).toInt()
+            val outsideY = (bottom - hostBounds.top + 12f * density).toInt()
+            val inside = pixels[x, insideY]
+            assertTrue("The bounded viewport must still draw its real content: $inside",
+                inside.red < .1f && inside.green > .9f && inside.blue > .9f)
+            return pixels[x, outsideY]
+        }
+        val clipped = sampleBelowViewport()
+        assertTrue("Protected streaming content cannot paint below its own measured frame: $clipped",
+            clipped.red > .9f && clipped.green > .9f && clipped.blue > .9f)
+        mainThread { protectBottom = false }
+        ui.waitForIdle()
+        val manual = sampleBelowViewport()
+        assertTrue("Detached reading must retain the deliberately extended backdrop: $manual",
+            manual.red < .1f && manual.green > .9f && manual.blue > .9f)
+        mainThread { protectBottom = true }
+        ui.waitForIdle()
+        val protectedAgain = sampleBelowViewport()
+        assertTrue("The same live viewport must restore its protected bottom: $protectedAgain",
+            protectedAgain.red > .9f && protectedAgain.green > .9f && protectedAgain.blue > .9f)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testManualReadingDrawsThroughClearanceInsteadOfExposingPageBackground() {
         mount(interactive = true, painted = true)
         manualNonzeroPosition()
@@ -381,7 +437,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         val composer = ui.onNodeWithTag("occlusion-composer").fetchSemanticsNode().boundsInRoot
         val host = ui.onNodeWithTag("occlusion-host")
         val hostBounds = host.fetchSemanticsNode().boundsInRoot
-        val sampleY = composer.top - 8f * density
+        val sampleY = composer.top - ChatTailClearance.value * .5f * density
         assertTrue("Probe must be below the finite reading window", sampleY > viewport.boundsInRoot.bottom)
         val pixels = host.captureToImage().toPixelMap()
         val x = (viewport.boundsInRoot.center.x - hostBounds.left).toInt()

@@ -139,7 +139,7 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
 
     def test_following_gap_is_single_source_and_catchup_is_not_a_global_scroll_override(self):
         source = (CHAT / 'ChatMessageList.kt').read_text()
-        self.assertIn('internal val ChatTailClearance = 35.dp', source)
+        self.assertIn('internal val ChatTailClearance = 8.dp', source)
         self.assertIn('bottom = composerBottomInset + ChatTailClearance', source)
         self.assertIn('if (protect) clearance() else 0', source)
         self.assertIn('val actualTop = list.localPositionOf(viewport, Offset.Zero).y', source)

@@ -120,7 +120,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertLess(placement.index("state.scrollOffset = if"), placement.index("state.viewportOffset = q"))
         self.assertLess(placement.index("state.viewportOffset = q"), placement.index("viewport.placeRelative(0, q)"))
         self.assertNotIn("if (state.bounded && follows()) maximum.toFloat()", viewport)
-        self.assertIn("clipRect(bottom = bottom)", viewport)
+        self.assertIn("clipRect(bottom = clipBottom)", viewport)
         self.assertIn("state.viewportOffset.coerceIn(0, state.maxOffset)", viewport)
         device = DEVICE.read_text()
         for token in ("testAppendingShortWorkflowKeepsIdentityAndHeaderUnclippedInEveryFrame",
@@ -132,6 +132,19 @@ class StreamingOcclusionContract(unittest.TestCase):
                       "clipped.boundsInRoot.height < clipped.size.height - 1f",
                       "failure is junit.framework.AssertionFailedError", "neighbor.boundsInRoot.bottom",
                       "The outer follower must actually reveal each new tool"):
+            self.assertIn(token, device)
+
+    def test_protected_drawing_caps_current_frame_without_clipping_manual_backdrop(self):
+        source = CHAT.read_text()
+        viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
+        self.assertIn("val clipBottom = if (protect) minOf(size.height, bottom) else bottom", viewport)
+        self.assertIn("clipRect(bottom = clipBottom)", viewport)
+        self.assertIn("internal val ChatTailClearance = 8.dp", source)
+        device = DEVICE.read_text()
+        for token in ("testProtectedTailClipsItsOwnBottomButManualReadingKeepsBackdrop",
+                      "sampleBelowViewport()", "protectBottom = false", "protectBottom = true",
+                      "inside.red < .1f", "clipped.red > .9f", "manual.red < .1f",
+                      "protectedAgain.red > .9f"):
             self.assertIn(token, device)
 
     def test_short_to_long_growth_exercises_partial_viewport_before_outer_catchup(self):
@@ -175,12 +188,12 @@ class StreamingOcclusionContract(unittest.TestCase):
             "(list.size.height - actualTop - if (protect) clearance() else 0).coerceAtLeast(0f)",
             " ".join(geometry.split()),
         )
-        self.assertIn("clipRect(bottom = bottom)", drawing)
+        self.assertIn("clipRect(bottom = clipBottom)", drawing)
         self.assertNotIn(".clipToBounds()", viewport)
         device = DEVICE.read_text()
         case = device.split("fun testManualReadingDrawsThroughClearanceInsteadOfExposingPageBackground()", 1)[1].split("fun testContinuousEveryFrameGrowth", 1)[0]
         for token in ("manualNonzeroPosition()", "painted = true", "sampleY > viewport.boundsInRoot.bottom",
-                      "composer.top - 8f * density", "captureToImage().toPixelMap()",
+                      "composer.top - ChatTailClearance.value * .5f * density", "captureToImage().toPixelMap()",
                       "color.red < .1f", "color.green > .9f", "color.blue > .9f"):
             self.assertIn(token, case)
 

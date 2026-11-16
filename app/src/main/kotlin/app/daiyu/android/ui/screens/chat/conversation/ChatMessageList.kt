@@ -90,7 +90,7 @@ import kotlinx.coroutines.flow.collect
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-internal val ChatTailClearance = 35.dp
+internal val ChatTailClearance = 8.dp
 private val StreamingTailContentHeight = HorizontalAlignmentLine(::maxOf)
 
 private class FollowClearanceLayout : RemeasurementModifier {
@@ -172,7 +172,9 @@ internal fun StreamingTailContainer(
                     val actualTop = list.localPositionOf(viewport, Offset.Zero).y
                     (list.size.height - actualTop - if (protect) clearance() else 0).coerceAtLeast(0f)
                 } else size.height
-                clipRect(bottom = bottom) { this@drawWithContent.drawContent() }
+                // Follow protection owns this measured frame; detached reading keeps its extended backdrop.
+                val clipBottom = if (protect) minOf(size.height, bottom) else bottom
+                clipRect(bottom = clipBottom) { this@drawWithContent.drawContent() }
             }
             .scrollable(innerScroll, Orientation.Vertical, enabled = userScrollEnabled && state.bounded)
             .semantics {

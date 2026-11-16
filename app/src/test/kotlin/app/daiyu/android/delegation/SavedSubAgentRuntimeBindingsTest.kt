@@ -78,7 +78,10 @@ class SavedSubAgentRuntimeBindingsTest {
             val wire = childSettings.requestOptions.apply(NativeCompletionRequest.body(childSettings, org.json.JSONArray(), emptyList(), null),
                 childSettings.protocol, false)
             assertFalse(wire.has("enable_search"))
-            assertEquals(options.customBody, childSettings.requestOptions.customBody)
+            val childBody = if (childSettings.requestOptions.customBody.isEmpty()) org.json.JSONObject()
+                else org.json.JSONObject(childSettings.requestOptions.customBody)
+            assertEquals(options.customBody.isNotEmpty(), childBody.has("enable_search"))
+            if (options.customBody.isNotEmpty()) assertTrue(childBody.getBoolean("enable_search"))
             assertEquals(options, configured.requestOptions)
         }
     }

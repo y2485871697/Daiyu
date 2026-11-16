@@ -2,6 +2,7 @@ package app.daiyu.android.browser.runtime
 
 import app.daiyu.android.browser.bridge.BrowserCommand
 import app.daiyu.android.browser.bridge.BrowserExecutionPort
+import app.daiyu.android.browser.bridge.BrowserOperationNotStartedException
 import app.daiyu.android.browser.bridge.BrowserExecutionResult
 import app.daiyu.android.browser.session.BrowserSessionRegistry
 import app.daiyu.android.browser.session.BrowserTabLease
@@ -31,8 +32,8 @@ interface AsyncBrowserBackend {
 
 /**
  * Worker-thread synchronous facade over a genuinely asynchronous UI backend. No retries are made.
- * Every exception from this port retains BrowserHostBridge's existing Unknown semantics, including
- * timeout/interruption: cancellation is best effort, never proof that a side effect did not happen.
+ * Once backend admission begins, timeout/interruption remains Unknown and cleanup is best effort.
+ * Before admission, failure seals the queue entry without retiring the untouched page.
  */
 class BrowserQueuedExecutionPort(
     private val sessions: BrowserSessionRegistry,
@@ -43,8 +44,9 @@ class BrowserQueuedExecutionPort(
     init { require(waitTimeoutMillis in 1..60_000) { "BROWSER_WAIT_TIMEOUT_RANGE" } }
 
     override fun execute(command: BrowserCommand, lease: BrowserTabLease): BrowserExecutionResult {
-        check(!ui.isUiThread()) { "BROWSER_UI_THREAD_WAIT_FORBIDDEN" }
-        if (Thread.currentThread().isInterrupted) throw InterruptedException("BROWSER_WAIT_INTERRUPTED")
+        if (ui.isUiThread()) throw BrowserOperationNotStartedException(IllegalStateException("BROWSER_UI_THREAD_WAIT_FORBIDDEN"))
+        if (Thread.currentThread().isInterrupted)
+            throw BrowserOperationNotStartedException(InterruptedException("BROWSER_WAIT_INTERRUPTED"))
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(waitTimeoutMillis)
         val request = Request(command, lease)
         try {
@@ -56,10 +58,10 @@ class BrowserQueuedExecutionPort(
         } catch (e: InterruptedException) {
             request.fail(e)
             Thread.currentThread().interrupt()
-            throw e
+            throw request.failure() ?: e
         } catch (e: Exception) {
             request.fail(e)
-            throw e
+            throw request.failure() ?: e
         } finally {
             request.detach()
         }
@@ -69,6 +71,8 @@ class BrowserQueuedExecutionPort(
         val result = CompletableFuture<BrowserExecutionResult>()
         private val lock = Any()
         private var terminal = false
+        private var backendEntered = false
+        private var terminalFailure: Throwable? = null
         private var subscription: AutoCloseable? = null
 
         fun attach(handle: AutoCloseable) {
@@ -92,7 +96,10 @@ class BrowserQueuedExecutionPort(
                     sessions.assertAllowed(lease, command.action)
                     synchronized(lock) {
                         if (terminal) null
-                        else backend.execute(command, lease)
+                        else {
+                            backendEntered = true
+                            backend.execute(command, lease)
+                        }
                     }
                 } ?: return
                 pending.whenComplete { value, failure ->
@@ -114,19 +121,28 @@ class BrowserQueuedExecutionPort(
 
         fun fail(failure: Throwable) = finish(null, failure)
 
+        fun failure(): Throwable? = synchronized(lock) { terminalFailure }
+
         private fun finish(value: BrowserExecutionResult?, failure: Throwable?) {
+            var cancelBackend = false
             val handle = synchronized(lock) {
                 if (terminal) return
                 terminal = true
+                terminalFailure = failure?.let {
+                    if (!backendEntered) BrowserOperationNotStartedException(it)
+                    else if (it is BrowserOperationNotStartedException) IllegalStateException("BROWSER_BACKEND_FAILED", it)
+                    else it
+                }
+                cancelBackend = failure != null && backendEntered
                 val handle = subscription
                 subscription = null
                 // Wake the worker before best-effort cleanup; it must not wait for cancellation.
-                if (failure != null) result.completeExceptionally(failure)
+                if (failure != null) result.completeExceptionally(checkNotNull(terminalFailure))
                 else result.complete(checkNotNull(value))
                 handle
             }
             try { handle?.close() } catch (_: Exception) { /* already terminal */ }
-            if (failure != null) {
+            if (cancelBackend) {
                 try { backend.cancel(lease) } catch (_: Exception) { /* outcome remains unknown */ }
             }
         }

@@ -19,11 +19,13 @@ class LeaseBrowserHostTest {
     private class Ui : UiDispatcher {
         private var onUi = false
         var rejectPosts = false
+        var onPost: (() -> Unit)? = null
         private val queue = ArrayDeque<() -> Unit>()
         override fun isUiThread() = onUi
         override fun post(task: () -> Unit) {
             check(!rejectPosts) { "dispatcher stopped" }
             queue.addLast(task)
+            onPost?.invoke()
         }
         fun <T> now(task: () -> T): T {
             check(!onUi)
@@ -542,6 +544,45 @@ class LeaseBrowserHostTest {
         f.ui.drain()
         assertEquals(1, resource.destroyed)
         assertTrue(f.host.closeStatus().successful)
+    }
+
+    @Test fun queuedStopBeforeAdmissionDoesNotRetireTheOriginalResource() {
+        val f = Fixture()
+        val lease = f.create()
+        val port = app.daiyu.android.browser.runtime.BrowserQueuedExecutionPort(f.sessions, f.ui, f.host)
+        val bridge = app.daiyu.android.browser.bridge.BrowserHostBridge(f.sessions, port)
+        fun startCall(): Pair<Thread, java.util.concurrent.CompletableFuture<app.daiyu.android.browser.bridge.BrowserOutcome>> {
+            val posted = java.util.concurrent.CountDownLatch(1)
+            f.ui.onPost = { posted.countDown() }
+            val result = java.util.concurrent.CompletableFuture<app.daiyu.android.browser.bridge.BrowserOutcome>()
+            val worker = kotlin.concurrent.thread(isDaemon = true) {
+                try { result.complete(bridge.executeSafely(f.owner, BrowserCommand("get_page_info", lease.tabId))) }
+                catch (failure: Throwable) { result.completeExceptionally(failure) }
+            }
+            check(posted.await(3, java.util.concurrent.TimeUnit.SECONDS))
+            return worker to result
+        }
+        try {
+            val (worker, first) = startCall()
+            worker.interrupt()
+            assertEquals(app.daiyu.android.browser.bridge.BrowserOutcome.NotExecuted("BROWSER_OPERATION_NOT_STARTED"),
+                first.get(3, java.util.concurrent.TimeUnit.SECONDS))
+            f.ui.drain()
+            assertEquals(0, f.resources.single().calls)
+            assertEquals(0, f.resources.single().destroyed)
+            assertFalse(f.resources.single().admissionRevoked)
+            f.resources.single().result.complete(BrowserActionResult("original resource still usable"))
+            val (_, next) = startCall()
+            f.ui.drain()
+            assertEquals(app.daiyu.android.browser.bridge.BrowserOutcome.Confirmed(
+                app.daiyu.android.browser.bridge.BrowserExecutionResult("original resource still usable")),
+                next.get(3, java.util.concurrent.TimeUnit.SECONDS))
+            assertEquals(1, f.resources.single().calls)
+            assertEquals(0, f.resources.single().destroyed)
+        } finally {
+            f.ui.now { f.host.close(lease) }
+            f.ui.drain()
+        }
     }
 
 }

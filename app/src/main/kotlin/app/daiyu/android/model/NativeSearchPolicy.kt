@@ -7,7 +7,7 @@ import java.util.Locale
 
 /** Select a wire adapter, not a promise about a model's remote entitlement. Opt-in stays per model. */
 internal object NativeSearchPolicy {
-    enum class Family { OPENAI, XAI, GOOGLE, ANTHROPIC, QWEN, GLM, ARK, DEEPSEEK, PERPLEXITY, MINIMAX, MISTRAL, MOONSHOT, STEPFUN, COMPATIBLE }
+    enum class Family { OPENAI, XAI, GOOGLE, ANTHROPIC, QWEN, GLM, ARK, DEEPSEEK, PERPLEXITY, MINIMAX, HUNYUAN, BAIDU, MISTRAL, MOONSHOT, STEPFUN, COMPATIBLE }
 
     fun family(endpoint: String?): Family {
         val host = endpoint?.let { URI(it).host }?.lowercase(Locale.ROOT) ?: return Family.COMPATIBLE
@@ -23,6 +23,8 @@ internal object NativeSearchPolicy {
             host == "api.deepseek.com" -> Family.DEEPSEEK
             host == "api.perplexity.ai" -> Family.PERPLEXITY
             host in setOf("api.minimax.io", "api.minimaxi.com") -> Family.MINIMAX
+            host == "api.hunyuan.cloud.tencent.com" -> Family.HUNYUAN
+            host == "qianfan.baidubce.com" -> Family.BAIDU
             host == "api.mistral.ai" -> Family.MISTRAL
             host in setOf("api.moonshot.cn", "api.moonshot.ai") -> Family.MOONSHOT
             host == "api.stepfun.com" -> Family.STEPFUN
@@ -34,8 +36,11 @@ internal object NativeSearchPolicy {
               enabled: Boolean, localTools: List<app.daiyu.android.domain.ToolDefinition>): JSONObject {
         if (!enabled) return body
         val family = family(endpoint)
-        require(family !in setOf(Family.MISTRAL, Family.MOONSHOT, Family.STEPFUN)) {
+        require(family !in setOf(Family.MISTRAL, Family.MOONSHOT)) {
             "当前接口的原生搜索协议尚未接入，请使用本轮提供的浏览器工具"
+        }
+        require(family !in setOf(Family.STEPFUN, Family.HUNYUAN, Family.BAIDU) || protocol == ProviderProtocol.CHAT_COMPLETIONS) {
+            "该提供商的原生搜索请使用 Chat Completions 格式"
         }
         fun append(tool: JSONObject) {
             val tools = body.optJSONArray("tools") ?: JSONArray().also { body.put("tools", it) }
@@ -53,6 +58,13 @@ internal object NativeSearchPolicy {
                 Family.MINIMAX -> throw IllegalArgumentException("MiniMax 原生搜索请使用 Messages 或 Responses 格式")
                 Family.XAI -> throw IllegalArgumentException("Grok 原生搜索请使用 Responses 格式")
                 Family.QWEN -> body.put("enable_search", true)
+                Family.HUNYUAN -> body.put("enable_enhancement", true).put("search_info", true).put("citation", true)
+                Family.BAIDU -> body.put("web_search", JSONObject().put("enable", true).put("enable_trace", true)
+                    .put("enable_status", true).put("enable_citation", true))
+                Family.STEPFUN -> {
+                    require(!model.lowercase(Locale.ROOT).startsWith("step-5-preview")) { "此型号不支持内置原生搜索" }
+                    append(JSONObject().put("type", "web_search").put("function", JSONObject().put("description", "搜索互联网信息")))
+                }
                 Family.GLM -> append(JSONObject().put("type", "web_search")
                     .put("web_search", JSONObject().put("enable", true).put("search_result", true)))
                 Family.DEEPSEEK -> append(JSONObject().put("type", "deepseek_web_search"))

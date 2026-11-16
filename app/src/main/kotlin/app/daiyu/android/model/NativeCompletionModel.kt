@@ -161,7 +161,8 @@ class NativeCompletionModel internal constructor(
                     throw ModelRequestException(ModelFailure.PROTOCOL)
                 trace.phase = ModelTransportPhase.READING_STREAM
                 trace.reader(conn.inputStream).useProviderResponse { reader ->
-                    val row = NativeCompletionStream.read(settings.protocol, reader, cancelled::get, deliver)
+                    val row = NativeCompletionStream.read(settings.protocol, reader, cancelled::get, deliver,
+                        if (settings.requestOptions.openAiWebSearchEnabled) NativeSearchPolicy.family(endpoint) else null)
                     trace.completionReceived()
                     voiceSearch?.completed()
                     checkCancelled()

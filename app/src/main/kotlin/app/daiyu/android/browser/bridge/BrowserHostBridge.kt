@@ -21,6 +21,10 @@ sealed interface BrowserOutcome {
     data class NotExecuted(val code: String) : BrowserOutcome
     data object Unknown : BrowserOutcome
 }
+/** Emitted only when the queue atomically prevents backend admission. */
+internal class BrowserOperationNotStartedException(cause: Throwable) :
+    IllegalStateException("BROWSER_OPERATION_NOT_STARTED", cause)
+
 interface BrowserExecutionPort {
     fun execute(command: BrowserCommand, lease: BrowserTabLease): BrowserExecutionResult
 }
@@ -32,13 +36,14 @@ class BrowserHostBridge(
 ) {
     fun execute(owner: BrowserOwner, command: BrowserCommand): BrowserExecutionResult = executeChecked(owner, command)
 
-    /** Any failure after entering the port is unknown, never an invitation to replay. */
+    /** Only a queue-proven admission rejection can be reported as not executed after port entry. */
     fun executeSafely(owner: BrowserOwner, command: BrowserCommand): BrowserOutcome {
         var entered = false
         return try {
             BrowserOutcome.Confirmed(executeChecked(owner, command) { entered = true })
         } catch (e: Exception) {
-            if (entered) BrowserOutcome.Unknown else BrowserOutcome.NotExecuted("BROWSER_PRECHECK_REJECTED")
+            if (e is BrowserOperationNotStartedException) BrowserOutcome.NotExecuted(checkNotNull(e.message))
+            else if (entered) BrowserOutcome.Unknown else BrowserOutcome.NotExecuted("BROWSER_PRECHECK_REJECTED")
         }
     }
     private fun executeChecked(

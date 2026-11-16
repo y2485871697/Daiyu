@@ -4,6 +4,7 @@ import app.daiyu.android.browser.bridge.BrowserCommand
 import app.daiyu.android.browser.bridge.BrowserExecutionPort
 import app.daiyu.android.browser.bridge.BrowserExecutionResult
 import app.daiyu.android.browser.bridge.BrowserHostBridge
+import app.daiyu.android.browser.bridge.BrowserOperationNotStartedException
 import app.daiyu.android.browser.bridge.BrowserOutcome
 import app.daiyu.android.browser.session.BrowserGrant
 import app.daiyu.android.browser.session.BrowserAccess
@@ -122,6 +123,7 @@ class BrowserToolSession(
 
     fun execute(parameters: Map<String, Any?>, navigationDefaults: Boolean = false): BrowserOutcome {
         var entered = false
+        var allocationEntered = false
         var stage = "precheck"
         return try {
             // Snapshot top-level arguments. Bridge performs all ordinary-action validation.
@@ -138,7 +140,7 @@ class BrowserToolSession(
                     val navigation = if (arguments.isEmpty()) null else BrowserCommand("navigate", null, arguments).also {
                         validateNavigation(it)
                     }
-                    val lease = newTab { entered = true; stage = "create" }
+                    val lease = newTab { entered = true; allocationEntered = true; stage = "create" }
                     if (navigation != null) executeCommand(lease,
                         BrowserCommand("navigate", lease.tabId, navigation.arguments)) { entered = true; stage = "execute" }
                     tabResult(lease)
@@ -174,7 +176,7 @@ class BrowserToolSession(
                                 null to allocateTab()
                             }
                         }
-                        selected ?: createTab(checkNotNull(allocation)) { entered = true; stage = "create" }
+                        selected ?: createTab(checkNotNull(allocation)) { entered = true; allocationEntered = true; stage = "create" }
                     } else synchronized(lock) { resolve(id).lease }
                     val command = BrowserCommand(action, expected.tabId, arguments)
                     preflight(command)
@@ -183,7 +185,9 @@ class BrowserToolSession(
             }
             BrowserOutcome.Confirmed(result)
         } catch (e: Exception) {
-            if (entered) {
+            if (e is BrowserOperationNotStartedException && !allocationEntered)
+                BrowserOutcome.NotExecuted(checkNotNull(e.message))
+            else if (entered) {
                 val causes = generateSequence<Throwable>(e) { it.cause }.take(8).toList()
                 val kind = when {
                     causes.any { it is java.util.concurrent.TimeoutException } -> "timeout"

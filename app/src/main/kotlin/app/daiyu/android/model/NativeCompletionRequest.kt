@@ -23,7 +23,7 @@ internal object NativeCompletionRequest {
         return when (settings.protocol) {
             ProviderProtocol.CHAT_COMPLETIONS -> {
                 require(!path.endsWith("/responses") && !path.endsWith("/messages") && !path.contains(":streamGenerateContent")) { "请求地址与所选协议不匹配" }
-                when { path.isEmpty() -> "$base/v1/chat/completions"; path.endsWith("/chat/completions") -> base; else -> "$base/chat/completions" }
+                when { path.isEmpty() -> "$base/${if (settings.requestOptions.openAiWebSearchEnabled && NativeSearchPolicy.family(base) == NativeSearchPolicy.Family.BAIDU) "v2" else "v1"}/chat/completions"; path.endsWith("/chat/completions") -> base; else -> "$base/chat/completions" }
             }
             ProviderProtocol.GEMINI -> {
                 val model = settings.model.removePrefix("models/")
@@ -207,7 +207,7 @@ internal object NativeCompletionRequest {
         val gemini = settings.protocol == ProviderProtocol.GEMINI
         val contents = JSONArray().also { projected ->
             for (index in 0 until history.length()) projected.put(JSONObject(history.getJSONObject(index).toString())
-                .also { it.remove("groundingMetadata"); it.remove("search_sources") })
+                .also { it.remove("groundingMetadata"); it.remove("search_sources"); it.remove("search_info") })
         }
         val request = if (gemini) JSONObject().put("contents", contents) else JSONObject().put("model", settings.model)
             .put("messages", contents).put("stream", true).put("stream_options", JSONObject().put("include_usage", true))

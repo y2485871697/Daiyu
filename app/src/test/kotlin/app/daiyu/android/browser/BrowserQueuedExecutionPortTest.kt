@@ -118,18 +118,18 @@ class BrowserQueuedExecutionPortTest {
             try { call.await(); fail("expected stale-lease failure") } catch (_: ExecutionException) { }
             assertTrue(f.ui.queue.isEmpty())
             assertTrue(f.backend.starts.isEmpty())
-            assertEquals(f.lease, f.backend.cancelled())
+            assertTrue(f.backend.cancellations.isEmpty())
         }
     }
 
-    @Test fun closeOrTakeoverAfterEnqueueButBeforeUiStartIsUnknownAndNeverExecutes() {
+    @Test fun closeOrTakeoverAfterEnqueueBeforeUiStartIsNotExecutedAndNeverCancels() {
         for (takeover in listOf(false, true)) {
             val f = Fixture()
             val call = f.call()
             val queued = f.ui.next()
             if (takeover) f.sessions.releaseTakeover(f.sessions.takeover(f.lease)) else f.sessions.close(f.owner)
-            assertEquals(BrowserOutcome.Unknown, call.await())
-            assertEquals(f.lease, f.backend.cancelled())
+            assertEquals(BrowserOutcome.NotExecuted("BROWSER_OPERATION_NOT_STARTED"), call.await())
+            assertTrue(f.backend.cancellations.isEmpty())
             f.ui.asUi(queued)
             assertTrue(f.backend.starts.isEmpty())
             assertTrue(f.backend.cancellations.isEmpty())
@@ -175,12 +175,12 @@ class BrowserQueuedExecutionPortTest {
         assertTrue(f.backend.cancellations.isEmpty())
     }
 
-    @Test fun timeoutBeforeUiStartIsUnknownDoesNotReplayAndDetachesListener() {
+    @Test fun timeoutBeforeUiStartIsNotExecutedAndDetachesWithoutRetiringPage() {
         val f = Fixture(timeout = 100)
         val call = f.call()
         val queued = f.ui.next()
-        assertEquals(BrowserOutcome.Unknown, call.await())
-        assertEquals(f.lease, f.backend.cancelled())
+        assertEquals(BrowserOutcome.NotExecuted("BROWSER_OPERATION_NOT_STARTED"), call.await())
+        assertTrue(f.backend.cancellations.isEmpty())
         f.ui.asUi(queued)
         f.sessions.close(f.owner)
         assertTrue(f.backend.starts.isEmpty())
@@ -201,16 +201,17 @@ class BrowserQueuedExecutionPortTest {
         assertTrue(f.backend.cancellations.isEmpty())
     }
 
-    @Test fun interruptBeforeOrAfterUiStartIsUnknownAndPreservesInterrupt() {
+    @Test fun interruptBeforeOrAfterUiStartUsesAdmissionBoundaryAndPreservesInterrupt() {
         for (started in listOf(false, true)) {
             val f = Fixture()
             val call = f.call()
             val queued = f.ui.next()
             if (started) f.ui.asUi(queued)
             call.worker.interrupt()
-            assertEquals(BrowserOutcome.Unknown, call.await())
+            assertEquals(if (started) BrowserOutcome.Unknown else BrowserOutcome.NotExecuted("BROWSER_OPERATION_NOT_STARTED"), call.await())
             assertTrue(call.interruptedAtExit)
-            assertEquals(f.lease, f.backend.cancelled())
+            if (started) assertEquals(f.lease, f.backend.cancelled())
+            else assertTrue(f.backend.cancellations.isEmpty())
             if (started) f.backend.futures.single().complete(BrowserExecutionResult("late interrupt result"))
             else f.ui.asUi(queued)
             f.sessions.close(f.owner)
@@ -225,7 +226,7 @@ class BrowserQueuedExecutionPortTest {
             Thread.currentThread().interrupt()
             f.bridge.executeSafely(f.owner, BrowserCommand("get_text", f.lease.tabId))
         }
-        assertEquals(BrowserOutcome.Unknown, call.await())
+        assertEquals(BrowserOutcome.NotExecuted("BROWSER_OPERATION_NOT_STARTED"), call.await())
         assertTrue(call.interruptedAtExit)
         assertTrue(f.ui.queue.isEmpty())
         assertTrue(f.backend.starts.isEmpty())
@@ -236,7 +237,7 @@ class BrowserQueuedExecutionPortTest {
         val f = Fixture()
         f.ui.asUi {
             assertFailure { f.port.execute(BrowserCommand("get_text", f.lease.tabId), f.lease) }
-            assertEquals(BrowserOutcome.Unknown, f.bridge.executeSafely(f.owner, BrowserCommand("get_text", f.lease.tabId)))
+            assertEquals(BrowserOutcome.NotExecuted("BROWSER_OPERATION_NOT_STARTED"), f.bridge.executeSafely(f.owner, BrowserCommand("get_text", f.lease.tabId)))
         }
         assertTrue(f.ui.queue.isEmpty())
         assertTrue(f.backend.starts.isEmpty())
@@ -249,7 +250,7 @@ class BrowserQueuedExecutionPortTest {
         f.ui.runNext()
         try { call.await(); fail("expected permission failure") } catch (_: ExecutionException) { }
         assertTrue(f.backend.starts.isEmpty())
-        assertEquals(f.lease, f.backend.cancelled())
+        assertTrue(f.backend.cancellations.isEmpty())
     }
 
     @Test fun oldLeaseCancellationCannotBeRetargetedToReusedSlot() {
@@ -323,7 +324,7 @@ class BrowserQueuedExecutionPortTest {
         assertTrue(f.backend.cancellations.isEmpty())
     }
 
-    @Test fun rejectedPostCleansUpListenerAndRemainsUnknown() {
+    @Test fun rejectedPostIsNotExecutedAndDoesNotCancelThePage() {
         val f = Fixture()
         val rejectingUi = object : UiDispatcher {
             override fun isUiThread() = false
@@ -331,10 +332,38 @@ class BrowserQueuedExecutionPortTest {
         }
         val port = BrowserQueuedExecutionPort(f.sessions, rejectingUi, f.backend)
         val bridge = BrowserHostBridge(f.sessions, port)
-        assertEquals(BrowserOutcome.Unknown, bridge.executeSafely(f.owner, BrowserCommand("get_text", f.lease.tabId)))
-        assertEquals(f.lease, f.backend.cancelled())
+        assertEquals(BrowserOutcome.NotExecuted("BROWSER_OPERATION_NOT_STARTED"), bridge.executeSafely(f.owner, BrowserCommand("get_text", f.lease.tabId)))
+        assertTrue(f.backend.cancellations.isEmpty())
         f.sessions.close(f.owner)
         assertTrue(f.backend.cancellations.isEmpty())
         assertTrue(f.backend.starts.isEmpty())
     }
+    @Test fun synchronousBackendFailureAfterAdmissionRemainsUnknown() {
+        val f = Fixture()
+        f.backend.onStart = { error("failure after side effect") }
+        val call = f.call()
+        f.ui.runNext()
+        assertEquals(BrowserOutcome.Unknown, call.await())
+        assertEquals(listOf(f.lease), f.backend.starts)
+        assertEquals(f.lease, f.backend.cancelled())
+        assertTrue(f.backend.futures.isEmpty())
+    }
+
+    @Test fun preAdmissionStopLeavesSameLeaseAvailableForNextCommand() {
+        val f = Fixture()
+        val first = f.call()
+        val queued = f.ui.next()
+        first.worker.interrupt()
+        assertEquals(BrowserOutcome.NotExecuted("BROWSER_OPERATION_NOT_STARTED"), first.await())
+        f.ui.asUi(queued)
+        f.sessions.assertCurrent(f.lease)
+        assertTrue(f.backend.starts.isEmpty())
+        assertTrue(f.backend.cancellations.isEmpty())
+        f.backend.immediate = BrowserExecutionResult("same page")
+        val next = f.call()
+        f.ui.runNext()
+        assertEquals(BrowserOutcome.Confirmed(BrowserExecutionResult("same page")), next.await())
+        assertEquals(listOf(f.lease), f.backend.starts)
+    }
+
 }

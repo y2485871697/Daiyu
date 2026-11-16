@@ -48,7 +48,7 @@ jobs:
           cmdline-tools-version: '16111833'
           packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
           log-accepted-android-sdk-licenses: false
-      - name: 原生搜索请求、引用、重试与历史定向验证
+      - name: 原生搜索与浏览器排队停止定向验证
         shell: bash
         run: |
           mkdir -p native-search-checks
@@ -72,13 +72,16 @@ jobs:
             --tests 'app.daiyu.android.model.ProviderFailureBoundaryTest' \
             --tests 'app.daiyu.android.model.ProviderHeadersTest' \
             --tests 'app.daiyu.android.model.RikkaHubReasoningTest' \
+            --tests 'app.daiyu.android.browser.BrowserQueuedExecutionPortTest' \
+            --tests 'app.daiyu.android.browser.BrowserToolSessionTest' \
+            --tests 'app.daiyu.android.browser.openminis.LeaseBrowserHostTest' \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee native-search-checks/gradle.log
       - name: 核验精确测试与零安装包
         run: |
           python3 - <<'PY'
           import json, os, re, xml.etree.ElementTree as ET
           from pathlib import Path
-          expected = ['AllProtocolRequestRetryTest', 'MessagesFactoryContractTest', 'MessagesHistoryContractTest', 'MessagesProtocolCompatibilityTest', 'MessagesWebSearchTest', 'NativeCompletionWebSearchTest', 'NativeProtocolCompatibilityTest', 'NativeSearchAdaptersTest', 'ProviderFailureBoundaryTest', 'ProviderHeadersTest', 'ProviderRequestWireTest', 'ResponsesProtocolCompatibilityTest', 'ResponsesWebSearchTest', 'RikkaHubReasoningTest']
+          expected = ['AllProtocolRequestRetryTest', 'MessagesFactoryContractTest', 'MessagesHistoryContractTest', 'MessagesProtocolCompatibilityTest', 'MessagesWebSearchTest', 'NativeCompletionWebSearchTest', 'NativeProtocolCompatibilityTest', 'NativeSearchAdaptersTest', 'ProviderFailureBoundaryTest', 'ProviderHeadersTest', 'ProviderRequestWireTest', 'ResponsesProtocolCompatibilityTest', 'ResponsesWebSearchTest', 'RikkaHubReasoningTest', 'BrowserQueuedExecutionPortTest', 'BrowserToolSessionTest', 'LeaseBrowserHostTest']
           suites = [ET.parse(path).getroot() for path in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert set(expected) <= names, set(expected) - names

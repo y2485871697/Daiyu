@@ -15,7 +15,8 @@ internal object NativeCompletionStream {
         val id = StringBuilder(); val name = StringBuilder(); val arguments = StringBuilder()
     }
 
-    fun read(protocol: ProviderProtocol, reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit): JSONObject {
+    fun read(protocol: ProviderProtocol, reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit,
+             nativeSearchFamily: NativeSearchPolicy.Family? = null): JSONObject {
         var deliveryFailure: Exception? = null
         fun deliver(event: ModelEvent) {
             if (cancelled()) throw InterruptedException()
@@ -23,7 +24,7 @@ internal object NativeCompletionStream {
         }
         try {
             return when (protocol) {
-                ProviderProtocol.CHAT_COMPLETIONS -> chat(reader, cancelled, ::deliver)
+                ProviderProtocol.CHAT_COMPLETIONS -> chat(reader, cancelled, ::deliver, nativeSearchFamily)
                 ProviderProtocol.GEMINI -> gemini(reader, cancelled, ::deliver)
                 else -> throw UnsupportedProviderException(protocol.wireName)
             }
@@ -38,13 +39,17 @@ internal object NativeCompletionStream {
 
     /* Adapted from RikkaHub ChatCompletionsStreamDecoder (AGPL-3.0); completion
        remains Daiyu's confirmed-terminal contract, never upstream's EOF success. */
-    private fun chat(reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit): JSONObject {
+    private fun chat(reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit,
+                     nativeSearchFamily: NativeSearchPolicy.Family?): JSONObject {
         val text = StringBuilder()
         val reasoning = StringBuilder()
         val details = sortedMapOf<Int, JSONObject>()
         val calls = sortedMapOf<Int, Call>()
         val annotations = linkedMapOf<String, JSONObject>()
         val searchSources = NativeSearchSources()
+        val serverSearchIndices = mutableSetOf<Int>()
+        var serverSearchSeen = false
+        var rawSearchInfo: Any? = null
         val eventId = "chat-${java.util.UUID.randomUUID()}"
         var sourceId: String? = null
         var reason: String? = null
@@ -69,6 +74,14 @@ internal object NativeCompletionStream {
             if (chunk.has("error")) throw ProviderHttpFailure.event(chunk.optJSONObject("error"))
             val searchMetadata = searchSources.chat(chunk)
             if (searchMetadata) account(data.length)
+            val hasSearchInfo = nativeSearchFamily == NativeSearchPolicy.Family.HUNYUAN && !chunk.isNull("search_info")
+            if (hasSearchInfo) {
+                val info = chunk.get("search_info")
+                protocol(info is JSONObject || info is JSONArray)
+                account(info.toString().length)
+                protocol(info.toString().length <= 262144)
+                rawSearchInfo = info
+            }
             val searchPhase = when (chunk.optString("type")) {
                 "response.web_search_call.in_progress", "response.web_search_call.searching" -> NativeSearchPhase.RUNNING
                 "response.web_search_call.completed" -> NativeSearchPhase.COMPLETED
@@ -96,7 +109,7 @@ internal object NativeCompletionStream {
                 usage = if (input == null && output == null && cached == null) null else ModelEvent.Usage(input, output, cached)
             }
             val choices = chunk.optJSONArray("choices")
-            if (choices == null) { protocol(chunk.has("usage") || searchMetadata); return@frame true }
+            if (choices == null) { protocol(chunk.has("usage") || searchMetadata || hasSearchInfo); return@frame true }
             protocol(choices.length() <= 1)
             if (choices.length() == 0) return@frame true
             protocol(reason == null)
@@ -108,6 +121,12 @@ internal object NativeCompletionStream {
                 else -> JSONObject()
             }
             if (delta.has("role")) protocol(delta.string("role") == "assistant")
+            if (nativeSearchFamily == NativeSearchPolicy.Family.BAIDU && choice.optString("delta_tag") == "search_status") {
+                protocol(choice.isNull("finish_reason") && delta.isNull("tool_calls"))
+                if (!serverSearchSeen) sink(ModelEvent.NativeSearch("$eventId:web-search", NativeSearchPhase.RUNNING))
+                serverSearchSeen = true
+                return@frame true
+            }
             if (delta.has("refusal") && !delta.isNull("refusal")) throw ModelRequestException(ModelFailure.INCOMPLETE)
             protocol(delta.isNull("function_call") && delta.isNull("audio"))
             val nativeReasoning = when {
@@ -158,10 +177,26 @@ internal object NativeCompletionStream {
                 }
             }
             if (!delta.isNull("tool_calls")) protocol(delta.opt("tool_calls") is JSONArray)
-            delta.optJSONArray("tool_calls")?.let { array -> for (i in 0 until array.length()) {
+            delta.optJSONArray("tool_calls")?.let { array -> tool@ for (i in 0 until array.length()) {
                 val wire = array.getJSONObject(i)
                 val index = if (wire.has("index")) wire.index("index") else i
                 protocol(index in 0..1023)
+                if (wire.optString("type") == "web_search" || index in serverSearchIndices) {
+                    protocol(nativeSearchFamily == NativeSearchPolicy.Family.STEPFUN && index !in calls)
+                    if (wire.has("type")) protocol(wire.string("type") == "web_search")
+                    serverSearchIndices.add(index)
+                    if (!serverSearchSeen) sink(ModelEvent.NativeSearch("$eventId:web-search", NativeSearchPhase.RUNNING))
+                    serverSearchSeen = true
+                    account(wire.toString().length)
+                    wire.optJSONObject("function")?.optJSONArray("results")?.let { results ->
+                        protocol(results.length() <= 128)
+                        repeat(results.length()) { position ->
+                            val source = results.getJSONObject(position)
+                            searchSources.add(source.string("url"), source.optString("title"))
+                        }
+                    }
+                    continue@tool
+                }
                 val call = calls.getOrPut(index) { Call() }
                 if (wire.has("type")) protocol(wire.string("type") == "function")
                 if (wire.has("id")) {
@@ -186,6 +221,7 @@ internal object NativeCompletionStream {
         val row = NativeCompletionRequest.textMessage(ProviderProtocol.CHAT_COMPLETIONS, "assistant", text.toString())
         if (annotations.isNotEmpty()) row.put("annotations", JSONArray(annotations.values.toList()))
         if (searchSources.wire().length() > 0) row.put("search_sources", searchSources.wire())
+        rawSearchInfo?.let { row.put("search_info", it) }
         ChatSearchProtocol.validate(row)
         if (reasoning.isNotEmpty()) row.put("reasoning_content", reasoning.toString())
         if (details.isNotEmpty()) row.put("reasoning_details", JSONArray(details.values.toList()))
@@ -205,6 +241,7 @@ internal object NativeCompletionStream {
         protocol(row.toString().length <= 1_000_000)
         if (reasoning.isNotEmpty()) sink(ModelEvent.ReasoningFinal("$eventId:reasoning", reasoning.toString()))
         if (text.isNotEmpty()) sink(ModelEvent.TextFinal("$eventId:text", ChatSearchProtocol.displayText(row)))
+        if (serverSearchSeen) sink(ModelEvent.NativeSearch("$eventId:web-search", NativeSearchPhase.COMPLETED))
         confirmed.forEach { sink(ModelEvent.ToolReady(it)) }
         usage?.let(sink)
         return row

@@ -22,6 +22,11 @@ internal object ChatSearchProtocol {
     }
 
     fun validate(row: JSONObject) {
+        if (row.has("search_info")) {
+            require(row.optString("role") == "assistant")
+            require(row.opt("search_info") is JSONObject || row.opt("search_info") is JSONArray)
+            require(row.get("search_info").toString().length <= 262144) { "搜索元数据过长" }
+        }
         if (row.has("search_sources")) {
             require(row.optString("role") == "assistant")
             NativeSearchSources().restore(row.getJSONArray("search_sources"))

@@ -36,7 +36,7 @@ data class ProviderRequestOptions(
         if (customBody.isNotEmpty()) {
             val body = parseBody()
             require(body.keys().asSequence().none { it in OWNED_FIELDS }) { "自定义请求体不能覆盖会话协议字段" }
-            require(!openAiWebSearchEnabled || !body.has("enable_search")) { "自定义请求体不能覆盖已开启的原生搜索" }
+            require(!openAiWebSearchEnabled || body.keys().asSequence().none { it in NATIVE_SEARCH_FIELDS }) { "自定义请求体不能覆盖已开启的原生搜索" }
             if (protocol == ProviderProtocol.GEMINI) require(body.keys().asSequence().all { it in setOf("generationConfig", "safetySettings") }) {
                 "Gemini 自定义请求体仅支持 generationConfig 与 safetySettings"
             }
@@ -137,6 +137,7 @@ data class ProviderRequestOptions(
         const val MAX_BODY_BYTES = 64 * 1024
         private const val MAX_BODY_DEPTH = 64
         // History, advertised tools, and continuation state must match the local runner.
+        private val NATIVE_SEARCH_FIELDS = setOf("enable_search", "enable_enhancement", "search_info", "citation", "web_search")
         private val OWNED_FIELDS = setOf("input", "messages", "tools", "stream", "store", "include", "web_search_options",
             "previous_response_id", "conversation", "background", "tool_choice", "parallel_tool_calls",
             "contents", "systemInstruction", "toolConfig", "stream_options", "candidateCount")

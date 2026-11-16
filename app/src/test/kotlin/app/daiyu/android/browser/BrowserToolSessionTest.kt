@@ -599,4 +599,30 @@ class BrowserToolSessionTest {
         }
     }
 
+    @Test fun queueProvenRejectionOnExistingTabIsNotExecutedAndCanContinue() {
+        val f = Fixture(main)
+        confirmed(call(f.session, "new_tab"))
+        val lease = checkNotNull(f.session.currentTab)
+        f.port.perform = { _, _ -> throw app.daiyu.android.browser.bridge.BrowserOperationNotStartedException(
+            InterruptedException("before backend")) }
+        rejected(call(f.session, "get_text"), "BROWSER_OPERATION_NOT_STARTED")
+        assertEquals(lease, f.session.currentTab)
+        assertTrue(f.resources.closed.isEmpty())
+        f.port.perform = { _, _ -> BrowserExecutionResult("original page") }
+        assertEquals("original page", confirmed(call(f.session, "get_text")))
+        assertEquals(1, f.resources.created.size)
+    }
+
+    @Test fun queueRejectionCannotEraseEarlierAllocationFromTheSameAction() {
+        for (explicitNewTab in listOf(false, true)) {
+            val f = Fixture(main)
+            f.port.perform = { _, _ -> throw app.daiyu.android.browser.bridge.BrowserOperationNotStartedException(
+                InterruptedException("before navigation backend")) }
+            val action = if (explicitNewTab) "new_tab" else "navigate"
+            assertEquals(BrowserOutcome.Unknown, ordinary(f.session, action, "url" to "https://example.com"))
+            assertEquals(1, f.resources.created.size)
+            assertTrue(f.resources.closed.isEmpty())
+        }
+    }
+
 }

@@ -622,15 +622,16 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             } } }
             ui.waitForIdle()
             val fixedTop = top()
-            val header = ui.onNodeWithTag("work-process-header").fetchSemanticsNode().layoutInfo.coordinates
-            val headerBottom = header.positionInWindow().y + header.size.height
+            val header = ui.onNodeWithTag("work-process-header").fetchSemanticsNode()
+            assertEquals("Header bounds must include its padding", fixedTop, header.positionInRoot.y, 1f)
+            val headerBottom = header.positionInWindow.y + header.size.height
             val fullDetail = bottom() - fixedTop - header.size.height
             val start = safeBottom - headerBottom
             assertTrue("Fixture must contain more than twice its visible height", fullDetail > start * 2f)
             ui.onNodeWithTag("work-process-header").assertIsDisplayed()
             fun visibleDetail(): Float {
-                val surface = ui.onNodeWithTag("work-process-surface").fetchSemanticsNode().layoutInfo.coordinates
-                return (minOf(surface.positionInWindow().y + surface.size.height, safeBottom) - headerBottom).coerceAtLeast(0f)
+                val surface = ui.onNodeWithTag("work-process-surface").fetchSemanticsNode()
+                return (minOf(surface.positionInWindow.y + surface.size.height, safeBottom) - headerBottom).coerceAtLeast(0f)
             }
             val samples = mutableListOf(start)
             ui.mainClock.autoAdvance = false

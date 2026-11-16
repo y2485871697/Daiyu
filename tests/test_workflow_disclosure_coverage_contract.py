@@ -63,6 +63,16 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertIn('samples[3] < start - 1f', device)
         self.assertIn('fullDetail > start * 2f', device)
 
+    def test_long_card_geometry_uses_matching_unclipped_semantic_bounds(self):
+        device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowDisclosureDirectionTest.kt').read_text()
+        long_card = device.split('fun testLongWorkflowManualAndAutomaticCollapseHasNoHiddenHeightPlateau()', 1)[1]
+        self.assertNotIn('layoutInfo.coordinates', long_card)
+        self.assertIn('header.positionInWindow.y + header.size.height', long_card)
+        self.assertIn('surface.positionInWindow.y + surface.size.height', long_card)
+        self.assertIn('fixedTop, header.positionInRoot.y, 1f', long_card)
+        self.assertIn('0f, samples.last(), 1f', long_card)
+        self.assertIn('assertDoesNotExist()', long_card)
+
     def test_supplemental_chat_disclosures_have_both_geometry_anchors_and_toggle(self):
         for name in ('QuestionCard.kt', 'ToolCategoryContent.kt', 'ChildTaskToolContent.kt', 'ChildTaskCardContent.kt'):
             with self.subTest(name=name):

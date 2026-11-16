@@ -11,6 +11,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -21,6 +22,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
@@ -100,6 +103,18 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     private fun frame() {
         ui.mainClock.advanceTimeByFrame()
         ui.waitForIdle()
+    }
+
+    private fun paintedBottom(node: SemanticsNode, result: androidx.compose.ui.text.TextLayoutResult): Float? {
+        val top = node.positionInRoot.y
+        val bottom = top + result.getLineBottom(result.lineCount - 1)
+        val entering = generateSequence(node.parent) { it.parent }.filter {
+            it.config.getOrNull(WorkflowEntryEntering)?.invoke() == true
+        }.toList()
+        if (entering.isEmpty()) return bottom
+        val entranceTop = entering.maxOf { it.positionInRoot.y }
+        val entranceBottom = entering.minOf { it.positionInRoot.y + it.size.height }
+        return minOf(bottom, entranceBottom).takeIf { it > maxOf(top, entranceTop) }
     }
 
     private fun shortWorkflow(count: Int): ChatTurnUi.Assistant {
@@ -214,6 +229,51 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         ui.waitForIdle()
         ui.onNodeWithTag("tool-step:short-step-4").assertIsDisplayed()
         assertEquals(0, fixture.opens.get())
+    }
+
+    fun testNativeEntryMeasurementStillDetectsDrawOnlyClipping() {
+        ui.mainClock.autoAdvance = false
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            Box(Modifier.size(240.dp, 160.dp).background(Color.White).testTag("native-entry-host")) {
+                WorkflowEntry("probe", WorkflowEntrances(), animate = true) {
+                    Text("first line\nlast line", Modifier.testTag("native-entry-text").drawWithContent {
+                        clipRect(bottom = size.height / 2f) { this@drawWithContent.drawContent() }
+                    }, color = Color.Black)
+                }
+            }
+        } } }
+        ui.waitForIdle()
+        try {
+            var sawNativeClipping = false
+            repeat(20) {
+                frame()
+                val candidate = ui.onAllNodesWithTag("native-entry-text", useUnmergedTree = true)
+                    .fetchSemanticsNodes().singleOrNull() ?: return@repeat
+                val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                ui.runOnUiThread { candidate.config[SemanticsActions.GetTextLayoutResult].action!!(layouts) }
+                val result = layouts.single()
+                val fullBottom = candidate.positionInRoot.y + result.getLineBottom(result.lineCount - 1)
+                if (paintedBottom(candidate, result)?.let { it < fullBottom - 1f } != false) sawNativeClipping = true
+            }
+            assertTrue("Observe the actual native entrance envelope before it is fully expanded", sawNativeClipping)
+            val node = ui.onNodeWithTag("native-entry-text", useUnmergedTree = true).fetchSemanticsNode()
+            val results = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            ui.runOnUiThread { node.config[SemanticsActions.GetTextLayoutResult].action!!(results) }
+            val text = results.single()
+            val logicalBottom = node.positionInRoot.y + text.getLineBottom(text.lineCount - 1)
+            assertEquals("Draw-only clipping must not shorten the measured painted end", logicalBottom, paintedBottom(node, text)!!, 1f)
+            val host = ui.onNodeWithTag("native-entry-host")
+            val root = host.fetchSemanticsNode().boundsInRoot
+            val pixels = host.captureToImage().toPixelMap()
+            val top = (node.positionInRoot.y + text.getLineTop(1) - root.top).toInt().coerceIn(0, pixels.height)
+            val bottom = (logicalBottom - root.top).toInt().coerceIn(0, pixels.height)
+            var ink = 0
+            for (y in top until bottom) for (x in 0 until pixels.width) {
+                val pixel = pixels[x, y]
+                if (pixel.red < .8f && pixel.green < .8f && pixel.blue < .8f) ink++
+            }
+            assertEquals("The strict latest-line ink probe must detect the deliberately clipped line", 0, ink)
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
     fun testTerminalPacedTextKeepsItsActualPaintedEndNearComposer() {
@@ -425,9 +485,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 }
                 if (displayed.length > previousText.length) growthFrames++
                 if (height > previousHeight) heightGrowth++
-                val bottom = layouts.maxOf { (node, result) ->
-                    node.positionInRoot.y + result.getLineBottom(result.lineCount - 1)
-                }
+                val measuredBottom = layouts.mapNotNull { (node, result) -> paintedBottom(node, result) }.maxOrNull()
+                val bottom = measuredBottom ?: continue
                 val composerTop = ui.onNodeWithTag("paced-composer").fetchSemanticsNode().boundsInRoot.top
                 val gap = (composerTop - bottom) / density
                 val settled = ready.get() && displayed == expectedFull

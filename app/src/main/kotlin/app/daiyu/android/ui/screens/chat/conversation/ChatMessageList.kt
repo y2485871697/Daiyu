@@ -122,6 +122,8 @@ internal class StreamingTailViewport(initiallyBounded: Boolean) {
     // Re-publish placement even when Compose reuses the coordinates object.
     var viewportCoordinates by mutableStateOf<LayoutCoordinates?>(null, neverEqualPolicy())
     var anchorCorrection = ""
+    var followDiagnostic = ""
+    var clearanceDiagnostic = ""
     var scroller: ScrollableState? = null
     private val presentedQuestions = mutableSetOf<String>()
 
@@ -452,43 +454,54 @@ internal fun ChatMessageList(
                 " item=${item?.offset}/${item?.size} origin=${state.itemOrigin} actual=$actual viewport=${viewport?.size?.height}" +
                 " list=${layout.viewportStartOffset}/${layout.viewportEndOffset} size=${layout.viewportSize.height} padding=${layout.afterContentPadding}" +
                 " occlusion=$currentOcclusionPx clearance=$currentFollowClearancePx ready=${tail == null || readyTurns[tail.listKey] == tail}" +
-                " revealed=${tail == null || revealedTurns[tail.listKey] == tail} correction=${state.anchorCorrection}"
+                " revealed=${tail == null || revealedTurns[tail.listKey] == tail} resumePending=$resumeFollowPending" +
+                " motion=${state.followDiagnostic} sync=${state.clearanceDiagnostic} correction=${state.anchorCorrection}"
         }
     }
     fun correctFollowClearance() {
         synchronousTrace("daiyu.chat.restore-clearance") {
             val activeTail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
-            if (nestedTail.migrating || nestedTail.followCatchup || !clearanceLayout.active || clearanceLayout.correcting ||
-                !canFollowBottom() || currentOcclusionPx <= 0 || !listState.canScrollForward) return
+            if (nestedTail.migrating || !clearanceLayout.active || clearanceLayout.correcting ||
+                !canFollowBottom() || currentOcclusionPx <= 0) return
             val remeasurement = clearanceLayout.remeasurement ?: return
             var layout = listState.layoutInfo
             if (layout.viewportSize.height <= 0) return
             val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey &&
                 nestedTail.contentHeight > 0 && nestedTail.contentHeight <= layout.viewportSize.height -
                 currentOcclusionPx - with(density) { 11.dp.roundToPx() + ChatTailClearance.roundToPx() }
-            if (!shortBoundedTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return
+            val boundedTerminalReveal = nestedTail.bounded && currentTailKey == assistantOwnerKey &&
+                activeTail != null && activeTail.status != RunStatus.RUNNING && !activeTail.isStreaming &&
+                readyTurns[activeTail.listKey] == activeTail &&
+                revealedTurns[activeTail.listKey] != activeTail
+            val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal
+            if (nestedTail.followCatchup && !protectMeasuredTail) return
+            if (!protectMeasuredTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return
             var last = layout.visibleItemsInfo.lastOrNull {
                 it.index == currentTailIndex && it.key == currentTailKey
             } ?: return
             val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
-            if (resumeFollowPending && tail != null && !tail.isStreaming &&
+            if (!protectMeasuredTail && resumeFollowPending && tail != null && !tail.isStreaming &&
                 layout.visibleItemsInfo.any { it.key == tail.listKey } &&
                 (readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) return
             clearanceLayout.correcting = true
             try {
-                if (shortBoundedTail && last.size != nestedTail.contentHeight) {
+                if (protectMeasuredTail && last.size != nestedTail.contentHeight) {
                     remeasurement.forceRemeasure()
                     layout = listState.layoutInfo
                     last = layout.visibleItemsInfo.lastOrNull {
                         it.index == currentTailIndex && it.key == currentTailKey
                     } ?: return
                 }
-                // A short body keeps its header: move the outer list before drawing, not its inner offset.
+                if (!listState.canScrollForward) return
+                // Keep measured text above the editor while terminal reveal is still advancing.
+                // Move the outer list, not a header-clipping inner offset.
                 val tailClearance = currentFollowClearancePx
                 val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - tailClearance
                 val correction = (last.offset + last.size - visibleBottom).coerceAtLeast(0)
                 if (correction == 0) return
-                if (listState.dispatchRawDelta(correction.toFloat()) > 0f && clearanceLayout.active) {
+                val consumed = listState.dispatchRawDelta(correction.toFloat())
+                nestedTail.clearanceDiagnostic = "delta=$correction,consumed=$consumed"
+                if (consumed > 0f && clearanceLayout.active) {
                     // Raw delta may defer placement; finish it after the previous layout pass.
                     remeasurement.forceRemeasure()
                 }
@@ -720,6 +733,7 @@ internal fun ChatMessageList(
                     resumeReady to currentNestedTail.contentHeight))
         }.collect { target ->
             if (target == null) { motion.reset(); return@collect }
+            currentNestedTail.followDiagnostic = "target"
             var observedViewport = previousViewport
             while (canFollowBottom()) {
                 val index = currentTailIndex
@@ -757,6 +771,7 @@ internal fun ChatMessageList(
                 if (resumeFollowPending && tail != null && !tail.isStreaming &&
                     layout.visibleItemsInfo.any { it.key == tail.listKey } &&
                     (readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) {
+                    currentNestedTail.followDiagnostic = "wait-resume-reveal"
                     motion.reset()
                     return@collect
                 }
@@ -765,6 +780,7 @@ internal fun ChatMessageList(
                 val obscuredTail = if (currentOcclusionPx > 0)
                     (last.offset + last.size - visibleBottom).coerceAtLeast(0) else 0
                 val followDistance = maxOf(overflow.toFloat(), obscuredTail.toFloat())
+                currentNestedTail.followDiagnostic = "distance=$followDistance"
                 if (followDistance <= 0f) {
                     if (currentNestedTail.followCatchup) {
                         clearanceLayout.remeasurement?.forceRemeasure()
@@ -819,6 +835,7 @@ internal fun ChatMessageList(
                 }
                 if (delta > 0f && canFollowBottom()) {
                     val consumed = listState.scrollBy(delta)
+                    currentNestedTail.followDiagnostic = "distance=$followDistance,delta=$delta,consumed=$consumed"
                     if (consumed <= 0f) {
                         // A fractional step or pending item measure is not a settled boundary.
                         withFrameNanos { }

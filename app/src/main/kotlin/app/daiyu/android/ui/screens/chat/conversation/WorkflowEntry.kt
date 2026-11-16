@@ -12,6 +12,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsPropertyKey
+import androidx.compose.ui.semantics.semantics
+
+internal val WorkflowEntryEntering = SemanticsPropertyKey<() -> Boolean>("WorkflowEntryEntering")
 
 /** Lives above disclosure content, so reopening a workflow never replays an item's entrance. */
 internal class WorkflowEntrances(initiallyVisible: Collection<String> = emptyList()) {
@@ -27,7 +31,9 @@ internal fun WorkflowEntry(key: String, entrances: WorkflowEntrances, animate: B
     val visibility = remember(key, stopped) {
         MutableTransitionState(!enter || stopped).apply { targetState = true }
     }
-    AnimatedVisibility(visibility, Modifier.testTag("workflow-entry:$key"),
+    AnimatedVisibility(visibility, Modifier.testTag("workflow-entry:$key").semantics {
+        this[WorkflowEntryEntering] = { !visibility.isIdle && !visibility.currentState && visibility.targetState }
+    },
         enter = expandVertically(tween(220, easing = FastOutSlowInEasing), expandFrom = Alignment.Top) + fadeIn(tween(220)),
         exit = ExitTransition.None) { content() }
 }

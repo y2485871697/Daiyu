@@ -164,11 +164,19 @@ class StreamingOcclusionContract(unittest.TestCase):
         correction = source.split("fun correctFollowClearance() {", 1)[1].split("val requestedIndex", 1)[0]
         for token in ("val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey",
                       "nestedTail.contentHeight <= layout.viewportSize.height", "11.dp.roundToPx() + ChatTailClearance.roundToPx()",
-                      "if (!shortBoundedTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return",
+                      "val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal",
+                      "if (!protectMeasuredTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return",
                       "val tailClearance = currentFollowClearancePx",
                       "dispatchRawDelta", "remeasurement.forceRemeasure()", "!canFollowBottom()",
-                      "shortBoundedTail && last.size != nestedTail.contentHeight", "layout = listState.layoutInfo"):
+                      "protectMeasuredTail && last.size != nestedTail.contentHeight", "layout = listState.layoutInfo"):
             self.assertIn(token, correction)
+        self.assertNotIn("nestedTail.migrating || nestedTail.followCatchup", correction)
+        self.assertIn("if (nestedTail.followCatchup && !protectMeasuredTail) return", correction)
+        self.assertIn("if (!protectMeasuredTail && resumeFollowPending", correction)
+        self.assertIn("readyTurns[activeTail.listKey] == activeTail", correction)
+        self.assertIn("revealedTurns[activeTail.listKey] != activeTail", correction)
+        self.assertIn("activeTail.status != RunStatus.RUNNING", correction)
+        self.assertLess(correction.index("if (protectMeasuredTail && last.size"), correction.index("if (!listState.canScrollForward) return"))
         device = DEVICE.read_text()
         case = device.split("fun testShortReplyGrowingPastViewportKeepsTailPinnedDuringOuterCatchup()", 1)[1].split("fun testManualReadingDrawsThrough", 1)[0]
         for token in ("for (shortHeight in listOf(160, 200))", "height = shortHeight.dp",
@@ -316,6 +324,22 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn('clearanceLayout.remeasurement?.forceRemeasure()', settle)
         self.assertIn('settledTail.size == currentNestedTail.contentHeight', settle)
         self.assertIn('currentNestedTail.followCatchup = false', settle)
+
+    def test_terminal_reveal_keeps_strict_pixels_and_only_accounts_for_native_entry(self):
+        source = DEVICE.read_text()
+        for token in ("minimumGap = ChatTailClearance.value - 2f / density",
+                      "maximumGap = ChatTailClearance.value + if (settled) 64f else 26f",
+                      "ink > 2", "index < 90", "growthFrames > 120", "paintedGrowth >= 5",
+                      "Lifecycle.State.CREATED", "Lifecycle.State.RESUMED",
+                      "if (entering.isEmpty()) return bottom", "it.config.getOrNull(WorkflowEntryEntering)?.invoke() == true",
+                      "it.positionInRoot.y + it.size.height"):
+            self.assertIn(token, source)
+        observation = source.split("fun paintedBottom(", 1)[1].split("private fun shortWorkflow(", 1)[0]
+        self.assertNotIn("boundsInRoot", observation)
+        self.assertNotIn("ChatTailClearance", observation)
+        self.assertIn("testNativeEntryMeasurementStillDetectsDrawOnlyClipping", source)
+        self.assertIn("The strict latest-line ink probe must detect the deliberately clipped line", source)
+
 
 if __name__ == "__main__":
     unittest.main()

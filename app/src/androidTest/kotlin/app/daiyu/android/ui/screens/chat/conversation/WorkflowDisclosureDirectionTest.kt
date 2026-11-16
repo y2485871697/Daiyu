@@ -19,6 +19,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -715,39 +719,46 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         data class ArrivalFrame(val geometry: String, val top: Float?)
         val frames = java.util.Collections.synchronizedList(mutableListOf<ArrivalFrame>())
         val marker = Color.Magenta
+        var safeTop = 0
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
-            BoxWithConstraints(Modifier.size(320.dp, 420.dp).testTag("question-arrival-root")) {
-                val step = WorkStepUi("question", "向用户提问", "", WorkStepState.PENDING,
-                    owner = owner, toolName = "ask_user", dedicatedKey = if (projected) identity.storageKey else null,
-                    renderKey = "arrival:run:tail:question:0")
-                val cards = if (presented) mapOf((owner to identity.callId) to record) else emptyMap()
-                val turn = ChatTurnUi.Assistant("tail", status = RunStatus.RUNNING, isStreaming = true,
-                    workProcess = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), "等待回答", running = true),
-                    content = listOf(MessageContentUi.Tool(step)))
-                ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { inset ->
-                    ChatMessageList(listOf(ChatTurnUi.User("user", userText)) +
-                        if (withPlaceholder || presented) listOf(turn) else emptyList(),
-                        ChatScreenActions(), composerBottomInset = inset,
-                        dedicatedTool = { tool ->
-                            val questionRecord = if (tool.toolName == "ask_user" && tool.owner != null)
-                                cards[tool.owner to tool.toolCallId]?.takeIf { it.callId == tool.dedicatedKey } else null
-                            if (questionRecord == null) false else {
-                                val viewport = LocalWorkflowDisclosureContext.current?.viewport
-                                QuestionCard(identity, questionRecord, true, submit = { _, _, _ -> fail("Arrival must not submit") },
-                                    modifier = Modifier.onPlaced { questionCoordinates = it }.drawWithContent {
-                                        drawContent()
-                                        drawRect(marker, Offset.Zero, Size(size.width, 3.dp.toPx()))
-                                        frames.add(ArrivalFrame(viewport?.diagnostics?.invoke().orEmpty(),
-                                            questionCoordinates?.takeIf { it.isAttached }?.positionInRoot()?.y))
-                                    })
-                                true
-                            }
-                        })
-                }, composer = { Box(Modifier.fillMaxWidth().height(96.dp).testTag("question-arrival-composer")) })
+            safeTop = WindowInsets.safeDrawing.getTop(LocalDensity.current)
+            Box(Modifier.safeDrawingPadding()) {
+                BoxWithConstraints(Modifier.size(320.dp, 420.dp).testTag("question-arrival-root")) {
+                    val step = WorkStepUi("question", "向用户提问", "", WorkStepState.PENDING,
+                        owner = owner, toolName = "ask_user", dedicatedKey = if (projected) identity.storageKey else null,
+                        renderKey = "arrival:run:tail:question:0")
+                    val cards = if (presented) mapOf((owner to identity.callId) to record) else emptyMap()
+                    val turn = ChatTurnUi.Assistant("tail", status = RunStatus.RUNNING, isStreaming = true,
+                        workProcess = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), "等待回答", running = true),
+                        content = listOf(MessageContentUi.Tool(step)))
+                    ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { inset ->
+                        ChatMessageList(listOf(ChatTurnUi.User("user", userText)) +
+                            if (withPlaceholder || presented) listOf(turn) else emptyList(),
+                            ChatScreenActions(), composerBottomInset = inset,
+                            dedicatedTool = { tool ->
+                                val questionRecord = if (tool.toolName == "ask_user" && tool.owner != null)
+                                    cards[tool.owner to tool.toolCallId]?.takeIf { it.callId == tool.dedicatedKey } else null
+                                if (questionRecord == null) false else {
+                                    val viewport = LocalWorkflowDisclosureContext.current?.viewport
+                                    QuestionCard(identity, questionRecord, true, submit = { _, _, _ -> fail("Arrival must not submit") },
+                                        modifier = Modifier.onPlaced { questionCoordinates = it }.drawWithContent {
+                                            drawContent()
+                                            drawRect(marker, Offset.Zero, Size(size.width, 3.dp.toPx()))
+                                            frames.add(ArrivalFrame(viewport?.diagnostics?.invoke().orEmpty(),
+                                                questionCoordinates?.takeIf { it.isAttached }?.positionInRoot()?.y))
+                                        })
+                                    true
+                                }
+                            })
+                    }, composer = { Box(Modifier.fillMaxWidth().height(96.dp).testTag("question-arrival-composer")) })
+                }
             }
         } } }
         ui.waitForIdle()
+        val arrivalHost = ui.onNodeWithTag("question-arrival-root").fetchSemanticsNode()
+        assertEquals("Keep the original question-arrival viewport width", 320f * density, arrivalHost.size.width.toFloat(), 1f)
+        assertEquals("Keep the original question-arrival viewport height", 420f * density, arrivalHost.size.height.toFloat(), 1f)
         if (withPlaceholder) ui.onNodeWithTag("tool-step-header:question").assertIsDisplayed()
         ui.runOnUiThread { projected = true }
         ui.waitForIdle()
@@ -772,11 +783,21 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                     firstDrawChecked = true
                 }
                 if (sample != null && top != null && top >= rootTop && top + 3f * density < safe) {
-                    val pixels = ui.onNodeWithTag("question-arrival-root").captureToImage().toPixelMap()
+                    val bitmap = ui.onNodeWithTag("question-arrival-root").captureToImage()
+                    val pixels = bitmap.toPixelMap()
                     val y = (top - rootTop + density).toInt()
                     assertTrue("Card-head sample must be inside the captured image", y in 0 until pixels.height)
                     val colored = (0 until pixels.width).count { x -> val p = pixels[x, y]
                         p.red > .8f && p.blue > .8f && p.green < .3f }
+                    if (colored <= pixels.width / 2) {
+                        val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/question-arrival").apply { mkdirs() }
+                        val label = "${withPlaceholder}-${historical}-$frame"
+                        java.io.File(directory, "$label.txt").writeText(
+                            "safeTop=$safeTop rootTop=$rootTop top=$top y=$y colored=$colored width=${pixels.width} ${sample.geometry}")
+                        java.io.File(directory, "$label.png").outputStream().use {
+                            bitmap.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                        }
+                    }
                     assertTrue("The real card top must be painted, not clipped by an old viewport: frame=$frame top=$top ${sample.geometry}",
                         colored > pixels.width / 2)
                     pixelFrames++

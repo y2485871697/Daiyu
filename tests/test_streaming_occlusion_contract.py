@@ -77,7 +77,8 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_bounded_viewport_preserves_extent_and_aligns_real_content_same_measure(self):
         source = CHAT.read_text()
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
-        for token in ("maxHeight = Constraints.Infinity", "state.contentHeight = contentHeight",
+        for token in ("maxHeight = Constraints.Infinity", "state.contentHeight = body.height",
+                      "val contentHeight = state.contentHeight",
                       "minOf(body.height, currentViewportHeight)", "state.contentHeight - visibleHeight",
                       "state.bounded && following && !state.followCatchup", "state.maxOffset.toFloat()",
                       "body.placeRelative(0, -state.scrollOffset.roundToInt())",
@@ -200,7 +201,9 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_full_extent_invalidates_outer_measure_and_exact_ownership_survives_consumption(self):
         source = CHAT.read_text()
         self.assertIn("var contentHeight by androidx.compose.runtime.mutableIntStateOf(0)", source)
-        self.assertIn("state.contentHeight = contentHeight", source)
+        self.assertIn("state.contentHeight = body.height", source)
+        self.assertIn("val contentHeight = state.contentHeight", source)
+        self.assertNotIn("StreamingTailContentHeight", source)
         self.assertIn("layout(viewport.width, contentHeight)", source)
         migration = source.split("// Unwrap only after terminal", 1)[1].split("val requestedIndex", 1)[0]
         self.assertIn("&& !exactNavigationOwnsScroll", migration)

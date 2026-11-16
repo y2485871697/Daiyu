@@ -142,9 +142,8 @@ class AutomaticBackPerformanceContractTest(unittest.TestCase):
 
     def test_capture_prefix_wall_and_schedule_preserve_original_token_and_bitmap_policy(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
-        self.assertIn('private fun schedule(frame: Frame) = schedule(frame, captureBackPerformanceToken())', layers)
-        self.assertIn('capture(frame, sourceToken)', layers)
-        self.assertIn('schedule(frame, sourceToken)', layers)
+        self.assertNotIn('private fun schedule(', layers)
+        self.assertIn('capture(frame, captureBackPerformanceToken())', layers)
         prefix = layers.split('val capture = synchronousTrace("daiyu.back.capture-launch", sourceToken)', 1)[1].split('frame.capture = capture', 1)[0]
         self.assertIn('scope.launch(start = CoroutineStart.UNDISPATCHED)', prefix)
         self.assertIn('BackPerformance.beginCapture(sourceToken)', prefix)
@@ -152,7 +151,7 @@ class AutomaticBackPerformanceContractTest(unittest.TestCase):
         self.assertIn('BackPerformance.completeCapture(wall, result)', prefix)
         self.assertNotIn('captureBackPerformanceToken()', prefix)
         self.assertIn('previewEpoch == epoch', prefix)
-        self.assertIn('if (navigation) frame.frozen && frame.generation == generation else !frame.frozen', prefix)
+        self.assertIn('frame.frozen && frame.generation == generation', prefix)
         self.assertIn('Event.OBSERVED_CAPTURE_IN_FLIGHT', layers)
         runtime = (APP / 'diagnostics/RuntimeDiagnostics.kt').read_text()
         self.assertIn('ELAPSED_INCLUDING_SUSPENSION_NOT_CPU', runtime)

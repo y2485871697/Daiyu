@@ -134,7 +134,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         }
         dismissIme()
         ui.waitForIdle()
-        captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        awaitPreparedCurrentPixels()
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)

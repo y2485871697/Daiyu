@@ -1447,6 +1447,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             ui.onNodeWithTag("page-back-departure-scrim").assertDoesNotExist()
             ui.onNodeWithTag("page-back-target").assertDoesNotExist()
             assertEquals(1, backCount)
+            prepareCurrentPixels(prefetchForImmediateCapture = true)
             mainThread { route = "test-page" }
             ui.mainClock.advanceTimeBy(1000)
             prepareCurrentPixels(prefetchForImmediateCapture = true)

@@ -181,7 +181,8 @@ jobs:
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-node-motion':
               patterns = ('test_reasoning_workflow_contract.py', 'test_work_timeline_connector_contract.py',
                           'test_workflow_render_isolation_contract.py', 'test_workflow_narration_contract.py',
-                          'test_record_tool_tests_scope.py')
+                          'test_record_tool_tests_scope.py', 'test_reasoning_typewriter_contract.py',
+                          'test_markdown_typing_contract.py', 'test_reported_reasoning_markdown_contract.py')
           for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               discovered = suite.countTestCases()
@@ -294,7 +295,7 @@ jobs:
             filters=()
           fi
           if [[ "$WORKFLOW_CHECK_SCOPE" == workflow-node-motion ]]; then
-            classes=(WorkflowConnectorsTest WorkflowNarrationCompositionTest)
+            classes=(WorkflowConnectorsTest WorkflowNarrationCompositionTest MarkdownRevealTest ReasoningHandoffTest)
             filters=()
           fi
           for class in "${classes[@]}"; do
@@ -361,7 +362,7 @@ jobs:
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-collapse':
               expected = {'WorkflowDisclosureMotionTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-node-motion':
-              expected = {'WorkflowConnectorsTest', 'WorkflowNarrationCompositionTest'}
+              expected = {'WorkflowConnectorsTest', 'WorkflowNarrationCompositionTest', 'MarkdownRevealTest', 'ReasoningHandoffTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

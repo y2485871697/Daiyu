@@ -23,8 +23,12 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
-import app.daiyu.android.domain.ReportedReasoning
+import app.daiyu.android.domain.*
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import app.daiyu.android.ui.app.AgentAppTheme
+import kotlinx.coroutines.runBlocking
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
@@ -49,6 +53,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
     private var motionEnabled by mutableStateOf(true)
     private var narrationText by mutableStateOf<String?>(null)
     private var nextAdmitted by mutableStateOf(true)
+    private val visibleAdvances = java.util.concurrent.atomic.AtomicInteger()
 
     private fun content(): List<MessageContentUi> = buildList {
         rows.forEachIndexed { index, step ->
@@ -71,7 +76,8 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                         if (mounted) {
                             if (thought) WorkflowLineScope(incoming?.let { WorkflowLineMotion(incoming = WorkflowLinePart(it, 1, 2)) }, 0.dp) {
                                 ReasoningStepRow("motion", reasoning, allowLiveTiming = flowRunning,
-                                    generationComplete = !flowRunning, stopped = !flowRunning)
+                                    generationComplete = !flowRunning, stopped = !flowRunning,
+                                    onVisibleAdvance = { visibleAdvances.incrementAndGet() })
                             } else if (incoming != null) WorkflowLineScope(WorkflowLineMotion(incoming = WorkflowLinePart(incoming, 1, 2)), 0.dp) {
                                 WorkStepRow(rows.first(), flowRunning = flowRunning)
                             } else MessageContent(content(), ChatScreenActions(), null,
@@ -155,10 +161,10 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         return (top until bottom).flatMap { y -> (left until right).map { x -> p[x, y] } }
     }
 
-    private fun line(p: PixelMap): List<Float> {
+    private fun line(p: PixelMap, fromTag: String = "tool-step:motion-a", toTag: String = "tool-step:motion-b"): List<Float> {
         val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().boundsInRoot
-        val a = ui.onNodeWithTag("tool-step:motion-a").fetchSemanticsNode().boundsInRoot
-        val b = ui.onNodeWithTag("tool-step:motion-b").fetchSemanticsNode().boundsInRoot
+        val a = ui.onNodeWithTag(fromTag).fetchSemanticsNode().boundsInRoot
+        val b = ui.onNodeWithTag(toTag).fetchSemanticsNode().boundsInRoot
         val x = a.left - raster.left + with(density) { 5.dp.toPx() }
         val from = ceil(a.top - raster.top + with(density) { 28.dp.toPx() }).toInt()
         val to = floor(b.top - raster.top + with(density) { 16.dp.toPx() }).toInt()
@@ -392,23 +398,211 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         } finally { ui.mainClock.autoAdvance = true }
     }
 
-    fun testReasoningCompletionWaitsForActualArrivalThenPopsIn() {
+    fun testReasoningCompletionWaitsForActualArrivalThenPopsIn() = verifyHeldReasoningArrival(true)
+
+    private fun nodeInk(p: PixelMap, tag: String): Float =
+        glyph(p, tag).sumOf { distance(it, background).toDouble() }.toFloat()
+
+    fun testNewActiveReasoningWaitsForActualArrival() = verifyHeldReasoningArrival(false)
+
+    fun testEmptyReasoningFinalTextWaitsForArrivalAndTypes() = verifyHeldReasoningArrival(true, emptyStart = true)
+
+    private fun verifyHeldReasoningArrival(terminal: Boolean, emptyStart: Boolean = false) {
+        val bufferedText = "thinking" + " buffered".repeat(12)
+        runBlocking {
+            for (text in listOf("", bufferedText)) {
+                projectMarkdown(listOf(text))
+                projectMarkdown(listOf(text), parser = streamingMarkdownParser)
+            }
+        }
+        instrumentation.runOnMainSync { reasoning = reasoning.copy(text = if (emptyStart) "" else bufferedText) }
         val arrival = mutableStateOf(.99f)
+        val tag = "work-reasoning:motion-r"
         ui.mainClock.autoAdvance = false
         try {
-            show(thought = true, incoming = arrival)
-            instrumentation.runOnMainSync { reasoning = reasoning.copy(activeSinceNanos = null) }
-            repeat(2) { ui.mainClock.advanceTimeByFrame() }
-            ui.mainClock.advanceTimeBy(1_000)
-            assertEquals("elapsed time cannot release a glyph before its actual connector arrives", 0f,
-                coverage(pixels(), success, "work-reasoning:motion-r"), .01f)
+            show(thought = true, incoming = arrival, baseline = false)
+            fun assertHeld() {
+                ui.mainClock.advanceTimeBy(1_000)
+                val p = heldPixels(if (terminal) "reasoning-terminal" else "reasoning-active")
+                assertEquals(.99f, arrival.value, 0f)
+                assertEquals("typewriter must not advance before arrival", 0, visibleAdvances.get())
+                assertEquals("all node colors must wait for incoming", 0f, nodeInk(p, tag), .1f)
+                assertEquals("brain, status and summary must wait for incoming", 0f, bodyInk(p, tag), .03f)
+            }
+            assertHeld()
+            if (terminal) {
+                instrumentation.runOnMainSync { reasoning = reasoning.copy(text = bufferedText, activeSinceNanos = null) }
+                repeat(2) { ui.mainClock.advanceTimeByFrame() }
+                assertHeld()
+            }
             instrumentation.runOnMainSync { arrival.value = 1f }
             repeat(2) { ui.mainClock.advanceTimeByFrame() }
             ui.mainClock.advanceTimeBy(48)
-            val middle = coverage(pixels(), success, "work-reasoning:motion-r")
+            val middle = coverage(pixels(), success, tag)
+            val contentTag = "reported-reasoning-content:motion:reasoning:motion-r"
+            val displayed = ui.onAllNodes((hasTestTag(contentTag) or hasAnyAncestor(hasTestTag(contentTag))) and
+                SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true)
+                .fetchSemanticsNodes().flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty() }
+                .joinToString("") { it.text }
+            assertTrue("queued live text must resume as a partial source prefix after arrival",
+                displayed.isNotEmpty() && displayed.length < reasoning.text.length && reasoning.text.startsWith(displayed))
+            assertTrue("arrival must resume visible typewriter feedback", visibleAdvances.get() > 0)
             ui.mainClock.advanceTimeBy(1_000)
-            val complete = coverage(pixels(), success, "work-reasoning:motion-r")
-            assertTrue("arrival must start the glyph animation, not jump to its end", middle > 0f && middle < complete)
+            val end = pixels()
+            assertTrue("arrival must expose the node", nodeInk(end, tag) > 1f)
+            assertTrue("arrival must expose the header", bodyInk(end, tag) > 1f)
+            if (terminal) assertTrue("arrival must start the completion spring",
+                middle > 0f && middle < coverage(end, success, tag))
+            else ui.onNodeWithTag("workflow-waiting:reasoning:motion-r").assertExists()
+
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testMixedLiveToolReasoningToolReasoningWaitsForEachFrontier() = verifyLiveChain(false)
+
+    fun testLegacyLiveToolReasoningToolReasoningWaitsForEachFrontier() = verifyLiveChain(true)
+
+    private fun verifyLiveChain(legacy: Boolean) {
+        fun tool(id: String) = MessageBlock.Tool(ToolInvocation(ToolCallId(id), "lookup", "{}"), "done")
+        val r1 = ReportedReasoning("live-r1", "甲", 0L, 1L, blockOffset = 1)
+        val r2 = ReportedReasoning("live-r2", "丙", 0L, 1L, blockOffset = 2)
+        var source by mutableStateOf(Message(MessageId("motion-live"), ConversationId("motion-c"),
+            RunId("motion-run"), "assistant", listOf(tool("live-t1")), RunStatus.RUNNING))
+        val owner = (ChatTurnMapper.map(listOf(source)).single() as ChatTurnUi.Assistant).listKey
+        val advances = java.util.concurrent.atomic.AtomicInteger()
+        var contrast = 0f
+        fun frame() { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+        fun text(id: String): String {
+            val tag = "reported-reasoning-content:$owner:reasoning:$id"
+            return ui.onAllNodes((hasTestTag(tag) or hasAnyAncestor(hasTestTag(tag))) and
+                SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true)
+                .fetchSemanticsNodes().flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty() }
+                .joinToString("") { it.text }
+        }
+        fun observe(tags: List<String>) {
+            val target = tags.last()
+            val feedback = advances.get()
+            var partial = false
+            var arrived = false
+            repeat(64) { index ->
+                frame()
+                val present = ui.onAllNodesWithTag(target).fetchSemanticsNodes().isNotEmpty()
+                val p = pixels()
+                val visibleTags = if (present) tags else tags.dropLast(1)
+                for ((from, to) in visibleTags.zipWithNext()) {
+                    val rail = line(p, from, to)
+                    assertTrue("$legacy: connector must have a measurable span", rail.isNotEmpty())
+                    val mask = rail.map { it > contrast * .35f }
+                    val last = mask.indexOfLast { it }
+                    assertTrue("$legacy: gap behind frontier at frame $index, $from -> $to",
+                        mask.take((last - 2).coerceAtLeast(0)).all { it })
+                    if (to != target) assertTrue("arrived upstream must remain connected", mask.all { it })
+                }
+                if (present) {
+                    val incoming = line(p, tags[tags.lastIndex - 1], target)
+                    val reached = incoming.isNotEmpty() && incoming.all { it >= contrast * .9f }
+                    partial = partial || (!reached && incoming.any { it > contrast * .35f })
+                    arrived = arrived || reached
+                    if (!reached) {
+                        assertEquals("$legacy: node overtook incoming, frame $index", 0f, nodeInk(p, target), .1f)
+                        assertEquals("$legacy: header/body overtook incoming, frame $index", 0f, bodyInk(p, target), .03f)
+                        assertEquals("typewriter ran before arrival", feedback, advances.get())
+                    }
+                }
+            }
+            assertTrue("must observe partial incoming rather than only its final frame", partial)
+            assertTrue("incoming must arrive", arrived)
+            val p = pixels()
+            assertTrue("target node must eventually appear", nodeInk(p, target) > 1f)
+            assertTrue("target header must eventually appear", bodyInk(p, target) > 1f)
+        }
+        fun type(id: String, seed: String, full: String, update: () -> Unit) {
+            ui.waitUntil(5_000) { frame(); text(id) == seed }
+            val feedback = advances.get()
+            instrumentation.runOnMainSync { update() }
+            var length = seed.length
+            var partial = false
+            ui.waitUntil(10_000) {
+                frame()
+                val shown = text(id)
+                assertTrue("typed text must stay a monotonic source prefix", full.startsWith(shown) && shown.length >= length)
+                partial = partial || (shown.length > seed.length && shown.length < full.length)
+                length = shown.length
+                shown == full
+            }
+            assertTrue("reasoning must type rather than appear as a whole block", partial)
+            assertTrue("visible typewriter feedback must remain connected", advances.get() > feedback)
+        }
+        val t1 = "tool-step:live-t1"
+        val a = "work-reasoning:live-r1"
+        val t2 = "tool-step:live-t2"
+        val b = "work-reasoning:live-r2"
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                density = LocalDensity.current
+                val colors = conversationColors()
+                background = colors.surface.copy(alpha = 1f)
+                contrast = distance(colors.line.compositeOver(background), background)
+                val turn = ChatTurnMapper.map(listOf(source)).single() as ChatTurnUi.Assistant
+                Box(Modifier.safeDrawingPadding()) {
+                    Box(Modifier.width(300.dp).background(background).testTag("motion-raster")) {
+                        AssistantTurn(if (legacy) turn.copy(content = emptyList(), isStreaming = true)
+                            else turn.copy(isStreaming = true), ChatScreenActions(),
+                            onVisibleAdvance = { advances.incrementAndGet() })
+                    }
+                }
+            } } }
+            ui.mainClock.advanceTimeBy(1_000)
+            ui.onNodeWithTag(t1).assertIsDisplayed()
+            assertTrue("line must contrast with background", contrast > .01f)
+            instrumentation.runOnMainSync { source = source.copy(reportedReasoning = listOf(r1)) }
+            observe(listOf(t1, a))
+            val full1 = r1.copy(text = r1.text + "乙".repeat(24))
+            type(r1.itemId, r1.text, full1.text) { source = source.copy(reportedReasoning = listOf(full1)) }
+            instrumentation.runOnMainSync { source = source.copy(blocks = source.blocks + tool("live-t2"),
+                reportedReasoning = listOf(full1.copy(activeSinceNanos = null))) }
+            observe(listOf(t1, a, t2))
+            instrumentation.runOnMainSync { source = source.copy(reportedReasoning = source.reportedReasoning + r2) }
+            observe(listOf(t1, a, t2, b))
+            val full2 = r2.copy(text = r2.text + "丁".repeat(24))
+            type(r2.itemId, r2.text, full2.text) { source = source.copy(
+                reportedReasoning = listOf(full1.copy(activeSinceNanos = null), full2)) }
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testNewEdgesWaitForUpstreamIncoming() {
+        val initial = listOf(MessageContentUi.Tool(first))
+        var items by mutableStateOf(initial)
+        val motions = WorkflowNodeMotions(initial)
+        var parts: Map<Int, WorkflowLineMotion> = emptyMap()
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent {
+                CompositionLocalProvider(LocalWorkflowNodeMotions provides motions) {
+                    parts = rememberWorkflowLineMotions(items, items.indices.toList(), continuous = true)
+                }
+            } }
+            instrumentation.runOnMainSync { items = initial + listOf(
+                MessageContentUi.Reasoning(ReportedReasoning("serial-r1", "", 0L, 1L)),
+                MessageContentUi.Tool(second),
+                MessageContentUi.Reasoning(ReportedReasoning("serial-r2", "", 0L, 1L))) }
+            var sawWaiting = false
+            repeat(80) {
+                ui.mainClock.advanceTimeByFrame()
+                instrumentation.runOnMainSync {
+                    for (source in 1..2) {
+                        val upstream = parts[source]?.incoming?.fraction() ?: 0f
+                        val downstream = parts[source]?.outgoing?.fraction() ?: 0f
+                        if (upstream < 1f) {
+                            sawWaiting = true
+                            assertEquals("downstream line cannot skip unfinished upstream", 0f, downstream, 0f)
+                        }
+                    }
+                }
+            }
+            assertTrue("must sample a queued edge", sawWaiting)
+            assertEquals(1f, parts[3]?.incoming?.fraction() ?: 0f, 0f)
         } finally { ui.mainClock.autoAdvance = true }
     }
 

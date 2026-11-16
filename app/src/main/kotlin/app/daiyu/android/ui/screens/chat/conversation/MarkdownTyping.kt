@@ -106,7 +106,7 @@ internal fun rememberMarkdownReveal(
     val baselineProjection = if (sources == baseline) projection else rememberMarkdownProjection(baseline.map { it.text },
         streaming = !terminal, windows = baseline.map { it.window })
     val baselineLength = remember(baselineProjection, baseline, sources == baseline, allowBaselinePrefix) {
-        markdownTypingBaselineLength(baselineProjection, baseline.map { it.text }, allowPrefix = sources == baseline && allowBaselinePrefix,
+        if (baseline.isEmpty()) 0 else markdownTypingBaselineLength(baselineProjection, baseline.map { it.text }, allowPrefix = sources == baseline && allowBaselinePrefix,
             windows = baseline.map { it.window })
     }
     val partIds = sources.map { it.id }

@@ -71,12 +71,61 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
                      'testNarrationWaitDoesNotDrawADanglingLineOrExposeTheNextTool'):
             self.assertIn('fun ' + name, regression)
 
+    def test_reasoning_arrival_keeps_header_and_typewriter_behind_the_node(self):
+        card = (CHAT / 'ReportedReasoningCard.kt').read_text()
+        motion = (CHAT / 'WorkflowNodeMotion.kt').read_text()
+        row = card[card.index('internal fun ReasoningStepRow('):]
+        identity = chr(34) + 'reasoning:${reported.itemId}' + chr(34)
+        self.assertIn('rememberWorkflowToolAppearance(' + identity + ')', row)
+        self.assertIn('.workflowCompletion(' + identity + ', complete, appearance = appearance)', row)
+        self.assertIn('onHandoffReady = onHandoffReady, appearance = appearance', row)
+        header = card[card.index('Row(Modifier.fillMaxWidth().heightIn'):card.index('AnimatedVisibility(')]
+        self.assertIn('.workflowToolAppearance(appearance)', header)
+        self.assertIn('val arrived = appearance?.arrived != false', card)
+        self.assertIn('val revealEnabled = arrived && revealGate && hasReportedReasoningText(text)', card)
+        self.assertIn('val reveal = key(revealGate)', card)
+        self.assertNotIn('key(revealEnabled)', card)
+        gate = card[card.index('val revealGate ='):card.index('val revealEnabled =')]
+        self.assertNotIn('hasReportedReasoningText', gate)
+        for token in ('live = isThinking', 'paceTerminal = queuedForArrival',
+                      'initialBaseline = if (queuedForArrival) emptyList() else null',
+                      'onHandoffReady(appearance?.settled != false && handoffReady)'):
+            self.assertIn(token, card)
+        body = card[card.index('AnimatedVisibility('):card.index('internal fun rememberReasoningElapsed(')]
+        self.assertIn('enter = if (manualExpansion)', body)
+        self.assertIn('else EnterTransition.None', body)
+        self.assertNotIn('workflowToolAppearance', body)
+        appearance = motion[motion.index('internal fun rememberWorkflowToolAppearance'):motion.index('internal fun Modifier.workflowToolAppearance')]
+        wait = 'snapshotFlow { incoming.value?.fraction() ?: 1f }.first { it >= 1f }'
+        self.assertIn('var arrived by mutableStateOf(!animate)', motion)
+        self.assertLess(appearance.index(wait), appearance.index('appearance.arrived = true'))
+        self.assertLess(appearance.index('appearance.arrived = true'), appearance.index('appearance.progress.animateTo(1f, spring('))
+        self.assertLess(appearance.index('appearance.progress.animateTo(1f, spring('), appearance.index('appearance.settled = true'))
+        typing = (CHAT / 'MarkdownTyping.kt').read_text()
+        self.assertIn('if (baseline.isEmpty()) 0 else markdownTypingBaselineLength(', typing)
+        regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNodeMotionTest.kt').read_text()
+        for name in ('testNewActiveReasoningWaitsForActualArrival',
+                     'testMixedLiveToolReasoningToolReasoningWaitsForEachFrontier',
+                     'testLegacyLiveToolReasoningToolReasoningWaitsForEachFrontier'):
+            self.assertIn('fun ' + name, regression)
+
+    def test_successive_edges_wait_for_their_upstream_incoming(self):
+        motion = (CHAT / 'WorkflowNodeMotion.kt').read_text()
+        lines = motion[motion.index('internal fun rememberWorkflowLineMotions'):motion.index('internal fun WorkflowLineScope')]
+        self.assertIn('val upstream = rememberUpdatedState(result[from]?.incoming)', lines)
+        wait = 'snapshotFlow { upstream.value?.fraction() ?: 1f }.first { it >= 1f }'
+        self.assertLess(lines.index(wait), lines.index('progress.animateTo(1f, tween('))
+        self.assertIn('(result[from] ?: WorkflowLineMotion()).copy(outgoing =', lines)
+        self.assertIn('(result[to] ?: WorkflowLineMotion()).copy(incoming =', lines)
+        regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNodeMotionTest.kt').read_text()
+        self.assertIn('fun testNewEdgesWaitForUpstreamIncoming', regression)
+
     def test_motion_check_keeps_an_exact_contract_and_jvm_scope(self):
         workflow = (ROOT / '.github/workflows/chat-workflow-checks.yml').read_text()
         self.assertIn('options: [workflow-node-motion,', workflow)
         self.assertIn("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-node-motion':\n              patterns = ('test_reasoning_workflow_contract.py', 'test_work_timeline_connector_contract.py',", workflow)
-        self.assertIn('if [[ "$WORKFLOW_CHECK_SCOPE" == workflow-node-motion ]]; then\n            classes=(WorkflowConnectorsTest WorkflowNarrationCompositionTest)\n            filters=()', workflow)
-        self.assertIn("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-node-motion':\n              expected = {'WorkflowConnectorsTest', 'WorkflowNarrationCompositionTest'}", workflow)
+        self.assertIn('if [[ "$WORKFLOW_CHECK_SCOPE" == workflow-node-motion ]]; then\n            classes=(WorkflowConnectorsTest WorkflowNarrationCompositionTest MarkdownRevealTest ReasoningHandoffTest)\n            filters=()', workflow)
+        self.assertIn("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-node-motion':\n              expected = {'WorkflowConnectorsTest', 'WorkflowNarrationCompositionTest', 'MarkdownRevealTest', 'ReasoningHandoffTest'}", workflow)
 
     def test_captured_position_is_display_metadata_not_protocol(self):
         source = (DOMAIN / 'Conversation.kt').read_text()
@@ -192,7 +241,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         card = ' '.join((CHAT / 'ReportedReasoningCard.kt').read_text().split())
         self.assertIn('val handoffReady = stopped || !observedLive || !isThinking && settled && '
                       '(manualExpansion || visibility.isIdle && !visibility.currentState && !visibility.targetState)', card)
-        self.assertIn('SideEffect { onHandoffReady(handoffReady) }', card)
+        self.assertIn('SideEffect { onHandoffReady(appearance?.settled != false && handoffReady) }', card)
         handoff = (CHAT / 'ReasoningHandoff.kt').read_text()
         self.assertIn('initial.filter { it.activeSinceNanos == null }.forEach { put(it.itemId, true) }', handoff)
         self.assertIn('fun ready(reported: ReportedReasoning): Boolean = completed[reported.itemId] == true', handoff)

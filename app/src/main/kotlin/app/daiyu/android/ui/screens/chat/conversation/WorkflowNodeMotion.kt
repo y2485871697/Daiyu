@@ -89,9 +89,15 @@ internal fun rememberWorkflowLineMotions(items: List<MessageContentUi>, visible:
         if (!continuous && to != from + 1) return@forEach
         val edge = WorkflowEdge(items[from].workflowKey(from), items[to].workflowKey(to))
         androidx.compose.runtime.key(edge) {
+            val upstream = rememberUpdatedState(result[from]?.incoming)
             val animate = remember(owner, edge) { owner.connect(edge) }
             val progress = remember(owner, edge) { Animatable(if (animate) 0f else 1f) }
-            LaunchedEffect(progress) { if (animate) progress.animateTo(1f, tween(300, easing = FastOutSlowInEasing)) }
+            LaunchedEffect(progress) {
+                if (animate) {
+                    snapshotFlow { upstream.value?.fraction() ?: 1f }.first { it >= 1f }
+                    progress.animateTo(1f, tween(300, easing = FastOutSlowInEasing))
+                }
+            }
             val middle = visible.filter { it > from && it < to }
             val count = middle.size + 2
             result[from] = (result[from] ?: WorkflowLineMotion()).copy(outgoing = WorkflowLinePart(progress.asState(), 0, count))
@@ -111,6 +117,7 @@ internal fun WorkflowLineScope(motion: WorkflowLineMotion?, spacingAfter: Dp, co
 
 internal class WorkflowToolAppearance(animate: Boolean) {
     val progress = Animatable(if (animate) 0f else 1f)
+    var arrived by mutableStateOf(!animate)
     var settled by mutableStateOf(!animate)
 }
 
@@ -124,8 +131,10 @@ internal fun rememberWorkflowToolAppearance(key: String): WorkflowToolAppearance
         if (!appearance.settled) {
             if (enabled) {
                 snapshotFlow { incoming.value?.fraction() ?: 1f }.first { it >= 1f }
+                appearance.arrived = true
                 appearance.progress.animateTo(1f, spring(dampingRatio = .7f, stiffness = 600f))
             } else appearance.progress.snapTo(1f)
+            appearance.arrived = true
             appearance.settled = true
         }
     }

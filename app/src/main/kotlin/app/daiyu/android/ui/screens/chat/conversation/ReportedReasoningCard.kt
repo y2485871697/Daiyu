@@ -2,6 +2,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
@@ -71,11 +72,13 @@ internal fun ReportedReasoningCard(
     parentExpanded: Boolean = true,
     onVisibleAdvance: () -> Unit = {},
     onHandoffReady: (Boolean) -> Unit = {},
+    appearance: WorkflowToolAppearance? = null,
 ) {
     val summaries = reported.filter { hasReportedReasoningText(it.text) }
     val isThinking = !stopped && !generationComplete && isReportedReasoningActive(reported)
-    if (summaries.isEmpty() && !isThinking) { SideEffect { onHandoffReady(true) }; return }
+    if (summaries.isEmpty() && !isThinking) { SideEffect { onHandoffReady(appearance?.settled != false) }; return }
     val hasSummary = summaries.isNotEmpty()
+    val arrived = appearance?.arrived != false
     val colors = conversationColors()
     val shape = RoundedCornerShape(14.dp)
     var observedLive by rememberSaveable(ownerKey) { mutableStateOf(isThinking) }
@@ -92,8 +95,10 @@ internal fun ReportedReasoningCard(
             val streamingProjection = remember(ownerKey, summary.itemId) { !generationComplete }
             val sourceWindow = LocalReasoningSourceWindows.current[summary.itemId]
             val projection = rememberMarkdownProjection(listOf(text), streaming = streamingProjection, windows = listOf(sourceWindow))
-            val revealEnabled = parentExpanded && !manuallyCollapsed && (!stopped || currentOverride == true) && hasReportedReasoningText(text)
-            val reveal = key(revealEnabled) {
+            val revealGate = parentExpanded && !manuallyCollapsed && (!stopped || currentOverride == true)
+            val revealEnabled = arrived && revealGate && hasReportedReasoningText(text)
+            val reveal = key(revealGate) {
+                val queuedForArrival = remember(revealResetEpoch) { !arrived && !stopped }
                 rememberMarkdownReveal(
                     listOf(MarkdownTypingSource(summary.itemId, text, sourceWindow)), projection,
                     streaming = isThinking && revealEnabled, terminal = !isThinking,
@@ -101,6 +106,9 @@ internal fun ReportedReasoningCard(
                     onVisibleAdvance = onVisibleAdvance,
                     enabled = revealEnabled,
                     allowBaselinePrefix = false,
+                    live = isThinking,
+                    paceTerminal = queuedForArrival,
+                    initialBaseline = if (queuedForArrival) emptyList() else null,
                 )
             }
             ReasoningSummaryDisplay(summary, projection, reveal)
@@ -110,14 +118,14 @@ internal fun ReportedReasoningCard(
     val disclosureExpanded = currentOverride ?: (!stopped && (isThinking || observedLive && !settled))
     val expanded = hasSummary && disclosureExpanded && summaryDisplays.any { display ->
         display.projection?.sources?.any(::hasReportedReasoningText) == true
-    }
+    } && arrived
     val visibility = remember(ownerKey, stopped) { MutableTransitionState(expanded) }
     visibility.targetState = expanded
     val disclosure = rememberWorkflowDisclosureMotion(ownerKey, visibility)
     val manualExpansion = currentOverride == true
     val handoffReady = stopped || !observedLive || !isThinking && settled &&
         (manualExpansion || visibility.isIdle && !visibility.currentState && !visibility.targetState)
-    SideEffect { onHandoffReady(handoffReady) }
+    SideEffect { onHandoffReady(appearance?.settled != false && handoffReady) }
     val chevronRotation = animateFloatAsState(
         targetValue = if (expanded) 180f else 0f,
         animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
@@ -125,7 +133,7 @@ internal fun ReportedReasoningCard(
     )
     Column(Modifier.fillMaxWidth().testTag("reported-reasoning:$ownerKey").then(disclosure.containerModifier)
         .then(if (embedded) Modifier else Modifier.clip(shape).border(1.dp, colors.line, shape).background(colors.surface))) {
-        Row(Modifier.fillMaxWidth().heightIn(min = if (embedded) 44.dp else 35.dp).testTag("reported-reasoning-header:$ownerKey").then(disclosure.headerModifier)
+        Row(Modifier.fillMaxWidth().heightIn(min = if (embedded) 44.dp else 35.dp).testTag("reported-reasoning-header:$ownerKey").workflowToolAppearance(appearance).then(disclosure.headerModifier)
             .then(if (hasSummary) Modifier.conversationClickable(
                 onClickLabel = if (expanded) "收起思考摘要" else "展开思考摘要"
             ) { disclosure.toggle(opening = !disclosureExpanded); overridePhase = isThinking; overrideStopped = stopped; expandedOverride = !disclosureExpanded }.semantics {
@@ -146,10 +154,10 @@ internal fun ReportedReasoningCard(
         AnimatedVisibility(
             visibleState = visibility,
             modifier = Modifier.fillMaxWidth(),
-            enter = expandVertically(
+            enter = if (manualExpansion) expandVertically(
                 animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
                 expandFrom = disclosure.alignment
-            ) + fadeIn(tween(ReasoningDisclosureDurationMillis)),
+            ) + fadeIn(tween(ReasoningDisclosureDurationMillis)) else EnterTransition.None,
             exit = shrinkVertically(
                 animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
                 shrinkTowards = disclosure.alignment
@@ -253,6 +261,7 @@ internal fun ReasoningStepRow(
 ) {
     val colors = conversationColors()
     val lineMotion = LocalWorkflowLineMotion.current
+    val appearance = rememberWorkflowToolAppearance("reasoning:${reported.itemId}")
     Row(Modifier.fillMaxWidth().testTag("work-reasoning:${reported.itemId}").drawBehind {
         if (showConnector) drawLine(colors.line, Offset(5.dp.toPx(), 27.dp.toPx()),
             Offset(5.dp.toPx(), minOf(size.height,
@@ -263,7 +272,7 @@ internal fun ReasoningStepRow(
             val spinning = !complete && allowLiveTiming && !generationComplete && !stopped && LocalWorkflowNodeMotionEnabled.current
             Box(Modifier.size(10.dp).testTag("reasoning-step-state:${reported.itemId}")
                 .semantics { stateDescription = if (complete) "已思考" else "正在思考" }
-                .workflowCompletion("reasoning:${reported.itemId}", complete)
+                .workflowCompletion("reasoning:${reported.itemId}", complete, appearance = appearance)
                 .clip(CircleShape).then(when {
                     complete -> Modifier.background(colors.success)
                     spinning -> Modifier
@@ -277,7 +286,7 @@ internal fun ReasoningStepRow(
             ReportedReasoningCard("$ownerKey:reasoning:${reported.itemId}", listOf(reported),
                 allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, stopped = stopped, embedded = true,
                 revealResetEpoch = revealResetEpoch, parentExpanded = parentExpanded,
-                onVisibleAdvance = onVisibleAdvance, onHandoffReady = onHandoffReady)
+                onVisibleAdvance = onVisibleAdvance, onHandoffReady = onHandoffReady, appearance = appearance)
         }
     }
 }

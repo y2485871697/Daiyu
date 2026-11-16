@@ -210,14 +210,26 @@ class DictationActivityTest : WiredActivityTestCase() {
 
     private fun result(text: String) = text
 
-    private fun voice(expectNewAttempt: Boolean = true) {
+    private fun voice(expectNewAttempt: Boolean = true, phase: String = "start") {
         val previousCount = platform.listeners.size
-        ui.onNode(hasContentDescription("语音输入") or hasContentDescription("停止语音输入"))
-            .assertIsDisplayed().assertIsEnabled().performClick()
+        val selector = if (expectNewAttempt) hasContentDescription("语音输入") else
+            hasContentDescription("语音输入") or hasContentDescription("停止语音输入")
+        ui.onNode(selector).assertIsDisplayed().assertIsEnabled().performClick()
         ui.waitForIdle()
         if (expectNewAttempt) {
-            awaitControl("one new owned offline attempt after voice click") {
-                platform.listeners.size == previousCount + 1 && host.state.value.target != null
+            try {
+                awaitControl("$phase: one new owned offline attempt after voice click") {
+                    platform.listeners.size == previousCount + 1 && host.state.value.target != null
+                }
+            } catch (failure: AssertionError) {
+                var snapshot = ""
+                controlMain {
+                    snapshot = "phase=$phase previous=$previousCount actual=${platform.listeners.size} " +
+                        "state=${host.state.value} creates=${platform.creates} cancels=${platform.cancels} " +
+                        "destroys=${platform.destroys} permission=${platform.permission} requests=$permissionRequests " +
+                        "lifecycle=${activity.lifecycle.currentState} draft=${fixture.database.draft()} opens=${fixture.opens.get()}"
+                }
+                throw AssertionError(snapshot, failure)
             }
             platform.listeners[previousCount].awaitStarted()
         }
@@ -261,7 +273,11 @@ class DictationActivityTest : WiredActivityTestCase() {
 
     fun testRealMainProjectsOnlyOwnedRecognizerListeningAndFencesLateReady() {
         setDraft("base")
-        voice()
+        assertDraft("base")
+        awaitControl("initial draft persisted and dictation idle") {
+            fixture.database.draft() == "base" && host.state.value.target == null
+        }
+        voice(phase = "initial")
         val first = platform.listeners.last()
         ui.onNodeWithContentDescription("语音输入").assertExists() // A click/PREPARING is not listening.
         assertFalse(host.state.value.listening)
@@ -291,7 +307,8 @@ class DictationActivityTest : WiredActivityTestCase() {
         instrumentation.waitForIdleSync()
         ui.onNodeWithContentDescription("语音输入").assertExists()
         assertFalse(host.state.value.listening)
-        voice()
+        awaitControl("editor re-entry retires the old dictation target") { host.state.value.target == null }
+        voice(phase = "after-editor-reentry")
         val hidden = platform.listeners.last()
         ui.onNodeWithContentDescription("打开侧边栏").performClick()
         hidden.onReadyForSpeech(Bundle())
@@ -300,7 +317,8 @@ class DictationActivityTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("停止语音输入").assertExists()
         assertTrue(host.state.value.listening)
         voice(expectNewAttempt = false)
-        voice()
+        awaitControl("explicit stop retires old dictation target") { host.state.value.target == null }
+        voice(phase = "after-explicit-stop")
         val background = platform.listeners.last()
         mainThread { call("onPause") }
         background.onReadyForSpeech(Bundle())

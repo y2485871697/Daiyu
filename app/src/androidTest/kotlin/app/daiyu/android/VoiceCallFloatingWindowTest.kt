@@ -62,21 +62,38 @@ class VoiceCallFloatingWindowTest {
         assertTrue(message, satisfied)
     }
     private fun awaitNativeFade(root: View, message: String, close: () -> Unit) {
+        var drewBaseline = false
         var drewIntermediateFrame = false
-        var observer: android.view.ViewTreeObserver? = null
-        val probe = android.view.ViewTreeObserver.OnDrawListener {
-            if (root.isAttachedToWindow && root.alpha > 0f && root.alpha < 1f &&
-                root.scaleX < 1f && root.scaleY < 1f) drewIntermediateFrame = true
-        }
+        var closing = false
+        val frames = mutableListOf<String>()
         try {
             main {
-                observer = root.viewTreeObserver
-                observer!!.addOnDrawListener(probe)
-                close()
+                check(windows.onDraw == null)
+                windows.onDraw = { view ->
+                    if (view === root) {
+                        frames += "${SystemClock.uptimeMillis()} close=$closing attached=${root.isAttachedToWindow} " +
+                            "shown=${root.isShown} alpha=${root.alpha} scale=${root.scaleX},${root.scaleY}"
+                        if (!closing && root.isAttachedToWindow && root.isShown && root.alpha == 1f &&
+                            root.scaleX == 1f && root.scaleY == 1f) drewBaseline = true
+                        if (closing && root.isAttachedToWindow && root.isShown && root.alpha > 0f && root.alpha < 1f &&
+                            root.scaleX < 1f && root.scaleY < 1f) drewIntermediateFrame = true
+                    }
+                }
+                root.invalidate()
             }
+            await("complete visible baseline before external close") { drewBaseline }
+            main { closing = true; close() }
             await(message) { drewIntermediateFrame }
+        } catch (failure: AssertionError) {
+            var snapshot = ""
+            main {
+                snapshot = "baseline=$drewBaseline closing=$closing frames=$frames " +
+                    "finalAttached=${root.isAttachedToWindow} finalAlpha=${root.alpha} " +
+                    "finalScale=${root.scaleX},${root.scaleY} removals=${windows.removals.size} completed=$completed"
+            }
+            throw AssertionError("$message; $snapshot", failure)
         } finally {
-            main { observer?.takeIf { it.isAlive }?.removeOnDrawListener(probe) }
+            main { windows.onDraw = null }
         }
     }
     private fun picture(key: Long = -2L, mini: Boolean = false) = DoubaoCallUi(key, "original-conversation",

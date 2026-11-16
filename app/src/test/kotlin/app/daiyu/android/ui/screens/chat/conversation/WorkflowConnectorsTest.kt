@@ -81,4 +81,18 @@ class WorkflowConnectorsTest {
         assertFalse(motions.fail("tool:hidden"))
     }
 
+    @Test fun toolAppearanceIsIndependentOfReceiptAndDoesNotReplayHistoryOrHiddenUpdates() {
+        val pending = MessageContentUi.Tool(WorkStepUi("pending", "pending", ""))
+        val motions = WorkflowNodeMotions(listOf(tool("a"), pending))
+        assertFalse(motions.appear("tool:a"))
+        assertFalse(motions.appear("tool:pending"))
+        assertTrue(motions.appear("tool:new"))
+        assertFalse(motions.appear("tool:new"))
+        assertTrue(motions.complete("tool:new"))
+        assertTrue(motions.fail("tool:new"))
+        assertFalse(motions.appear("tool:new"))
+        motions.suppress(listOf(tool("hidden")))
+        assertFalse(motions.appear("tool:hidden"))
+    }
+
 }

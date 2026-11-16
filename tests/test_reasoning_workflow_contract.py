@@ -34,18 +34,49 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn(wait, completion)
         self.assertLess(completion.index(wait), completion.index('progress.animateTo(1f, spring('))
         self.assertNotIn('delay(', completion)
-        self.assertIn('if (animate) {', completion)
+        self.assertIn('if (animate && sharedAppearance == null) {', completion)
         regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNodeMotionTest.kt').read_text()
         for name in ('testAppendedSuccessWaitsForIncomingConnector', 'testAppendedFailureWaitsForIncomingConnector',
                      'testReasoningCompletionWaitsForActualArrivalThenPopsIn'):
+            self.assertIn('fun ' + name, regression)
+
+    def test_tool_body_and_glyph_share_incoming_arrival_without_moving_the_line_or_text(self):
+        motion = (CHAT / 'WorkflowNodeMotion.kt').read_text()
+        work = (CHAT / 'WorkProcessCard.kt').read_text()
+        self.assertIn('fun appear(key: String) = appeared.add(key)', motion)
+        self.assertIn('appeared.add(item.workflowKey(index))', motion)
+        appearance = motion[motion.index('internal fun rememberWorkflowToolAppearance'):motion.index('internal fun Modifier.workflowToolAppearance')]
+        self.assertIn('remember(owner, key)', appearance)
+        self.assertIn('WorkflowToolAppearance(owner.appear(key) && enabled)', appearance)
+        self.assertIn('snapshotFlow { incoming.value?.fraction() ?: 1f }.first { it >= 1f }', appearance)
+        self.assertIn('appearance.progress.animateTo(1f, spring(', appearance)
+        self.assertIn('else appearance.progress.snapTo(1f)', appearance)
+        self.assertNotIn('delay(', appearance)
+        self.assertIn('appearance?.takeUnless { it.settled }', motion)
+        self.assertIn('sharedAppearance?.progress?.value ?: progress.value', motion)
+        self.assertIn('translationY = 4.dp.toPx() * (1f - fraction)', motion)
+        self.assertIn('val appearance = rememberWorkflowToolAppearance("tool:${step.renderKey}")', work)
+        self.assertIn('failed = step.state == WorkStepState.FAILED, appearance = appearance', work)
+        self.assertIn('testTag("tool-step-body:${step.toolCallId}").workflowToolAppearance(appearance)', work)
+        row = work[work.index('internal fun WorkStepRow'):]
+        self.assertLess(row.index('.drawBehind {'), row.index('.workflowToolAppearance(appearance)'))
+        content = (CHAT / 'MessageContent.kt').read_text()
+        self.assertNotIn('workflowToolAppearance', content)
+        self.assertIn('val timelineIndices = visibleIndices.filter', content)
+        narration = (CHAT / 'WorkflowNarration.kt').read_text()
+        self.assertIn('entry.precedingText.all { currentReveal.ready(it.id, it.text, it.window) }', narration)
+        regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNodeMotionTest.kt').read_text()
+        for name in ('testNewPendingToolAndFastCompletionShareActualArrival',
+                     'testExistingToolReceiptUpdateDoesNotReplayItsBody',
+                     'testNarrationWaitDoesNotDrawADanglingLineOrExposeTheNextTool'):
             self.assertIn('fun ' + name, regression)
 
     def test_motion_check_keeps_an_exact_contract_and_jvm_scope(self):
         workflow = (ROOT / '.github/workflows/chat-workflow-checks.yml').read_text()
         self.assertIn('options: [workflow-node-motion,', workflow)
         self.assertIn("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-node-motion':\n              patterns = ('test_reasoning_workflow_contract.py', 'test_work_timeline_connector_contract.py',", workflow)
-        self.assertIn('if [[ "$WORKFLOW_CHECK_SCOPE" == workflow-node-motion ]]; then\n            classes=(WorkflowConnectorsTest)\n            filters=()', workflow)
-        self.assertIn("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-node-motion':\n              expected = {'WorkflowConnectorsTest'}", workflow)
+        self.assertIn('if [[ "$WORKFLOW_CHECK_SCOPE" == workflow-node-motion ]]; then\n            classes=(WorkflowConnectorsTest WorkflowNarrationCompositionTest)\n            filters=()', workflow)
+        self.assertIn("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-node-motion':\n              expected = {'WorkflowConnectorsTest', 'WorkflowNarrationCompositionTest'}", workflow)
 
     def test_captured_position_is_display_metadata_not_protocol(self):
         source = (DOMAIN / 'Conversation.kt').read_text()

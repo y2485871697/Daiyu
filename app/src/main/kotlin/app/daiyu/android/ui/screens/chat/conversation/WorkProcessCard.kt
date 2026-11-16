@@ -201,6 +201,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
 internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowRunning: Boolean = false, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     val colors = conversationColors()
     val lineMotion = LocalWorkflowLineMotion.current
+    val appearance = rememberWorkflowToolAppearance("tool:${step.renderKey}")
     var expanded by rememberSaveable(step.renderKey) { mutableStateOf(false) }
     val visibility = remember(step.renderKey) { MutableTransitionState(expanded) }
     visibility.targetState = expanded
@@ -232,7 +233,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
                 ToolActivityUi.PAUSING, ToolActivityUi.STOPPING)
             val ring = running && !terminal
             Box(Modifier.size(10.dp).workflowCompletion("tool:${step.renderKey}", step.state == WorkStepState.OK,
-                failed = step.state == WorkStepState.FAILED).clip(CircleShape).then(when {
+                failed = step.state == WorkStepState.FAILED, appearance = appearance).clip(CircleShape).then(when {
                     spinning -> Modifier
                     ring -> Modifier.border(1.5.dp, tint, CircleShape)
                     else -> Modifier.background(tint)
@@ -242,7 +243,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
                 else if (step.state == WorkStepState.FAILED) Icon(DaiyuIcons.Close, "执行失败", Modifier.size(8.dp), tint = Color.White)
             }
         }
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).testTag("tool-step-body:${step.toolCallId}").workflowToolAppearance(appearance)) {
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val stacked = maxWidth < 280.dp || LocalDensity.current.fontScale >= 1.2f
                 Row(Modifier.fillMaxWidth().testTag("tool-step-header:${step.toolCallId}").then(disclosure.headerModifier).heightIn(min = 44.dp).conversationClickable {

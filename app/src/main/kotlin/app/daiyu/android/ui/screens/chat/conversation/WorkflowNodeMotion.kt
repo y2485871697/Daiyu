@@ -10,6 +10,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
@@ -26,18 +29,23 @@ internal data class WorkflowEdge(val from: String, val to: String)
 
 /** Owned above disclosure and lazy-item content; revisiting an admitted event is silent. */
 internal class WorkflowNodeMotions(initial: List<MessageContentUi> = emptyList()) {
+    private val appeared = mutableSetOf<String>()
     private val completed = mutableSetOf<String>()
     private val failed = mutableSetOf<String>()
     private val connected = mutableSetOf<WorkflowEdge>()
     private val baselineNodes = mutableSetOf<String>()
     init { suppress(initial) }
+    fun appear(key: String) = appeared.add(key)
     fun complete(key: String) = completed.add(key)
     fun fail(key: String) = failed.add(key)
     fun connect(edge: WorkflowEdge) = connected.add(edge) &&
         !(edge.from in baselineNodes && edge.to in baselineNodes)
     fun suppress(items: List<MessageContentUi>) {
         items.forEachIndexed { index, item ->
-            if (item is MessageContentUi.Tool || item is MessageContentUi.Reasoning) baselineNodes.add(item.workflowKey(index))
+            if (item is MessageContentUi.Tool || item is MessageContentUi.Reasoning) {
+                baselineNodes.add(item.workflowKey(index))
+                appeared.add(item.workflowKey(index))
+            }
         }
         items.forEachIndexed { index, item ->
             if ((item is MessageContentUi.Tool && item.step.state == WorkStepState.OK) ||
@@ -101,8 +109,41 @@ internal fun WorkflowLineScope(motion: WorkflowLineMotion?, spacingAfter: Dp, co
     CompositionLocalProvider(LocalWorkflowLineMotion provides (motion ?: WorkflowLineMotion()).copy(spacingAfter = spacingAfter), content = content)
 }
 
+internal class WorkflowToolAppearance(animate: Boolean) {
+    val progress = Animatable(if (animate) 0f else 1f)
+    var settled by mutableStateOf(!animate)
+}
+
 @Composable
-internal fun Modifier.workflowCompletion(key: String, complete: Boolean, failed: Boolean = false): Modifier {
+internal fun rememberWorkflowToolAppearance(key: String): WorkflowToolAppearance? {
+    val owner = LocalWorkflowNodeMotions.current ?: return null
+    val enabled = LocalWorkflowNodeMotionEnabled.current
+    val incoming = rememberUpdatedState(LocalWorkflowLineMotion.current.incoming)
+    val appearance = remember(owner, key) { WorkflowToolAppearance(owner.appear(key) && enabled) }
+    LaunchedEffect(appearance, enabled) {
+        if (!appearance.settled) {
+            if (enabled) {
+                snapshotFlow { incoming.value?.fraction() ?: 1f }.first { it >= 1f }
+                appearance.progress.animateTo(1f, spring(dampingRatio = .7f, stiffness = 600f))
+            } else appearance.progress.snapTo(1f)
+            appearance.settled = true
+        }
+    }
+    return appearance
+}
+
+internal fun Modifier.workflowToolAppearance(appearance: WorkflowToolAppearance?): Modifier {
+    if (appearance == null) return this
+    return graphicsLayer {
+        val fraction = appearance.progress.value.coerceIn(0f, 1f)
+        alpha = fraction
+        translationY = 4.dp.toPx() * (1f - fraction)
+    }
+}
+
+@Composable
+internal fun Modifier.workflowCompletion(key: String, complete: Boolean, failed: Boolean = false,
+    appearance: WorkflowToolAppearance? = null): Modifier {
     val owner = LocalWorkflowNodeMotions.current ?: return this
     val enabled = LocalWorkflowNodeMotionEnabled.current
     val incoming = rememberUpdatedState(LocalWorkflowLineMotion.current.incoming)
@@ -110,16 +151,18 @@ internal fun Modifier.workflowCompletion(key: String, complete: Boolean, failed:
         val fresh = if (failed) owner.fail(key) else complete && owner.complete(key)
         fresh && enabled
     }
+    val sharedAppearance = remember(owner, key, complete, failed, enabled) { appearance?.takeUnless { it.settled } }
     val progress = remember(owner, key, complete, failed, enabled) { Animatable(if (animate) 0f else 1f) }
     LaunchedEffect(progress) {
-        if (animate) {
+        if (animate && sharedAppearance == null) {
             snapshotFlow { incoming.value?.fraction() ?: 1f }.first { it >= 1f }
             progress.animateTo(1f, spring(dampingRatio = .7f, stiffness = 600f))
         }
     }
     return graphicsLayer {
-        alpha = progress.value.coerceIn(0f, 1f)
-        scaleX = .65f + .35f * progress.value
+        val fraction = sharedAppearance?.progress?.value ?: progress.value
+        alpha = fraction.coerceIn(0f, 1f)
+        scaleX = .65f + .35f * fraction
         scaleY = scaleX
     }
 }

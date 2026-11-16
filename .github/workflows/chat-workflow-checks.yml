@@ -294,7 +294,7 @@ jobs:
             filters=()
           fi
           if [[ "$WORKFLOW_CHECK_SCOPE" == workflow-node-motion ]]; then
-            classes=(WorkflowConnectorsTest)
+            classes=(WorkflowConnectorsTest WorkflowNarrationCompositionTest)
             filters=()
           fi
           for class in "${classes[@]}"; do
@@ -361,7 +361,7 @@ jobs:
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-collapse':
               expected = {'WorkflowDisclosureMotionTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-node-motion':
-              expected = {'WorkflowConnectorsTest'}
+              expected = {'WorkflowConnectorsTest', 'WorkflowNarrationCompositionTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

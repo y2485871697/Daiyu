@@ -118,6 +118,10 @@ PAGE_BACK_PLATFORM_CLASSES = (
     'app.daiyu.android.ui.navigation.PageRetainedContentActivityTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
 )
+PAGE_BACK_GESTURE_RETAINED_CLASSES = (
+    'app.daiyu.android.ui.navigation.PageBackGesturesActivityTest',
+    'app.daiyu.android.ui.navigation.PageRetainedContentActivityTest',
+)
 PAGE_BACK_MODULES = (
     'test_page_back_gesture_contract', 'test_page_back_repeat_contract',
     'test_page_enter_contract', 'test_chat_return_refresh_contract',
@@ -969,6 +973,7 @@ def command_for(python, env):
     if (env.get('SMOKE_MODE') == 'smoke'
             and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) in (
                 sorted(PAGE_BACK_PLATFORM_CLASSES),
+                sorted(PAGE_BACK_GESTURE_RETAINED_CLASSES),
                 sorted((*PAGE_BACK_PLATFORM_CLASSES, 'app.daiyu.android.MessageActionsActivityTest')))):
         return [python, '-B', '-m', 'unittest', *PAGE_BACK_MODULES, '-v'], 'page-back-targeted'
     if (env.get('SMOKE_MODE') == 'smoke'
@@ -1032,6 +1037,8 @@ def record(python):
         child_env["PYTHONPATH"] = str(Path("tests").resolve()) + os.pathsep + child_env.get("PYTHONPATH", "")
     validation_cwd = None
     if scope in ("voice-browser-targeted", "browser-targeted", "doubao-motion-targeted", "child-hot-configuration-targeted", "child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted") or (
+            scope == "page-back-targeted" and sorted(os.environ.get("SMOKE_TEST_CLASSES", "").split(","))
+            == sorted(PAGE_BACK_GESTURE_RETAINED_CLASSES)) or (
             scope == "child-task-cards-targeted" and sorted(os.environ.get("SMOKE_TEST_CLASSES", "").split(","))
             == sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES)):
         validation_cwd = Path(__file__).resolve().parents[2]

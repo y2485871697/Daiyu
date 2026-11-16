@@ -59,6 +59,54 @@ class PageBackSmokeScopeTests(unittest.TestCase):
         self.assertEqual(len(required), len(recorder.PAGE_BACK_MODULES))
         self.assertNotIn('discover', command)
 
+    def test_exact_gesture_retained_pair_keeps_all_return_contracts(self):
+        pair = (CLASSES[0], CLASSES[3])
+        self.assertEqual(pair, recorder.PAGE_BACK_GESTURE_RETAINED_CLASSES)
+        for classes in (pair, tuple(reversed(pair))):
+            command, scope = recorder.command_for('python3', dict(
+                SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=','.join(classes)))
+            self.assertEqual('page-back-targeted', scope)
+            self.assertEqual(['python3', '-B', '-m', 'unittest', *recorder.PAGE_BACK_MODULES, '-v'], command)
+            self.assertNotIn('discover', command)
+
+    def test_inexact_gesture_retained_pair_and_other_modes_keep_full_fallback(self):
+        pair = (CLASSES[0], CLASSES[3])
+        raw = ','.join(pair)
+        for selected in ('', *pair, raw + ',' + pair[0], raw + ',app.daiyu.android.UnknownTest',
+                         raw.replace('PageBackGesturesActivityTest', 'PageBackGesturesActivityTestExtra'),
+                         ' ' + raw, raw + ' ', raw.replace(',', ', '), raw + ','):
+            self.assertEqual('full', recorder.command_for('python3', dict(
+                SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=selected))[1])
+        for mode in ('', 'compile', 'candidate', 'daily', 'release'):
+            self.assertEqual('full', recorder.command_for('python3', dict(
+                SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
+
+    def test_gesture_retained_pair_receipt_keeps_current_tools_and_frozen_identity(self):
+        old = Path.cwd()
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                os.chdir(directory)
+                env = dict(GITHUB_SHA='b' * 40, EXPECTED_SHA='a' * 40, GITHUB_RUN_ID='14',
+                           GITHUB_RUN_ATTEMPT='1', SMOKE_MODE='smoke',
+                           SMOKE_TEST_CLASSES=','.join((CLASSES[0], CLASSES[3])))
+                with patch.dict(os.environ, env, clear=True), patch.object(
+                        recorder.subprocess, 'check_output', return_value='a' * 40 + '\n'), patch.object(
+                        recorder.subprocess, 'call', return_value=9) as call, patch.object(
+                        recorder.sys, 'stdout', SimpleNamespace(buffer=io.BytesIO())):
+                    self.assertEqual(9, recorder.record('python3'))
+                    receipt = json.loads(Path('tool-evidence/receipt.json').read_text())
+                    tools = Path(recorder.__file__).resolve().parents[2]
+                    self.assertEqual(tools, call.call_args.kwargs['cwd'])
+                    self.assertEqual(str(tools / 'tests'), call.call_args.kwargs['env']['PYTHONPATH'].split(os.pathsep)[0])
+                    self.assertEqual(dict(sha='a' * 40, run_id=14, attempt=1), receipt['identity'])
+                    self.assertEqual('b' * 40, receipt['workflow_sha'])
+                    self.assertEqual('b' * 40, receipt['validation_tools_sha'])
+                    self.assertEqual('page-back-targeted', receipt['scope'])
+                    self.assertEqual(9, receipt['exit_code'])
+                    self.assertEqual(call.call_args.args[0], receipt['command'])
+        finally:
+            os.chdir(old)
+
     def test_return_with_message_actions_keeps_exact_targeted_command_and_inventory(self):
         extra = 'app.daiyu.android.MessageActionsActivityTest'
         extended = (*CLASSES, extra)

@@ -487,7 +487,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
                 probe.batches = listOf(listOf(call("blocked-navigation", "browser_write", org.json.JSONObject()
                     .put("action", "navigate").put("url", "https://example.invalid/search"))))
             }
-            val receipt = AtomicReference<TextSendResult>()
+            val receipt = AtomicReference<ChatController.TextSendResult>()
             val complete = CountDownLatch(1)
             main {
                 assertTrue(f.controller.sendText(conversation, 0, 0, "用内置浏览器查询", voiceConversation = true) {
@@ -495,7 +495,7 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
                 })
             }
             assertTrue("voice receipt timeout", complete.await(10, TimeUnit.SECONDS))
-            assertTrue(receipt.get() is TextSendResult.Accepted)
+            assertTrue(receipt.get() is ChatController.TextSendResult.Accepted)
             awaitState(f) { f.controller.active == null }
             val expected = if (access == app.daiyu.android.browser.session.BrowserAccess.DISABLED) emptySet()
                 else setOf("browser_read", "browser_write")

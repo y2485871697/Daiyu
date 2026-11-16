@@ -49,6 +49,7 @@ class SourceTests(unittest.TestCase):
         self.assertEqual([
             base_scope, reasoning_scope, binding_scope,
             'app.daiyu.android.VoiceCallFloatingWindowTest,' + binding_scope,
+            'app.daiyu.android.VoiceCallFloatingWindowTest',
         ], re.findall(r'test "\$\{SMOKE_TEST_CLASSES:-\}" = "([^"]+)"', setup))
         self.assertIn('--es command enter', setup)
         self.assertIn('--es command clock --es hhmm 1200', setup)

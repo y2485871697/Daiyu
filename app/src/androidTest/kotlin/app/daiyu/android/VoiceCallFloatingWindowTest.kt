@@ -30,8 +30,8 @@ class VoiceCallFloatingWindowTest {
     private var hangups = 0
     private val actions get() = DoubaoCallActions(onHangUp = { hangups++ }, onCloseAnimationFinished = { completed.add(it) })
 
-    private class RecordingWindows(context: Context,
-        private val actual: WindowManager = context.getSystemService(WindowManager::class.java)) : WindowManager by actual {
+    private open class RecordingWindows(context: Context,
+        protected val actual: WindowManager = context.getSystemService(WindowManager::class.java)) : WindowManager by actual {
         val added = mutableListOf<View>()
         val removals = mutableListOf<View>()
         var updates = 0
@@ -51,6 +51,11 @@ class VoiceCallFloatingWindowTest {
         }
         override fun removeViewImmediate(view: View) { removals.add(view); actual.removeViewImmediate(view) }
         fun detachExternally(view: View) { actual.removeViewImmediate(view) }
+    }
+    @android.annotation.TargetApi(30)
+    private class RecordingWindowsApi30(context: Context) : RecordingWindows(context) {
+        override fun getMaximumWindowMetrics(): android.view.WindowMetrics =
+            actual.maximumWindowMetrics
     }
     private fun shell(command: String): String = ParcelFileDescriptor.AutoCloseInputStream(
         instrumentation.uiAutomation.executeShellCommand(command)).bufferedReader().use { it.readText().trim() }
@@ -109,7 +114,11 @@ class VoiceCallFloatingWindowTest {
         overlayMode = Regex("SYSTEM_ALERT_WINDOW: (allow|ignore|deny|default|foreground)")
             .find(shell("appops get ${context.packageName} SYSTEM_ALERT_WINDOW"))?.groupValues?.get(1) ?: "default"
         shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW allow")
-        main { windows = RecordingWindows(context); host = VoiceCallFloatingWindow(context, windows) }
+        main {
+            windows = if (android.os.Build.VERSION.SDK_INT >= 30) RecordingWindowsApi30(context)
+                else RecordingWindows(context)
+            host = VoiceCallFloatingWindow(context, windows)
+        }
     }
     @After fun tearDown() {
         try {

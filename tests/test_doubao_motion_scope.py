@@ -10,7 +10,7 @@ import test_speech_platform_discovery as discovery
 class DoubaoMotionScopeTest(unittest.TestCase):
     def test_contract_scope_requires_exact_classes_and_smoke_mode(self):
         classes = recorder.DOUBAO_MOTION_PLATFORM_CLASSES
-        for selected in (classes, tuple(reversed(classes))):
+        for selected in (classes, tuple(reversed(classes)), ("app.daiyu.android.VoiceCallFloatingWindowTest",)):
             command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))
             self.assertEqual("doubao-motion-targeted", scope)
             self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.DOUBAO_MOTION_MODULES, "-v"], command)
@@ -18,6 +18,10 @@ class DoubaoMotionScopeTest(unittest.TestCase):
         for raw in (",".join(classes[:-1]), ",".join((*classes, classes[0])), ",".join((*classes, "app.daiyu.android.OtherTest"))):
             self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=raw))[1])
         self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="release", SMOKE_TEST_CLASSES=",".join(classes)))[1])
+        floating = "app.daiyu.android.VoiceCallFloatingWindowTest"
+        for raw in (floating + "," + floating, floating + ",app.daiyu.android.OtherTest"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=raw))[1])
+        self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="release", SMOKE_TEST_CLASSES=floating))[1])
 
     def fixture(self, root, classes=None):
         helper = discovery.SpeechPlatformDiscoveryTest()
@@ -160,10 +164,21 @@ class DoubaoMotionScopeTest(unittest.TestCase):
                     expected += selection["expected_tests"]
                 self.assertCountEqual(classes, selected)
                 self.assertEqual(inventory["total_tests"], expected)
+            result = helper.select(root, 0, classes=floating, count=1)
+            self.assertEqual(0, result.returncode, result.stderr)
+            inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+            selection = json.loads((root / "smoke/selection.json").read_text())
+            self.assertEqual("targeted", inventory["discovery_scope"])
+            self.assertEqual({floating: 18}, inventory["all_classes"])
+            self.assertEqual([floating], selection["selected_classes"])
+            self.assertEqual(18, selection["expected_tests"])
+            self.assertEqual(18, inventory["total_tests"])
             source = root / "app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt"
             source.write_text(source.read_text() + "\nclass UnexpectedTest {}\n")
             result = helper.select(root, classes=",".join(classes), count=1)
             self.assertNotEqual(0, result.returncode)
             self.assertIn("Ambiguous instrumentation test declaration", result.stderr)
+            self.assertNotEqual(0, helper.select(root, classes=floating, count=1).returncode)
             source.unlink()
             self.assertNotEqual(0, helper.select(root, classes=",".join(classes), count=1).returncode)
+            self.assertNotEqual(0, helper.select(root, classes=floating, count=1).returncode)

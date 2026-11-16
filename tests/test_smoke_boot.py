@@ -150,6 +150,22 @@ class SourceTests(unittest.TestCase):
         self.assertEqual({(v['api'], v['shard']) for v in json.loads(matrix)},
                          {(api, index) for api in ('26', '37.2') for index in range(4)})
 
+    def test_workflow_collapse_smoke_has_isolated_non_cancelling_queue(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        group = next(line.strip() for line in workflow.splitlines()
+                     if line.startswith('  group: daiyu-'))
+        classes = (
+            'app.daiyu.android.ui.screens.chat.conversation.WorkflowDisclosureDirectionTest,'
+            'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest'
+        )
+        suffix = (
+            "${{ inputs.mode == 'smoke' && inputs.smoke_api == 'all' "
+            "&& inputs.smoke_classes == '" + classes
+            + "' && '-workflow-collapse' || '' }}"
+        )
+        self.assertTrue(group.endswith(suffix), group)
+        self.assertIn('\n  cancel-in-progress: false\n', workflow)
+
     def test_api26_has_pinned_emulator_without_changing_image_or_formal_matrix(self):
         smoke = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:\n', 1)[1]
         matrices = [json.loads(value) for value in re.findall(r"'(\[[^']*\])'", smoke)]

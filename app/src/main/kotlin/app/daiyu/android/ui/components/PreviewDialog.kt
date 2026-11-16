@@ -9,7 +9,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 
@@ -26,7 +25,7 @@ internal fun PreviewDialog(onDismiss: () -> Unit, scrimColor: Color? = null, scr
     val inheritedDimStack = LocalDialogDimStack.current
     val dialogDimStack = inheritedDimStack ?: remember { DialogDimStack() }
     val motion = remember(bottomSheet) { if (bottomSheet) BottomSheetMotion() else null }
-    Dialog(onDismissRequest = {
+    PreviewWindowDialog(onDismissRequest = {
         if (dismissEnabled) motion?.requestDismiss(BottomSheetDismissSource.System) ?: onDismiss()
     },
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false,

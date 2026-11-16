@@ -291,7 +291,20 @@ class MainActivity : ComponentActivity() {
         if (granted && activityUsable() && voiceForeground) ensureVoiceCallService(continuation ?: {})
         else continuation?.invoke(false)
     }
+    private fun requireCallOverlayPermission(): Boolean {
+        if (android.provider.Settings.canDrawOverlays(applicationContext)) return true
+        voiceConfigurationToast("请开启悬浮窗权限后重新发起通话")
+        try {
+            startActivity(Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")))
+        } catch (_: RuntimeException) { voiceConfigurationToast("请在系统设置中允许代鱼显示悬浮窗") }
+        return false
+    }
     private fun ensureVoiceCallService(started: (Boolean) -> Unit) {
+        if (!activityUsable() || !voiceForeground || !android.provider.Settings.canDrawOverlays(applicationContext)) {
+            started(false)
+            return
+        }
         if (!microphoneGranted()) {
             if (voiceCallPermissionContinuation != null) { started(false); return }
             voiceCallPermissionContinuation = started
@@ -520,6 +533,7 @@ class MainActivity : ComponentActivity() {
     private fun startUniversalVoice(profile: VoiceControlProfile, limits: VoiceControlLimits) {
         if (!VoiceSettingsPreferences(applicationContext).enabled("conversation")) { toast("请先在语音设置中启用语音对话"); return }
         if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible || voiceCallStarting != null) return
+        if (!requireCallOverlayPermission()) return
         stopCascadeVoice(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
         speechHost.stop(speechHost.owner)
         val visit = Any()
@@ -563,7 +577,11 @@ class MainActivity : ComponentActivity() {
                         refreshVoiceCallService()
                         return@ensureVoiceCallService
                     }
-                    if (!it) { clearVoiceCallConversation(); refreshVoiceCallService(); toast("后台通话服务未启动"); return@ensureVoiceCallService }
+                    if (!it || !android.provider.Settings.canDrawOverlays(applicationContext)) {
+                        clearVoiceCallConversation(); refreshVoiceCallService()
+                        voiceConfigurationToast("通话权限或后台服务不可用，请重新发起通话")
+                        return@ensureVoiceCallService
+                    }
                     try {
                         val permit = universalVoice.start(profile, limits)
                         if (permit != null && universalVoice.state.value.active) {
@@ -2541,10 +2559,6 @@ class MainActivity : ComponentActivity() {
                             val pageAssistant = projectedAssistants.firstOrNull {
                                 it.id == (if (selected == null) activeAssistant else selected?.assistantId)
                             }
-                            val pageCallUi = shownVoiceCall()?.let {
-                                if (floatingCallReturnKey == it.sessionKey) it.copy(skipEntryAnimation = true) else it
-                            }
-                            val pageCallActions = if (voiceCallPresentation.state != null) voiceCallActions() else doubaoCallActions()
                                     val mediaLease = imageHost.mediaPreviews
                                     val mediaGallery = remember(chatState.turns, mediaLease, messageMediaSnapshot, displayWindow) {
                                         chatMediaPreviewGallery(if (displayWindow == null) chatState.turns else emptyList(),
@@ -2555,7 +2569,7 @@ class MainActivity : ComponentActivity() {
                                 owner = pageState.conversationKey, modifier = Modifier.fillMaxSize(),
                                 content = remember(
                                     chatPageState, pageState, pageCompression, pageActions, pageGeneration,
-                                    pageImageLoader, pageAssistant, pageCallUi, pageCallActions,
+                                    pageImageLoader, pageAssistant,
                                     mediaGallery, speechMessageId, speechPreparingMessageId, routeActive,
                                 ) {
                                 @Composable { presented, onReady ->
@@ -2573,8 +2587,7 @@ class MainActivity : ComponentActivity() {
                                         onPresentationReady = onReady,
                                         menuAvailable = retainedPage == "chat" && !sidebarVisible,
                                         readAutomaticCompression = { pageCompression },
-                                        callUi = pageCallUi,
-                                        callActions = pageCallActions, dedicatedTool = { step -> DedicatedQuestion(step, routeActive && pageCurrent && presented) },
+                                        dedicatedTool = { step -> DedicatedQuestion(step, routeActive && pageCurrent && presented) },
                                         toolContent = { step -> ToolTrustedContent(step, routeActive && pageCurrent && presented) },
                                         imageLoader = pageImageLoader,
                                         assistant = pageAssistant,
@@ -3184,6 +3197,8 @@ class MainActivity : ComponentActivity() {
                     val owner = chatModelOwner
                     val session = chatModelSession
                     val dismiss = { if (dialogActionsCurrent(lease) && chatModelOwner === owner) dismissChatModels() }
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        app.daiyu.android.ui.components.LocalPreviewOverlayWindow provides voiceCallModelPicker) {
                     ChatModelPicker(picker,
                         onSelect = { id ->
                             if (session != null && dialogActionsCurrent(lease) && picker.enabled && !picker.loading && !picker.switching) {
@@ -3196,6 +3211,7 @@ class MainActivity : ComponentActivity() {
                             }
                         },
                         onDismiss = dismiss)
+                    }
                 }
                 composerShortcutPick?.let { pick ->
                     val lease = ordinaryDialogLease
@@ -3324,6 +3340,8 @@ class MainActivity : ComponentActivity() {
                     ownerMatches = { activityUsable() && selected?.id?.value == owner && retainedPage == "chat" && !controller.dataBusy },
                     repositoryFactory = { subAgentRepository }, modelSource = subAgentModelSource)
                 voiceThinkingPicker?.let { voice ->
+                    androidx.compose.runtime.CompositionLocalProvider(
+                        app.daiyu.android.ui.components.LocalPreviewOverlayWindow provides true) {
                     SubAgentThinkingEffortPickerDialog(show = true, mainChat = true,
                         effort = ReasoningEffort.textPreference(voice.effort, model = voice.requestModel),
                         options = ReasoningEffort.textChoices(voice.requestModel),
@@ -3337,6 +3355,7 @@ class MainActivity : ComponentActivity() {
                                 } catch (_: Exception) { voiceConfigurationToast("思考偏好保存未确认") }
                             }
                         })
+                    }
                 }
                 // Saved independently for the standalone composer or this conversation.
                 // The preparation worker freezes it once; edits never mutate an active request.
@@ -3564,11 +3583,11 @@ class MainActivity : ComponentActivity() {
             chatVoiceConfigurationProblem(voiceEntryMode)?.let { voiceConfigurationToast(it); return@voice }
             when (voiceEntryMode) {
                 ChatMenuAction.VOICE_INPUT -> requestDictation()
-                ChatMenuAction.VOICE_DOUBAO -> if (currentChat()) {
+                ChatMenuAction.VOICE_DOUBAO -> if (currentChat() && requireCallOverlayPermission()) {
                     stopCascadeVoice(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
                     speechHost.stop(speechHost.owner)
                     ensureVoiceCallService { ready ->
-                        if (ready && currentChat() && selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration) {
+                        if (ready && android.provider.Settings.canDrawOverlays(applicationContext) && currentChat() && selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration) {
                             remoteVoice.startDuplex(conversationId = renderedConversation) {
                                 activityUsable() && (voiceForeground || voiceCallServiceReady) && microphoneGranted()
                             }
@@ -3841,57 +3860,28 @@ class MainActivity : ComponentActivity() {
         return admitted
     }
 
-    private val floatingCallDelegate = lazy { VoiceCallFloatingWindow(applicationContext) }
+    private val floatingCallDelegate = lazy {
+        VoiceCallFloatingWindow(applicationContext, onUnavailable = {
+            if (!floatingCallClosed && shownVoiceCall() != null) {
+                invalidateConfiguredVoice()
+                voiceConfigurationToast("悬浮窗权限已关闭，通话已结束")
+            }
+        })
+    }
     private val floatingCall get() = floatingCallDelegate.value
     private var floatingCallClosed = false
-    private var floatingCallReturnKey by mutableStateOf<Long?>(null)
-    private var floatingCallRouteInline = false
-    private var floatingCallHandoffEpoch by mutableStateOf(0L)
-    private var floatingCallReadyPosted: Pair<Long, Long>? = null
     private var pendingFloatingCallAction: Pair<Long, () -> Unit>? = null
 
     private fun refreshFloatingCall() {
         if (floatingCallClosed) return
         val shown = shownVoiceCall()
-        val inline = voiceForeground && retainedPage == "chat" && !sidebarVisible
-        if (floatingCallRouteInline != inline) {
-            floatingCallRouteInline = inline
-            floatingCallHandoffEpoch++
-            floatingCallReadyPosted = null
-        }
         if (shown != null && activityUsable()) {
-            if (inline && shown.presentation == DoubaoCallPresentation.CLOSING) {
-                floatingCallReturnKey = null
-                if (floatingCallDelegate.isInitialized()) floatingCall.hide()
-                return
+            val actions = if (voiceCallPresentation.state != null) voiceCallActions() else doubaoCallActions()
+            if (!floatingCall.update(shown, actions) && shown.presentation != DoubaoCallPresentation.CLOSING) {
+                invalidateConfiguredVoice()
+                voiceConfigurationToast("通话悬浮窗不可用，请检查悬浮窗权限")
             }
-            if (!inline) floatingCallReturnKey = shown.sessionKey
-            val returning = inline && floatingCallReturnKey == shown.sessionKey
-            if (inline && !returning) floatingCallReturnKey = null
-            floatingCall.update(shown, if (voiceCallPresentation.state != null) voiceCallActions(external = true)
-                else doubaoCallActions(external = true), visible = !inline || returning)
-        } else if (floatingCallDelegate.isInitialized()) {
-            floatingCallReturnKey = null
-            if (inline) floatingCall.hide() else floatingCall.dismiss()
-        }
-    }
-
-    private fun finishVoiceCallHandoff(key: Long, epoch: Long) {
-        fun current() = !floatingCallClosed && activityUsable() && voiceForeground &&
-            retainedPage == "chat" && !sidebarVisible && floatingCallHandoffEpoch == epoch &&
-            floatingCallReturnKey == key && shownVoiceCall()?.let {
-                it.sessionKey == key && it.presentation != DoubaoCallPresentation.CLOSING
-            } == true
-        val receipt = key to epoch
-        if (!current() || floatingCallReadyPosted == receipt) return
-        floatingCallReadyPosted = receipt
-        window.decorView.postOnAnimation {
-            if (current()) {
-                floatingCallReturnKey = null
-                refreshFloatingCall()
-            }
-            if (floatingCallReadyPosted == receipt) floatingCallReadyPosted = null
-        }
+        } else if (floatingCallDelegate.isInitialized()) floatingCall.dismiss()
     }
 
     private fun returnToVoiceCall(key: Long, action: () -> Unit) {
@@ -3916,6 +3906,7 @@ class MainActivity : ComponentActivity() {
 
     private fun closeVoiceCall(key: Long) {
         if (voiceCallPresentation.beginClose(key, SystemClock.elapsedRealtime())) {
+            if (pendingFloatingCallAction?.first == key) pendingFloatingCallAction = null
             if (universalVoiceDelegate.isInitialized()) universalVoice.state.value.permitId?.let(universalVoice::stop)
             if (voiceCallModelPicker) dismissChatModels()
             clearVoiceCallConversation()
@@ -3924,28 +3915,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun voiceCallActions(external: Boolean = false): DoubaoCallActions {
+    private fun voiceCallActions(): DoubaoCallActions {
         val shown = voiceCallPresentation.state ?: return DoubaoCallActions()
         val key = shown.sessionKey
-        val surfaceEpoch = floatingCallHandoffEpoch
         fun current() = activityUsable() &&
-            (if (external) (voiceCallServiceReady || shown.endedAtMillis != null) && floatingCall.isShowing(key)
-             else voiceForeground && retainedPage == "chat" && !sidebarVisible && floatingCallReturnKey != key) && voiceCallPresentation.state?.let {
+            (voiceCallServiceReady || shown.endedAtMillis != null) && floatingCall.isShowing(key) && voiceCallPresentation.state?.let {
                 it.sessionKey == key && it.presentation != DoubaoCallPresentation.CLOSING
             } == true
         return DoubaoCallActions(
-            onPresentationReady = if (!external && floatingCallReturnKey == key)
-                { readyKey -> finishVoiceCallHandoff(readyKey, surfaceEpoch) } else null,
             onExpand = { if (current()) voiceCallPresentation.present(key, DoubaoCallPresentation.EXPANDED) },
             onMinimize = { if (current()) voiceCallPresentation.present(key, DoubaoCallPresentation.MINI) },
             onHangUp = { if (current()) closeVoiceCall(key) },
             onSelectModel = {
-                if (current() && external && !voiceCallHasDialogue) returnToVoiceCall(key) { openVoiceCallModelPicker(key) }
+                if (current() && !voiceCallHasDialogue) returnToVoiceCall(key) { openVoiceCallModelPicker(key) }
                 else if (current() && voiceCallHasDialogue) voiceConfigurationToast("仅对话前可更改")
-                else if (current()) openVoiceCallModelPicker(key)
             },
             onModelLongPress = { if (current()) {
-                if (external) returnToVoiceCall(key) { openVoiceThinking(key) } else openVoiceThinking(key)
+                returnToVoiceCall(key) { openVoiceThinking(key) }
             } },
             onToggleMute = { if (current()) universalVoice.setMuted(!universalVoice.state.value.muted) },
             onToggleSpeaker = {
@@ -3971,22 +3957,19 @@ class MainActivity : ComponentActivity() {
     private fun closeDoubaoCall(key: Long) {
         // Freeze the departing UI BEFORE stop can synchronously publish cancellation/empty text.
         if (doubaoCallPresentation.beginClose(key, SystemClock.elapsedRealtime())) {
+            if (pendingFloatingCallAction?.first == key) pendingFloatingCallAction = null
             try { remoteVoice.stopDuplex(key) } catch (_: Exception) { voiceConfigurationToast("语音资源释放未确认") }
         }
     }
 
-    private fun doubaoCallActions(external: Boolean = false): DoubaoCallActions {
+    private fun doubaoCallActions(): DoubaoCallActions {
         val shown = doubaoCallPresentation.state ?: return DoubaoCallActions()
         val key = shown.sessionKey
-        val surfaceEpoch = floatingCallHandoffEpoch
         fun current() = activityUsable() &&
-            (if (external) (voiceCallServiceReady || shown.endedAtMillis != null) && floatingCall.isShowing(key)
-             else voiceForeground && retainedPage == "chat" && !sidebarVisible && floatingCallReturnKey != key) && doubaoCallPresentation.state?.let {
+            (voiceCallServiceReady || shown.endedAtMillis != null) && floatingCall.isShowing(key) && doubaoCallPresentation.state?.let {
                 it.sessionKey == key && it.presentation != DoubaoCallPresentation.CLOSING
             } == true
         return DoubaoCallActions(
-            onPresentationReady = if (!external && floatingCallReturnKey == key)
-                { readyKey -> finishVoiceCallHandoff(readyKey, surfaceEpoch) } else null,
             onExpand = { if (current()) doubaoCallPresentation.expand(key) },
             onMinimize = { if (current()) doubaoCallPresentation.minimize(key) },
             onHangUp = { if (current()) closeDoubaoCall(key) },
@@ -6208,12 +6191,12 @@ class MainActivity : ComponentActivity() {
         val returnToCall = pendingCall != null && voiceCallServiceReady && floatingCall.isShowing(pendingCall.first) &&
             shownVoiceCall()?.let { it.sessionKey == pendingCall.first && it.presentation != DoubaoCallPresentation.CLOSING } == true
         refreshFloatingCall()
+        resumeOrdinaryDialogActions()
         if (returnToCall && pendingCall != null) {
             sidebarVisible = false
             retainedPage = "chat"
             pendingCall.second()
         }
-        resumeOrdinaryDialogActions()
         if (retainedPage == "session-gateway" && gatewayReloadPending) loadSessionGateway(restore = true)
         chatReferencePick?.pickerAway = false
         editImagePick?.pickerAway = false
@@ -6286,6 +6269,9 @@ class MainActivity : ComponentActivity() {
     }
     override fun onPause() {
         voiceForeground = false
+        if (voiceCallModelPicker) dismissChatModels()
+        voiceThinkingVisit = null
+        voiceThinkingPicker = null
         refreshFloatingCall()
         chatReturnRefresh = null
         suspendMessageActionEditor()

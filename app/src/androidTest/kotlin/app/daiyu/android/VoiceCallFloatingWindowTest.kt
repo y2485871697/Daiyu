@@ -32,7 +32,16 @@ class VoiceCallFloatingWindowTest {
         private val actual: WindowManager = context.getSystemService(WindowManager::class.java)) : WindowManager by actual {
         val added = mutableListOf<View>()
         val removals = mutableListOf<View>()
-        override fun addView(view: View, params: ViewGroup.LayoutParams) { actual.addView(view, params); added.add(view) }
+        var failAdd = false
+        var failUpdate = false
+        override fun updateViewLayout(view: View, params: ViewGroup.LayoutParams) {
+            if (failUpdate) throw SecurityException("synthetic overlay update rejection")
+            actual.updateViewLayout(view, params)
+        }
+        override fun addView(view: View, params: ViewGroup.LayoutParams) {
+            if (failAdd) throw SecurityException("synthetic overlay rejection")
+            actual.addView(view, params); added.add(view)
+        }
         override fun removeViewImmediate(view: View) { removals.add(view); actual.removeViewImmediate(view) }
         fun detachExternally(view: View) { actual.removeViewImmediate(view) }
     }
@@ -204,37 +213,33 @@ class VoiceCallFloatingWindowTest {
         }
     }
 
-    @Test fun foregroundPreparationKeepsTheSameComposedWindowAcrossBackgroundUpdates() {
+    @Test fun globalWindowRemainsVisibleOnEveryStateUpdate() {
         val state = picture(-7L)
-        main { host.update(state, actions, visible = false) }
-        await("transparent prepared surface laid out") { windows.added.single().isLaidOut }
+        main { assertTrue(host.update(state, actions)) }
+        await("global surface drawn from first presentation") { windows.added.single().isLaidOut }
         val root = windows.added.single()
         main {
-            assertFalse(host.isShowing(state.sessionKey))
-            assertEquals(0f, (root.layoutParams as WindowManager.LayoutParams).alpha, 0f)
-            assertTrue((root.layoutParams as WindowManager.LayoutParams).flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0)
+            val params = root.layoutParams as WindowManager.LayoutParams
+            val position = params.x to params.y
             repeat(3) {
-                host.update(state, actions)
                 assertTrue(host.isShowing(state.sessionKey))
-                assertEquals(1f, (root.layoutParams as WindowManager.LayoutParams).alpha, 0f)
-                assertEquals(0, (root.layoutParams as WindowManager.LayoutParams).flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
-                host.update(state.copy(reply = "same call"), actions)
-                host.update(state, actions, visible = false)
-                assertFalse(host.isShowing(state.sessionKey))
+                assertTrue(host.update(state.copy(reply = "same call"), actions))
+                assertSame(root, windows.added.single())
+                assertEquals(1f, params.alpha, 0f)
+                assertEquals(0, params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+                assertEquals(position, params.x to params.y)
                 assertTrue(root.isAttachedToWindow)
             }
-            assertEquals(listOf(root), windows.added)
             assertTrue(windows.removals.isEmpty())
             assertTrue(completed.isEmpty())
             assertEquals(0, hangups)
         }
     }
 
-    @Test fun hiddenCloseCompletesOnceWithoutAnimatingAnInvisibleWindow() {
+    @Test fun closeBeforeFirstTraversalCompletesOnceWithoutWaitingForLayout() {
         val state = picture(-8L)
-        main { host.update(state, actions, visible = false) }
-        await("hidden close surface laid out") { windows.added.single().isLaidOut }
         main {
+            host.update(state, actions)
             val root = windows.added.single()
             host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), actions)
             assertFalse(root.isAttachedToWindow)
@@ -245,10 +250,10 @@ class VoiceCallFloatingWindowTest {
         }
     }
 
-    @Test fun detachedPreparedSurfaceIsRebuiltInsteadOfReusingADestroyedComposition() {
+    @Test fun detachedGlobalSurfaceIsRebuiltInsteadOfReusingADestroyedComposition() {
         val state = picture(-9L)
-        main { host.update(state, actions, visible = false) }
-        await("prepared detach surface laid out") { windows.added.single().isLaidOut }
+        main { host.update(state, actions) }
+        await("global detach surface laid out") { windows.added.single().isLaidOut }
         val root = windows.added.single()
         main {
             windows.detachExternally(root)
@@ -260,6 +265,68 @@ class VoiceCallFloatingWindowTest {
         main {
             assertEquals(Lifecycle.State.DESTROYED, (root as LifecycleOwner).lifecycle.currentState)
             assertTrue(completed.isEmpty())
+            assertEquals(0, hangups)
+        }
+    }
+    @Test fun rejectedGlobalWindowReportsFailureInsteadOfRunningWithoutControls() {
+        var unavailable = 0
+        main {
+            host.close()
+            host = VoiceCallFloatingWindow(context, windows, onUnavailable = { unavailable++ })
+            windows.failAdd = true
+            assertFalse(host.update(picture(-10L), actions))
+            assertFalse(host.isShowing(-10L))
+            assertTrue(windows.added.isEmpty())
+            assertTrue(completed.isEmpty())
+            windows.failAdd = false
+            assertTrue(host.update(picture(-10L), actions))
+        }
+        await("drag failure fixture attached") { host.isShowing(-10L) }
+        main {
+            windows.failUpdate = true
+            val move = host.javaClass.declaredMethods.single { it.name.startsWith("move-") }
+                .apply { isAccessible = true }
+            move.invoke(host, windows.added.single(), androidx.compose.ui.geometry.Offset(8f, 8f).packedValue)
+            assertEquals(1, unavailable)
+            assertFalse(host.isShowing(-10L))
+            assertFalse(windows.added.single().isAttachedToWindow)
+            assertTrue(completed.isEmpty())
+            assertEquals(0, hangups)
+        }
+    }
+
+    @Test fun permissionRevocationNotifiesTheOwnerWithoutAnotherStateUpdate() {
+        var revoked = 0
+        main {
+            host.close()
+            host = VoiceCallFloatingWindow(context, windows, onUnavailable = { revoked++ })
+            assertTrue(host.update(picture(-11L), actions))
+        }
+        await("global permission fixture attached") { host.isShowing(-11L) }
+        shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW ignore")
+        await("permission loss reaches the call owner") { revoked > 0 }
+        main { assertTrue(completed.isEmpty()) }
+    }
+    @Test fun callConfigurationIsAnotherOverlayAboveTheSamePrimaryWindow() {
+        val state = picture(-12L)
+        main { host.update(state, actions) }
+        await("call already visible before configuration") { windows.added.single().isLaidOut }
+        val root = windows.added.single()
+        main {
+            val dialog = app.daiyu.android.ui.components.PreviewOverlayWindow(context,
+                androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+                inheritedSecure = false, parent = null, onDismiss = {},
+                content = { androidx.compose.material3.Text("configuration fixture") })
+            try {
+                dialog.show()
+                val params = checkNotNull(dialog.window).attributes
+                assertEquals(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, params.type)
+                assertEquals(0, params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+                assertTrue(host.isShowing(state.sessionKey))
+                assertSame(root, windows.added.single())
+            } finally { dialog.dismiss() }
+            assertTrue(host.isShowing(state.sessionKey))
+            assertTrue(windows.removals.isEmpty())
             assertEquals(0, hangups)
         }
     }

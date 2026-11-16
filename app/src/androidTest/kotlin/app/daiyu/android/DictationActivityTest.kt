@@ -710,55 +710,88 @@ class DictationActivityTest : WiredActivityTestCase() {
     }
 
 
-    fun testMainHandoffWaitsForItsDrawAndRejectsThePreviousReturnEpoch() {
+    fun testGlobalCallKeepsOneVisibleWindowAcrossActualActivityLifecycle() {
         fun shell(command: String) = android.os.ParcelFileDescriptor.AutoCloseInputStream(
             instrumentation.uiAutomation.executeShellCommand(command)).bufferedReader().use { it.readText().trim() }
-        fun value(name: String): Any? = MainActivity::class.java.getDeclaredField(name)
-            .apply { isAccessible = true }.get(activity)
-        val packageName = instrumentation.targetContext.packageName
+        fun value(target: Any, name: String): Any? = target.javaClass.getDeclaredField(name)
+            .apply { isAccessible = true }.get(target)
+        val context = instrumentation.targetContext
+        val packageName = context.packageName
         val oldMode = Regex("SYSTEM_ALERT_WINDOW: (allow|ignore|deny|default|foreground)")
             .find(shell("appops get $packageName SYSTEM_ALERT_WINDOW"))?.groupValues?.get(1) ?: "default"
-        shell("appops set $packageName SYSTEM_ALERT_WINDOW allow")
-        var floatingCleanup: VoiceCallFloatingWindow? = null
         lateinit var floating: VoiceCallFloatingWindow
         lateinit var owner: VoiceCallPresentationOwner
+        lateinit var state: MutableStateFlow<app.daiyu.android.voice.control.VoiceControlState>
         var key = 0L
+        var paused = false
+        var stateReady = false
+        var floatingReady = false
         try {
+            val hadMicrophone = context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+            shell("appops set $packageName SYSTEM_ALERT_WINDOW allow")
+            if (!hadMicrophone) shell("pm grant $packageName android.permission.RECORD_AUDIO")
+            val created = CountDownLatch(1)
+            var conversation: app.daiyu.android.domain.Conversation? = null
+            mainThread { fixture.controller.createVoiceCall(null) { conversation = it?.conversation; created.countDown() } }
+            assertTrue("temporary call owner created", created.await(5, TimeUnit.SECONDS))
+            assertNotNull(conversation)
             mainThread {
-                owner = value("voiceCallPresentation") as VoiceCallPresentationOwner
+                owner = value(activity, "voiceCallPresentation") as VoiceCallPresentationOwner
+                val universal = call("getUniversalVoice") as ActivityUniversalVoiceHost
+                val control = value(universal, "controller")!!
+                @Suppress("UNCHECKED_CAST")
+                val mutable = value(control, "mutable") as MutableStateFlow<app.daiyu.android.voice.control.VoiceControlState>
+                state = mutable
+                stateReady = true
+                field(activity, "voiceCallConversation", conversation!!)
+                field(activity, "voiceCallServiceReady", true)
+                state.value = app.daiyu.android.voice.control.VoiceControlState(
+                    phase = app.daiyu.android.voice.control.VoiceControlPhase.LISTENING, permitId = "presentation-only")
                 owner.begin(null, "presentation-only", android.os.SystemClock.elapsedRealtime(), null, "GPT")
                 key = checkNotNull(owner.state).sessionKey
                 call("refreshFloatingCall")
-                floating = (value("floatingCallDelegate") as Lazy<*>).value as VoiceCallFloatingWindow
-                floatingCleanup = floating
-                assertFalse(floating.isShowing(key))
-                field(activity, "voiceForeground", false)
-                call("refreshFloatingCall")
+                floating = (value(activity, "floatingCallDelegate") as Lazy<*>).value as VoiceCallFloatingWindow
+                floatingReady = true
             }
-            awaitControl("same call externally shown") { floating.isShowing(key) }
+            awaitControl("call visible while Activity is still resumed") { floating.isShowing(key) }
+            lateinit var root: android.view.View
             mainThread {
-                field(activity, "voiceForeground", true)
-                call("refreshFloatingCall")
-                assertTrue("resume alone must not hide the external call", floating.isShowing(key))
-                val epoch = call("getFloatingCallHandoffEpoch") as Long
-                call("finishVoiceCallHandoff", key, epoch)
-                field(activity, "voiceForeground", false)
-                call("refreshFloatingCall")
-                field(activity, "voiceForeground", true)
-                call("refreshFloatingCall")
-                call("finishVoiceCallHandoff", key, epoch)
-                assertTrue("previous return epoch cannot hide this surface", floating.isShowing(key))
+                root = value(floating, "window") as android.view.View
+                assertNotSame(activity.window.decorView, root.rootView)
+                assertEquals(1f, (root.layoutParams as android.view.WindowManager.LayoutParams).alpha, 0f)
+                instrumentation.callActivityOnPause(activity)
+                paused = true
+                assertTrue("pause cannot hide the call", floating.isShowing(key))
+                instrumentation.callActivityOnStop(activity)
+                assertTrue("stop cannot hide the call", floating.isShowing(key))
+                assertSame(root, value(floating, "window"))
+                instrumentation.callActivityOnStart(activity)
+                instrumentation.callActivityOnResume(activity)
+                paused = false
             }
-            awaitControl("current inline draw hands back the surface") { !floating.isShowing(key) }
+            ui.waitForIdle()
             mainThread {
-                assertNotNull(owner.state)
-                assertNull(call("getFloatingCallReturnKey"))
+                assertTrue("returning does not wait for an inline draw", floating.isShowing(key))
+                assertSame(root, value(floating, "window"))
+                assertEquals(key, checkNotNull(owner.state).sessionKey)
+                assertEquals(1f, (root.layoutParams as android.view.WindowManager.LayoutParams).alpha, 0f)
             }
             assertEquals(0, platform.creates)
             assertEquals(0, fixture.opens.get())
         } finally {
-            mainThread { floatingCleanup?.hide() }
-            shell("appops set $packageName SYSTEM_ALERT_WINDOW $oldMode")
+            try { mainThread {
+                if (stateReady) state.value = app.daiyu.android.voice.control.VoiceControlState()
+                field(activity, "voiceCallServiceReady", false)
+                call("clearVoiceCallConversation")
+                if (floatingReady) floating.hide()
+                if (paused) {
+                    instrumentation.callActivityOnStart(activity)
+                    instrumentation.callActivityOnResume(activity)
+                }
+            } } finally {
+                // Revoking RECORD_AUDIO kills this instrumentation UID; the emulator owns this grant.
+                shell("appops set $packageName SYSTEM_ALERT_WINDOW $oldMode")
+            }
         }
     }
 }

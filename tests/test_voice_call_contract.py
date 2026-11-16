@@ -49,9 +49,9 @@ class VoiceCallContractTest(unittest.TestCase):
         self.assertIn('VoiceCallModelMemory.readOrInitialize(db)', database)
         self.assertIn('isTemporaryVoice(id.value)) VoiceCallModelMemory.write(db, replacement)', database)
         main = (SRC / 'MainActivity.kt').read_text()
-        actions = main.split('private fun voiceCallActions(external: Boolean = false)', 1)[1].split('private fun closeDoubaoCall(', 1)[0]
+        actions = main.split('private fun voiceCallActions()', 1)[1].split('private fun closeDoubaoCall(', 1)[0]
         self.assertIn('onModelLongPress = { if (current()) {\n'
-                      '                if (external) returnToVoiceCall(key) { openVoiceThinking(key) } else openVoiceThinking(key)\n'
+                      '                returnToVoiceCall(key) { openVoiceThinking(key) }\n'
                       '            } },', actions)
         self.assertIn('controller.setVoiceCallReasoning(voice, effort)', main)
         self.assertIn('needsModelSelection = model == null', controller)
@@ -186,7 +186,7 @@ class VoiceCallContractTest(unittest.TestCase):
     def test_call_picker_and_initial_model_are_scoped_to_actual_call_binding(self):
         main = (SRC / 'MainActivity.kt').read_text()
         self.assertIn('voiceCallModelName = checkNotNull(created).modelName', main)
-        close = main.split('private fun closeVoiceCall(key: Long)', 1)[1].split('private fun voiceCallActions(external: Boolean = false)', 1)[0]
+        close = main.split('private fun closeVoiceCall(key: Long)', 1)[1].split('private fun voiceCallActions()', 1)[0]
         self.assertLess(close.index('universalVoice::stop'), close.index('dismissChatModels()'))
         self.assertIn('chatModelConversation = if (forVoiceCall) voiceCallConversation?.id else selected?.id', main)
     def test_compaction_success_only_after_durable_application(self):
@@ -216,30 +216,39 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertNotIn('invalidateConfiguredVoice()', sidebar)
         self.assertIn('foreground = activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible', activity)
 
-    def test_handoff_prepares_the_same_surface_and_waits_for_an_inline_draw(self):
+    def test_call_has_one_global_surface_without_foreground_handoff(self):
         activity = (SRC / 'MainActivity.kt').read_text()
         floating = (SRC / 'VoiceCallFloatingWindow.kt').read_text()
-        overlay = (SRC / 'ui/screens/chat/conversation/DoubaoCallOverlay.kt').read_text()
-        self.assertIn('visible = !inline || returning', activity)
-        self.assertIn('floatingCallHandoffEpoch == epoch', activity)
-        self.assertIn('window.decorView.postOnAnimation', activity)
-        self.assertIn('skipEntryAnimation = true', activity)
-        pause = activity.split('override fun onPause() {', 1)[1].split('chatReturnRefresh = null', 1)[0]
-        self.assertIn('voiceForeground = false', pause)
-        self.assertIn('refreshFloatingCall()', pause)
-        self.assertIn('it.presented && !it.departing', floating)
-        self.assertIn('alpha = if (initiallyVisible) 1f else 0f', floating)
+        refresh = activity.split('private fun refreshFloatingCall() {', 1)[1].split('private fun returnToVoiceCall(', 1)[0]
+        self.assertIn('floatingCall.update(shown, actions)', refresh)
+        self.assertNotIn('voiceForeground', refresh)
+        self.assertNotIn('retainedPage', refresh)
+        self.assertNotIn('floatingCallReturnKey', activity)
+        self.assertNotIn('floatingCallHandoffEpoch', activity)
+        self.assertNotIn('callUi = pageCallUi', activity)
+        self.assertNotIn('initiallyVisible', floating)
+        self.assertNotIn('fun present(', floating)
         self.assertIn('previous.detached', floating)
-        self.assertIn('!current.presented || !current.isLaidOut', floating)
-        self.assertIn('firstPresentation && !state.skipEntryAnimation', overlay)
-        self.assertIn('presentationView.post { ready(state.sessionKey) }', overlay)
-        self.assertIn('!closing && !morphing && progress.value == 1f', overlay)
+        self.assertIn('TYPE_APPLICATION_OVERLAY', floating)
+        self.assertIn('onUnavailable()', floating)
 
-    def test_call_model_picker_uses_one_admission_for_inline_and_external_return(self):
+    def test_call_configuration_uses_overlay_dialog_without_replacing_the_call(self):
+        activity = (SRC / 'MainActivity.kt').read_text()
+        preview = (SRC / 'ui/components/PreviewDialog.kt').read_text()
+        dialog = (SRC / 'ui/components/PreviewOverlayDialog.kt').read_text()
+        self.assertIn('LocalPreviewOverlayWindow provides voiceCallModelPicker', activity)
+        self.assertIn('LocalPreviewOverlayWindow provides true', activity)
+        self.assertIn('PreviewWindowDialog(onDismissRequest', preview)
+        self.assertIn(') : ComponentDialog(context)', dialog)
+        self.assertIn('setType(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)', dialog)
+        self.assertIn('setParentCompositionContext(parent)', dialog)
+        self.assertIn('DialogWindowProvider', dialog)
+
+    def test_call_model_picker_uses_one_admission_for_global_window_return(self):
         activity = (SRC / 'MainActivity.kt').read_text()
         actions = activity.split('private fun voiceCallActions(', 1)[1].split('private fun openVoiceCallModelPicker(', 1)[0]
         self.assertIn('returnToVoiceCall(key) { openVoiceCallModelPicker(key) }', actions)
-        self.assertIn('else if (current()) openVoiceCallModelPicker(key)', actions)
+        self.assertNotIn('external:', actions)
         self.assertNotIn('voiceCallActions().onSelectModel()', actions)
         admission = activity.split('private fun openVoiceCallModelPicker(key: Long) {', 1)[1].split('private fun closeDoubaoCall(', 1)[0]
         for guard in ('!activityUsable()', '!voiceForeground', 'retainedPage != "chat"',

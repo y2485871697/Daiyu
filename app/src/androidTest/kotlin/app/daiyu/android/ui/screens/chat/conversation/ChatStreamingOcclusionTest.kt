@@ -218,6 +218,21 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     fun testTerminalPacedTextKeepsItsActualPaintedEndNearComposer() {
         val seed = "已显示的正文用于测量当前可见末行。".repeat(24)
         val full = seed + "最后一段还在逐字输出，不能预留空白或暂停绘制。".repeat(20)
+        verifyTerminalPacedText(seed, full)
+    }
+
+    fun testTerminalPacedMarkdownKeepsItsActualPaintedEndNearComposer() {
+        val seed = "**1. 第一项**\n" + "当前已经显示的说明应保持正常测量与绘制。".repeat(24)
+        val full = seed + "\n\n**2. 第二项**\n" + "第二段说明随真实进度逐字增加，不应提前预占后续段落高度。".repeat(8) +
+            "\n\n**3. 第三项**\n" + "第三段结束后仍需连续显示总述，不能等待终态才一次恢复。".repeat(8) +
+            "\n\n**总体来看**：" + "总述逐字显示，正文末行始终贴近安全底边。".repeat(5) +
+            "\n\n需要展开其中的某一项吗？"
+        verifyTerminalPacedText(seed, full)
+    }
+
+    private fun verifyTerminalPacedText(seed: String, full: String) {
+        val expectedSeed = markdownBlocksDisplayText(defaultMarkdownParser(seed))
+        val expectedFull = markdownBlocksDisplayText(defaultMarkdownParser(full))
         for (parser in listOf(defaultMarkdownParser, streamingMarkdownParser)) {
             for (text in listOf(seed, full)) {
                 markdownProjectionCache.put(MarkdownProjection(listOf(text), mapOf(text to parser(text)), parser))
@@ -248,13 +263,19 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         }
         ui.waitForIdle()
         ui.waitUntil(5_000) { ready.get() }
-        val text = ui.onNodeWithTag("message-content-text:0", useUnmergedTree = true)
-        text.assertTextEquals(seed)
-        fun textLayout(): androidx.compose.ui.text.TextLayoutResult {
-            val results = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
-            text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(results) }
-            return results.single()
+        val textMatcher = SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult) and
+            (hasTestTag("message-content-text:0") or hasAnyAncestor(hasTestTag("message-content-text:0")))
+        fun textLayouts(): List<Pair<SemanticsNode, androidx.compose.ui.text.TextLayoutResult>> {
+            val nodes = ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
+            return nodes.map { node ->
+                val results = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                ui.runOnUiThread { node.config[SemanticsActions.GetTextLayoutResult].action!!(results) }
+                node to results.single()
+            }
         }
+        fun displayed(layouts: List<Pair<SemanticsNode, androidx.compose.ui.text.TextLayoutResult>>) =
+            layouts.joinToString("") { it.second.layoutInput.text.text }
+        assertEquals(expectedSeed, displayed(textLayouts()))
         fun pixels(): IntArray {
             val image = ui.onNodeWithTag("paced-host").captureToImage().toPixelMap()
             return IntArray(image.width * image.height) { index ->
@@ -262,9 +283,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             }
         }
         var previousPixels = pixels()
-        var capturedLength = seed.length
-        var previousText = seed
-        var previousHeight = textLayout().size.height
+        var capturedLength = expectedSeed.length
+        var previousText = expectedSeed
+        var previousHeight = textLayouts().sumOf { it.second.size.height }
         var heightGrowth = 0
         var growthFrames = 0
         var unreadyFrames = 0
@@ -278,17 +299,19 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             }
             for (index in 0 until 640) {
                 frame()
-                val result = textLayout()
-                val displayed = result.layoutInput.text.text
-                assertTrue("Revealed text must remain an append-only prefix", full.startsWith(displayed) && displayed.startsWith(previousText))
+                val layouts = textLayouts()
+                val displayed = displayed(layouts)
+                val height = layouts.sumOf { it.second.size.height }
+                assertTrue("Revealed text must remain an append-only prefix", expectedFull.startsWith(displayed) && displayed.startsWith(previousText))
                 if (!ready.get()) unreadyFrames++
                 if (displayed.length > previousText.length) growthFrames++
-                if (result.size.height > previousHeight) heightGrowth++
-                val node = text.fetchSemanticsNode()
-                val bottom = node.positionInRoot.y + result.getLineBottom(result.lineCount - 1)
+                if (height > previousHeight) heightGrowth++
+                val bottom = layouts.maxOf { (node, result) ->
+                    node.positionInRoot.y + result.getLineBottom(result.lineCount - 1)
+                }
                 val composerTop = ui.onNodeWithTag("paced-composer").fetchSemanticsNode().boundsInRoot.top
                 val gap = (composerTop - bottom) / density
-                val settled = ready.get() && displayed == full
+                val settled = ready.get() && displayed == expectedFull
                 assertTrue("Actual text must clear the composer: frame=$index gap=$gap", gap >= ChatTailClearance.value - 2f / density)
                 assertTrue("Large blank after actual text: frame=$index gap=$gap ready=${ready.get()}",
                     gap <= ChatTailClearance.value + if (settled) 64f else 26f)
@@ -300,7 +323,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     paintedGrowth++
                 }
                 previousText = displayed
-                previousHeight = result.size.height
+                previousHeight = height
                 if (settled) { finished = true; break }
             }
             assertTrue("Exercise terminal formatting before reveal is settled", reports.contains(false))
@@ -308,7 +331,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             assertTrue("Wrap across several real text lines", heightGrowth >= 5)
             assertTrue("Check actual painted growth repeatedly", paintedGrowth >= 5)
             assertTrue("Finish within the same visit without remounting", finished)
-            text.assertTextEquals(full)
+            assertEquals(expectedFull, displayed(textLayouts()))
         } finally { ui.mainClock.autoAdvance = true }
         ui.waitForIdle()
         assertEquals(0, fixture.opens.get())

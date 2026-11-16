@@ -257,6 +257,32 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertIn('internal fun FloatingVoiceCallSurface(', overlay)
         self.assertIn('firstPresentation && animationAllowed && !state.skipEntryAnimation', overlay)
 
+    def test_native_raster_capture_waits_for_each_backdrop_without_weakening_pixels(self):
+        fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt').read_text()
+        raster = fixture.split('fun frozenSystemWindowPanelHasNoOpacityJumpWhenItBecomesLive()', 1)[1]
+        capture = raster.split('fun capture(', 1)[1].split('        try {', 1)[0]
+        self.assertIn('deadline: Long = SystemClock.uptimeMillis() + 2_000', capture)
+        self.assertIn('root.setBackgroundColor(expectedBackground)', capture)
+        self.assertNotIn('awaitCommittedDraw(root)', capture)
+        self.assertIn('while (true)', capture)
+        self.assertIn('takeScreenshot()', capture)
+        self.assertIn('image.getPixel(controlX, controlY)', capture)
+        self.assertIn('kotlin.math.abs(channel(control) - channel(expectedBackground)) < 8', capture)
+        self.assertIn('val timely = SystemClock.uptimeMillis() <= deadline', capture)
+        self.assertIn('composed || !timely', capture)
+        self.assertIn('Integer.toHexString(control), composed && timely)', capture)
+        self.assertIn('image.recycle()', capture)
+        self.assertNotIn('motion.progress', capture)
+        self.assertIn('capture(root, "live-dark", android.graphics.Color.BLACK, liveDeadline).recycle()', raster)
+        self.assertIn('capture(root, "live-light", android.graphics.Color.WHITE, liveDeadline)', raster)
+        for stage, background in (('frozen-dark', 'BLACK'), ('frozen-light', 'WHITE')):
+            self.assertIn('capture(root, "' + stage + '", android.graphics.Color.' + background + ')', raster)
+        for assertion in ('channel(control[0]) < 8', 'channel(control[1]) > 247',
+                          'channel(control[2]) > 247', 'for (i in 1..9)',
+                          'kotlin.math.abs(channel(colors[0]) - channel(colors[1])) <= 4',
+                          'kotlin.math.abs(channel(colors[1]) - channel(colors[2])) <= 4'):
+            self.assertIn(assertion, raster)
+
     def test_call_configuration_uses_overlay_dialog_without_replacing_the_call(self):
         activity = (SRC / 'MainActivity.kt').read_text()
         preview = (SRC / 'ui/components/PreviewDialog.kt').read_text()

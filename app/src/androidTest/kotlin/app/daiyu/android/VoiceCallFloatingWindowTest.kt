@@ -662,13 +662,33 @@ class VoiceCallFloatingWindowTest {
         val drawing = androidx.test.platform.graphics.HardwareRendererCompat.isDrawingEnabled()
         val diagnostics = java.io.File(context.getExternalFilesDir(null), "visual-diagnostics/native-call-alpha")
             .apply { mkdirs() }
-        fun capture(root: View, name: String): android.graphics.Bitmap {
-            awaitCommittedDraw(root)
-            val image = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
-            java.io.File(diagnostics, "$name.png").outputStream().use {
-                check(image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+        fun capture(root: View, name: String, expectedBackground: Int,
+            deadline: Long = SystemClock.uptimeMillis() + 2_000): android.graphics.Bitmap {
+            var bounds = androidx.compose.ui.geometry.Rect.Zero
+            main { bounds = panel(root); root.setBackgroundColor(expectedBackground) }
+            val density = context.resources.displayMetrics.density
+            val controlX = bounds.center.x.roundToInt()
+            val controlY = (bounds.top - 27f * density).roundToInt()
+            val channels = listOf<(Int) -> Int>(android.graphics.Color::red,
+                android.graphics.Color::green, android.graphics.Color::blue)
+            while (true) {
+                val image = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+                val control = image.getPixel(controlX, controlY)
+                val composed = channels.all { channel ->
+                    kotlin.math.abs(channel(control) - channel(expectedBackground)) < 8
+                }
+                val timely = SystemClock.uptimeMillis() <= deadline
+                if (composed || !timely) {
+                    java.io.File(diagnostics, "$name.png").outputStream().use {
+                        check(image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                    }
+                    assertTrue("$name backdrop reached composition at $controlX,$controlY: " +
+                        Integer.toHexString(control), composed && timely)
+                    return image
+                }
+                image.recycle()
+                SystemClock.sleep(8)
             }
-            return image
         }
         try {
             if (!drawing) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
@@ -680,15 +700,15 @@ class VoiceCallFloatingWindowTest {
             main {
                 assertTrue(root.isHardwareAccelerated)
                 scope.launch { motion.progress.stop(); motion.progress.snapTo(.999f) }
-                root.setBackgroundColor(android.graphics.Color.BLACK)
             }
             await("near-end frozen native panel") { motion.transforming && motion.progress.value == .999f }
-            val frozenDark = capture(root, "frozen-dark")
-            main { root.setBackgroundColor(android.graphics.Color.WHITE) }
-            val frozenLight = capture(root, "frozen-light")
+            val frozenDark = capture(root, "frozen-dark", android.graphics.Color.BLACK)
+            val frozenLight = capture(root, "frozen-light", android.graphics.Color.WHITE)
             main { scope.launch { motion.progress.snapTo(1f); motion.transforming = false } }
             await("actual live branch after frozen raster") { liveReady }
-            val live = capture(root, "live-light")
+            val liveDeadline = SystemClock.uptimeMillis() + 2_000
+            capture(root, "live-dark", android.graphics.Color.BLACK, liveDeadline).recycle()
+            val live = capture(root, "live-light", android.graphics.Color.WHITE, liveDeadline)
             var bounds = androidx.compose.ui.geometry.Rect.Zero
             main { bounds = panel(root) }
             val density = context.resources.displayMetrics.density

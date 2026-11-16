@@ -2,6 +2,7 @@
 import io
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -225,3 +226,20 @@ class PageBackSmokeScopeTests(unittest.TestCase):
             result = helper.select(root, classes=','.join(CLASSES))
             self.assertNotEqual(0, result.returncode)
             self.assertIn('Unknown instrumentation test class', result.stderr)
+
+    def test_page_back_checks_pin_build_source_without_rebinding_workflow_identity(self):
+        workflow = (Path(__file__).resolve().parents[1] / '.github/workflows/screen-observation-jank-checks.yml').read_text()
+        storage = workflow.split('  storage:\n', 1)[1].split('  recorder:\n', 1)[0]
+        steps = re.split(r'(?m)^      - ', storage)[1:]
+        self.assertTrue(steps[0].startswith('uses: actions/checkout@'))
+        self.assertIn('ref: ${{ inputs.expected_sha }}', steps[0])
+        self.assertIn('persist-credentials: false', steps[0])
+        self.assertTrue(steps[1].startswith('name: 核对检查源码'))
+        self.assertIn('test -n "$EXPECTED_SHA"', steps[1])
+        self.assertIn('GITHUB_SHA="$EXPECTED_SHA" python3 scripts/cooperation/cloud_checks.py --verify-revision-only', steps[1])
+        self.assertNotIn('continue-on-error:', steps[1])
+        self.assertNotIn('if:', steps[1])
+        self.assertIn("source_sha=os.environ['EXPECTED_SHA'], workflow_sha=os.environ['GITHUB_SHA']", storage)
+        self.assertNotIn('GITHUB_ENV', storage)
+        self.assertIn('checks_only.init.gradle', storage)
+        self.assertIn('assert not packages, packages', storage)

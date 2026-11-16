@@ -33,11 +33,12 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ inputs.expected_sha }}
           persist-credentials: false
       - name: 核对检查源码
         run: |
           test -n "$EXPECTED_SHA"
-          python3 scripts/cooperation/cloud_checks.py --verify-revision-only
+          GITHUB_SHA="$EXPECTED_SHA" python3 scripts/cooperation/cloud_checks.py --verify-revision-only
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         with:
           distribution: temurin
@@ -197,7 +198,7 @@ jobs:
                   assert not re.match(r'(?i)^(package|bundle).*(apk|debug|release|androidtest)$', name), task
           packages = [str(p) for p in Path.cwd().rglob('*') if p.is_file() and p.suffix.lower() in ('.apk', '.aab', '.apks')]
           assert not packages, packages
-          record = dict(source_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
+          record = dict(source_sha=os.environ['EXPECTED_SHA'], workflow_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
                         attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), tests=sum(int(s.attrib['tests']) for s in suites),
                         check_scope=os.environ['SCREEN_JANK_CHECK_SCOPE'], classes=sorted(names), contracts=json.loads(Path('screen-jank-checks/contracts.json').read_text()),
                         apk_built=False, instrumentation_run=False)

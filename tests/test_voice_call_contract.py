@@ -360,16 +360,54 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertIn('val fittedHeight = bottom?.let', placement)
         move = floating.split('private fun move(', 1)[1].split('private fun applyMove(', 1)[0]
         self.assertLess(move.index('if (delta == Offset.Zero) return'), move.index('current.manuallyDragged = true'))
-        self.assertIn('resize(current)', move)
+        self.assertIn('restoreFullHeight(current)', move)
+        self.assertNotIn('resize(current)', move)
         self.assertIn('current.postOnAnimation(current.moveFrame)', move)
+        restore = floating.split('private fun restoreFullHeight(', 1)[1].split('private fun move(', 1)[0]
+        self.assertIn('ValueAnimator.ofFloat(current.panelBounds.height, current.expandedHeight)', restore)
+        self.assertIn('current.pendingHeight = it.animatedValue as Float', restore)
+        self.assertIn('scheduleMove(current)', restore)
+        self.assertIn('current.heightRestore !== it', restore)
+        self.assertIn('!ValueAnimator.areAnimatorsEnabled()', restore)
+        self.assertIn('internal const val RESTORE_MILLIS = 220L', floating)
+        resize = floating.split('private fun resize(', 1)[1].split('private data class ImePlacement', 1)[0]
+        self.assertIn('if (current.heightRestore != null)', resize)
+        apply_move = floating.split('private fun applyMove(', 1)[1].split('private fun clamp(', 1)[0]
+        self.assertIn('current.pendingHeight ?: current.panelBounds.height', apply_move)
+        self.assertIn('bounds.top + height).translate(delta)', apply_move)
+        cancel = floating.split('private fun cancelHeightRestore(', 1)[1].split('private fun restoreFullHeight(', 1)[0]
+        self.assertLess(cancel.index('current.heightRestore = null'), cancel.index('animator?.cancel()'))
+        for start, end in (('private fun dismiss(current:', 'private fun fade('),
+                           ('private fun remove(', 'override fun close('),
+                           ('fun release()', 'override fun onDetachedFromWindow()')):
+            self.assertIn('cancelHeightRestore(', floating.split(start, 1)[1].split(end, 1)[0])
         self.assertIn('internal const val CLOSE_MILLIS = 180L', floating)
         fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt').read_text()
-        self.assertIn('valid drag immediately releases IME squeeze', fixture)
+        self.assertIn('valid drag immediately starts, rather than jumps through, IME release', fixture)
+        self.assertIn('drag release must draw a genuinely intermediate height', fixture)
+        self.assertIn('IME updates and unchanged configuration cannot finish the drag animation', fixture)
+        self.assertIn('height restoration must already have intermediate displacement', fixture)
+        self.assertIn('height restoration must not finish before displacement', fixture)
+        self.assertIn('IME reversal starts from the displayed bounds', fixture)
+        self.assertIn('resetTailMetadata = true', fixture)
         self.assertIn('light touch must retain composer following', fixture)
         self.assertIn('IME retract preserves manual full-height placement', fixture)
         ime = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ChatComposerImeActivityTest.kt').read_text()
         self.assertIn('dismissal anchor must not jump ahead or lag behind the composer', ime)
         self.assertIn('Actual intermediate dismissal motion missing', ime)
+        self.assertIn('dismissal forwards intermediate IME occlusion', ime)
+        screen = (SRC / 'ui/screens/chat/conversation/ChatScreen.kt').read_text()
+        self.assertIn('WindowInsets.imeAnimationSource', screen)
+        self.assertIn('WindowInsets.imeAnimationTarget', screen)
+        self.assertIn('insets.getBottom(density) - navigationBars.getBottom(density)', screen)
+        self.assertIn('copy(imeInsets = latestCallIme())', screen)
+        self.assertIn('if (drawerBlocksIme) 0', screen)
+        self.assertIn('previousAnchor.composerTop', placement)
+        self.assertIn('current.imeComposerBaseline ?: (start + (previousAnchor.imeInsets?.bottom ?: ime.source))', placement)
+        self.assertIn('val end = baseline - ime.target', placement)
+        self.assertIn('transition.endComposerTop - transition.startComposerTop', placement)
+        self.assertIn('if (progress >= 1f) current.imePlacement = null', placement)
+        self.assertNotIn('ValueAnimator', placement)
 
     def test_external_close_is_visual_only_and_detaches_after_its_own_animation(self):
         floating = (ROOT / 'app/src/main/kotlin/app/daiyu/android/VoiceCallFloatingWindow.kt').read_text()

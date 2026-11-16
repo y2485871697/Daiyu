@@ -655,6 +655,69 @@ class VoiceCallFloatingWindowTest {
             assertTrue(host.update(state.copy(sessionKey = -31L), actions, shifted(-80f * density), inApp = true))
             assertEquals("manually moved calls do not re-anchor", manual, panel(next))
         }
+        val coordinatedState = state.copy(sessionKey = -35L)
+        val inset = (full.composerTop - 210f * density).roundToInt()
+        var currentInset = inset
+        fun imeAnchor(bottom: Int, source: Int, target: Int) = full.copy(
+            bounds = full.bounds.translate(androidx.compose.ui.geometry.Offset(0f, -bottom.toFloat())),
+            composerTop = full.composerTop - bottom,
+            imeInsets = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(bottom, source, target))
+        main { assertTrue(host.update(coordinatedState, actions, imeAnchor(inset, inset, inset), inApp = true)) }
+        val coordinated = windows.added.last()
+        await("coordinated IME fixture attached") { coordinated.isLaidOut }
+        awaitCommittedDraw(coordinated)
+        fun imeStage(target: Int, progress: List<Float>, resetTailMetadata: Boolean = false) {
+            val source = currentInset
+            var initial = androidx.compose.ui.geometry.Rect.Zero
+            var endHeight = 0f
+            val startComposer = full.composerTop - source
+            val endComposer = full.composerTop - target
+            main {
+                initial = panel(coordinated)
+                val safe = coordinated.javaClass.getDeclaredMethod("getSafeTop").apply { isAccessible = true }
+                    .invoke(coordinated) as Int
+                endHeight = minOf(followed.height, endComposer - 10f * density - maxOf(8f * density, safe.toFloat()))
+                assertTrue(host.update(coordinatedState, actions, imeAnchor(source, source, target), inApp = true))
+                assertEquals("IME reversal starts from the displayed bounds", initial, panel(coordinated))
+            }
+            for ((index, fraction) in progress.withIndex()) {
+                currentInset = (source + (target - source) * fraction).roundToInt()
+                val anchor = imeAnchor(currentInset, source, target).let {
+                    if (resetTailMetadata && index >= progress.lastIndex - 1)
+                        it.copy(imeInsets = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(target)) else it
+                }
+                val actualProgress = (anchor.composerTop - startComposer) / (endComposer - startComposer)
+                val expectedHeight = initial.height + (endHeight - initial.height) * actualProgress
+                main {
+                    val before = panel(coordinated)
+                    val oldComposer = full.composerTop - (if (index == 0) source else
+                        (source + (target - source) * progress[index - 1]).roundToInt())
+                    assertTrue(host.update(coordinatedState, actions, anchor, inApp = true))
+                    val bounds = panel(coordinated)
+                    assertEquals("IME height and displacement share the composer's progress", expectedHeight, bounds.height, 1.5f)
+                    assertEquals("coordinated IME bottom follows the composer in the same frame",
+                        anchor.composerTop - 10f * density, bounds.bottom, 1f)
+                    assertEquals(anchor.composerTop - oldComposer, bounds.bottom - before.bottom, 1f)
+                    if (fraction < 1f && target < source) {
+                        assertTrue("height restoration must already have intermediate displacement", bounds.top > initial.top + 1f)
+                        assertTrue("height restoration must not finish before displacement", bounds.height < endHeight - 1f)
+                    }
+                }
+                awaitCommittedDraw(coordinated)
+                main { assertEquals(expectedHeight, panel(coordinated).height, 1.5f) }
+            }
+        }
+        imeStage(0, listOf(.22f, .55f))
+        main {
+            val skewed = imeAnchor(currentInset, inset, 0).copy(imeInsets =
+                app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets((currentInset * .7f).roundToInt(), inset, 0))
+            val before = panel(coordinated)
+            assertTrue(host.update(coordinatedState, actions, skewed, inApp = true))
+            assertEquals("inset metadata ahead of drawing must not move the displayed panel", before, panel(coordinated))
+        }
+        imeStage(inset, listOf(.31f, .68f))
+        imeStage(0, listOf(.15f, .56f, .91f, 1f), resetTailMetadata = true)
+        main { assertEquals("coordinated IME motion reaches the direct no-IME bounds", followed, panel(coordinated)) }
         val squeezedState = state.copy(sessionKey = -34L)
         val squeezed = full.copy(composerTop = 210f * density,
             bounds = full.bounds.translate(androidx.compose.ui.geometry.Offset(0f, 210f * density - full.composerTop)))
@@ -687,11 +750,36 @@ class VoiceCallFloatingWindowTest {
             assertEquals("light touch must retain composer following", compressedBounds.bottom + 4f * density,
                 panel(compressed).bottom, 1f)
             compressedBounds = panel(compressed)
-            move(compressed, density, 0f)
-            assertEquals("valid drag immediately releases IME squeeze", followed.height, panel(compressed).height, 1f)
         }
-        await("valid drag consumes its coalesced displacement") { panel(compressed).left > compressedBounds.left }
+        var drewIntermediateRestore = false
+        val restoreFrames = mutableListOf<androidx.compose.ui.geometry.Rect>()
+        try {
+            main {
+                windows.onDraw = { view ->
+                    if (view === compressed && view.isAttachedToWindow) {
+                        val bounds = panel(view)
+                        restoreFrames += bounds
+                        if (bounds.height > compressedBounds.height + 1f && bounds.height < followed.height - 1f)
+                            drewIntermediateRestore = true
+                    }
+                }
+                move(compressed, density, 0f)
+                assertEquals("valid drag immediately starts, rather than jumps through, IME release",
+                    compressedBounds.height, panel(compressed).height, 1f)
+                assertNotNull(compressed.javaClass.getDeclaredMethod("getHeightRestore").apply { isAccessible = true }.invoke(compressed))
+                assertTrue(host.update(squeezedState, actions, full, inApp = true))
+                compressed.dispatchConfigurationChanged(android.content.res.Configuration(context.resources.configuration))
+                assertEquals("IME updates and unchanged configuration cannot finish the drag animation",
+                    compressedBounds.height, panel(compressed).height, 1f)
+            }
+            await("valid drag consumes its coalesced displacement") { panel(compressed).left > compressedBounds.left }
+            await("drag release must draw a genuinely intermediate height: $restoreFrames") { drewIntermediateRestore }
+            await("drag release reaches full height") { kotlin.math.abs(panel(compressed).height - followed.height) < 1f }
+            awaitCommittedDraw(compressed)
+        } finally { main { windows.onDraw = null } }
         main {
+            assertEquals("restoration preserves the coalesced horizontal drag", compressedBounds.left + density,
+                panel(compressed).left, 1f)
             val manual = panel(compressed)
             assertTrue(host.update(squeezedState, actions, full, inApp = true))
             assertEquals("IME retract preserves manual full-height placement", manual, panel(compressed))

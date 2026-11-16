@@ -123,7 +123,10 @@ data class DoubaoCallActions(
     val onPresentationReady: ((Long) -> Unit)? = null,
 )
 
-internal data class DoubaoCallAnchor(val bounds: Rect, val composerTop: Float, val hostBounds: Rect)
+internal data class DoubaoCallImeInsets(val bottom: Int, val source: Int = bottom, val target: Int = bottom)
+
+internal data class DoubaoCallAnchor(val bounds: Rect, val composerTop: Float, val hostBounds: Rect,
+    val imeInsets: DoubaoCallImeInsets? = null)
 
 internal class DoubaoCallMotionState {
     val progress = Animatable(0f)

@@ -161,12 +161,14 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
                 }
                 val samples = mutableListOf<Pair<Float, Float>>()
                 val anchorSamples = mutableListOf<Pair<Float, Float>>()
+                val imeSamples = mutableListOf<app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets>()
                 val listener = android.view.ViewTreeObserver.OnPreDrawListener {
                     if (surface.layoutInfo.isPlaced && header.layoutInfo.isPlaced && samples.size < 240) {
                         samples += (surface.positionOnScreen.y + surface.size.height) to
                             (header.positionOnScreen.y + header.size.height)
                         val anchor = anchorField.get(activity) as? app.daiyu.android.ui.screens.chat.conversation.DoubaoCallAnchor
                         anchorSamples += (surface.positionOnScreen.y - surfaceTopOffset) to (anchor?.composerTop ?: Float.NaN)
+                        anchor?.imeInsets?.let { imeSamples += it }
                     }
                     true
                 }
@@ -188,12 +190,14 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
                     it.first < before.composerBottom - 2f && it.first > shown.composerBottom + 2f
                 })
                 frames.forEach { assertEquals(before.headerBottom, it.second, 2f) }
+                assertTrue("opening forwards actual IME animation endpoints", imeSamples.any { it.target > it.source })
                 anchorSamples.forEach { (composerTop, anchorTop) ->
                     assertEquals("opening anchor must come from this drawn composer frame", composerTop, anchorTop, 2f)
                 }
                 mainThread {
                     samples.clear()
                     anchorSamples.clear()
+                    imeSamples.clear()
                     view.viewTreeObserver.addOnPreDrawListener(listener)
                 }
                 try {
@@ -207,6 +211,10 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
                     it.first > shown.composerBottom + 2f && it.first < before.composerBottom - 2f
                 })
                 assertTrue("dismissal must produce anchor samples", anchorSamples.size > 2)
+                assertTrue("dismissal forwards actual IME animation endpoints", imeSamples.any { it.source > it.target })
+                assertTrue("dismissal forwards intermediate IME occlusion", imeSamples.any {
+                    it.bottom > it.target && it.bottom < it.source
+                })
                 anchorSamples.forEach { (composerTop, anchorTop) ->
                     assertEquals("dismissal anchor must not jump ahead or lag behind the composer", composerTop, anchorTop, 2f)
                 }

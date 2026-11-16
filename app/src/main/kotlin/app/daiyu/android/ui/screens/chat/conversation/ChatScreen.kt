@@ -17,6 +17,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imeAnimationSource
+import androidx.compose.foundation.layout.imeAnimationTarget
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -30,6 +32,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import app.daiyu.android.ui.components.chatInputDismissTapModifier
 import app.daiyu.android.ui.components.hideChatInputIme
@@ -163,11 +166,21 @@ internal fun DaiyuChatScreen(
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
+    val density = LocalDensity.current
+    val ime = WindowInsets.ime
+    val imeSource = WindowInsets.imeAnimationSource
+    val imeTarget = WindowInsets.imeAnimationTarget
+    val navigationBars = WindowInsets.navigationBars
+    val latestCallIme by rememberUpdatedState {
+        fun effective(insets: WindowInsets): Int = if (drawerBlocksIme) 0 else
+            (insets.getBottom(density) - navigationBars.getBottom(density)).coerceAtLeast(0)
+        DoubaoCallImeInsets(effective(ime), effective(imeSource), effective(imeTarget))
+    }
     DisposableEffect(view, presentationActive, callCoordinates) {
         var reported: DoubaoCallAnchor? = null
         val observer = view.viewTreeObserver
         val listener = android.view.ViewTreeObserver.OnPreDrawListener {
-            if (presentationActive) callCoordinates.read()?.let { anchor ->
+            if (presentationActive) callCoordinates.read()?.copy(imeInsets = latestCallIme())?.let { anchor ->
                 if (anchor != reported) {
                     reported = anchor
                     latestCallAnchorChanged(anchor)

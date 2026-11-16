@@ -37,6 +37,7 @@ class TerminalRegistryRetentionTest {
         override fun getFilesDir() = root
     }
     private fun fixture(test: (File, TerminalRegistry, String) -> Unit) {
+        org.junit.Assume.assumeFalse("Requires production POSIX directory fsync", System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true))
         val root = Files.createTempDirectory("registry-retention").toFile()
         val registry = TerminalRegistry(context(root)).apply {
             configure(UUID.randomUUID().toString(), TerminalConfiguration())

@@ -131,6 +131,7 @@ class LinuxRunnerGenerationPinsTest {
     }
 
     @Test fun realJvmOwnerWritesBootWitnessButAnotherJvmInSameBootIsStillDenied() = fixture { root ->
+        org.junit.Assume.assumeFalse("Windows host identity fixture is process-local; requires cross-JVM inode identity", System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true))
         assertEquals("CLAIMED", runLinuxPinChild(root, "claim"))
         assertEquals(1, root.listFiles()!!.count { it.name.startsWith(".runner-boot-") })
         assertEquals("DENIED", runLinuxPinChild(root, "admit"))
@@ -165,6 +166,7 @@ class LinuxRunnerGenerationPinsTest {
     }
 
     @Test fun deadOwnerSharedPinAllowsNewSharedWorkWithoutSettlingOldRun() = fixture { root ->
+        org.junit.Assume.assumeFalse("Windows host identity fixture is process-local; requires cross-JVM inode identity", System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true))
         assertEquals("CLAIMED", runLinuxPinChild(root, "claim"))
         val old = root.listFiles()!!.single { it.name.startsWith(".runner-pin-") }
         val bytes = old.readBytes(); val key = hostLinuxFileKey(old.toPath())
@@ -183,6 +185,7 @@ class LinuxRunnerGenerationPinsTest {
     }
 
     @Test fun legacyAndExclusiveUnknownPinsNeverBecomeSharedOccupancy() = fixture { root ->
+        org.junit.Assume.assumeFalse("Windows host identity fixture is process-local; requires cross-JVM inode identity", System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true))
         val legacy = legacyPin(root)
         rejects { recovering(root, "android:10").admitted(allowRetained = true) { } }
         assertTrue(legacy.exists())
@@ -193,6 +196,7 @@ class LinuxRunnerGenerationPinsTest {
     }
 
     @Test fun retainedSharedPinRequiresExactBootSourceContentAndInode() = fixture { root ->
+        org.junit.Assume.assumeFalse("Windows host identity fixture is process-local; requires cross-JVM inode identity", System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true))
         assertEquals("CLAIMED", runLinuxPinChild(root, "claim"))
         val pins = recovering(root, "android:10")
         pins.admitted(allowRetained = true) { }

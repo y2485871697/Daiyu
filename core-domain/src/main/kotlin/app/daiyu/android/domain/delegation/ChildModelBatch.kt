@@ -479,12 +479,12 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                 try { transport.cancel(); confirmed = true }
                                                 finally {
                                                     synchronized(gate) {
-                                                        cleanupFinished = confirmed || assembly == null
+                                                        cleanupFinished = confirmed
                                                         if (cleanupFinished) cleanupPins--
                                                     }
                                                     releaseItemIfReady()
                                                     trace(activeChild, if (confirmed) ChildTaskDiagnosticPhase.CLEANUP_COMPLETED else ChildTaskDiagnosticPhase.CLEANUP_FAILED)
-                                                    if (confirmed || assembly == null) cleanup.complete(Unit)
+                                                    if (confirmed) cleanup.complete(Unit)
                                                     else cleanup.completeExceptionally(IllegalStateException("child_transport_cleanup_unconfirmed"))
                                                 }
                                             }

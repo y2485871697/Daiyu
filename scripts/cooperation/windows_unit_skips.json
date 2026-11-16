@@ -55,5 +55,28 @@
   ],
   "app.daiyu.android.terminal.LinuxSettingsApplicationFreezeTest": [
     "onlyExistingMatchingTrustedSelectionCanProduceNonStartingPinnedLaunch"
+  ],
+  "app.daiyu.android.integration.tools.RunCommandToolsTest": [
+    "preFactoryLinuxClaimFailureCanDrainItsUnstartedMetadataLease"
+  ],
+  "app.daiyu.android.terminal.LinuxRunnerGenerationPinsTest": [
+    "legacyAndExclusiveUnknownPinsNeverBecomeSharedOccupancy",
+    "deadOwnerSharedPinAllowsNewSharedWorkWithoutSettlingOldRun",
+    "realJvmOwnerWritesBootWitnessButAnotherJvmInSameBootIsStillDenied",
+    "retainedSharedPinRequiresExactBootSourceContentAndInode"
+  ],
+  "app.daiyu.android.terminal.TerminalRegistryRetentionTest": [
+    "moreThan64DistinctSessionsCanOpen",
+    "asyncAndDaemonNaturalExitPersistWithoutPollingOrFurtherCommands",
+    "failedCompletionSaveKeepsUnknownDiskEvidenceAndStillReleasesResources",
+    "releasedProcessWithIncompleteOutputNeverBecomesExecuted",
+    "confirmedStartupCleanupReleasesProcessButExecutionRemainsUnknown",
+    "unreadCompletedAsyncHistorySurvivesFurtherCommandsAndRepeatedReads",
+    "persistedLogsAbove16MiBDoNotBlockDispatchOrGetDeleted",
+    "releasedCompletionStillStopsAndDrainsWithoutLosingExitStatus",
+    "sixtyFiveRunningAsyncJobsAreNotRejectedByCumulativeQuota",
+    "eofObservedBeforePumpFinishesDoesNotLoseLaterOutput",
+    "continuous130CommandsKeepAllHistoryAndReplayNeverStartsAgain",
+    "finishedDaemonCanReleaseResourcesAndRetainInspectableHistoryAfterClose"
   ]
 }

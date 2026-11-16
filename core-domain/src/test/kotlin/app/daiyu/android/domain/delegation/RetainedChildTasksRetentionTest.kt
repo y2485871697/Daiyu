@@ -348,6 +348,7 @@ class RetainedChildTasksRetentionTest {
         val nextReturned = CountDownLatch(1)
         val cancelEntered = CountDownLatch(1)
         val returnCancel = CountDownLatch(1)
+        val cancelReturned = CountDownLatch(1)
         val cancels = AtomicInteger()
         override fun open(history: List<Message>): ModelSession = error("explicit tool definitions required")
         override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession = object : ModelSession {
@@ -360,16 +361,18 @@ class RetainedChildTasksRetentionTest {
             }
             override fun cancel() {
                 cancels.incrementAndGet(); cancelEntered.countDown()
-                check(returnCancel.await(15, TimeUnit.SECONDS))
-                check(!failCancel) { "provider cancel failed after cleanup" }
+                try {
+                    check(returnCancel.await(15, TimeUnit.SECONDS))
+                    check(!failCancel) { "provider cancel failed after cleanup" }
+                } finally { cancelReturned.countDown() }
             }
         }
     }
 
     @Test fun returnedNextDoesNotReleaseCapacityPoolOrBindingUntilBlockingCancelFinallyReturns() {
-        for (outcome in listOf("stop", "timeout", "complete", "cancel-throws")) {
-            val completes = outcome == "complete" || outcome == "cancel-throws"
-            val store = Journal(); val model = BlockingCancelModel(failCancel = outcome == "cancel-throws"); val fast = Model()
+        for (outcome in listOf("stop", "timeout", "complete")) {
+            val completes = outcome == "complete"
+            val store = Journal(); val model = BlockingCancelModel(); val fast = Model()
             val parent = Parent("cleanup-$outcome"); val next = Parent("next-$outcome")
             val supervisor = RetainedChildTasks(store, timeoutMillis = if (outcome == "timeout") 500 else 120_000,
                 maxRetainedTasks = 1)
@@ -401,6 +404,39 @@ class RetainedChildTasksRetentionTest {
                 assertEquals(expected, supervisor.snapshots(a).single().record.status)
                 assertEquals(1, callbacks.get()); assertEquals(1, model.cancels.get())
             } finally { model.returnNext.countDown(); model.returnCancel.countDown(); drain(supervisor) }
+        }
+    }
+
+    @Test fun failedTextCancellationNeverConfirmsStopOrAdmitsAReplacement() {
+        val store = Journal(); val model = BlockingCancelModel(failCancel = true); val fast = Model()
+        val parent = Parent("failed-stop"); val next = Parent("failed-stop-replacement")
+        val supervisor = RetainedChildTasks(store, maxRetainedTasks = 1)
+        val a = parent.bind(supervisor, model)
+        val idle = CountDownLatch(1)
+        try {
+            val accepted = submit(supervisor, a, parent, "first") as ChildTaskAdmission.Accepted
+            val owner = accepted.tasks.single().owner
+            assertTrue(model.entered.await(3, TimeUnit.SECONDS))
+            supervisor.stop(a, owner)
+            supervisor.finishParent(a)
+            assertTrue(model.cancelEntered.await(3, TimeUnit.SECONDS))
+            model.returnNext.countDown()
+            assertTrue(model.nextReturned.await(3, TimeUnit.SECONDS))
+            await { store.list("conversation").single().status == ChildTaskStatus.UNKNOWN }
+            val b = next.bind(supervisor, fast)
+            model.returnCancel.countDown()
+            assertTrue(model.cancelReturned.await(3, TimeUnit.SECONDS))
+            assertEquals(ChildTaskAdmission.Rejected("child_paused_source_requires_stop_or_explicit_independent_task"),
+                supervisor.submit(b, next.context("replacement"), input, independentOfPausedTasks = false))
+            assertEquals(0, fast.opens.get()); assertEquals(1, store.enqueues.get())
+            supervisor.closeWhenIdle { idle.countDown() }
+            assertFalse("failed cancel is not confirmed source drain", idle.await(200, TimeUnit.MILLISECONDS))
+            repeat(3) { supervisor.close() }
+            assertFalse(supervisor.isReleased(a))
+            assertFalse(supervisor.snapshots(a).single().settled)
+            assertEquals(1, model.cancels.get())
+        } finally {
+            model.returnNext.countDown(); model.returnCancel.countDown(); supervisor.close()
         }
     }
 

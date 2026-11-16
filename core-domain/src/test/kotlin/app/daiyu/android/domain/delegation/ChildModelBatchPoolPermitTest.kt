@@ -107,28 +107,53 @@ class ChildModelBatchPoolPermitTest {
     }
 
     @Test fun samePoolWaiterOpensOnlyAfterFirstWorkersBlockingCleanupReturns() {
-        for (failCancel in listOf(false, true)) {
-            val opens = AtomicInteger()
-            val first = Session(failCancel = failCancel); val second = Session(holdCancel = false)
-            val fixture = Fixture(port(opens, first, second))
-            try {
-                fixture.start()
-                assertTrue(first.entered.await(3, TimeUnit.SECONDS))
-                first.returnNext.countDown()
-                assertTrue(first.nextReturned.await(3, TimeUnit.SECONDS))
-                assertTrue(first.cancelEntered.await(3, TimeUnit.SECONDS))
-                assertTrue(fixture.journal.firstTerminal.await(3, TimeUnit.SECONDS))
-                assertFalse("worker result must not free a still-cleaning pool", second.entered.await(200, TimeUnit.MILLISECONDS))
-                assertEquals(1, opens.get()); assertEquals(0, fixture.pool.availablePermits())
-                first.returnCancel.countDown()
-                assertTrue("release this item's permit, not after the whole batch drains", second.entered.await(3, TimeUnit.SECONDS))
-                assertEquals(2, opens.get()); assertEquals(0, fixture.pool.availablePermits())
-                second.returnNext.countDown()
-                fixture.join()
-                assertTrue(fixture.result.get() is ExecutionReceipt.Confirmed)
-                fixture.drain()
-                assertEquals(1, first.cancels.get()); assertEquals(1, second.cancels.get())
-            } finally { first.release(); second.release(); fixture.drain() }
+        val opens = AtomicInteger()
+        val first = Session(); val second = Session(holdCancel = false)
+        val fixture = Fixture(port(opens, first, second))
+        try {
+            fixture.start()
+            assertTrue(first.entered.await(3, TimeUnit.SECONDS))
+            first.returnNext.countDown()
+            assertTrue(first.nextReturned.await(3, TimeUnit.SECONDS))
+            assertTrue(first.cancelEntered.await(3, TimeUnit.SECONDS))
+            assertTrue(fixture.journal.firstTerminal.await(3, TimeUnit.SECONDS))
+            assertFalse("worker result must not free a still-cleaning pool", second.entered.await(200, TimeUnit.MILLISECONDS))
+            assertEquals(1, opens.get()); assertEquals(0, fixture.pool.availablePermits())
+            first.returnCancel.countDown()
+            assertTrue("release this item's permit, not after the whole batch drains", second.entered.await(3, TimeUnit.SECONDS))
+            assertEquals(2, opens.get()); assertEquals(0, fixture.pool.availablePermits())
+            second.returnNext.countDown()
+            fixture.join()
+            assertTrue(fixture.result.get() is ExecutionReceipt.Confirmed)
+            fixture.drain()
+            assertEquals(1, first.cancels.get()); assertEquals(1, second.cancels.get())
+        } finally { first.release(); second.release(); fixture.drain() }
+    }
+
+    @Test fun failedTextTransportCancelKeepsPoolAndIdleUnconfirmed() {
+        val opens = AtomicInteger()
+        val first = Session(failCancel = true); val second = Session(holdCancel = false)
+        val fixture = Fixture(port(opens, first, second))
+        val idle = CountDownLatch(1)
+        try {
+            fixture.start()
+            assertTrue(first.entered.await(3, TimeUnit.SECONDS))
+            first.returnNext.countDown()
+            assertTrue(first.cancelEntered.await(3, TimeUnit.SECONDS))
+            assertTrue(fixture.journal.firstTerminal.await(3, TimeUnit.SECONDS))
+            first.returnCancel.countDown()
+            assertTrue(first.cancelReturned.await(3, TimeUnit.SECONDS))
+            assertFalse("failed cancellation is not transport drain", second.entered.await(200, TimeUnit.MILLISECONDS))
+            assertEquals(1, opens.get()); assertEquals(0, fixture.pool.availablePermits())
+            fixture.batch.closeWhenIdle { idle.countDown() }
+            fixture.join()
+            assertFalse("stop cannot confirm while transport cleanup is unknown", idle.await(200, TimeUnit.MILLISECONDS))
+            repeat(3) { fixture.batch.close() }
+            assertFalse(idle.await(100, TimeUnit.MILLISECONDS))
+            assertEquals(0, fixture.pool.availablePermits()); assertEquals(1, first.cancels.get())
+            assertEquals(1L, second.entered.count)
+        } finally {
+            first.release(); second.release(); fixture.batch.close(); fixture.join()
         }
     }
 

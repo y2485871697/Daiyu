@@ -80,6 +80,7 @@ class RunCommandToolsTest {
                 .put("environment", environment).put("timeout_ms", timeout).toString())), dispatchOwner) { cancelled }.single().outcome
     }
     @Test fun preFactoryLinuxClaimFailureCanDrainItsUnstartedMetadataLease() {
+        org.junit.Assume.assumeFalse("Requires production POSIX directory fsync", System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true))
         val files = java.nio.file.Files.createTempDirectory("command-unstarted-").toFile()
         try {
             val root = File(files, "rootfs").apply { File(this, "bin").mkdirs(); File(this, "bin/sh").writeText("never executed") }

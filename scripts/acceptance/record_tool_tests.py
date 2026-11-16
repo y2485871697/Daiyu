@@ -676,6 +676,34 @@ GENERATION_PORT_MODULES = (
 )
 
 
+CHILD_HOT_CONFIGURATION_PLATFORM_CLASSES = (
+    "app.daiyu.android.ChildStopChoiceActivityTest",
+    "app.daiyu.android.ControllerChildRetentionTest",
+    "app.daiyu.android.ControllerChildModelsTest",
+    "app.daiyu.android.storage.SQLiteChildTaskStoreTest",
+    "app.daiyu.android.model.usage.AttributedUsageDatabaseTest",
+    "app.daiyu.android.backup.TypedUsageBackupTest",
+    "app.daiyu.android.ControllerGenerationIntegrationTest",
+    "app.daiyu.android.integration.tools.RunGenerationToolsDeviceTest",
+    "app.daiyu.android.storage.SQLiteGenerationAttemptStoreTest",
+    "app.daiyu.android.storage.SQLiteGenerationOutputStoreTest",
+)
+CHILD_HOT_CONFIGURATION_MODULES = tuple(dict.fromkeys(
+    CHILD_STOP_MODULES + GENERATION_PORT_MODULES + (
+        "test_child_hot_configuration_scope", "test_windows_unit_skips",
+    )
+))
+
+
+def child_hot_configuration_scope(raw):
+    parts = raw.split(",")
+    if sorted(parts) == sorted(CHILD_HOT_CONFIGURATION_PLATFORM_CLASSES):
+        return True
+    if len({part.strip() for part in parts} & set(CHILD_HOT_CONFIGURATION_PLATFORM_CLASSES)) >= len(CHILD_HOT_CONFIGURATION_PLATFORM_CLASSES) - 1:
+        raise ValueError("Exact child hot configuration smoke scope required")
+    return False
+
+
 RETURN_CHAT_HANDOFF_PLATFORM_CLASSES = PAGE_BACK_PLATFORM_CLASSES + (
     "app.daiyu.android.RetainedToolOutcomesTest",
     "app.daiyu.android.ToolReceiptPauseActivityTest",
@@ -734,6 +762,9 @@ PANE_QUESTION_MODULES = (
 
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and child_hot_configuration_scope(env.get("SMOKE_TEST_CLASSES", ""))):
+        return [python, "-B", "-m", "unittest", *CHILD_HOT_CONFIGURATION_MODULES, "-v"], "child-hot-configuration-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PANE_QUESTION_CORE_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *PANE_QUESTION_MODULES, "-v"], "pane-question-core-targeted"
@@ -966,7 +997,7 @@ def record(python):
         child_env = os.environ.copy()
         child_env["PYTHONPATH"] = str(Path("tests").resolve()) + os.pathsep + child_env.get("PYTHONPATH", "")
     validation_cwd = None
-    if scope in ("child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted") or (
+    if scope in ("child-hot-configuration-targeted", "child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted") or (
             scope == "child-task-cards-targeted" and sorted(os.environ.get("SMOKE_TEST_CLASSES", "").split(","))
             == sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES)):
         validation_cwd = Path(__file__).resolve().parents[2]

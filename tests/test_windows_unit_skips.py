@@ -83,7 +83,7 @@ class WindowsUnitSkipsTests(unittest.TestCase):
 
     def test_allowlist_exactly_lists_unique_test_identities(self):
         allowlist = json.loads((Path(__file__).resolve().parents[1] / 'scripts/cooperation/windows_unit_skips.json').read_text())
-        self.assertEqual(sum(len(v) for v in allowlist.values()), 45)
+        self.assertEqual(sum(len(v) for v in allowlist.values()), 62)
         self.assertTrue(all(len(v) == len(set(v)) for v in allowlist.values()))
 
 

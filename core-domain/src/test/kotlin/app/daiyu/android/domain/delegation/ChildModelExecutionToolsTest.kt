@@ -10,6 +10,9 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 
 class ChildModelExecutionToolsTest {
     private class Parent {
@@ -51,9 +54,12 @@ class ChildModelExecutionToolsTest {
         val cancelled = CountDownLatch(1)
         var failCancel = false
         var beforeTool: () -> Unit = {}
+        var onOpen: (List<Message>) -> Unit = {}
+        var afterCancel: () -> Unit = {}
         override fun open(history: List<Message>): ModelSession = error("explicit schemas required")
         override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
             assertEquals(toolsExpected, definitions.isNotEmpty()); opens.incrementAndGet()
+            onOpen(history)
             return object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                     val request = requests.incrementAndGet()
@@ -67,7 +73,7 @@ class ChildModelExecutionToolsTest {
                         sink(ModelEvent.TextFinal("answer", "continued"))
                     }
                 }
-                override fun cancel() { cancelled.countDown(); check(!failCancel) { "transport_cleanup_failed" } }
+                override fun cancel() { cancelled.countDown(); check(!failCancel) { "transport_cleanup_failed" }; afterCancel() }
             }
         }
     }
@@ -164,6 +170,62 @@ class ChildModelExecutionToolsTest {
             } finally { batch.close() }
         }
     }
+    @Test fun completedToolRoundRebindsSameTaskOnlyAfterOldCancelReturns() {
+        val parent = Parent(); val assembly = Assembly(); val old = Port(); val next = Port(useTool = false)
+        val enqueues = AtomicInteger(); val events = CopyOnWriteArrayList<ChildTaskDiagnosticEvent>()
+        val releaseCancel = CountDownLatch(1); val cancelConfirmed = AtomicBoolean(false)
+        val journal = object : ChildTaskStore {
+            override fun enqueue(parent: RunExecutionOwner, tasks: List<ChildTaskRecord>) { enqueues.incrementAndGet() }
+            override fun started(task: ChildTaskRecord) {}
+            override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) {}
+            override fun list(conversationId: String, limit: Int) = emptyList<ChildTaskRecord>()
+        }
+        val supervisor = RetainedChildTasks(journal, diagnostics = ChildTaskDiagnostics { events += it })
+        fun definition(selection: String, modelId: String, port: ModelPort) =
+            ChildModelDefinition("pool", 1, null, selection = selection, role = ChildModelRole.IMPLEMENTATION) { port }
+                .routed("fixture-provider", modelId)
+        val chosen = AtomicReference(definition("old", "old-model", old))
+        val dynamic = ChildModelDefinition("pool", 1, null, latest = { chosen.get() }, selection = "old",
+            role = ChildModelRole.IMPLEMENTATION) { old }
+        val binding = supervisor.bind(parent.owner, parent.session, parent.authorization,
+            mapOf("one" to dynamic), factory(assembly))
+        assembly.beforeReceipt = { supervisor.pauseGroup(binding) }
+        old.afterCancel = { check(releaseCancel.await(5, TimeUnit.SECONDS)); cancelConfirmed.set(true) }
+        try {
+            val task = (supervisor.submit(binding, parent.context(),
+                listOf(ChildModelTask("one", "read once", ChildToolAccess.DEFAULT))) as ChildTaskAdmission.Accepted).tasks.single()
+            await { supervisor.snapshots(binding).single().pauseState == ChildTaskPauseState.PAUSED }
+            assertEquals(1, old.requests.get()); assertEquals(1, assembly.executions.get())
+            assertEquals(1L, old.cancelled.count); assertEquals(0, next.opens.get())
+            next.onOpen = { history ->
+                assertTrue("old cancel must finish before replacement open", cancelConfirmed.get())
+                val expanded = MessageHistory.expand(history)
+                assertEquals(listOf("read-once"), expanded.flatMap { it.blocks }.filterIsInstance<MessageBlock.Tool>().map { it.result })
+                assertTrue(expanded.any { it.runId.value == task.owner.childRunId && it.id.value == task.owner.assistantMessageId })
+            }
+            chosen.set(definition("new", "new-model", next))
+            assertEquals(ChildTaskControlReceipt.RESUMED, supervisor.resume(binding, task.owner))
+            assertTrue(old.cancelled.await(5, TimeUnit.SECONDS))
+            assertFalse(cancelConfirmed.get()); assertEquals(0, next.opens.get()); assertEquals(0, next.requests.get())
+            releaseCancel.countDown()
+            await { supervisor.snapshots(binding).single().settled }
+            val result = supervisor.snapshots(binding).single().record
+            assertEquals(task.owner, result.owner); assertEquals(ChildTaskStatus.COMPLETED, result.status)
+            assertEquals("continued", result.text); assertEquals(1, enqueues.get())
+            assertEquals(1, assembly.prepares.get()); assertEquals(1, assembly.executions.get())
+            assertEquals(1, old.opens.get()); assertEquals(1, old.requests.get())
+            assertEquals(1, next.opens.get()); assertEquals(1, next.requests.get())
+            val requests = events.filter { it.phase == ChildTaskDiagnosticPhase.REQUEST_STARTED }
+            assertEquals(listOf(ChildRequestModel("fixture-provider", "old-model"),
+                ChildRequestModel("fixture-provider", "new-model")), requests.map { it.model })
+            assertTrue(requests.all { it.owner == task.owner })
+        } finally {
+            releaseCancel.countDown()
+            val idle = CountDownLatch(1); supervisor.closeWhenIdle { idle.countDown() }
+            assertTrue(idle.await(5, TimeUnit.SECONDS))
+        }
+    }
+
     @Test fun failedTransportCancelKeepsExecutionPinnedAfterToolDrain() {
         val parent = Parent(); val assembly = Assembly(); val port = Port(useTool = false).apply { failCancel = true }
         val batch = parent.bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1, ChildModelRole.IMPLEMENTATION) { port }),

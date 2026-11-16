@@ -487,7 +487,8 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             repeat(64) { index ->
                 frame()
                 val present = ui.onAllNodesWithTag(target).fetchSemanticsNodes().isNotEmpty()
-                val p = pixels()
+                val image = ui.onNodeWithTag("motion-raster").captureToImage()
+                val p = image.toPixelMap()
                 val visibleTags = if (present) tags else tags.dropLast(1)
                 for ((from, to) in visibleTags.zipWithNext()) {
                     val rail = line(p, from, to)
@@ -504,7 +505,36 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                     partial = partial || (!reached && incoming.any { it > contrast * .35f })
                     arrived = arrived || reached
                     if (!reached) {
-                        assertEquals("$legacy: node overtook incoming, frame $index", 0f, nodeInk(p, target), .1f)
+                        val nodeAmount = nodeInk(p, target)
+                        val bodyAmount = bodyInk(p, target)
+                        if (nodeAmount > .1f || bodyAmount > .03f || advances.get() != feedback) {
+                            val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/workflow-arrival").apply { mkdirs() }
+                            val name = "chain-${if (legacy) "legacy" else "mixed"}-${tags.size}-frame$index"
+                            java.io.File(directory, "$name.png").outputStream().use {
+                                image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                            }
+                            val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().boundsInRoot
+                            val sourceBounds = ui.onNodeWithTag(tags[tags.lastIndex - 1]).fetchSemanticsNode().boundsInRoot
+                            val targetBounds = ui.onNodeWithTag(target).fetchSemanticsNode().boundsInRoot
+                            val lineStart = ceil(sourceBounds.top - raster.top + with(density) { 28.dp.toPx() }).toInt()
+                            val glyphLeft = ceil(targetBounds.left - raster.left).toInt()
+                            val glyphTop = ceil(targetBounds.top - raster.top + with(density) { 17.dp.toPx() }).toInt()
+                            val glyphRight = floor(targetBounds.left - raster.left + with(density) { 10.dp.toPx() }).toInt()
+                            val glyphBottom = floor(targetBounds.top - raster.top + with(density) { 27.dp.toPx() }).toInt()
+                            java.io.File(directory, "$name.txt").writeText(buildString {
+                                appendLine("density=${density.density} raster=$raster source=$sourceBounds target=$targetBounds")
+                                appendLine("contrast=$contrast threshold=${contrast * .9f} reached=$reached everReached=$arrived node=$nodeAmount body=$bodyAmount advances=${advances.get() - feedback}")
+                                appendLine("lineX=${sourceBounds.left - raster.left + with(density) { 5.dp.toPx() }} glyphCenterX=${targetBounds.left - raster.left + with(density) { 5.dp.toPx() }} glyph=[$glyphLeft,$glyphTop,$glyphRight,$glyphBottom]")
+                                incoming.forEachIndexed { offset, value ->
+                                    if (value < contrast * .9f) appendLine("line y=${lineStart + offset - targetBounds.top + raster.top} value=$value")
+                                }
+                                for (y in glyphTop until glyphBottom) for (x in glyphLeft until glyphRight) {
+                                    val color = p[x, y]; val value = distance(color, background)
+                                    if (value > 0f) appendLine("glyph x=${x - targetBounds.left + raster.left} y=${y - targetBounds.top + raster.top} rgba=${color.red},${color.green},${color.blue},${color.alpha} value=$value")
+                                }
+                            })
+                        }
+                        assertEquals("$legacy: node overtook incoming, frame $index", 0f, nodeAmount, .1f)
                         assertEquals("$legacy: header/body overtook incoming, frame $index", 0f, bodyInk(p, target), .03f)
                         assertEquals("typewriter ran before arrival", feedback, advances.get())
                     }

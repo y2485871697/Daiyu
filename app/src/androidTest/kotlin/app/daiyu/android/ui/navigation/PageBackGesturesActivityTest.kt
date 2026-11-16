@@ -1049,13 +1049,30 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     }
 
     private fun awaitFrozenPixels(source: () -> PageBackPreviewLayers.Frame?) {
-        ui.waitUntil(5_000) {
-            var ready = false
-            instrumentation.runOnMainSync {
-                ready = source()?.let { it.frozen && it.navigationFrozen && !it.releaseRequested &&
-                    it.size.width > 0 && it.size.height > 0 && it.canDrawPreview } == true
+        // A stopped Compose clock must still submit the real draw and drain the frozen copy.
+        captureScreenNode(ui.onNodeWithTag("page-back-host"))
+        try {
+            ui.waitUntil(5_000) {
+                var ready = false
+                instrumentation.runOnMainSync {
+                    ready = source()?.let { it.frozen && it.navigationFrozen && !it.releaseRequested &&
+                        it.size.width > 0 && it.size.height > 0 && it.canDrawPreview } == true
+                }
+                if (!ready) ui.mainClock.advanceTimeByFrame()
+                ready
             }
-            ready
+        } catch (failure: ComposeTimeoutException) {
+            var state = "no frame"
+            instrumentation.runOnMainSync {
+                source()?.let { frame ->
+                    state = "key=${frame.key} identity=${System.identityHashCode(frame)} " +
+                        "released=${frame.releaseRequested} frozen=${frame.frozen}/${frame.navigationFrozen} " +
+                        "generation=${frame.generation} size=${frame.size} image=${frame.image != null} " +
+                        "inherited=${frame.inheritedImage != null} " +
+                        "capture=${frame.capture?.isCompleted}/${frame.capture?.isCancelled}"
+                }
+            }
+            throw AssertionError("Frozen pixels did not become ready: $state", failure)
         }
     }
 

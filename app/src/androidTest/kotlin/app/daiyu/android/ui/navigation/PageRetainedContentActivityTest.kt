@@ -679,13 +679,30 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
     fun testRealChatSwipeReturnDrawsLiveContentWithoutRemount() = assertRealChatReturn(swipe = true)
 
     private fun awaitFrozenPixels(source: () -> PageBackPreviewLayers.Frame?) {
-        ui.waitUntil(5_000) {
-            var ready = false
-            instrumentation.runOnMainSync {
-                ready = source()?.let { it.frozen && it.navigationFrozen && !it.releaseRequested &&
-                    it.size.width > 0 && it.size.height > 0 && it.canDrawPreview } == true
+        // A stopped Compose clock must still submit the real draw and drain the frozen copy.
+        captureScreenNode(ui.onNodeWithTag("page-back-host"))
+        try {
+            ui.waitUntil(5_000) {
+                var ready = false
+                instrumentation.runOnMainSync {
+                    ready = source()?.let { it.frozen && it.navigationFrozen && !it.releaseRequested &&
+                        it.size.width > 0 && it.size.height > 0 && it.canDrawPreview } == true
+                }
+                if (!ready) ui.mainClock.advanceTimeByFrame()
+                ready
             }
-            ready
+        } catch (failure: ComposeTimeoutException) {
+            var state = "no frame"
+            instrumentation.runOnMainSync {
+                source()?.let { frame ->
+                    state = "key=${frame.key} identity=${System.identityHashCode(frame)} " +
+                        "released=${frame.releaseRequested} frozen=${frame.frozen}/${frame.navigationFrozen} " +
+                        "generation=${frame.generation} size=${frame.size} image=${frame.image != null} " +
+                        "inherited=${frame.inheritedImage != null} " +
+                        "capture=${frame.capture?.isCompleted}/${frame.capture?.isCancelled}"
+                }
+            }
+            throw AssertionError("Frozen pixels did not become ready: $state", failure)
         }
     }
 
@@ -707,6 +724,14 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         var chatFrame: PageBackPreviewLayers.Frame? = null
         var settingsFrame: PageBackPreviewLayers.Frame? = null
         var detailFrame: PageBackPreviewLayers.Frame? = null
+        fun observeFrame(frame: PageBackPreviewLayers.Frame?) {
+            if (frame == null) return
+            when (frame.key) {
+                "chat" -> chatFrame = frame
+                "settings" -> settingsFrame = frame
+                else -> detailFrame = frame
+            }
+        }
         var settingsDetail by mutableStateOf(false)
         var observedStack: PageBackStackRegistry? = null
         val insetsProbe = PageBackInsetsProbe()
@@ -731,18 +756,16 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                                 dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
                                 backTargetKey = when (rendered) { "chat" -> null; "appearance" -> "settings"; else -> "chat" },
                                 retainedRootKey = "chat", retainedRootScopeKey = scopeKey,
+                                captureFromContent = true,
                                 previewCapture = { frame ->
-                                    when (frame.key) {
-                                        "chat" -> chatFrame = frame
-                                        "settings" -> settingsFrame = frame
-                                        else -> detailFrame = frame
-                                    }
                                     check(frame.frozen && frame.navigationFrozen)
                                     frame.layer.toImageBitmap()
                                 },
                                 retainedRootContent = {
+                                    val currentFrame = LocalPageBackPreviewFrame.current
+                                    SideEffect { observeFrame(currentFrame) }
                                     DisposableEffect(Unit) { mounts++; onDispose { disposals++ } }
-                                    Box(Modifier.fillMaxSize().onGloballyPositioned { retainedCoordinates = it }
+                                    Box(Modifier.fillMaxSize().pageBackPreviewSource().onGloballyPositioned { retainedCoordinates = it }
                                         .drawWithContent {
                                             liveDraws++
                                             drawContent()
@@ -775,12 +798,13 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                                 },
                             ) {
                                 val registry = LocalPageBackStackPath.current?.registry
-                                SideEffect { observedStack = registry }
+                                val currentFrame = LocalPageBackPreviewFrame.current
+                                SideEffect { observedStack = registry; observeFrame(currentFrame) }
                                 if (rendered != "chat") {
                                     PageBackHandler { detailBacks++; route = if (rendered == "appearance") "settings" else "chat" }
                                     PageBackStack(if (settingsDetail) "detail" else null) {
                                         PageBackHandler(enabled = settingsDetail) { detailBacks++; settingsDetail = false }
-                                        Box(Modifier.fillMaxSize().background(if (settingsDetail || rendered == "appearance") Color.Yellow else Color.Blue).testTag("detail-root"))
+                                        Box(Modifier.fillMaxSize().pageBackPreviewSource().background(if (settingsDetail || rendered == "appearance") Color.Yellow else Color.Blue).testTag("detail-root"))
                                     }
                                 }
                             }

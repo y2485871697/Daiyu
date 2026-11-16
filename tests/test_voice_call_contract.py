@@ -241,6 +241,8 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertIn('} else fade(current)', dismiss)
         self.assertIn('LaunchedEffect(inApp, genieClosing, motion.transforming)', floating)
         self.assertIn('FLAG_LAYOUT_IN_SCREEN', floating)
+        self.assertIn('viewTreeObserver.addOnPreDrawListener(syncOrigin)', floating)
+        self.assertIn('viewTreeObserver.removeOnPreDrawListener(syncOrigin)', floating)
         self.assertIn('composition.translationX = -origin[0].toFloat()', floating)
         self.assertIn('composition.translationY = -origin[1].toFloat()', floating)
         overlay = (SRC / 'ui/screens/chat/conversation/DoubaoCallOverlay.kt').read_text()

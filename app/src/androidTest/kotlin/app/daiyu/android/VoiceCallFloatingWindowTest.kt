@@ -384,6 +384,15 @@ class VoiceCallFloatingWindowTest {
         tapMinimize(root)
         await("real minimize tap reaches the settled Compose control") { minimizes == 1 }
         main {
+            ready = false
+            val move = host.javaClass.declaredMethods.single { it.name.startsWith("move-") }
+                .apply { isAccessible = true }
+            move.invoke(host, root, androidx.compose.ui.geometry.Offset(8f, 8f).packedValue)
+        }
+        await("moved window redraws in real screen coordinates") { ready }
+        tapMinimize(root)
+        await("real control remains clickable after window translation") { minimizes == 2 }
+        main {
             host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), callbacks, anchor, motion, inApp = true)
             host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), callbacks, anchor, motion, inApp = true)
             assertFalse(host.isShowing(state.sessionKey))

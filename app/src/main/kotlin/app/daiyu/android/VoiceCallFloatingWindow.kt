@@ -9,6 +9,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
+import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
@@ -277,6 +278,10 @@ internal class VoiceCallFloatingWindow(context: Context,
         override val lifecycle: Lifecycle get() = ownerLifecycle
         override val savedStateRegistry: SavedStateRegistry get() = savedState.savedStateRegistry
         private val composition: ComposeView
+        private val syncOrigin = ViewTreeObserver.OnPreDrawListener {
+            syncCompositionOrigin()
+            true
+        }
         private var released = false
         private val releaseAfterDetach = Runnable {
             if (departing && !removed) remove(this, completed = true) else release()
@@ -309,9 +314,13 @@ internal class VoiceCallFloatingWindow(context: Context,
             }
             val metrics = app.resources.displayMetrics
             addView(composition, LayoutParams(metrics.widthPixels, metrics.heightPixels))
+            viewTreeObserver.addOnPreDrawListener(syncOrigin)
         }
         override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
             super.onLayout(changed, left, top, right, bottom)
+            syncCompositionOrigin()
+        }
+        private fun syncCompositionOrigin() {
             val origin = IntArray(2)
             getLocationOnScreen(origin)
             composition.translationX = -origin[0].toFloat()
@@ -326,6 +335,7 @@ internal class VoiceCallFloatingWindow(context: Context,
             if (released) return
             released = true
             mainHandler.removeCallbacks(releaseAfterDetach)
+            if (viewTreeObserver.isAlive) viewTreeObserver.removeOnPreDrawListener(syncOrigin)
             composition.disposeComposition()
             if (lifecycle.currentState != Lifecycle.State.DESTROYED)
                 ownerLifecycle.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)

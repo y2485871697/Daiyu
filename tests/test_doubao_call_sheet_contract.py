@@ -15,7 +15,7 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
         main = (SRC / 'MainActivity.kt').read_text()
         self.assertNotIn('val pageCallUi = shownVoiceCall()', main)
         self.assertNotIn('callUi = pageCallUi,', main)
-        self.assertIn('floatingCall.update(shown, actions)', main)
+        self.assertIn('floatingCall.update(shown, actions, floatingCallAnchor, floatingCallButtonMotion,', main)
         self.assertIn('else doubaoCallActions()', main)
         self.assertNotIn('engineeringUi || remoteVoice.duplexActive', main)
 
@@ -217,7 +217,9 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
         self.assertIn('(shadow.height - content.height) / 2f', composite)
         self.assertIn('.outset(padding * endpointSize / size.width, padding * endpointSize / size.height)', overlay)
         self.assertIn('size.height).outset(padding)', overlay)
-        composition = overlay.split('val morphing =', 1)[1].split('.drawWithContent {', 1)[0]
+        panel = overlay.split('private fun CallGeniePanel(', 1)[1]
+        composition = panel.split('LaunchedEffect(state.presentation, animationAllowed)', 1)[0]
+        composition += panel.split('val panelWidth =', 1)[1].split('.drawWithContent {', 1)[0]
         self.assertNotIn('progress.value', composition)
         morph = overlay.split('// Never replay the full live display list once per strip.', 1)[1].split('.clip(shape)', 1)[0]
         self.assertIn('drawImage(bitmap)', morph)

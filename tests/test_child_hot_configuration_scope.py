@@ -36,7 +36,7 @@ class ChildHotConfigurationScopeTest(unittest.TestCase):
 
     def test_frozen_recorder_uses_the_validation_checkout(self):
         source = inspect.getsource(recorder.record)
-        self.assertIn('if scope in ("child-hot-configuration-targeted",', source)
+        self.assertIn('if scope in ("doubao-motion-targeted", "child-hot-configuration-targeted",', source)
         self.assertIn('validation_cwd = Path(__file__).resolve().parents[2]', source)
         self.assertIn('cwd=validation_cwd', source)
 

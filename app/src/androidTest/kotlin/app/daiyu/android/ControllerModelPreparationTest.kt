@@ -508,9 +508,16 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             assertEquals("gpt-6.1-sol", frozen.get().model)
             assertEquals(RunStatus.COMPLETED, f.db.messages(conversation.id).last().second.status)
             if (access == app.daiyu.android.browser.session.BrowserAccess.READ_ONLY) {
+                val writeSchema = org.json.JSONObject(probe.definitions.single { it.name == "browser_write" }.parameters)
+                val properties = writeSchema.getJSONObject("properties")
+                val actions = properties.getJSONObject("action").getJSONArray("enum")
+                assertEquals(setOf("new_tab", "close_tab"),
+                    (0 until actions.length()).map { actions.getString(it) }.toSet())
+                assertFalse(properties.has("url"))
+                assertFalse(writeSchema.getBoolean("additionalProperties"))
                 val rejected = org.json.JSONObject(probe.returned.single().single().output)
                 assertFalse(rejected.getBoolean("ok")); assertFalse(rejected.getBoolean("executed"))
-                assertEquals("preparation_failed", rejected.getString("error"))
+                assertEquals("invalid_arguments", rejected.getString("error"))
             }
             assertTrue(ledger(f).isEmpty())
         }

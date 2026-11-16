@@ -21,14 +21,26 @@ class ChildTaskHotConfigurationTest {
             enqueues.incrementAndGet(); tasks.forEach { rows[it.owner.childRunId] = it }
         }
         override fun started(task: ChildTaskRecord) {
-            synchronized(this) { rows[task.owner.childRunId] = task.copy(status = ChildTaskStatus.RUNNING) }
+            synchronized(this) {
+                check(rows.getValue(task.owner.childRunId).status == ChildTaskStatus.QUEUED)
+                check(task.status == ChildTaskStatus.QUEUED)
+                rows[task.owner.childRunId] = task.copy(status = ChildTaskStatus.RUNNING)
+            }
             onStarted()
         }
         override fun selected(task: ChildTaskRecord, display: ChildTaskDisplay?) {
-            synchronized(this) { rows[task.owner.childRunId] = rows.getValue(task.owner.childRunId).copy(display = display) }
+            synchronized(this) {
+                val prior = rows.getValue(task.owner.childRunId)
+                check(prior.status == ChildTaskStatus.RUNNING)
+                check(task.status == ChildTaskStatus.QUEUED && task.text.isEmpty() && task.detail == null)
+                check(prior.copy(status = ChildTaskStatus.QUEUED, text = "", detail = null,
+                    display = task.display) == task)
+                rows[task.owner.childRunId] = prior.copy(display = display)
+            }
             onSelected()
         }
         @Synchronized override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) {
+            check(task.status == ChildTaskStatus.QUEUED && task.text.isEmpty() && task.detail == null)
             rows[task.owner.childRunId] = rows.getValue(task.owner.childRunId).copy(status = status, text = text, detail = detail)
         }
         @Synchronized override fun reassigned(task: ChildTaskRecord, profileId: String, display: ChildTaskDisplay?): ChildTaskRecord? {
@@ -134,6 +146,60 @@ class ChildTaskHotConfigurationTest {
                 assertEquals(accepted.tasks.map { it.owner }.toSet(), journal.rows.values.map { it.owner }.toSet())
             } finally { finishA.countDown(); finishB.countDown(); close(supervisor) }
         }
+    }
+
+    @Test fun waitingAcrossParentBindingsDoesNotSelectOrStartBeforeCapacityIsAvailable() {
+        val journal = Journal(); val supervisor = RetainedChildTasks(journal)
+        val first = Parent("first"); val second = Parent("second")
+        val opens = AtomicInteger(); val selections = AtomicInteger(); val finish = CountDownLatch(1)
+        journal.onSelected = { selections.incrementAndGet() }
+        val port = ModelPort {
+            opens.incrementAndGet()
+            object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    check(finish.await(10, TimeUnit.SECONDS)); sink(ModelEvent.TextFinal("text", "done"))
+                }
+                override fun cancel() {}
+            }
+        }
+        val definition = ChildModelDefinition("shared", 1) { port }
+        val a = supervisor.bind(first.owner, first.caps, first.auth, mapOf("p" to definition))
+        val b = supervisor.bind(second.owner, second.caps, second.auth, mapOf("p" to definition))
+        try {
+            supervisor.submit(a, first.context("same-call"), listOf(ChildModelTask("p", "first"))) as ChildTaskAdmission.Accepted
+            await { opens.get() == 1 }
+            val accepted = supervisor.submit(b, second.context("same-call"), listOf(ChildModelTask("p", "second")))
+                as ChildTaskAdmission.Accepted
+            await { supervisor.snapshots(b).single().queueState == ChildTaskQueueState.PENDING }
+            assertEquals(ChildTaskStatus.QUEUED, journal.get(accepted.tasks.single().owner)?.status)
+            assertEquals(1, opens.get()); assertEquals(1, selections.get())
+            finish.countDown()
+            await { supervisor.snapshots(a).all { it.settled } && supervisor.snapshots(b).all { it.settled } }
+            assertEquals(2, opens.get()); assertEquals(2, selections.get())
+            assertEquals(2, journal.rows.size)
+            assertTrue(journal.rows.values.all { it.status == ChildTaskStatus.COMPLETED })
+        } finally { finish.countDown(); close(supervisor) }
+    }
+
+    @Test fun runningHandoffNormalizesTheJournalIdentityBeforeSelectionAndCompletion() {
+        val journal = Journal(); val supervisor = RetainedChildTasks(journal); val parent = Parent()
+        val opensA = AtomicInteger(); val opensB = AtomicInteger(); val selections = AtomicInteger()
+        val a = ChildModelDefinition("pool-a", 1) { answer(opensA, "a") }.identified("a", "a", "group")
+        val b = ChildModelDefinition("pool-b", 1) { answer(opensB, "b") }.identified("b", "b", "group")
+        val current = AtomicReference(a)
+        val definition = ChildModelDefinition(a.poolKey, a.parallelLimit, null, latest = { current.get() },
+            selection = Any()) { error("prototype must not open") }
+        journal.onSelected = { if (selections.incrementAndGet() == 1) current.set(b) }
+        val binding = supervisor.bind(parent.owner, parent.caps, parent.auth, mapOf("a" to definition))
+        try {
+            val admitted = supervisor.submit(binding, parent.context("handoff"), listOf(ChildModelTask("a", "task")))
+                as ChildTaskAdmission.Accepted
+            await { supervisor.snapshots(binding).single().settled }
+            val row = checkNotNull(journal.get(admitted.tasks.single().owner))
+            assertEquals("b", row.assignedProfileId); assertEquals(1L, row.revision)
+            assertEquals(ChildTaskStatus.COMPLETED, row.status); assertEquals("b", row.text)
+            assertEquals(0, opensA.get()); assertEquals(1, opensB.get()); assertEquals(2, selections.get())
+        } finally { close(supervisor) }
     }
 
     @Test fun configureExistingPoolAppliesNewCapacityWithoutASeparateReconcile() {

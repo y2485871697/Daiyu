@@ -355,14 +355,20 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                             waitingLeases.clear()
                         }
                         var recordedSelection: ChildModelDefinition? = null
+                        fun recordAssignment(selected: ChildModelDefinition) {
+                            val profileId = selected.profileId ?: assignment.profileId
+                            if (record.assignedProfileId == profileId) return
+                            record = if (store == null) record.copy(assignedProfileId = profileId)
+                            else checkNotNull(store.reassigned(record, profileId, selected.display)) {
+                                "child_assignment_unconfirmed"
+                            }.copy(status = ChildTaskStatus.QUEUED, text = "", detail = null)
+                            synchronized(gate) { activeChild.record = record }
+                        }
                         fun recordSelection(selected: ChildModelDefinition) {
                             val profileId = selected.profileId ?: assignment.profileId
                             if (recordedSelection?.sameSelection(selected) == true && record.assignedProfileId == profileId &&
                                 recordedSelection?.requestModel == selected.requestModel) return
-                            if (record.assignedProfileId != profileId) {
-                                record = if (store == null) record.copy(assignedProfileId = profileId)
-                                else checkNotNull(store.reassigned(record, profileId, selected.display)) { "child_assignment_unconfirmed" }
-                            }
+                            recordAssignment(selected)
                             store?.selected(record, selected.display)
                             record = record.copy(display = selected.display)
                             synchronized(gate) { activeChild.record = record; activeChild.selected = selected }
@@ -419,7 +425,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                 val ready = ChildPoolLease.acquireBalanced(waitingLeases.values.toList())
                                 if (ready == null) {
                                     // Binding is accepted even while all compatible capacity is busy.
-                                    if (definition.select(current)) recordSelection(current)
+                                    if (definition.select(current)) recordAssignment(current)
                                     poolWaiting(true); Thread.sleep(25); continue
                                 }
                                 val (selected, selectedLease) = ready

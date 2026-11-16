@@ -358,7 +358,10 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             enabled = pageActive && (callUi != null || voiceMenuEnabled),
                             description = if (callUi != null) "挂断${callUi.title}"
                                 else if (state.voiceMode == ChatMenuAction.VOICE_DOUBAO) "开始豆包实时通话" else null,
-                            callMotion = callEntryMotion ?: callMotion.takeIf { callUi?.presentation == DoubaoCallPresentation.EXPANDED },
+                            callMotion = callEntryMotion ?: callMotion.takeIf {
+                                callUi?.presentation == DoubaoCallPresentation.EXPANDED ||
+                                    callUi?.presentation == DoubaoCallPresentation.CLOSING
+                            },
                             modifier = Modifier.onGloballyPositioned { onVoiceAnchorBounds(it.boundsInRoot()) },
                             onClick = { if (callUi != null || state.voiceMode in state.voiceModes) actions.onVoice() },
                             onLongClick = if (callUi != null || voiceMenuEnabled) ({

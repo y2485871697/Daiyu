@@ -16,6 +16,7 @@ import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
 class VoiceCallFloatingWindowTest {
@@ -33,11 +34,13 @@ class VoiceCallFloatingWindowTest {
         private val actual: WindowManager = context.getSystemService(WindowManager::class.java)) : WindowManager by actual {
         val added = mutableListOf<View>()
         val removals = mutableListOf<View>()
+        var updates = 0
         var failAdd = false
         var failUpdate = false
         var onDraw: ((View) -> Unit)? = null
         override fun updateViewLayout(view: View, params: ViewGroup.LayoutParams) {
             if (failUpdate) throw SecurityException("synthetic overlay update rejection")
+            updates++
             actual.updateViewLayout(view, params)
         }
         override fun addView(view: View, params: ViewGroup.LayoutParams) {
@@ -127,6 +130,8 @@ class VoiceCallFloatingWindowTest {
             val expanded = root.width
             val params = root.layoutParams as WindowManager.LayoutParams
             assertEquals(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, params.type)
+            assertTrue(params.flags and WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED != 0)
+            assertTrue(root.isHardwareAccelerated)
             assertTrue(params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
             assertTrue(params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL != 0)
             assertTrue(root.height < context.resources.displayMetrics.heightPixels)
@@ -326,6 +331,9 @@ class VoiceCallFloatingWindowTest {
             val move = host.javaClass.declaredMethods.single { it.name.startsWith("move-") }
                 .apply { isAccessible = true }
             move.invoke(host, windows.added.single(), androidx.compose.ui.geometry.Offset(8f, 8f).packedValue)
+        }
+        await("coalesced drag reports rejected window update") { unavailable == 1 }
+        main {
             assertEquals(1, unavailable)
             assertFalse(host.isShowing(-10L))
             assertFalse(windows.added.single().isAttachedToWindow)
@@ -520,4 +528,187 @@ class VoiceCallFloatingWindowTest {
         }
     }
 
+
+    private fun awaitCommittedDraw(root: View) {
+        val frame = java.util.concurrent.CountDownLatch(1)
+        val listener = android.view.ViewTreeObserver.OnDrawListener {
+            if (android.os.Build.VERSION.SDK_INT >= 29 && root.isHardwareAccelerated) {
+                root.viewTreeObserver.registerFrameCommitCallback { frame.countDown() }
+            } else root.postOnAnimation { frame.countDown() }
+        }
+        main { root.viewTreeObserver.addOnDrawListener(listener); root.invalidate() }
+        try {
+            assertTrue("native frame committed", frame.await(2, java.util.concurrent.TimeUnit.SECONDS))
+        } finally { main { if (root.viewTreeObserver.isAlive) root.viewTreeObserver.removeOnDrawListener(listener) } }
+    }
+
+    private fun panel(root: View) = root.javaClass.getDeclaredMethod("getPanelBounds").apply { isAccessible = true }
+        .invoke(root) as androidx.compose.ui.geometry.Rect
+
+    private fun move(root: View, x: Float, y: Float) {
+        host.javaClass.declaredMethods.single { it.name.startsWith("move-") }.apply { isAccessible = true }
+            .invoke(host, root, androidx.compose.ui.geometry.Offset(x, y).packedValue)
+    }
+
+    @Test fun untouchedWindowTracksEachComposerFrameAndRestoresItsFullDefaultBounds() {
+        val state = picture(-30L).copy(skipEntryAnimation = true)
+        val full = callAnchor()
+        val density = context.resources.displayMetrics.density
+        fun shifted(dy: Float) = full.copy(bounds = full.bounds.translate(androidx.compose.ui.geometry.Offset(0f, dy)),
+            composerTop = full.composerTop + dy)
+        main { assertTrue(host.update(state, actions, shifted(-220f * density), inApp = true)) }
+        await("keyboard anchor fixture") { windows.added.single().isLaidOut }
+        val root = windows.added.single()
+        var followed = androidx.compose.ui.geometry.Rect.Zero
+        for (offset in listOf(-220f, -183f, -129f, -72f, -9f, 0f)) {
+            val anchor = shifted(offset * density)
+            main { assertTrue(host.update(state, actions, anchor, inApp = true)) }
+            awaitCommittedDraw(root)
+            main {
+                assertEquals("same-frame composer bottom alignment", anchor.composerTop - 10f * density,
+                    panel(root).bottom, 1f)
+                val screen = IntArray(2)
+                val local = IntArray(2)
+                root.getLocationOnScreen(screen)
+                root.getLocationInWindow(local)
+                val params = root.layoutParams as WindowManager.LayoutParams
+                assertEquals(params.x, screen[0] - local[0])
+                assertEquals(params.y, screen[1] - local[1])
+                val composition = (root as ViewGroup).getChildAt(0)
+                assertEquals(-(screen[1] - local[1]).toFloat(), composition.translationY, .5f)
+            }
+        }
+        main {
+            followed = panel(root)
+            val direct = state.copy(sessionKey = -31L)
+            assertTrue(host.update(direct, actions, full, inApp = true))
+            assertEquals("IME dismissal must match a direct no-IME entry", followed, panel(windows.added.last()))
+        }
+        val next = windows.added.last()
+        await("fresh default window attached") { next.isLaidOut }
+        main { move(next, 0f, -12f) }
+        await("manual drag consumed") { panel(next).top < followed.top }
+        main {
+            val manual = panel(next)
+            assertTrue(host.update(state.copy(sessionKey = -31L), actions, shifted(-80f * density), inApp = true))
+            assertEquals("manually moved calls do not re-anchor", manual, panel(next))
+        }
+    }
+
+    @Test fun stableDragIsCoalescedAndKeepsTheHandleOutsideTheStatusBar() {
+        val state = picture(-32L).copy(skipEntryAnimation = true)
+        main { assertTrue(host.update(state, actions, callAnchor(), inApp = true)) }
+        await("coalesced drag fixture") { windows.added.single().isLaidOut }
+        val root = windows.added.single()
+        var updates = 0
+        var before = androidx.compose.ui.geometry.Rect.Zero
+        main {
+            updates = windows.updates
+            before = panel(root)
+            repeat(12) { move(root, 0f, -1f) }
+            assertEquals("pointer events must not submit separate WM layouts", updates, windows.updates)
+        }
+        await("one coalesced move") { panel(root).top < before.top }
+        main {
+            assertEquals(updates + 1, windows.updates)
+            assertEquals(before.top - 12f, panel(root).top, .01f)
+            move(root, 0f, -100_000f)
+        }
+        await("upward drag reaches safe top") {
+            val safe = root.javaClass.getDeclaredMethod("getSafeTop").apply { isAccessible = true }.invoke(root) as Int
+            panel(root).top == safe.toFloat()
+        }
+        main {
+            val safe = root.javaClass.getDeclaredMethod("getSafeTop").apply { isAccessible = true }.invoke(root) as Int
+            assertTrue("fixture must have a nonzero status-bar inset", safe > 0)
+            assertEquals(safe.toFloat(), panel(root).top, 0f)
+            assertTrue(host.update(state.copy(presentation = DoubaoCallPresentation.MINI), actions, callAnchor(), inApp = true))
+            move(root, 0f, 20f)
+        }
+        await("mini moves away from upper boundary first") {
+            val safe = root.javaClass.getDeclaredMethod("getSafeTop").apply { isAccessible = true }.invoke(root) as Int
+            panel(root).top > safe
+        }
+        main { move(root, 0f, -100_000f) }
+        await("mini handle remains below status bar") {
+            val safe = root.javaClass.getDeclaredMethod("getSafeTop").apply { isAccessible = true }.invoke(root) as Int
+            panel(root).top == safe.toFloat()
+        }
+        main {
+            val count = windows.updates
+            move(root, 0f, 12f)
+            host.hide()
+            assertEquals(count, windows.updates)
+        }
+        SystemClock.sleep(50)
+        main { assertFalse(root.isAttachedToWindow); assertEquals(0, hangups) }
+    }
+
+    @Test fun frozenSystemWindowPanelHasNoOpacityJumpWhenItBecomesLive() {
+        val state = picture(-33L)
+        val motion = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallMotionState()
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main.immediate)
+        var liveReady = false
+        val callbacks = actions.copy(onPresentationReady = { liveReady = true })
+        val drawing = androidx.test.platform.graphics.HardwareRendererCompat.isDrawingEnabled()
+        val diagnostics = java.io.File(context.getExternalFilesDir(null), "visual-diagnostics/native-call-alpha")
+            .apply { mkdirs() }
+        fun capture(root: View, name: String): android.graphics.Bitmap {
+            awaitCommittedDraw(root)
+            val image = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+            java.io.File(diagnostics, "$name.png").outputStream().use {
+                check(image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+            }
+            return image
+        }
+        try {
+            if (!drawing) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
+            main { assertTrue(host.update(state, callbacks, callAnchor(), motion, inApp = true)) }
+            await("native capture reached actual Genie raster") {
+                windows.added.singleOrNull()?.isLaidOut == true && motion.transforming && motion.progress.value > 0f
+            }
+            val root = windows.added.single()
+            main {
+                assertTrue(root.isHardwareAccelerated)
+                scope.launch { motion.progress.stop(); motion.progress.snapTo(.999f) }
+                root.setBackgroundColor(android.graphics.Color.BLACK)
+            }
+            await("near-end frozen native panel") { motion.transforming && motion.progress.value == .999f }
+            val frozenDark = capture(root, "frozen-dark")
+            main { root.setBackgroundColor(android.graphics.Color.WHITE) }
+            val frozenLight = capture(root, "frozen-light")
+            main { scope.launch { motion.progress.snapTo(1f); motion.transforming = false } }
+            await("actual live branch after frozen raster") { liveReady }
+            val live = capture(root, "live-light")
+            var bounds = androidx.compose.ui.geometry.Rect.Zero
+            main { bounds = panel(root) }
+            val density = context.resources.displayMetrics.density
+            val controlX = bounds.center.x.roundToInt()
+            val controlY = (bounds.top - 27f * density).roundToInt()
+            val control = listOf(frozenDark.getPixel(controlX, controlY), frozenLight.getPixel(controlX, controlY), live.getPixel(controlX, controlY))
+            java.io.File(diagnostics, "control.txt").writeText("panel=$bounds control=$controlX,$controlY rgba=" + control.joinToString { Integer.toHexString(it) })
+            for (channel in listOf<(Int) -> Int>(android.graphics.Color::red, android.graphics.Color::green, android.graphics.Color::blue)) {
+                assertTrue("dark control proves the new background reached composition: $control", channel(control[0]) < 8)
+                assertTrue("light control proves the new background reached composition: $control", channel(control[1]) > 247)
+                assertTrue("live control stays on the light background: $control", channel(control[2]) > 247)
+            }
+            val samples = mutableListOf<String>()
+            for (i in 1..9) {
+                val x = (bounds.left + 8f * density).roundToInt()
+                val y = (bounds.top + bounds.height * (i / 10f)).roundToInt()
+                val colors = listOf(frozenDark.getPixel(x, y), frozenLight.getPixel(x, y), live.getPixel(x, y))
+                samples += "$x,$y: " + colors.joinToString { Integer.toHexString(it) }
+                assertTrue("target panel exists in screenshot", kotlin.math.abs(android.graphics.Color.red(colors[2]) - 253) <= 4 &&
+                    kotlin.math.abs(android.graphics.Color.green(colors[2]) - 251) <= 4 && android.graphics.Color.blue(colors[2]) >= 251)
+                for (channel in listOf<(Int) -> Int>(android.graphics.Color::red, android.graphics.Color::green, android.graphics.Color::blue)) {
+                    assertTrue("frozen panel leaks its black backdrop at $x,$y: $colors", kotlin.math.abs(channel(colors[0]) - channel(colors[1])) <= 4)
+                    assertTrue("frozen-to-live opacity jump at $x,$y: $colors", kotlin.math.abs(channel(colors[1]) - channel(colors[2])) <= 4)
+                }
+            }
+            java.io.File(diagnostics, "samples.txt").writeText("panel=$bounds hardware=${root.isHardwareAccelerated}\n" + samples.joinToString("\n"))
+        } finally {
+            scope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
+            if (!drawing) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(false)
+        }
+    }
 }

@@ -2587,7 +2587,8 @@ class MainActivity : ComponentActivity() {
                                         onPresentationReady = onReady,
                                         callEntryMotion = floatingCallButtonMotion.takeIf {
                                             shownVoiceCall()?.let { call -> call.sessionKey == floatingCallMotionKey &&
-                                                call.presentation == DoubaoCallPresentation.EXPANDED } == true
+                                                (call.presentation == DoubaoCallPresentation.EXPANDED ||
+                                                    call.presentation == DoubaoCallPresentation.CLOSING) } == true
                                         },
                                         onCallAnchorChanged = { anchor ->
                                             if (routeActive && pageCurrent && presented && !sidebarVisible && floatingCallAnchor != anchor) {

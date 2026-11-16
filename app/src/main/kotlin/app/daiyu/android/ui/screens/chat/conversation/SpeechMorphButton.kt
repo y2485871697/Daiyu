@@ -86,7 +86,7 @@ internal fun SpeechMorphButton(
                 rotationZ = callEntryRotation(progress)
             },
             indicatorSize = 20.dp,
-            // Call entries pass only their opening motion; dictation keeps its activity feedback.
+            // Entry and closing share the window clock; stable calls do not keep spinning.
             animate = generating || listening || showPressFeedback || callMotion?.transforming == true,
         )
     }

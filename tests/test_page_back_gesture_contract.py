@@ -368,7 +368,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('freezeForNavigation(frame)', freeze)
         self.assertNotIn('frame.ready?.takeIf', freeze)
         self.assertIn('frame.key != currentKey && frame.navigationFrozen', layers)
-        self.assertIn('frame.captures.any { !it.isCompleted }', layers)
+        self.assertIn('frame.captures.any { !it.isCompleted && !it.isCancelled }', layers)
         self.assertIn('retainedRootKey = "chat"', self.main)
         self.assertEqual(1, self.main.count('chatPageState.SaveableStateProvider('))
         self.assertIn('backHandlerEnabled = routeActive', self.main)

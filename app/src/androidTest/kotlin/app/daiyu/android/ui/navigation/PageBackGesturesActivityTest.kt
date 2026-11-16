@@ -1113,7 +1113,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private fun assertReleaseClockContinuity(rtl: Boolean) {
         predictive = false
         navigateOnBack = true
-        mount(capturePreviousPage = true, rtl = rtl)
+        mount(capturePreviousPage = true, rtl = rtl, immediateCapture = true)
         ui.mainClock.autoAdvance = false
         try {
             val initial = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
@@ -1129,7 +1129,12 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeBy(32)
             val released = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
             assertTrue("the release trajectory starts from a moving page", direction * (edge(released) - edge(initial)) > 0f)
-            awaitFrozenPixels { observedFrame }
+            ui.runOnIdle {
+                val frame = checkNotNull(observedFrame)
+                assertTrue("motion fixture already owns its unchanged frozen pixels",
+                    frame.frozen && frame.navigationFrozen && !frame.releaseRequested &&
+                        frame.size.width > 0 && frame.size.height > 0 && frame.canDrawPreview)
+            }
             ui.onNodeWithTag("page-back-host").performTouchInput { up() }
             ui.runOnIdle {
                 assertEquals("previous-page", route)

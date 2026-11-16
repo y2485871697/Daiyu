@@ -584,6 +584,17 @@ CATALOG_MODEL_EDITOR_MODULES = (
 )
 
 
+SEARCH_BROWSER_PLATFORM_CLASSES = (
+    CATALOG_MODEL_EDITOR_PLATFORM_CLASS,
+    "app.daiyu.android.storage.ModelSettingsCatalogBindingTest",
+    "app.daiyu.android.browser.BrowserProductionCompositionTest",
+)
+SEARCH_BROWSER_MODULES = tuple(dict.fromkeys(
+    CATALOG_MODEL_EDITOR_MODULES + PROVIDER_SAVE_MODULES + BROWSER_MODULES
+    + ("test_rikkahub_protocol_port_contract",)
+))
+
+
 PROVIDER_CATALOG_PLATFORM_CLASSES = (
     "app.daiyu.android.ui.screens.settings.ProviderCatalogSettingsScreenTest",
     "app.daiyu.android.LocalCatalogModelsActivityTest",
@@ -792,6 +803,9 @@ PANE_QUESTION_MODULES = (
 
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(SEARCH_BROWSER_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *SEARCH_BROWSER_MODULES, "-v"], "browser-targeted"
     voice = ["app.daiyu.android.ControllerModelPreparationTest"]
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (

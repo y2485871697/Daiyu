@@ -7,7 +7,7 @@ MAIN = ROOT / "app/src/main/kotlin/app/daiyu/android"
 
 
 class ModelEditorDefaultsContractTest(unittest.TestCase):
-    def test_editor_has_only_vision_and_native_search_switches_without_reset_action(self):
+    def test_editor_has_vision_and_two_level_search_without_reset_action(self):
         source = (MAIN / "ui/screens/settings/CatalogModelEditorDialog.kt").read_text()
         for removed in ("恢复自动", "catalog-model-auto", "capabilitySummary", "手动：", "自动：不支持或未知",
                         "该值用于会话裁剪和上下文预算。留空时使用远端或官方目录值。"):
@@ -16,10 +16,19 @@ class ModelEditorDefaultsContractTest(unittest.TestCase):
         self.assertNotIn("summary =", switches)
         self.assertNotIn("支持推理", switches)
         self.assertNotIn("copy(reasoning =", switches)
-        self.assertEqual(2, switches.count("SettingsSwitchRow("))
+        self.assertEqual(3, switches.count("SettingsSwitchRow("))
         self.assertIn('SettingsSwitchRow("支持视觉", value.vision, interactive)', switches)
-        self.assertIn('SettingsSwitchRow("原生搜索", value.nativeSearch, interactive)', switches)
-        self.assertIn('val nativeSearch: Boolean = false', (MAIN / "model/catalog/CatalogModelEdit.kt").read_text())
+        self.assertIn('SettingsSwitchRow("搜索工具", value.searchTools, interactive,', switches)
+        self.assertIn('accessory = if (!nativeSupported) null else', switches)
+        self.assertIn('testTag("catalog-model-search-expand")', switches)
+        self.assertIn('SettingsExpandableContent(nativeSupported && searchExpanded)', switches)
+        self.assertIn('SettingsSwitchRow("原生搜索", value.preferNativeSearch,', switches)
+        self.assertIn('interactive && value.searchTools && nativeSupported && searchExpanded', switches)
+        self.assertIn('value.copy(searchTools = it)', switches)
+        self.assertIn('value.copy(preferNativeSearch = it)', switches)
+        edit = (MAIN / "model/catalog/CatalogModelEdit.kt").read_text()
+        self.assertIn('val searchTools: Boolean = false', edit)
+        self.assertIn('val preferNativeSearch: Boolean = true', edit)
         row = (MAIN / "ui/screens/settings/SettingsUiComponents.kt").read_text().split("internal fun SettingsRow(", 1)[1]
         self.assertIn("verticalAlignment = Alignment.CenterVertically", row.split("internal fun SettingsSwitchRow", 1)[0])
 

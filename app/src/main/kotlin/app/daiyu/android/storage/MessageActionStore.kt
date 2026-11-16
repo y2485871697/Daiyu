@@ -18,7 +18,20 @@ internal data class MessageActionTarget(val conversationId: ConversationId, val 
 internal data class MessageActionSnapshot(val conversationId: ConversationId, val revision: String,
     val targets: Map<String, MessageActionTarget>, val steps: Map<String, MessageActionTarget> = emptyMap(),
     val rowRevisions: Map<String, String> = emptyMap(),
-    val renderedTargets: Map<String, MessageActionTarget> = emptyMap()) {
+    val renderedTargets: Map<String, MessageActionTarget> = emptyMap(),
+    val editBaseline: MessageEditBaseline? = null) {
+    fun refreshedEditTarget(key: String, original: MessageActionTarget,
+        previous: MessageActionSnapshot): MessageActionTarget? {
+        val current = renderedTargets[key] ?: targets[key] ?: return null
+        if (editBaseline?.settled != true || previous.editBaseline?.settled != true) return null
+        if (previous.conversationId != conversationId || original.conversationId != conversationId ||
+            original != (previous.renderedTargets[key] ?: previous.targets[key]) ||
+            original.role != Message.USER_ROLE || original.branchPrefixSize != null ||
+            current != original.copy(revision = revision)) return null
+        if (current == original) return current
+        return current.takeIf { previous.editBaseline?.canRefresh(editBaseline, original) == true }
+    }
+
     fun matchesRendered(rows: List<Message>): Boolean = rows.all {
         it.conversationId == conversationId && rowRevisions[it.id.value] == ContextRevision.digest(listOf(it))
     }
@@ -79,8 +92,9 @@ internal class MessageActionStore(private val database: ConversationDatabase,
                 else if (key !in ambiguousSteps) steps[key] = targets.getValue(owner.id.value).copy(toolCallId = tool.invocation.id)
             }
         }
-        MessageActionSnapshot(id, revision, targets.toMap(), steps.toMap(),
-            history.associate { it.id.value to ContextRevision.digest(listOf(it)) }, renderedTargets.toMap())
+        val rowRevisions = history.associate { it.id.value to ContextRevision.digest(listOf(it)) }
+        MessageActionSnapshot(id, revision, targets.toMap(), steps.toMap(), rowRevisions,
+            renderedTargets.toMap(), if (branchOnly) null else MessageEditBaseline.capture(history, rowRevisions))
     }
 
     fun validate(target: MessageActionTarget) { transactions.run { authorize(it, target) } }

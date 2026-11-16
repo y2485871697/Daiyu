@@ -1485,6 +1485,7 @@ class MainActivity : ComponentActivity() {
     @Volatile private var selectionReady = false
     private data class InlineMessageEditor(val key: String, val text: String,
         val target: app.daiyu.android.storage.MessageActionTarget,
+        val baseline: app.daiyu.android.storage.MessageActionSnapshot,
         val images: List<app.daiyu.android.ui.screens.chat.conversation.MessageContentUi.Image>,
         val videos: List<app.daiyu.android.media.video.MessageVideoReference>,
         val additions: MessageEditImageDraft,
@@ -1563,6 +1564,12 @@ class MainActivity : ComponentActivity() {
                     app.daiyu.android.domain.context.ContextRevision.digest(rows) == key.rows &&
                     candidate != null && candidate.conversationId == owner && candidate.matchesRendered(rows)) {
                     messageActionSnapshot = candidate; messageActionKey = key
+                    inlineMessageEditor?.let { editor ->
+                        candidate.refreshedEditTarget(editor.key, editor.target, editor.baseline)?.let { target ->
+                            if (target != editor.target) inlineMessageEditor = editor.copy(
+                                target = target, baseline = candidate, visit = Any())
+                        }
+                    }
                     publishChat()
                 }
             }
@@ -3401,7 +3408,7 @@ class MainActivity : ComponentActivity() {
                             composerShortcutPick = null
                             clearInlineMessageEditor()
                             inlineMessageEditor = InlineMessageEditor(key, outcome.text, target,
-                                turn.content.filterIsInstance<app.daiyu.android.ui.screens.chat.conversation.MessageContentUi.Image>(),
+                                checkNotNull(actionSnapshot), turn.content.filterIsInstance<app.daiyu.android.ui.screens.chat.conversation.MessageContentUi.Image>(),
                                 outcome.videos, MessageEditImageDraft(target.conversationId.value,
                                     turn.content.count { it is app.daiyu.android.ui.screens.chat.conversation.MessageContentUi.Image },
                                     controller.imageAttachments, lifecycleScope,
@@ -7770,8 +7777,11 @@ class MainActivity : ComponentActivity() {
                 statusText = controller.problem ?: when {
                     controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";
                     !selectionReady -> "加载会话中";
-                    messageEditBlocked -> if (messageActionLoading != null) "正在核对消息；未保存编辑已保留"
-                        else "消息已变化或暂不可核对；编辑已保留，请复制后重新编辑";
+                    messageEditBlocked -> when {
+                        messageActionLoading != null -> "正在核对消息；未保存编辑已保留"
+                        messageActionSnapshot == null -> "暂时无法核对消息；未保存编辑已保留"
+                        else -> "原消息或会话结构已变化；编辑已保留，请复制后重新编辑"
+                    };
                     imageHost.sending -> "正在核实图片发送结果"; else -> null },
                 composer = ComposerUi(text = if (hideSubmittedDraft) "" else inlineMessageEditor?.text ?: draft,
                     selectionStart = if (hideSubmittedDraft) 0 else inlineMessageEditor?.selectionStart ?: selectionStart,

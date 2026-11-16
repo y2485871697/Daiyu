@@ -172,6 +172,63 @@ class MessageActionsActivityTest : WiredActivityTestCase() {
         assertEquals("ordinary draft stays separate", fixture.database.conversations().single { it.id == conversation.id }.draft)
     }
 
+    fun testStoppedAssistantSettlingRevalidatesTheUnchangedUserWithoutLosingItsEdit() {
+        val (conversation, user) = seed()
+        mainThread { activity.select(conversation) }; readySnapshot()
+        mainThread {
+            retainedControls(activity).onTextChange("separate ordinary draft")
+            retainedControls(activity).onEditUser(user.id.value)
+        }
+        awaitControl("edit opened before stop receipt") { !fixture.controller.dataBusy && call("getInlineMessageEditor") != null }
+        lateinit var old: app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
+        mainThread {
+            retainedControls(activity).onTextChange("keep my edited question")
+            retainedControls(activity).onSelectionChange(2, 8)
+            old = retainedControls(activity)
+        }
+        val editor = checkNotNull(call("getInlineMessageEditor"))
+        val additions = editor.javaClass.getDeclaredMethod("getAdditions").apply { isAccessible = true }.invoke(editor)
+        val beforeRevision = (field("messageActionSnapshot") as app.daiyu.android.storage.MessageActionSnapshot).revision
+        val completed = java.util.concurrent.atomic.AtomicReference<Boolean?>(null)
+        mainThread {
+            fixture.controller.dataTask(importing = true, completed = { completed.set(it) }, work = {
+                val blocks = org.json.JSONArray().put(org.json.JSONObject()
+                    .put("type", "text").put("item", "answer").put("text", "settled stopped assistant"))
+                check(fixture.database.writableDatabase.update("messages", android.content.ContentValues().apply {
+                    put("blocks", blocks.toString()); put("status", RunStatus.STOPPED.name); put("error", "stop receipt settled")
+                }, "conversation_id=? AND run_id=? AND role='assistant'",
+                    arrayOf(conversation.id.value, user.runId.value)) == 1)
+                "settled stop receipt"
+            })
+        }
+        awaitControl("unchanged user revalidated after stop receipt") {
+            val snapshot = field("messageActionSnapshot") as? app.daiyu.android.storage.MessageActionSnapshot
+            val state = field("chatState") as app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
+            completed.get() == true && !fixture.controller.dataBusy && snapshot != null &&
+                snapshot.revision != beforeRevision && !state.composer.editingMessageBlocked
+        }
+        mainThread {
+            old.onTextChange("stale callback"); old.onCancelMessageEdit(); old.onSend("keep my edited question")
+            val state = field("chatState") as app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
+            assertEquals("keep my edited question", state.composer.text)
+            assertEquals(2, state.composer.selectionStart); assertEquals(8, state.composer.selectionEnd)
+            assertFalse(state.composer.editingMessageBlocked)
+            assertEquals("separate ordinary draft", field("draft"))
+        }
+        val refreshedEditor = checkNotNull(call("getInlineMessageEditor"))
+        assertSame(additions, refreshedEditor.javaClass.getDeclaredMethod("getAdditions").apply { isAccessible = true }.invoke(refreshedEditor))
+        assertEquals(0, fixture.opens.get())
+        fixture.session("regenerated edited answer", held = false)
+        mainThread { retainedControls(activity).onSend("keep my edited question") }
+        awaitControl("one explicit save after revalidation") {
+            !fixture.controller.dataBusy && call("getInlineMessageEditor") == null && fixture.opens.get() == 1
+        }
+        val rewritten = fixture.database.messages(conversation.id).first().second
+        assertEquals(user.id, rewritten.id)
+        assertEquals("keep my edited question", rewritten.blocks.filterIsInstance<MessageBlock.Text>().single().text)
+        assertEquals("separate ordinary draft", fixture.database.conversations().single { it.id == conversation.id }.draft)
+    }
+
     fun testSameConversationRevisionChangeKeepsUnsavedTextAndBlocksOldTarget() {
         val (conversation, user) = seed()
         mainThread { activity.select(conversation) }; readySnapshot()

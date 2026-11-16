@@ -55,7 +55,7 @@ jobs:
           import json, unittest
           from pathlib import Path
           records = []
-          for pattern in ('test_message_composer_edit_contract.py', 'test_preview_dialog_status_bar_contract.py', 'test_work_timeline_connector_contract.py', 'test_image_sidebar_visibility_contract.py'):
+          for pattern in ('test_message_composer_edit_contract.py', 'test_preview_dialog_status_bar_contract.py', 'test_work_timeline_connector_contract.py', 'test_image_sidebar_visibility_contract.py', 'test_message_edit_revalidation_contract.py', 'test_message_action_snapshot_admission_contract.py', 'test_foreground_presentation_contract.py'):
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
@@ -78,6 +78,9 @@ jobs:
             --tests '*MessageMediaLayoutTest' \
             --tests '*MessageMediaPreviewBridgeTest' \
             --tests '*EditingImageSelectionStoreTest' \
+            --tests '*MessageEditBaselineTest' \
+            --tests '*MessageActionRenderedRevisionTest' \
+            --tests '*ForegroundComposerStateTest' \
             --tests '*MessageImageContractTest' \
             --tests '*ImageAttachmentsStateTest' \
             --tests '*ChatTurnMapperTest' \
@@ -91,7 +94,8 @@ jobs:
           import xml.etree.ElementTree as ET
           root = Path.cwd()
           expected_groups = ('ChatMediaPreview', 'MessageMediaLayoutTest', 'MessageMediaPreviewBridgeTest',
-                             'EditingImageSelectionStoreTest', 'MessageImageContractTest', 'ImageAttachmentsStateTest',
+                             'EditingImageSelectionStoreTest', 'MessageEditBaselineTest', 'MessageActionRenderedRevisionTest',
+                             'ForegroundComposerStateTest', 'MessageImageContractTest', 'ImageAttachmentsStateTest',
                              'ChatTurnMapperTest', 'ReasoningWorkflowMapperTest')
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}

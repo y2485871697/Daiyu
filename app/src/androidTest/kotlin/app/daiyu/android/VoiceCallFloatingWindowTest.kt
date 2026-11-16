@@ -6,6 +6,8 @@ import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import androidx.test.platform.app.InstrumentationRegistry
 import app.daiyu.android.ui.screens.chat.conversation.DoubaoCallActions
 import app.daiyu.android.ui.screens.chat.conversation.DoubaoCallPresentation
@@ -29,7 +31,10 @@ class VoiceCallFloatingWindowTest {
     private class RecordingWindows(context: Context,
         private val actual: WindowManager = context.getSystemService(WindowManager::class.java)) : WindowManager by actual {
         val added = mutableListOf<View>()
+        val removals = mutableListOf<View>()
         override fun addView(view: View, params: ViewGroup.LayoutParams) { actual.addView(view, params); added.add(view) }
+        override fun removeViewImmediate(view: View) { removals.add(view); actual.removeViewImmediate(view) }
+        fun detachExternally(view: View) { actual.removeViewImmediate(view) }
     }
     private fun shell(command: String): String = ParcelFileDescriptor.AutoCloseInputStream(
         instrumentation.uiAutomation.executeShellCommand(command)).bufferedReader().use { it.readText().trim() }
@@ -56,10 +61,13 @@ class VoiceCallFloatingWindowTest {
         main { windows = RecordingWindows(context); host = VoiceCallFloatingWindow(context, windows) }
     }
     @After fun tearDown() {
-        main { if (::host.isInitialized) host.close() }
-        if (animationScale == "null") shell("settings delete global animator_duration_scale")
-        else shell("settings put global animator_duration_scale $animationScale")
-        shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW $overlayMode")
+        try {
+            main { if (::host.isInitialized) host.close() }
+        } finally {
+            if (animationScale == "null") shell("settings delete global animator_duration_scale")
+            else shell("settings put global animator_duration_scale $animationScale")
+            shell("appops set ${context.packageName} SYSTEM_ALERT_WINDOW $overlayMode")
+        }
     }
 
     @Test fun boundedOverlayResizesWithoutTakingFocusOrHangingUpOnReturn() {
@@ -100,7 +108,15 @@ class VoiceCallFloatingWindowTest {
             root.isAttachedToWindow && root.alpha > 0f && root.alpha < 1f && root.scaleX < 1f && root.scaleY < 1f
         }
         await("animation removes the window") { !root.isAttachedToWindow }
-        main { assertEquals(listOf(state.sessionKey), completed); host.dismiss(); assertEquals(1, completed.size) }
+        main {
+            assertEquals(listOf(state.sessionKey), completed)
+            assertEquals(0, (root as ViewGroup).childCount)
+            assertEquals(Lifecycle.State.DESTROYED, (root as LifecycleOwner).lifecycle.currentState)
+            host.dismiss()
+            host.close()
+            assertEquals(1, completed.size)
+            assertEquals(listOf(root), windows.removals)
+        }
     }
 
     @Test fun lateOldExitCannotRemoveANewCallAndDestroyDoesNotWaitForAnimation() {
@@ -153,6 +169,28 @@ class VoiceCallFloatingWindowTest {
         main { host.update(active.copy(presentation = DoubaoCallPresentation.CLOSING), actions) }
         await("revocation removes closing surface") { !windows.added.single().isAttachedToWindow }
         main { assertEquals(listOf(active.sessionKey), completed) }
+    }
+
+    @Test fun systemDetachmentReleasesAfterChildDispatchAndRemainsIdempotent() {
+        val active = picture(-6L)
+        main { host.update(active, actions) }
+        await("external removal fixture laid out") { windows.added.single().isLaidOut }
+        val root = windows.added.single()
+        main {
+            windows.detachExternally(root)
+            assertFalse(root.isAttachedToWindow)
+        }
+        await("detached lifecycle released") {
+            (root as LifecycleOwner).lifecycle.currentState == Lifecycle.State.DESTROYED &&
+                (root as ViewGroup).childCount == 0
+        }
+        main {
+            host.hide()
+            host.close()
+            assertTrue(completed.isEmpty())
+            assertEquals(0, hangups)
+            assertEquals(listOf(root), windows.removals)
+        }
     }
 
     @Test fun hideBeforeFirstTraversalStillRemovesTheAddedWindow() {

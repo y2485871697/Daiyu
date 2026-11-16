@@ -3,6 +3,7 @@ package app.daiyu.android
 import android.animation.ValueAnimator
 import android.content.Context
 import android.graphics.PixelFormat
+import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
@@ -37,6 +38,7 @@ internal class VoiceCallFloatingWindow(context: Context,
     private var window: CallWindow? = null
     private val exiting = mutableSetOf<CallWindow>()
     private var closed = false
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     fun isShowing(key: Long): Boolean = window?.let {
         it.picture.sessionKey == key && !it.departing && it.isAttachedToWindow
@@ -177,6 +179,8 @@ internal class VoiceCallFloatingWindow(context: Context,
         override val lifecycle: Lifecycle get() = ownerLifecycle
         override val savedStateRegistry: SavedStateRegistry get() = savedState.savedStateRegistry
         private val composition: ComposeView
+        private var released = false
+        private val releaseAfterDetach = Runnable { release() }
         init {
             savedState.performRestore(null)
             ownerLifecycle.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
@@ -198,6 +202,9 @@ internal class VoiceCallFloatingWindow(context: Context,
             ownerLifecycle.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         }
         fun release() {
+            if (released) return
+            released = true
+            mainHandler.removeCallbacks(releaseAfterDetach)
             composition.disposeComposition()
             if (lifecycle.currentState != Lifecycle.State.DESTROYED)
                 ownerLifecycle.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
@@ -205,7 +212,8 @@ internal class VoiceCallFloatingWindow(context: Context,
         }
         override fun onDetachedFromWindow() {
             super.onDetachedFromWindow()
-            release()
+            // ViewGroup is still dispatching child detachment during this callback.
+            mainHandler.post(releaseAfterDetach)
         }
     }
     companion object { internal const val CLOSE_MILLIS = 180L }

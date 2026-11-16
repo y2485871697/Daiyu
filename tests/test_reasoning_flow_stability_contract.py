@@ -34,7 +34,11 @@ class ReasoningFlowStabilityContractTest(unittest.TestCase):
         self.assertIn('rememberSaveable(ownerKey) { mutableStateOf(finishing) }', work)
         self.assertIn('rememberSaveable(ownerKey) { mutableStateOf(stopped) }', work)
         self.assertNotIn('rememberSaveable(step.owner, step.toolCallId)', work)
-        self.assertIn('AnimatedVisibility(visibility, enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment)', work)
+        step = work.split('internal fun WorkStepRow(', 1)[1].split('private fun ToolDetailSection(', 1)[0]
+        self.assertIn('AnimatedVisibility(visibility, modifier = Modifier.layout', step)
+        self.assertIn('detailExtent.measure(detail.height, expanded, disclosure.closingDetailHeight)', step)
+        self.assertIn('enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment)', step)
+        self.assertIn('exit = fadeOut() + shrinkVertically(shrinkTowards = disclosure.alignment)', step)
         self.assertIn('val fullyClosed = visibility.isIdle && !visibility.currentState && !visibility.targetState', work)
         self.assertIn('val manuallyClosed = currentOverride == false && fullyClosed', work)
         card = self.read('ReportedReasoningCard.kt')

@@ -143,7 +143,11 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         shell = (CHAT / "WorkProcessCard.kt").read_text()
         for removed in ('ToolDisclosureHeader("技术详情"', 'tool-step-technical:', 'var technical', '.rich?.technical'):
             self.assertNotIn(removed, shell)
-        self.assertIn('AnimatedVisibility(visibility, enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment)', shell)
+        step = shell.split('internal fun WorkStepRow(', 1)[1].split('private fun ToolDetailSection(', 1)[0]
+        self.assertIn('AnimatedVisibility(visibility, modifier = Modifier.layout', step)
+        self.assertIn('detailExtent.measure(detail.height, expanded, disclosure.closingDetailHeight)', step)
+        self.assertIn('enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment)', step)
+        self.assertIn('exit = fadeOut() + shrinkVertically(shrinkTowards = disclosure.alignment)', step)
         self.assertIn('expandedOverride = !expanded', shell)
         body = (CHAT / "ToolBodyLayout.kt").read_text()
         self.assertIn('if (category in setOf("terminal", "background_job"))', body)

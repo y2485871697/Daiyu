@@ -35,7 +35,11 @@ class DisclosureConsistencyContractTest(unittest.TestCase):
         work = (CHAT / 'WorkProcessCard.kt').read_text()
         self.assertEqual(2, work.count('settingsDisclosureRotation(expanded)'))
         self.assertNotIn('Icon(if (expanded)', work)
-        self.assertIn('AnimatedVisibility(visibility, enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment)', work)
+        step = work.split('internal fun WorkStepRow(', 1)[1].split('private fun ToolDetailSection(', 1)[0]
+        self.assertIn('AnimatedVisibility(visibility, modifier = Modifier.layout', step)
+        self.assertIn('detailExtent.measure(detail.height, expanded, disclosure.closingDetailHeight)', step)
+        self.assertIn('enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment)', step)
+        self.assertIn('exit = fadeOut() + shrinkVertically(shrinkTowards = disclosure.alignment)', step)
 
     def test_usage_keeps_existing_content_motion_and_animates_both_arrows(self):
         source = (UI / 'screens/stats/UsageStatsScreen.kt').read_text()

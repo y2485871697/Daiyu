@@ -501,25 +501,70 @@ class VoiceCallControllerTest {
         assertNull(c.start(profile))
     }
 
-    @Test fun failedReasoningChoiceSurvivesCleanupButCannotBeSpokenOrLeakIntoTheNextCall() {
+    @Test fun failedReasoningChoiceRemainsTurnLocalWithoutEndingTheCallOrSpeakingTheError() {
         val f = Fake(); val c = VoiceCallController(f)
-        c.start(profile); f.finishRecognition(); f.accept(owner)
-        f.observations.single().body(VoiceAssistantBody(owner, "", VoiceBodyStatus.FAILED,
+        val permit = c.start(profile)!!; f.finishRecognition(); f.accept(owner)
+        val oldBody = f.observations.single().body
+        oldBody(VoiceAssistantBody(owner, "", VoiceBodyStatus.FAILED,
             unsupportedReasoning = app.daiyu.android.domain.RequestReasoningEffort.OFF))
         f.flush()
-        assertEquals(VoiceControlStopReason.RESPONSE_FAILED, c.state.value.reason)
+        assertTrue(c.state.value.active); assertTrue(c.state.value.responseFailed)
+        assertEquals(permit, c.state.value.permitId); assertNull(c.state.value.reason)
         assertEquals(app.daiyu.android.domain.RequestReasoningEffort.OFF, c.state.value.unsupportedReasoning)
-        assertEquals("", c.state.value.transcript); assertEquals("", c.state.value.reply)
-        assertTrue(f.outputs.single().bodies.isEmpty())
-        assertEquals(1, f.sends.size); assertEquals(listOf(owner), f.stopped)
-        val oldBody = f.observations.single().body
-        val nextPermit = c.start(profile)!!
-        assertNull(c.state.value.unsupportedReasoning)
+        assertEquals("", c.state.value.reply); assertTrue(f.outputs.single().bodies.isEmpty())
+        assertEquals(1, f.outputs.single().closes); assertTrue(f.observations.single().cancelled)
+        assertEquals(1, f.sends.size); assertTrue(f.stopped.isEmpty()); assertTrue(f.revoked.isEmpty())
+        f.recognitions.last().speechStarted(); f.flush()
+        assertFalse(c.state.value.responseFailed); assertNull(c.state.value.unsupportedReasoning)
         oldBody(VoiceAssistantBody(owner, "", VoiceBodyStatus.FAILED,
             unsupportedReasoning = app.daiyu.android.domain.RequestReasoningEffort.HIGH))
         f.flush()
-        assertEquals(nextPermit, c.state.value.permitId); assertTrue(c.state.value.active)
-        assertNull(c.state.value.unsupportedReasoning)
+        assertEquals(permit, c.state.value.permitId); assertTrue(c.state.value.active)
+        assertNull(c.state.value.unsupportedReasoning); assertEquals(1, f.sends.size)
+    }
+
+    @Test fun failedOrCancelledAnswerKeepsItsBodyAndMicrophoneWithoutRetryOrSearchSuccess() {
+        for (status in listOf(VoiceBodyStatus.FAILED, VoiceBodyStatus.CANCELLED)) {
+            val f = Fake(); val c = VoiceCallController(f)
+            val permit = c.start(profile)!!; f.finishRecognition(); f.accept(owner)
+            val old = f.observations.single().body
+            old(VoiceAssistantBody(owner, "已有的正文。", VoiceBodyStatus.STREAMING, true, "old-check")); f.flush()
+            old(VoiceAssistantBody(owner, "已有的正文。更多内容", status, false, "late-check")); f.flush()
+            assertTrue(c.state.value.active); assertTrue(c.state.value.responseFailed)
+            assertEquals(permit, c.state.value.permitId); assertEquals("已有的正文。更多内容", c.state.value.reply)
+            assertFalse(c.state.value.replyTextComplete); assertFalse(c.state.value.searching)
+            assertNull(c.state.value.searchCompletion); assertEquals(1, f.sends.size)
+            assertEquals(listOf("已有的正文。" to false), f.outputs.single().bodies)
+            assertEquals(1, f.outputs.single().closes); assertTrue(f.observations.single().cancelled)
+            assertTrue(f.revoked.isEmpty()); assertTrue(f.stopped.isEmpty()); assertEquals(0, f.inputs.last().closes)
+            old(VoiceAssistantBody(owner, "迟到成功", VoiceBodyStatus.COMPLETE, searchCompletion = "late")); f.flush()
+            assertEquals("已有的正文。更多内容", c.state.value.reply); assertNull(c.state.value.searchCompletion)
+            f.finishRecognition("新的问题")
+            assertEquals(2, f.sends.size); assertFalse(c.state.value.responseFailed)
+            assertEquals(permit, c.state.value.permitId)
+            c.stop(permit)
+        }
+    }
+
+    @Test fun failedAnswerStillFencesTheCallWhenOutputReleaseCannotBeConfirmed() {
+        val f = Fake(); val c = VoiceCallController(f)
+        c.start(profile); f.finishRecognition(); f.accept(owner)
+        f.outputs.single().failClose = true
+        f.body(owner, "部分正文", VoiceBodyStatus.FAILED)
+        assertFalse(c.state.value.active)
+        assertEquals(VoiceControlStopReason.RELEASE_FAILED, c.state.value.reason)
+        assertNull(c.start(profile)); assertEquals(1, f.sends.size)
+    }
+
+    @Test fun lateFailureCannotReplaceAnAlreadyCompleteAnswerWhileAudioDrains() {
+        val f = Fake(); val c = VoiceCallController(f)
+        c.start(profile); f.finishRecognition(); f.accept(owner)
+        f.body(owner, "完整正文。", VoiceBodyStatus.COMPLETE)
+        f.body(owner, "迟到失败", VoiceBodyStatus.FAILED)
+        assertTrue(c.state.value.active); assertFalse(c.state.value.responseFailed)
+        assertEquals("完整正文。", c.state.value.reply)
+        f.outputs.single().drained(); f.flush()
+        assertTrue(c.state.value.active); assertTrue(f.stopped.isEmpty())
     }
 
 }

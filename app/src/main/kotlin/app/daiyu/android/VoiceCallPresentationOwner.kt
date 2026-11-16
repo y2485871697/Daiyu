@@ -40,7 +40,8 @@ internal class VoiceCallPresentationOwner {
             searching = value.searching, searchCompletion = value.searchCompletion,
             compressionCompletion = completedCompression?.takeUnless { it == initialCompression },
             endedAtMillis = if (value.active) null else previous.endedAtMillis ?: now,
-            reason = when (value.phase) {
+            reason = if (value.responseFailed) value.unsupportedReasoning?.unsupportedMessage ?: "回答未完成，可以继续说"
+            else when (value.phase) {
                 VoiceControlPhase.PERMISSION_REQUIRED -> "等待麦克风授权"
                 VoiceControlPhase.MUTED -> if (value.muted) "麦克风已关闭" else "选择模型后继续通话"
                 VoiceControlPhase.SUBMITTING -> "正在准备回答"

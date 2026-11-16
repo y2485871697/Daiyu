@@ -146,9 +146,31 @@ class VoiceCallContractTest(unittest.TestCase):
     def test_model_output_is_text_only_and_non_search_device_tools_are_not_exposed(self):
         controller = (SRC / 'ChatController.kt').read_text()
         self.assertIn('requestOptions.copy(voiceTextOnly = true)', controller)
-        self.assertIn('allowedToolNames = if (voiceConversation) emptySet() else null', controller)
+        self.assertIn('allowedToolNames = if (voiceConversation) setOf(RunBrowserTools.READ_TOOL_NAME, RunBrowserTools.WRITE_TOOL_NAME) else null', controller)
+        self.assertIn('listOfNotNull(ordinaryBrowserScope(realOwner, task))', controller)
+        self.assertIn('val ordinaryRun = !voiceConversation', controller)
         self.assertIn('followChatModelWindow = voiceConversation', controller)
         self.assertIn('!voiceConversation && conversationChildrenEnabled', controller)
+    def test_voice_browser_reuses_the_ordinary_leaf_before_any_device_preparation(self):
+        controller = (SRC / 'ChatController.kt').read_text()
+        voice = controller.split('ordinaryFactory = if (voiceConversation)', 1)[1].split('else if (!ordinaryRun)', 1)[0]
+        self.assertIn('listOfNotNull(ordinaryBrowserScope(realOwner, task))', voice)
+        for forbidden in ('RunScreenLocation', 'TerminalPtyLaunch', 'RunOrdinaryGuiTools', 'RunOrdinaryGenerationTools'):
+            self.assertNotIn(forbidden, voice)
+        self.assertEqual(1, controller.count('return RunOrdinaryBrowserTools(application, realOwner, task'))
+        self.assertIn('if (ordinaryRun || voiceConversation) browserSettings.snapshot()', controller)
+        self.assertIn('settings.access == app.daiyu.android.browser.session.BrowserAccess.DISABLED', controller)
+
+    def test_failed_answer_is_turn_local_and_never_automatically_resubmitted(self):
+        controller = (SRC / 'voice/control/VoiceCallController.kt').read_text()
+        failure = controller.split('if (value.status in setOf(VoiceBodyStatus.FAILED, VoiceBodyStatus.CANCELLED)', 1)[1]
+        failure = failure.split('if (value.status !in', 1)[0]
+        self.assertIn('session.responseFailed = true', failure)
+        self.assertIn('session.searching = false; session.searchCompletion = null', failure)
+        self.assertIn('releaseAnswer(session, false)', failure)
+        self.assertNotIn('ports.submit', failure)
+        self.assertNotIn('end(session', failure)
+
     def test_search_is_native_model_policy_and_not_a_separate_local_tool(self):
         controller = (SRC / 'ChatController.kt').read_text()
         self.assertIn('frozen.requestOptions.copy(voiceTextOnly = true)', controller)

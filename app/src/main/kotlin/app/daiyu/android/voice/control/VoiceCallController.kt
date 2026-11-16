@@ -42,6 +42,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         var modelPicker = false
         var muted = false
         var recognitionFailures = 0
+        var responseFailed = false
+        var unsupportedReasoning: app.daiyu.android.domain.RequestReasoningEffort? = null
         var rearm: VoiceControlCancellation? = null
     }
     private val mutable = MutableStateFlow(VoiceControlState())
@@ -137,7 +139,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         mutable.value = VoiceControlState(shown, session.permit.id, session.permit.profile,
             session.nextTurn, 0, transcript, reply = session.reply, muted = session.muted, captionEpoch = session.captionEpoch,
             searching = session.searching, searchCompletion = session.searchCompletion,
-            replyTextComplete = session.replyTextComplete, transcriptTextComplete = session.transcriptTextComplete)
+            replyTextComplete = session.replyTextComplete, transcriptTextComplete = session.transcriptTextComplete,
+            responseFailed = session.responseFailed, unsupportedReasoning = session.unsupportedReasoning)
     }
     private fun listen(session: Call) {
         if (!current(session) || session.input != null || session.pending != null || session.compressing || session.muted || session.modelPicker) return
@@ -266,11 +269,21 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
     }
     private fun body(session: Call, answer: Answer, value: VoiceAssistantBody) {
         if (!current(session) || session.answer !== answer || value.owner != answer.owner || !admitted(session)) return
+        if (answer.final) return
+        if (value.status in setOf(VoiceBodyStatus.FAILED, VoiceBodyStatus.CANCELLED) && value.text.length <= MAX_TEXT) {
+            session.reply = app.daiyu.android.voice.VoiceCallOutput.text(value.text, complete = true)
+            session.replyTextComplete = false
+            session.responseFailed = true
+            session.unsupportedReasoning = value.unsupportedReasoning
+            session.searching = false; session.searchCompletion = null
+            releaseAnswer(session, false)
+            if (current(session)) { listen(session); publish(session) }
+            return
+        }
         if (value.status !in setOf(VoiceBodyStatus.STREAMING, VoiceBodyStatus.COMPLETE) || value.text.length > MAX_TEXT) {
             end(session, VoiceControlStopReason.RESPONSE_FAILED,
                 value.unsupportedReasoning.takeIf { value.status == VoiceBodyStatus.FAILED }); return
         }
-        if (answer.final) return
         val progressed = value.text != answer.text || value.searching != session.searching ||
             value.searchCompletion != session.searchCompletion
         val spokenText = app.daiyu.android.voice.VoiceCallOutput.text(value.text, value.status == VoiceBodyStatus.COMPLETE)
@@ -314,6 +327,7 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         session.reply = ""
         session.replyTextComplete = false
         session.transcriptTextComplete = false
+        session.responseFailed = false; session.unsupportedReasoning = null
         interrupt(session)
     }
     private fun interrupt(session: Call) {

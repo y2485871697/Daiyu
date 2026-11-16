@@ -4345,8 +4345,8 @@ class ChatController internal constructor(private val application:Application,
             browserPreparation == null && terminalRun == null && terminalJobRun == null && generation == null &&
             shizukuPreparation == null && shizukuAuthorization == null && virtualDisplay == null && gui == null && video == null
         val prepared = try {
-            val ordinaryBrowserSettings = if (ordinaryRun) browserSettings.snapshot() else null
-            val ordinaryAssistant = if (ordinaryRun) checkNotNull(assistantStore.read(assistantContext.assistantId)).let {
+            val ordinaryBrowserSettings = if (ordinaryRun || voiceConversation) browserSettings.snapshot() else null
+            val ordinaryAssistant = if (ordinaryRun || voiceConversation) checkNotNull(assistantStore.read(assistantContext.assistantId)).let {
                 it.copy(enabledSkillIds = it.enabledSkillIds.toList())
             } else null
             val runMode = app.daiyu.android.runningmode.AndroidRunningModeStore.get(application).mode.value
@@ -4434,12 +4434,12 @@ class ChatController internal constructor(private val application:Application,
                         video == null && generation == null) setOf(RunCommandTools.CAPABILITY) else emptySet()) +
                     (if (virtualDisplay == null) emptySet() else setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY)) +
                     (if (gui == null) emptySet() else setOf(app.daiyu.android.gui.GuiScreenToolFactory.CAPABILITY)) +
+                    (if (ordinaryBrowserSettings == null || ordinaryBrowserSettings.access == app.daiyu.android.browser.session.BrowserAccess.DISABLED)
+                        emptySet() else setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY)) +
                     (if (!ordinaryRun) emptySet() else app.daiyu.android.platform.actions.PlatformActionKind.entries.map { it.capability }.toSet() +
                         setOf(app.daiyu.android.gui.GuiScreenToolFactory.CAPABILITY, TerminalJobSession.CAPABILITY) +
                         setOf(RunGenerationTools.CAPABILITY) +
-                        (if (ordinaryShizuku?.uid == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY)) +
-                        (if (ordinaryBrowserSettings?.access == app.daiyu.android.browser.session.BrowserAccess.DISABLED) emptySet()
-                            else setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY))))
+                        (if (ordinaryShizuku?.uid == null) emptySet() else setOf(app.daiyu.android.shizuku.RunShizukuCommands.CAPABILITY))))
             val backgroundFactory: ((app.daiyu.android.domain.runtime.RunExecutionOwner, SessionCapabilities,
                 app.daiyu.android.domain.tools.TaskAuthorization) -> RunChildTasks)? =
                 if(!withChildren) null else { owner, grants, authorization ->
@@ -4465,11 +4465,20 @@ class ChatController internal constructor(private val application:Application,
             // Only the consumed, controller-owned approval may open the real Android transport.
             // The SAME frozen authorization reaches Dispatcher and RunShizukuCommands.bind.
             val shizuku=shizukuPreparation?.open(shizukuAccess)
+            fun ordinaryBrowserScope(realOwner: app.daiyu.android.domain.runtime.RunExecutionOwner,
+                task: app.daiyu.android.domain.tools.TaskAuthorization): RunOwnedToolScope? {
+                val settings = ordinaryBrowserSettings ?: return null
+                if (settings.access == app.daiyu.android.browser.session.BrowserAccess.DISABLED) return null
+                return RunOrdinaryBrowserTools(application, realOwner, task, checkNotNull(ordinaryAssistant), assistant.id,
+                    settings) { binding -> ordinaryBrowserOpened(assistant, binding) }
+            }
             val tools = RunCatalogTools(registry, capabilities, toolLedger, conversationId, run, devices, children,
                 backgroundFactory, memoryContext=assistantContext, childTaskAccess=childTaskAccess, mcp=mcpPreparation?.scope, liveMcp=liveMcp,
                 workspacePin = workspace, referenceReader = referenceReader, screenImages = screenToolImages,
-                allowedToolNames = if (voiceConversation) emptySet() else null,
-                ordinaryFactory = if (!ordinaryRun) null else { realOwner, grants, task ->
+                allowedToolNames = if (voiceConversation) setOf(RunBrowserTools.READ_TOOL_NAME, RunBrowserTools.WRITE_TOOL_NAME) else null,
+                ordinaryFactory = if (voiceConversation) { realOwner, _, task ->
+                    listOfNotNull(ordinaryBrowserScope(realOwner, task))
+                } else if (!ordinaryRun) null else { realOwner, grants, task ->
                     val location = RunScreenLocation(realOwner, taskSurfaceStore, application.packageName,
                         current = { isRunUnfenced(assistant) }, present = ::presentToolLocation)
                     val jobHost = ((application as? ChatApplication)?.terminalProvider?.state?.value as?
@@ -4495,9 +4504,7 @@ class ChatController internal constructor(private val application:Application,
                     try {
                         scopes.add(RunOrdinaryPlatformTools(realOwner, task,
                             app.daiyu.android.platform.actions.AndroidPlatformActionBackend(application)))
-                        if (ordinaryBrowserSettings?.access != app.daiyu.android.browser.session.BrowserAccess.DISABLED)
-                            scopes.add(RunOrdinaryBrowserTools(application, realOwner, task, checkNotNull(ordinaryAssistant), assistant.id,
-                                checkNotNull(ordinaryBrowserSettings)) { binding -> ordinaryBrowserOpened(assistant, binding) })
+                        ordinaryBrowserScope(realOwner, task)?.let(scopes::add)
                         scopes.add(RunOrdinaryGuiTools(realOwner, task, location, screenToolImages))
                         ordinaryShizuku?.uid?.let { uid ->
                             val scope = RunOrdinaryShizukuTools(realOwner, task, grants, shizukuAccess, uid, runMode)

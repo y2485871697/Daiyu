@@ -474,4 +474,43 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         assertTrue(ledger(f).isEmpty());assertTrue(probe.returned.isEmpty())
     }
 
+    fun testVoiceConversationUsesTheSameBrowserCatalogWithoutDeviceToolsOrChangingNativeSearch() {
+        for (access in app.daiyu.android.browser.session.BrowserAccess.entries) {
+            val probe = CatalogProbe()
+            val frozen = AtomicReference<ModelSettings>()
+            val f = fresh { config -> frozen.set(config); probe }
+            f.settings.save(ModelSettings("https://example.invalid", "gpt-6.1-sol", "fixture-key", true,
+                requestOptions = app.daiyu.android.model.ProviderRequestOptions(openAiWebSearchEnabled = true)))
+            f.controller.browserSettings.save(app.daiyu.android.browser.BrowserSettings(access))
+            val conversation = f.db.create("default", temporaryVoice = true)
+            if (access == app.daiyu.android.browser.session.BrowserAccess.READ_ONLY) {
+                probe.batches = listOf(listOf(call("blocked-navigation", "browser_write", org.json.JSONObject()
+                    .put("action", "navigate").put("url", "https://example.invalid/search"))))
+            }
+            val receipt = AtomicReference<TextSendResult>()
+            val complete = CountDownLatch(1)
+            main {
+                assertTrue(f.controller.sendText(conversation, 0, 0, "用内置浏览器查询", voiceConversation = true) {
+                    receipt.set(it); complete.countDown()
+                })
+            }
+            assertTrue("voice receipt timeout", complete.await(10, TimeUnit.SECONDS))
+            assertTrue(receipt.get() is TextSendResult.Accepted)
+            awaitState(f) { f.controller.active == null }
+            val expected = if (access == app.daiyu.android.browser.session.BrowserAccess.DISABLED) emptySet()
+                else setOf("browser_read", "browser_write")
+            assertEquals(expected, probe.definitions.map { it.name }.toSet())
+            assertTrue(frozen.get().requestOptions.voiceTextOnly)
+            assertTrue(frozen.get().requestOptions.openAiWebSearchEnabled)
+            assertEquals("gpt-6.1-sol", frozen.get().model)
+            assertEquals(RunStatus.COMPLETED, f.db.messages(conversation.id).last().second.status)
+            if (access == app.daiyu.android.browser.session.BrowserAccess.READ_ONLY) {
+                val rejected = org.json.JSONObject(probe.returned.single().single().output)
+                assertFalse(rejected.getBoolean("ok")); assertFalse(rejected.getBoolean("executed"))
+                assertEquals("preparation_failed", rejected.getString("error"))
+            }
+            assertTrue(ledger(f).isEmpty())
+        }
+    }
+
 }

@@ -78,4 +78,18 @@ class VoiceCallPresentationOwnerTest {
         assertNull(owner.state!!.reason)
     }
 
+    @Test fun answerFailurePreservesCaptionsAndKeepsTheCallListening() {
+        val owner = VoiceCallPresentationOwner()
+        owner.begin("anchor", "permit", 100, null, "gpt")
+        owner.update(state().copy(responseFailed = true), false, false, null, 200)
+        assertEquals(DoubaoCallVisualState.LISTENING, owner.state!!.visualState)
+        assertEquals("回答", owner.state!!.reply); assertNull(owner.state!!.endedAtMillis)
+        assertEquals("回答未完成，可以继续说", owner.state!!.reason)
+        owner.update(state().copy(responseFailed = true,
+            unsupportedReasoning = app.daiyu.android.domain.RequestReasoningEffort.OFF), false, false, null, 300)
+        assertEquals("模型不支持关闭思考", owner.state!!.reason)
+        owner.update(state(), false, false, null, 400)
+        assertNull(owner.state!!.reason); assertNull(owner.state!!.endedAtMillis)
+    }
+
 }

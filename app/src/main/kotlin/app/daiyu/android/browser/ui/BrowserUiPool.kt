@@ -133,9 +133,8 @@ internal class BrowserUiPool(private val context: Context, val visit: BrowserVis
     fun ensureTabForUI() {
         val state = visit?.snapshot() ?: return
         if (!state.live || state.unknown) return
-        if (state.tabs.isEmpty()) visit.newTab()
-        else if (!state.takenOver && !state.waiting) state.lease?.let(visit::takeover)
-        refresh()
+        if (visit.taskOwned) { refresh(); return }
+        takeControl()
     }
     fun newTabFromUI(): Tab? { visit?.newTab(); refresh(); return models[selectedTabId.value] }
     fun selectTab(id: Int) { visit?.snapshot()?.tabs?.firstOrNull { it.tabId == id }?.let { visit.selectTab(it) }; refresh() }
@@ -163,7 +162,13 @@ internal class BrowserUiPool(private val context: Context, val visit: BrowserVis
         customViewportWidth.value to customViewportHeight.value else currentUserAgentProfile.value.viewportSize
     val idleTimeoutMinutes get() = prefs.getInt(PREF_IDLE_TIMEOUT_MINUTES, DEFAULT_IDLE_TIMEOUT_MINUTES).coerceIn(1, 240)
     fun setIdleTimeoutMinutes(minutes: Int) { prefs.edit().putInt(PREF_IDLE_TIMEOUT_MINUTES, minutes.coerceIn(1, 240)).apply() }
-    fun takeControl() = ensureTabForUI()
+    fun takeControl() {
+        val state = visit?.snapshot() ?: return
+        if (!state.live || state.unknown || state.waiting) return
+        if (state.tabs.isEmpty()) visit.newTab()
+        else if (!state.takenOver) state.lease?.let(visit::takeover)
+        refresh()
+    }
     private fun download(url: String, userAgent: String, disposition: String?, mime: String?) {
         if (!OpenMinisNavigationPolicy.permits(url)) return
         val filename = URLUtil.guessFileName(url, disposition, mime).replace('/', '_').replace('\\', '_')

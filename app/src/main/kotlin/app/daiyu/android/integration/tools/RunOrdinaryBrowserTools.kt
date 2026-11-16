@@ -26,11 +26,19 @@ internal class RunOrdinaryBrowserTools private constructor(
     private val opened: (CatalogBrowserBinding) -> Unit,
     private val childScope: app.daiyu.android.domain.delegation.ChildRunScope?,
     parentBrowserPermission: BrowserDefaultPermission?,
+    private val openHost: (Context, java.nio.file.Path, AssistantProfile, BrowserRunAuthorization) -> CatalogBrowserBinding =
+        { context, root, assistant, confirmed -> CatalogBrowserBinding.open(context, root, assistant, confirmed) },
  ) : RunOwnedToolScope(owner, authorization) {
     constructor(context: Context, owner: RunExecutionOwner, authorization: TaskAuthorization,
         assistant: AssistantProfile, assistantMessageId: MessageId, settings: BrowserSettings,
         opened: (CatalogBrowserBinding) -> Unit) : this(context, owner, authorization, assistant,
         assistantMessageId, settings, opened, null, null)
+
+    internal constructor(context: Context, owner: RunExecutionOwner, authorization: TaskAuthorization,
+        assistant: AssistantProfile, assistantMessageId: MessageId, settings: BrowserSettings,
+        opened: (CatalogBrowserBinding) -> Unit,
+        openHost: (Context, java.nio.file.Path, AssistantProfile, BrowserRunAuthorization) -> CatalogBrowserBinding) :
+        this(context, owner, authorization, assistant, assistantMessageId, settings, opened, null, null, openHost)
 
     companion object {
         fun child(context: Context, owner: RunExecutionOwner, authorization: TaskAuthorization,
@@ -101,7 +109,7 @@ internal class RunOrdinaryBrowserTools private constructor(
             if (!main.post {
                 if (!live()) future.complete(null)
                 else try {
-                    val host = CatalogBrowserBinding.open(context, root, assistant, confirmed)
+                    val host = openHost(context, root, assistant, confirmed)
                     binding = host
                     if (!live()) host.close()
                     future.complete(host)

@@ -221,6 +221,105 @@ class CatalogBrowserBindingAndroidTest : InstrumentationTestCase() {
         }
     }
 
+    fun testOrdinaryEmptyInspectionCloseThenFreshRunNavigatesWithoutOpeningPanel() {
+        val base = instrumentation.targetContext
+        val root = Files.createTempDirectory(base.cacheDir.toPath(), "ordinary-browser-stop-").toFile()
+        val files = java.io.File(root, "files").apply { mkdirs() }
+        val cache = java.io.File(root, "cache").apply { mkdirs() }
+        val context = object : android.content.ContextWrapper(base) {
+            override fun getApplicationContext(): android.content.Context = this
+            override fun getFilesDir() = files
+            override fun getCacheDir() = cache
+        }
+        val leaves = mutableListOf<app.daiyu.android.integration.tools.RunOrdinaryBrowserTools>()
+        val requests = java.util.concurrent.atomic.AtomicInteger()
+        val bindings = mutableListOf<CatalogBrowserBinding>()
+        fun closeLeaf(leaf: app.daiyu.android.integration.tools.RunOrdinaryBrowserTools) {
+            val done = java.util.concurrent.CountDownLatch(1)
+            var result: app.daiyu.android.integration.tools.RunCatalogCloseResult? = null
+            leaf.observeClose { result = it; done.countDown() }
+            assertTrue("original ordinary browser must drain", done.await(10, TimeUnit.SECONDS))
+            assertEquals(app.daiyu.android.integration.tools.RunCatalogCloseResult.Drained, result)
+        }
+        fun run(suffix: String): Pair<app.daiyu.android.integration.tools.RunOrdinaryBrowserTools,
+            (String, String) -> app.daiyu.android.domain.tools.DispatchOutcome> {
+            val id = "ordinary-${java.util.UUID.randomUUID()}-$suffix"
+            val identity = BrowserRunIdentity(ConversationId("ordinary-conversation"), RunId(id),
+                "ordinary-profile", MessageId("message-$id"))
+            val executionOwner = owner(identity)
+            val authorization = app.daiyu.android.domain.tools.TaskAuthorization(id, id)
+            val leaf = app.daiyu.android.integration.tools.RunOrdinaryBrowserTools(context, executionOwner,
+                authorization, AssistantProfile(identity.assistantId, "Ordinary", ""), identity.assistantMessageId,
+                BrowserSettings(BrowserAccess.FULL), opened = { binding ->
+                    if (binding !in bindings) bindings.add(binding)
+                }, openHost = { hostContext, privateRoot, assistant, confirmed ->
+                    val host = AndroidBrowserRunHost(hostContext, confirmed.preview.grant, privateRoot,
+                        cookieEnvPath = { _, _ -> error("unused") }, cookieAuthorizeName = { _, _, _ -> false },
+                        requestOverride = { request ->
+                            check(request.url.host == "ordinary-fixture.invalid")
+                            if (request.isForMainFrame) requests.incrementAndGet()
+                            android.webkit.WebResourceResponse("text/html", "UTF-8",
+                                java.io.ByteArrayInputStream("<html><body>Fresh ordinary browser</body></html>".toByteArray()))
+                        })
+                    CatalogBrowserBinding.attach(host, assistant, confirmed)
+                })
+            leaves.add(leaf)
+            val dispatcher = app.daiyu.android.domain.tools.ToolDispatcher(
+                app.daiyu.android.domain.tools.ToolRegistry().apply { leaf.tools.forEach { register(it) } }.snapshot(),
+                app.daiyu.android.domain.tools.SessionCapabilities(id, setOf("browser.read", "browser.write")),
+                app.daiyu.android.domain.tools.ToolLedger(app.daiyu.android.domain.tools.InMemoryToolLedgerStore()))
+            var calls = 0
+            return leaf to { name, arguments ->
+                dispatcher.dispatchOwned(authorization,
+                    listOf(ToolInvocation(ToolCallId("$id-${calls++}"), name, arguments)), executionOwner).single().outcome
+            }
+        }
+        try {
+            val (old, inspect) = run("old")
+            val listed = inspect("browser_read", """{"action":"list_tabs"}""")
+            assertTrue(listed is app.daiyu.android.domain.tools.DispatchOutcome.Confirmed)
+            val listing = org.json.JSONObject((listed as app.daiyu.android.domain.tools.DispatchOutcome.Confirmed).payload)
+            assertEquals(0, org.json.JSONObject(listing.getString("text")).getJSONArray("tabs").length())
+            val binding = bindings.single()
+            var pauses = 0
+            val visual = main {
+                app.daiyu.android.ControllerBrowserVisual(Message(MessageId("visual-old"),
+                    ConversationId("ordinary-conversation"), RunId(binding.runId), Message.ASSISTANT_ROLE,
+                    emptyList(), RunStatus.RUNNING), binding, { true }, { pauses++; true }, { false },
+                    { error("opening must not resume") }, { error("opening must not stop") })
+            }
+            main {
+                val visit = requireNotNull(visual.openVisit())
+                val pool = app.daiyu.android.browser.ui.BrowserUiPool(context, visit)
+                repeat(3) { pool.ensureTabForUI(); pool.refresh() }
+                visit.close()
+                assertEquals(0, pauses)
+                assertTrue(binding.session.visibleTabs.isEmpty())
+                assertFalse(visual.automationHeld)
+                visual.revoke()
+            }
+            closeLeaf(old)
+            val (fresh, execute) = run("fresh")
+            assertEquals(0, requests.get())
+            val navigated = execute("browser_write",
+                """{"action":"navigate","url":"https://ordinary-fixture.invalid/fresh"}""")
+            assertTrue("fresh ordinary navigation must confirm: $navigated",
+                navigated is app.daiyu.android.domain.tools.DispatchOutcome.Confirmed)
+            assertEquals(1, requests.get())
+            assertEquals(2, bindings.size)
+            assertFalse(binding.browserOwnerId == bindings.last().browserOwnerId)
+            assertEquals(1, bindings.last().session.visibleTabs.size)
+            val body = execute("browser_read", """{"action":"get_text","selector":"body"}""")
+            assertTrue(body is app.daiyu.android.domain.tools.DispatchOutcome.Confirmed)
+            assertTrue((body as app.daiyu.android.domain.tools.DispatchOutcome.Confirmed).payload.contains("Fresh ordinary browser"))
+            assertEquals(1, requests.get())
+            closeLeaf(fresh)
+        } finally {
+            leaves.forEach(::closeLeaf)
+            assertTrue(root.deleteRecursively())
+        }
+    }
+
     private fun owner(identity: BrowserRunIdentity): RunExecutionOwner {
         var captured: RunExecutionOwner? = null
         val receiver = object : ReceiptBatchToolExecutor {

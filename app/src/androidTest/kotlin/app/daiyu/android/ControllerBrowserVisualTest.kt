@@ -451,6 +451,93 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
         } finally { f.close() }
     }
 
+    fun testOpeningTaskUiWithEmptyOrExistingTabsNeverPausesOrCreates() = main {
+        for (initialTab in listOf(false, true)) {
+            val f = Fixture(initialTab)
+            try {
+                val original = f.session.currentTab
+                val visit = requireNotNull(f.controller.openVisit())
+                val pool = app.daiyu.android.browser.ui.BrowserUiPool(instrumentation.targetContext, visit)
+                repeat(3) { pool.ensureTabForUI(); pool.refresh() }
+                assertEquals(if (initialTab) 1 else 0, f.allocations)
+                assertEquals(0, f.pauses)
+                assertEquals(0, f.calls)
+                assertEquals(original, f.session.currentTab)
+                assertFalse(f.controller.automationHeld)
+                pool.takeControl()
+                assertEquals(1, f.pauses)
+                assertTrue(visit.snapshot().waiting)
+                f.paused = true
+                pool.refresh()
+                assertTrue(visit.snapshot().takenOver)
+                assertEquals(1, f.allocations)
+                visit.close()
+                assertFalse(f.controller.automationHeld)
+                assertEquals(0, f.resumes)
+                assertEquals(0, f.calls)
+            } finally { f.close() }
+        }
+    }
+
+    fun testClosingTakenOverVisitReturnsExactTabWithoutResumingOrRecreating() = main {
+        val f = Fixture()
+        val parent = android.widget.FrameLayout(instrumentation.targetContext)
+        try {
+            f.paused = true
+            val visit = requireNotNull(f.controller.openVisit())
+            val original = requireNotNull(f.session.currentTab)
+            visit.takeover(original)
+            visit.mount(parent)
+            val held = requireNotNull(f.session.currentTab)
+            assertTrue(f.controller.automationHeld)
+            visit.close()
+            val returned = requireNotNull(f.session.currentTab)
+            assertEquals(held.owner, returned.owner)
+            assertEquals(held.tabId, returned.tabId)
+            assertFalse(held == returned)
+            f.registry.assertCurrent(returned)
+            assertFalse(f.controller.automationHeld)
+            assertTrue(f.paused)
+            assertEquals(0, f.resumes)
+            assertEquals(1, f.detaches)
+            assertEquals(0, parent.childCount)
+            assertEquals(1, f.allocations)
+            assertEquals(1, f.releaseChecks)
+            visit.close()
+            assertEquals(1, f.releaseChecks)
+            val reopened = requireNotNull(f.controller.openVisit())
+            visit.close()
+            assertTrue(reopened.snapshot().live)
+            assertFalse(reopened.snapshot().takenOver)
+            assertEquals(returned, f.session.currentTab)
+            assertEquals(0, f.calls)
+        } finally { f.close(); parent.removeAllViews() }
+    }
+
+    fun testClosingWithUnknownDetachOrReleaseNeverResumesOrRetries() = main {
+        for (detachFailure in listOf(false, true)) {
+            val f = Fixture()
+            val parent = android.widget.FrameLayout(instrumentation.targetContext)
+            try {
+                f.paused = true
+                val visit = requireNotNull(f.controller.openVisit())
+                visit.takeover(requireNotNull(f.session.currentTab))
+                visit.mount(parent)
+                f.failDetach = detachFailure
+                f.failBeforeRelease = !detachFailure
+                visit.close()
+                assertTrue(f.controller.automationHeld)
+                assertEquals(0, f.resumes)
+                val releaseChecks = f.releaseChecks
+                repeat(3) { visit.close(); visit.restore() }
+                assertEquals(releaseChecks, f.releaseChecks)
+                assertEquals(1, f.detaches)
+                assertEquals(1, f.allocations)
+                assertTrue(requireNotNull(f.controller.openVisit()).snapshot().unknown)
+            } finally { f.close(); parent.removeAllViews() }
+        }
+    }
+
     fun testKnownBusyPrecheckDoesNotPermanentlyPoisonOriginalBrowser() = main {
         val f = Fixture()
         try {

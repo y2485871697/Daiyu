@@ -316,11 +316,24 @@ internal class ControllerBrowserVisual(
         else if (!main.post { action() }) markUnknown("卸载队列未受理；保留原 attachment，由原 host 清理。")
     }
     private fun leave(visit: Visit) {
-        visit.active.set(false)
+        if (!visit.active.getAndSet(false)) return
         pending.get()?.takeIf { it.visit === visit }?.let { pending.compareAndSet(it, null) }
-        currentVisit.compareAndSet(visit, null)
-        val original = mounted.get()?.takeIf { it.visit === visit } ?: return
-        onMain { detach(original) }
+        val leaving = currentVisit.compareAndSet(visit, null)
+        val original = mounted.get()?.takeIf { it.visit === visit }
+        if (!leaving && original == null) return
+        val held = token
+        onMain {
+            original?.let(::detach)
+            if (held == null || token !== held || currentVisit.get() != null ||
+                unknown || revoked.get() || !ownerCurrent()) return@onMain
+            try {
+                binding.session.releaseTakeover(held)
+                if (token === held) token = null
+                notice = "原浏览器已归还，任务保持暂停。"
+            } catch (_: Exception) {
+                markUnknown("浏览器归还未确认；请停止原任务核实。")
+            }
+        }
     }
     fun revoke() {
         revoked.set(true)

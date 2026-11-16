@@ -21,7 +21,12 @@ BROWSER_PLATFORM_CLASSES = (
     "app.daiyu.android.browser.BrowserUiInputTest",
     "app.daiyu.android.browser.CatalogBrowserBindingAndroidTest",
 )
+BROWSER_LIFECYCLE_PLATFORM_CLASSES = (*BROWSER_PLATFORM_CLASSES,
+    "app.daiyu.android.ControllerBrowserVisualTest",
+    "app.daiyu.android.BrowserVisualLayoutTest",
+)
 BROWSER_MODULES = (
+    "test_browser_pause_lifecycle_contract",
     "test_browser_navigation_defaults_contract", "test_browser_port_contract",
     "test_browser_manual_state_contract", "test_browser_download_cleanup_contract",
     "test_browser_gesture_resume_contract", "test_browser_original_ui_contract",
@@ -781,7 +786,8 @@ PANE_QUESTION_MODULES = (
 
 def command_for(python, env):
     if (env.get("SMOKE_MODE") == "smoke"
-            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(BROWSER_PLATFORM_CLASSES)):
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in
+                (sorted(BROWSER_PLATFORM_CLASSES), sorted(BROWSER_LIFECYCLE_PLATFORM_CLASSES))):
         return [python, "-B", "-m", "unittest", *BROWSER_MODULES, "-v"], "browser-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and child_hot_configuration_scope(env.get("SMOKE_TEST_CLASSES", ""))):

@@ -59,6 +59,47 @@ class BrowserVisualLayoutTest : WiredActivityTestCase() {
         ui.runOnIdle { assertEquals(1, closed); assertEquals(0, fixture.opens.get()) }
     }
 
+    fun testOpeningAndClosingTaskSheetNeverAutomaticallyTakesControl() {
+        for (hasTab in listOf(false, true)) {
+            val lease = BrowserTabLease(BrowserOwner("opening-task", BrowserOwnerKind.MAIN), 0, 1L, 1L)
+            var changes = 0
+            var dismissed = 0
+            val visit = object : BrowserVisualVisit {
+                override val conversationId = null
+                override val memory = BrowserUiMemory("opening-task-$hasTab")
+                override val taskOwned = true
+                override fun snapshot() = ControllerBrowserVisual.State(live = true,
+                    lease = if (hasTab) lease else null, tabs = if (hasTab) listOf(lease) else emptyList())
+                override fun takeover(lease: BrowserTabLease) { changes++ }
+                override fun mount(parent: ViewGroup) = Unit
+                override fun unmount(parent: ViewGroup) = Unit
+                override fun navigate(url: String) { changes++ }
+                override fun newTab() { changes++ }
+                override fun selectTab(lease: BrowserTabLease) { changes++ }
+                override fun closeTab() { changes++ }
+                override fun control(action: BrowserVisibleAction) { changes++ }
+                override fun configure(configuration: BrowserVisibleConfiguration) = Unit
+                override fun downloads(listener: BrowserVisibleDownload?) = Unit
+                override fun restore() { changes++ }
+                override fun stop() { changes++ }
+                override fun close() = Unit
+            }
+            mainThread {
+                activity.setContent {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                        BrowserVisualScreen(visit, { true }, { dismissed++ })
+                    }
+                }
+            }
+            awaitBrowserWindowStable(node("browser-visual-page"))
+            node("browser-visual-tabs").assertTextEquals(if (hasTab) "1/3" else "0/3")
+            assertEquals(0, changes)
+            node("browser-visual-back").performClick()
+            ui.runOnIdle { assertEquals(1, dismissed); assertEquals(0, changes) }
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testTaskBrowserKeepsOriginalPopupWithoutExtraDescriptionsOrTaskButtons() {
         val diagnostic = "未确认：后端诊断，不是原版弹窗内容"
         val visit = object : BrowserVisualVisit {

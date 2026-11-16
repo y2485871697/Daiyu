@@ -122,6 +122,7 @@ class BrowserToolSession(
 
     fun execute(parameters: Map<String, Any?>, navigationDefaults: Boolean = false): BrowserOutcome {
         var entered = false
+        var stage = "precheck"
         return try {
             // Snapshot top-level arguments. Bridge performs all ordinary-action validation.
             val input = parameters.toMap()
@@ -137,9 +138,9 @@ class BrowserToolSession(
                     val navigation = if (arguments.isEmpty()) null else BrowserCommand("navigate", null, arguments).also {
                         validateNavigation(it)
                     }
-                    val lease = newTab { entered = true }
+                    val lease = newTab { entered = true; stage = "create" }
                     if (navigation != null) executeCommand(lease,
-                        BrowserCommand("navigate", lease.tabId, navigation.arguments)) { entered = true }
+                        BrowserCommand("navigate", lease.tabId, navigation.arguments)) { entered = true; stage = "execute" }
                     tabResult(lease)
                 }
                 "list_tabs" -> {
@@ -156,7 +157,7 @@ class BrowserToolSession(
                 "close_tab" -> {
                     require(arguments.isEmpty()) { "BROWSER_TAB_ARGUMENTS" }
                     val lease = synchronized(lock) { resolve(id).lease }
-                    closeTabChecked(lease) { entered = true }
+                    closeTabChecked(lease) { entered = true; stage = "close" }
                     synchronized(lock) {
                         BrowserExecutionResult("{\"closedTabId\":${lease.tabId},\"currentTabId\":${current?.lease?.tabId}}")
                     }
@@ -173,16 +174,25 @@ class BrowserToolSession(
                                 null to allocateTab()
                             }
                         }
-                        selected ?: createTab(checkNotNull(allocation)) { entered = true }
+                        selected ?: createTab(checkNotNull(allocation)) { entered = true; stage = "create" }
                     } else synchronized(lock) { resolve(id).lease }
                     val command = BrowserCommand(action, expected.tabId, arguments)
                     preflight(command)
-                    executeCommand(expected, command) { entered = true }
+                    executeCommand(expected, command) { entered = true; stage = "execute" }
                 }
             }
             BrowserOutcome.Confirmed(result)
         } catch (e: Exception) {
-            if (entered) BrowserOutcome.Unknown
+            if (entered) {
+                val causes = generateSequence<Throwable>(e) { it.cause }.take(8).toList()
+                val kind = when {
+                    causes.any { it is java.util.concurrent.TimeoutException } -> "timeout"
+                    causes.any { it is InterruptedException || it is java.util.concurrent.CancellationException } -> "cancel"
+                    else -> "failure"
+                }
+                runCatching { android.util.Log.w("DaiyuBrowser", "session:$stage:$kind") }
+                BrowserOutcome.Unknown
+            }
             else BrowserOutcome.NotExecuted(e.message?.takeIf { it.startsWith("BROWSER_") } ?: "BROWSER_PRECHECK_REJECTED")
         }
     }

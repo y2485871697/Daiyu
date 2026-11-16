@@ -66,8 +66,9 @@ class ChildModelBatchPoolPermitTest {
         }
         // Read the actual private semaphore: a drain callback alone cannot detect over-release.
         val pool: Semaphore = run {
-            val field = ChildModelBatch::class.java.getDeclaredField("limits").apply { isAccessible = true }
-            (field.get(batch) as Map<*, *>)["shared"] as Semaphore
+            val field = ChildModelBatch::class.java.getDeclaredField("localPools").apply { isAccessible = true }
+            val localPool = (field.get(batch) as Map<*, *>)["shared"] as ChildModelPool
+            localPool.semaphore
         }
         val result = AtomicReference<ExecutionReceipt>()
         private val failure = AtomicReference<Throwable>()

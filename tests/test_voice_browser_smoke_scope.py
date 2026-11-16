@@ -97,9 +97,9 @@ class VoiceBrowserSmokeScopeTest(unittest.TestCase):
             + "' || inputs.smoke_classes == '" + CLASS + "," + other
             + "') && '-voice-browser' || '' }}"
         )
-        self.assertTrue(group.endswith(suffix), group)
+        self.assertEqual(1, group.count(suffix), group)
         self.assertEqual(1, group.count("-voice-browser"))
-        original = group[:-len(suffix)]
+        original = group.replace(suffix, "", 1)
         self.assertTrue(original.startswith("  group: daiyu-${{ inputs.mode }}-${{ github.ref }}"))
         self.assertNotIn(CLASS, original)
         self.assertNotIn(other, original)

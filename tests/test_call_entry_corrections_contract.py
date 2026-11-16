@@ -23,10 +23,10 @@ class CallEntryCorrectionsContractTest(unittest.TestCase):
         self.assertNotIn('.expand(', entry)
         self.assertLess(entry.index('CallEntryAction.IGNORE_CLOSING'), entry.index('VoiceSettingsPreferences(applicationContext).enabled(feature)'))
         self.assertLess(entry.index('closeDoubaoCall('), entry.index('chatVoiceConfigurationProblem('))
-        close = self.main.split('private fun closeDoubaoCall(key: Long)', 1)[1].split('private fun doubaoCallActions(external: Boolean = false)', 1)[0]
+        close = self.main.split('private fun closeDoubaoCall(key: Long)', 1)[1].split('private fun doubaoCallActions()', 1)[0]
         self.assertIn('if (doubaoCallPresentation.beginClose(key, SystemClock.elapsedRealtime()))', close)
         self.assertLess(close.index('beginClose('), close.index('remoteVoice.stopDuplex(key)'))
-        actions = self.main.split('private fun doubaoCallActions(external: Boolean = false)', 1)[1].split('@Composable private fun projectedVoiceComposer()', 1)[0]
+        actions = self.main.split('private fun doubaoCallActions()', 1)[1].split('@Composable private fun projectedVoiceComposer()', 1)[0]
         self.assertIn('onHangUp = { if (current()) closeDoubaoCall(key) }', actions)
         self.assertIn('onExpand = { if (current()) doubaoCallPresentation.expand(key) }', actions)
         completion = actions.split('onCloseAnimationFinished =', 1)[1]

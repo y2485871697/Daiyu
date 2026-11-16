@@ -39,9 +39,17 @@ class SourceTests(unittest.TestCase):
     def test_call_clock_fixture_keeps_strict_raster_assertions(self):
         self.assertIn('app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest,app.daiyu.android.ControllerReasoningFreezeTest', (ROOT / "scripts/smoke_boot.sh").read_text())
         script = (ROOT / 'scripts/smoke_boot.sh').read_text()
-        setup = script.split('  if test "$api" = 26 && test "${SMOKE_MODE:-}" = smoke &&', 1)[1].split('  instrumentation_options=()', 1)[0]
+        setup = script.split('  if { test "$api" = 26 || test "$api" = 37; } && test "${SMOKE_MODE:-}" = smoke &&', 1)[1].split('  instrumentation_options=()', 1)[0]
         self.assertIn('test "${SMOKE_TEST_CLASSES:-}" = "app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest"', setup)
         self.assertIn('test "${SMOKE_TEST_CLASSES:-}" = "app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest,app.daiyu.android.ControllerReasoningFreezeTest,app.daiyu.android.storage.ConversationModelBindingDatabaseTest"', setup)
+        base_scope = ','.join('app.daiyu.android.ui.screens.chat.conversation.' + name for name in (
+            'DoubaoCallOverlayTest', 'DoubaoCallOrbPixelsTest', 'DoubaoCallOverlayZeroDurationTest'))
+        reasoning_scope = base_scope + ',app.daiyu.android.ControllerReasoningFreezeTest'
+        binding_scope = reasoning_scope + ',app.daiyu.android.storage.ConversationModelBindingDatabaseTest'
+        self.assertEqual([
+            base_scope, reasoning_scope, binding_scope,
+            'app.daiyu.android.VoiceCallFloatingWindowTest,' + binding_scope,
+        ], re.findall(r'test "\$\{SMOKE_TEST_CLASSES:-\}" = "([^"]+)"', setup))
         self.assertIn('--es command enter', setup)
         self.assertIn('--es command clock --es hhmm 1200', setup)
         self.assertNotIn('date ', setup)

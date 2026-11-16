@@ -727,7 +727,7 @@ if grep -Eq 'FATAL EXCEPTION|Fatal signal [0-9]+|GL errors!' smoke/logcat-before
 adb_stage install-app 120 install "$APK" 2>&1 | tee smoke/install.txt
 adb_stage install-tests 120 install delivery/tests/platform-test.apk 2>&1 | tee smoke/test-install.txt
 if test "$expected" -gt 0; then
-  if test "$api" = 26 && test "${SMOKE_MODE:-}" = smoke &&
+  if { test "$api" = 26 || test "$api" = 37; } && test "${SMOKE_MODE:-}" = smoke &&
       { test "${SMOKE_TEST_CLASSES:-}" = "app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest" ||
         test "${SMOKE_TEST_CLASSES:-}" = "app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest,app.daiyu.android.ControllerReasoningFreezeTest" ||
         test "${SMOKE_TEST_CLASSES:-}" = "app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest,app.daiyu.android.ControllerReasoningFreezeTest,app.daiyu.android.storage.ConversationModelBindingDatabaseTest" ||

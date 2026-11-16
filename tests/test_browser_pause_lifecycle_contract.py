@@ -74,5 +74,15 @@ class BrowserPauseLifecycleContractTest(unittest.TestCase):
         self.assertNotIn('call_00_', regression)
 
 
+    def test_lifecycle_workflow_has_an_independent_queue(self):
+        workflow = (ROOT / '.github/workflows/build.yml').read_text()
+        concurrency = workflow.split('\nconcurrency:\n', 1)[1].split('\njobs:\n', 1)[0]
+        selector = ','.join(recorder.BROWSER_LIFECYCLE_PLATFORM_CLASSES)
+        condition = "inputs.mode == 'smoke' && inputs.smoke_classes == '" + selector + "' && '-browser-lifecycle'"
+        self.assertIn(condition, concurrency)
+        self.assertIn('cancel-in-progress: false', concurrency)
+        self.assertEqual(1, concurrency.count("'-browser-lifecycle'"))
+
+
 if __name__ == '__main__':
     unittest.main()

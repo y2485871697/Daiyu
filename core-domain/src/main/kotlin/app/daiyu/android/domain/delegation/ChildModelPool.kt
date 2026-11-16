@@ -41,6 +41,9 @@ class ChildModelPool(limit: Int, private val maximum: Int = Int.MAX_VALUE) {
     private fun releasePermit(lease: ChildPoolLease) {
         if (lease.held) { lease.held = false; permits.release() }
     }
+    internal fun load(): Double = synchronized(gate) {
+        leases.count { it.entered && !it.closed }.toDouble() / capacity.coerceAtLeast(1)
+    }
     internal fun boundary(lease: ChildPoolLease) = synchronized(gate) {
         if (!lease.closed) { lease.boundary = true; rebalance() }
     }
@@ -68,12 +71,24 @@ class ChildModelPool(limit: Int, private val maximum: Int = Int.MAX_VALUE) {
 }
 
 /** No automatic cancel, reopen or replay; close is called only at the existing double-drain gate. */
-class ChildPoolLease internal constructor(private val pool: ChildModelPool, private val onWaiting: (Boolean) -> Unit) : AutoCloseable {
+class ChildPoolLease internal constructor(private val pool: ChildModelPool, initialOnWaiting: (Boolean) -> Unit) : AutoCloseable {
+    @Volatile private var onWaiting = initialOnWaiting
+    internal fun observeWaiting(observer: (Boolean) -> Unit) {
+        onWaiting = observer
+        observer(pool.waiting(this))
+    }
     internal var entered = false
     internal var held = false
     internal var boundary = true
     internal var excess = false
     internal var closed = false
+    companion object {
+        private val selectionGate = Any()
+        internal fun <T> acquireBalanced(candidates: List<Pair<T, ChildPoolLease>>): Pair<T, ChildPoolLease>? =
+            synchronized(selectionGate) {
+                candidates.sortedBy { it.second.pool.load() }.firstOrNull { it.second.tryAcquire() }
+            }
+    }
     private val observed = java.util.concurrent.atomic.AtomicBoolean(false)
     val yieldRequested: Boolean get() = pool.waiting(this).also { publish(it) }
     internal fun refresh() { publish(pool.waiting(this)) }

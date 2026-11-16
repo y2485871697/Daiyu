@@ -65,6 +65,103 @@ class ChildTaskHotConfigurationTest {
         val done = CountDownLatch(1); supervisor.closeWhenIdle { done.countDown() }
         assertTrue(done.await(5, TimeUnit.SECONDS))
     }
+    @Test fun groupOrOrphanHandoffsKeepFourTasksWithTwoOrThreeActiveAndDrainTheQueue() {
+        for (preset in listOf(false, true)) for (twoCandidates in listOf(false, true)) {
+            val journal = Journal(); val supervisor = RetainedChildTasks(journal); val parent = Parent()
+            val aOpens = AtomicInteger(); val bOpens = AtomicInteger(); val forks = AtomicInteger()
+            val finishA = CountDownLatch(1); val finishB = CountDownLatch(1)
+            fun port(opens: AtomicInteger, finish: CountDownLatch) = ModelPort {
+                opens.incrementAndGet()
+                object : ModelSession {
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        check(finish.await(10, TimeUnit.SECONDS)); sink(ModelEvent.TextFinal("text", "done"))
+                    }
+                    override fun cancel() { finish.countDown() }
+                }
+            }
+            val old = ChildModelDefinition("a-pool", 4) { error("old transport must not open") }
+                .identified("p", "old", "initial")
+            val choices = AtomicReference(listOf(old))
+            fun fork(): ChildModelDefinition {
+                forks.incrementAndGet()
+                val selected = AtomicReference(old)
+                fun current(): ChildModelDefinition {
+                    val candidates = choices.get()
+                    return (candidates.firstOrNull { it.profileId == selected.get().profileId } ?: candidates.first())
+                        .also { selected.set(it) }
+                }
+                return ChildModelDefinition(old.poolKey, old.parallelLimit, null, latest = ::current,
+                    selection = Any()) { error("prototype must not open") }
+                    .scheduling(candidates = { choices.get() }, select = { candidate ->
+                        if (choices.get().none { it.sameSelection(candidate) }) false
+                        else { selected.set(candidate); true }
+                    })
+            }
+            val prototype = old.taskScoped(::fork)
+            val binding = supervisor.bind(parent.owner, parent.caps, parent.auth, mapOf("p" to prototype))
+            val group = supervisor.pauseGroup(binding)
+            try {
+                val accepted = supervisor.submit(binding, parent.context("four"), List(4) { ChildModelTask("p", "task-$it") })
+                    as ChildTaskAdmission.Accepted
+                await { supervisor.snapshots(binding).size == 4 && supervisor.snapshots(binding).all {
+                    it.pauseState == ChildTaskPauseState.PAUSED
+                } }
+                val token = if (preset) "next-group" else "initial"
+                val a = ChildModelDefinition(if (preset) "next-a" else "a-pool", 2) { port(aOpens, finishA) }
+                    .identified("p", "a", token).routed("provider-a", "same-api")
+                val b = ChildModelDefinition("b-pool", 1) { port(bOpens, finishB) }
+                    .identified("b", "b", token).routed("provider-b", "same-api")
+                choices.set(if (twoCandidates) listOf(a, b) else listOf(a))
+                assertTrue(supervisor.configure(binding, choices.get().associateBy { it.profileId!! }))
+                assertTrue(supervisor.resumeGroup(group))
+                val active = if (twoCandidates) 3 else 2
+                await { aOpens.get() + bOpens.get() == active && supervisor.snapshots(binding)
+                    .count { it.queueState == ChildTaskQueueState.PENDING } == 4 - active }
+                assertEquals(4, accepted.tasks.size); assertEquals(4, forks.get())
+                assertEquals(2, aOpens.get()); assertEquals(if (twoCandidates) 1 else 0, bOpens.get())
+                assertTrue(supervisor.snapshots(binding).all {
+                    it.pauseState == ChildTaskPauseState.ACTIVE && !it.configurationPaused
+                })
+                if (twoCandidates) {
+                    finishB.countDown()
+                    await { bOpens.get() == 2 }
+                    assertEquals(2, aOpens.get())
+                }
+                finishA.countDown(); finishB.countDown()
+                await { supervisor.snapshots(binding).all { it.settled } }
+                assertEquals(4, aOpens.get() + bOpens.get())
+                assertEquals(1, journal.enqueues.get())
+                assertEquals(accepted.tasks.map { it.owner }.toSet(), journal.rows.values.map { it.owner }.toSet())
+            } finally { finishA.countDown(); finishB.countDown(); close(supervisor) }
+        }
+    }
+
+    @Test fun configureExistingPoolAppliesNewCapacityWithoutASeparateReconcile() {
+        val journal = Journal(); val supervisor = RetainedChildTasks(journal); val parent = Parent()
+        val opens = AtomicInteger(); val finish = CountDownLatch(1)
+        val port = ModelPort {
+            opens.incrementAndGet()
+            object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    check(finish.await(10, TimeUnit.SECONDS)); sink(ModelEvent.TextFinal("text", "done"))
+                }
+                override fun cancel() { finish.countDown() }
+            }
+        }
+        val binding = supervisor.bind(parent.owner, parent.caps, parent.auth,
+            mapOf("p" to ChildModelDefinition("pool", 4) { port }))
+        try {
+            assertTrue(supervisor.configure(binding, mapOf("p" to ChildModelDefinition("pool", 2) { port })))
+            val accepted = supervisor.submit(binding, parent.context("four"), List(4) { ChildModelTask("p", "task-$it") })
+                as ChildTaskAdmission.Accepted
+            await { opens.get() == 2 && supervisor.snapshots(binding).count { it.queueState == ChildTaskQueueState.PENDING } == 2 }
+            assertEquals(4, accepted.tasks.size)
+            finish.countDown()
+            await { supervisor.snapshots(binding).all { it.settled } }
+            assertEquals(4, opens.get()); assertEquals(1, journal.enqueues.get())
+        } finally { finish.countDown(); close(supervisor) }
+    }
+
     @Test fun emptyAuthorizedGroupCanAdmitAnAddedProfileWithoutRebindingParent() {
         val journal = Journal(); val supervisor = RetainedChildTasks(journal); val parent = Parent()
         val binding = supervisor.bind(parent.owner, parent.caps, parent.auth, emptyMap())

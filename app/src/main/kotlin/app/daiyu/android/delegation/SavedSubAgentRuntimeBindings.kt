@@ -83,74 +83,129 @@ internal class SavedSubAgentRuntimeBindings(
                 role = if (binding.profile.role == "implementation") ChildModelRole.IMPLEMENTATION else ChildModelRole.REVIEW) { runModel(binding.child) }
                 .identified(binding.profile.id, identity(binding.profile.providerId, binding.saved), frozen.presetApplicationToken)
                 .routed(binding.profile.providerId, binding.child.model)
-            val lock = Any()
-            var assigned = binding.profile
-            var last = original
-            val guard = runtimeStart?.let { start -> CommittedProfileBinding(start, binding.profile) { previous, candidate ->
-                runCatching {
-                    fun identityOf(profile: SubAgentProfile) = identity(profile.providerId,
-                        ModelFactory.snapshot(resolveSavedModel(profile.providerId, profile.modelId)))
-                    identityOf(previous) == identityOf(candidate)
-                }.getOrDefault(false)
-            } }
-            var lifetime = currentLifetime?.invoke(assigned.id)
-            var application = frozen.presetApplicationToken
-            var revoked = false
-            fun currentBinding(): Boolean = synchronized(lock) {
-                if (revoked) return@synchronized false
-                if (guard != null) {
-                    val view = guard.current() ?: run { revoked = true; return@synchronized false }
-                    assigned = view.profile
-                    return@synchronized true
-                }
-                val next = latestConfig?.invoke() ?: return@synchronized profileCurrent(binding.profile.id)
-                if (next.presetApplicationToken != application) {
-                    // A preset switch may bridge IDs, but never a model or role mismatch.
-                    val replacement = next.profiles.asSequence().filter { it.role == binding.profile.role }
-                        .sortedBy { it.id }.mapNotNull { profile ->
-                            runCatching { latestModel?.invoke(profile.id) }.getOrNull()?.takeIf {
-                                it.modelIdentity == last.modelIdentity && it.role == original.role && it.acceptsNewTask()
-                            }?.let { profile to it }
-                        }.firstOrNull() ?: run { revoked = true; return@synchronized false }
+            fun taskDefinition(): ChildModelDefinition {
+                val lock = Any()
+                var assigned = binding.profile
+                var last = original
+                val guard = runtimeStart?.let { start -> CommittedProfileBinding(start, binding.profile) { previous, candidate ->
+                    runCatching {
+                        fun modelOf(profile: SubAgentProfile) =
+                            ModelFactory.snapshot(resolveSavedModel(profile.providerId, profile.modelId)).model
+                        val previousModel = runCatching { modelOf(previous) }.getOrDefault(last.requestModel?.modelId ?: binding.child.model)
+                        previousModel == modelOf(candidate)
+                    }.getOrDefault(false)
+                } }
+                var lifetime = currentLifetime?.invoke(assigned.id)
+                var application = frozen.presetApplicationToken
+                var revoked = false
+                var eligibleIds = frozen.profiles.map { it.id }.toSet()
+                var offeredIds = setOf(binding.profile.id)
+                var observedConfig = frozen
+                fun currentBinding(): Boolean = synchronized(lock) {
+                    if (revoked) return@synchronized false
+                    if (guard != null) {
+                        val view = guard.current() ?: run { revoked = true; return@synchronized false }
+                        assigned = view.profile
+                        return@synchronized true
+                    }
+                    val next = latestConfig?.invoke() ?: return@synchronized profileCurrent(binding.profile.id)
+                    val switchingPreset = next.presetApplicationToken != application
+                    val stable = next.profiles.singleOrNull { it.id == assigned.id }?.role == binding.profile.role &&
+                        currentLifetime?.invoke(assigned.id) == lifetime &&
+                        (currentLifetime != null || profileCurrent(assigned.id))
+                    if (!switchingPreset && stable) {
+                        if (next != observedConfig) offeredIds = setOf(assigned.id)
+                        observedConfig = next
+                        return@synchronized true
+                    }
+                    val compatible = next.profiles.filter {
+                        it.role == binding.profile.role && (switchingPreset || it.id in eligibleIds) &&
+                            (switchingPreset || it.id != assigned.id)
+                    }.mapNotNull { profile ->
+                        runCatching { latestModel?.invoke(profile.id) }.getOrNull()?.takeIf {
+                            it.role == original.role && it.isValid() && it.acceptsNewTask()
+                        }?.let { profile to it }
+                    }
+                    val matching = compatible.filter { it.second.requestModel?.modelId == last.requestModel?.modelId }
+                    val choices = matching.ifEmpty { compatible }
+                    val replacement = choices.firstOrNull { it.first.id == assigned.id } ?: choices.firstOrNull()
+                        ?: run { revoked = true; return@synchronized false }
                     check(latestConfig.invoke() == next) { "child_model_configuration_changed" }
+                    if (switchingPreset) eligibleIds = next.profiles.map { it.id }.toSet()
+                    offeredIds = choices.map { it.first.id }.toSet()
                     assigned = replacement.first
                     last = replacement.second
                     lifetime = currentLifetime?.invoke(assigned.id)
                     application = next.presetApplicationToken
+                    observedConfig = next
+                    true
                 }
-                val valid = next.profiles.singleOrNull { it.id == assigned.id }?.role == binding.profile.role &&
-                    currentLifetime?.invoke(assigned.id) == lifetime &&
-                    (currentLifetime != null || profileCurrent(binding.profile.id))
-                if (!valid) revoked = true
-                valid
-            }
-            fun deletedSelection(): Boolean = synchronized(lock) {
-                val next = latestConfig?.invoke()?.profiles?.singleOrNull { it.id == assigned.id }
-                modelDeleted(assigned) || (next != null && modelDeleted(next))
-            }
-            binding.profile.id to if (latestConfig == null || latestModel == null) original else
-                ChildModelDefinition(original.poolKey, original.parallelLimit, display,
-                    latest = { synchronized(lock) {
-                        check(currentBinding()) { "child_profile_removed_or_role_changed" }
-                        if (deletedSelection()) last else try {
-                            val guardBefore = guard?.current()
-                            val next = latestConfig()
-                            val profile = checkNotNull(next.profiles.singleOrNull { it.id == assigned.id })
-                            check(profile.role == binding.profile.role) { "child_profile_removed_or_role_changed" }
-                            val resolved = latestModel(profile.id)
-                            check(latestConfig() == next && (if (guard != null) guard.current()?.revision == guardBefore?.revision
-                                else currentLifetime?.invoke(profile.id) == lifetime && (currentLifetime != null || profileCurrent(binding.profile.id)))) {
-                                "child_model_configuration_changed"
+
+                fun deletedSelection(): Boolean = synchronized(lock) {
+                    val next = latestConfig?.invoke()?.profiles?.singleOrNull { it.id == assigned.id }
+                    modelDeleted(assigned) || (next != null && modelDeleted(next))
+                }
+                if (latestConfig == null || latestModel == null) return original
+                return ChildModelDefinition(original.poolKey, original.parallelLimit, display,
+                        latest = { synchronized(lock) {
+                            check(currentBinding()) { "child_profile_removed_or_role_changed" }
+                            if (deletedSelection()) last else try {
+                                val guardBefore = guard?.current()
+                                val next = latestConfig()
+                                val profile = checkNotNull(next.profiles.singleOrNull { it.id == assigned.id })
+                                check(profile.role == binding.profile.role) { "child_profile_removed_or_role_changed" }
+                                val resolved = latestModel(profile.id)
+                                check(latestConfig() == next && (if (guard != null) guard.current()?.revision == guardBefore?.revision
+                                    else currentLifetime?.invoke(profile.id) == lifetime && (currentLifetime != null || profileCurrent(binding.profile.id)))) {
+                                    "child_model_configuration_changed"
+                                }
+                                assigned = profile
+                                resolved.also { last = it }
+                            } catch (failure: Exception) {
+                                if (deletedSelection()) last else throw failure
                             }
-                            assigned = profile
-                            resolved.also { last = it }
-                        } catch (failure: Exception) {
-                            if (deletedSelection()) last else throw failure
+                        } }, selection = binding.child, valid = ::currentBinding,
+                        admissionAllowed = { !deletedSelection() }, role = original.role) { runModel(binding.child) }
+                        .identified(binding.profile.id, identity(binding.profile.providerId, binding.saved), frozen.presetApplicationToken)
+                    .routed(binding.profile.providerId, binding.child.model)
+                    .scheduling(candidates = { synchronized(lock) {
+                        check(currentBinding()) { "child_profile_removed_or_role_changed" }
+                        if (deletedSelection()) listOf(last) else {
+                            val view = guard?.current()
+                            check(guard == null || view != null) { "child_profile_removed_or_role_changed" }
+                            val next = view?.config ?: latestConfig()
+                            val admitted = view?.candidates ?: next.profiles.filter {
+                                it.id in offeredIds && it.role == binding.profile.role
+                            }
+                            val resolved = admitted.mapNotNull { profile ->
+                                runCatching { latestModel(profile.id) }.getOrNull()?.takeIf {
+                                    it.role == original.role && it.isValid() && it.acceptsNewTask()
+                                }?.let { profile to it }
+                            }
+                            check(latestConfig() == next) { "child_model_configuration_changed" }
+                            if (guard != null) resolved.map { it.second } else {
+                                val matching = resolved.filter { it.second.requestModel?.modelId == last.requestModel?.modelId }
+                                matching.ifEmpty { resolved }.map { it.second }
+                            }
                         }
-                    } }, selection = binding.child, valid = ::currentBinding,
-                    admissionAllowed = { !deletedSelection() }, role = original.role) { runModel(binding.child) }
-                    .identified(binding.profile.id, identity(binding.profile.providerId, binding.saved), frozen.presetApplicationToken)
-                .routed(binding.profile.providerId, binding.child.model)
+                    } }, select = { candidate -> synchronized(lock) {
+                        if (!currentBinding()) return@synchronized false
+                        if (deletedSelection()) return@synchronized candidate.sameSelection(last)
+                        val next = latestConfig()
+                        val view = guard?.current()
+                        if (guard != null && view == null) return@synchronized false
+                        val profile = (view?.candidates ?: next.profiles.filter { it.id in offeredIds })
+                            .singleOrNull { it.id == candidate.profileId && it.role == binding.profile.role }
+                            ?: return@synchronized false
+                        if (!candidate.sameSelection(latestModel(profile.id)) || latestConfig() != next) return@synchronized false
+                        if (guard != null && !guard.select(profile.id, checkNotNull(view).revision)) return@synchronized false
+                        assigned = profile
+                        lifetime = currentLifetime?.invoke(profile.id)
+                        last = candidate
+                        true
+                    } })
+            }
+            binding.profile.id to taskDefinition().taskScoped(::taskDefinition)
         }
         return FrozenSubAgentModels(definitions, current, latest = if (latestConfig == null || latestModels == null) null else ({
             val next = latestConfig()

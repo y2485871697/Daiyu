@@ -90,7 +90,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     private val maxRetainedTasks: Int = 64, private val usageRecorder: ChildUsageRecorder? = null,
     private val diagnostics: ChildTaskDiagnostics? = null,
     private val maxRequestsPerBinding: Int = 1024) : AutoCloseable {
-    private class Pool(var limit: Int) {
+    private class Pool(@Volatile var limit: Int) {
         val capacity = ChildModelPool(limit)
         var bindings = 0
     }
@@ -273,15 +273,20 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             require(definitions.map { it.parallelLimit }.distinct().size == 1) { "child_pool_limit_conflict" }
             definitions.first().parallelLimit
         }
-        return synchronized(gate) {
-            val resources = binding.resources ?: return@synchronized false
-            if (closed || !binding.accepting) return@synchronized false
-            limits.forEach { (key, limit) ->
-                if (resources.poolKeys.add(key)) pools.getOrPut(key) { Pool(limit) }.bindings++
+        val updates = synchronized(gate) {
+            val resources = binding.resources ?: return false
+            if (closed || !binding.accepting) return false
+            val updates = limits.map { (key, limit) ->
+                val pool = pools.getOrPut(key) { Pool(limit) }
+                if (resources.poolKeys.add(key)) pool.bindings++
+                pool.limit = limit
+                pool to limit
             }
             resources.models = Collections.unmodifiableMap(frozen)
-            true
+            updates
         }
+        updates.forEach { (pool, _) -> synchronized(pool) { pool.capacity.resize(pool.limit) } }
+        return true
     }
 
     /** Durable configuration event, independent of parent admission or user pause state. */
@@ -296,7 +301,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         }.mapNotNull { key -> limit(key)?.let { key to it } }
         changes.forEach { (key, size) ->
             val pool = synchronized(gate) { pools[key]?.also { it.limit = size } }
-            pool?.capacity?.resize(size)
+            pool?.let { synchronized(it) { it.capacity.resize(it.limit) } }
         }
         candidates.filter { !runCatching { it.definition.isValid() }.getOrDefault(false) }
             .forEach { task ->
@@ -715,11 +720,11 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                     check(!task.settled && task.binding.resources === resources)
                     val pool = pools.getOrPut(selected.poolKey) { Pool(selected.parallelLimit) }
                     if (resources.poolKeys.add(selected.poolKey)) pool.bindings++
-                    pool.capacity.lease { waiting ->
-                        synchronized(gate) { task.queueState = if (waiting) ChildTaskQueueState.PENDING else ChildTaskQueueState.ACTIVE }
-                        notifyChanged(task.binding)
-                    }
-                } })
+                    pool.capacity.lease()
+                } }, onPoolWaiting = { waiting ->
+                    synchronized(gate) { task.queueState = if (waiting) ChildTaskQueueState.PENDING else ChildTaskQueueState.ACTIVE }
+                    notifyChanged(task.binding)
+                })
             batch.bind(task.binding.owner, resources.session, resources.authorization)
             synchronized(gate) { task.batch = batch }
             if (stopped(task)) {

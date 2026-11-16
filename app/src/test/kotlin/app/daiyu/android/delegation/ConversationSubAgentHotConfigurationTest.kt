@@ -63,7 +63,7 @@ class ConversationSubAgentHotConfigurationTest {
             val matching = repository.addPreset("matching")
             repository.update(SubAgentConfigKey.Preset(matching.id)) { it.copy(profiles = listOf(a.copy(id = "b"))) }
             val mismatch = repository.addPreset("different")
-            repository.update(SubAgentConfigKey.Preset(mismatch.id)) { it.copy(profiles = listOf(a.copy(modelId = "other"))) }
+            repository.update(SubAgentConfigKey.Preset(mismatch.id)) { it.copy(profiles = listOf(a.copy(role = "implementation", modelId = "other"))) }
             val binding = CommittedProfileBinding(repository.openRuntime(owner), a)
             when (destructive) {
                 "delete" -> repository.update(owner) { it.copy(profiles = emptyList()) }
@@ -90,6 +90,68 @@ class ConversationSubAgentHotConfigurationTest {
         assertEquals("b", binding.current()!!.profile.id)
         repository.update(owner) { it.copy(profiles = listOf(a), presetApplicationToken = "forged") }
         assertNull(binding.current())
+    }
+
+    @Test fun presetPrefersSameModelAcrossProvidersAndFallsBackOnlyWhenAbsent() {
+        val repository = ConversationSubAgentPreferences(HotConfigurationPreferences())
+        val a = profile.copy(providerId = "old", modelId = "record-x")
+        repository.update(owner) { it.copy(profiles = listOf(a)) }
+        val preset = repository.addPreset("replacement")
+        val same = a.copy(id = "same", providerId = "new", modelId = "another-record-x")
+        val other = a.copy(id = "other", modelId = "record-y")
+        val wrongRole = same.copy(id = "wrong-role", role = "implementation")
+        val binding = CommittedProfileBinding(repository.openRuntime(owner), a) { first, second ->
+            fun api(p: SubAgentProfile) = if (p.modelId.endsWith("x")) "api-x" else "api-y"
+            api(first) == api(second)
+        }
+        repository.update(SubAgentConfigKey.Preset(preset.id)) { it.copy(profiles = listOf(other, wrongRole, same)) }
+        repository.applyPreset(owner, preset.id)
+        val preferred = binding.current()!!
+        assertEquals(listOf(same), preferred.candidates)
+        assertFalse(binding.select(other.id, preferred.revision))
+        assertTrue(binding.select(same.id, preferred.revision))
+        repository.update(SubAgentConfigKey.Preset(preset.id)) { it.copy(profiles = listOf(other, wrongRole)) }
+        repository.applyPreset(owner, preset.id)
+        val fallback = binding.current()!!
+        assertEquals(listOf(other), fallback.candidates)
+        assertEquals(other, fallback.profile)
+        assertFalse(binding.select(other.id, preferred.revision))
+        assertTrue(binding.select(other.id, fallback.revision))
+    }
+
+    @Test fun ordinaryEditsStayWithTheOriginalAgentAndOrphansCanUseAnAdmittedPeer() {
+        val repository = ConversationSubAgentPreferences(HotConfigurationPreferences())
+        val a = profile.copy(id = "a", modelId = "x")
+        val b = a.copy(id = "b", modelId = "y")
+        repository.update(owner) { it.copy(profiles = listOf(a, b)) }
+        val binding = CommittedProfileBinding(repository.openRuntime(owner), a)
+        assertEquals(listOf(a), binding.current()!!.candidates)
+        repository.update(owner) { it.copy(profiles = listOf(a.copy(modelId = "y"), b, b.copy(id = "added"))) }
+        assertEquals(listOf("a"), binding.current()!!.candidates.map { it.id })
+        assertFalse(binding.select("b"))
+        repository.update(owner) { it.copy(profiles = listOf(b)) }
+        assertEquals("b", binding.current()!!.profile.id)
+    }
+
+    @Test fun deletingOrChangingTheAssignedRoleHandsOffToTheOriginalRoleButEditingNeverDoes() {
+        for (delete in listOf(false, true)) {
+            val repository = ConversationSubAgentPreferences(HotConfigurationPreferences())
+            val a = profile.copy(id = "a", providerId = "first", modelId = "x")
+            val b = a.copy(id = "b", providerId = "second", parallelLimit = 1)
+            repository.update(owner) { it.copy(profiles = listOf(a, b)) }
+            val binding = CommittedProfileBinding(repository.openRuntime(owner), a)
+            repository.update(owner) { it.copy(profiles = listOf(a.copy(modelId = "changed", parallelLimit = 2), b)) }
+            assertEquals("a", binding.current()!!.profile.id)
+            assertEquals(listOf("a"), binding.current()!!.candidates.map { it.id })
+            assertFalse(binding.select("b"))
+            repository.update(owner) { it.copy(profiles = if (delete) listOf(b)
+                else listOf(a.copy(role = "implementation"), b)) }
+            assertEquals("b", binding.current()!!.profile.id)
+            assertTrue(binding.select("b"))
+            repository.update(owner) { it.copy(profiles = listOf(a, b)) }
+            assertEquals("b", binding.current()!!.profile.id)
+            assertEquals(listOf("b"), binding.current()!!.candidates.map { it.id })
+        }
     }
 
     private fun assertPoolCapacity(pool: app.daiyu.android.domain.delegation.ChildModelPool, expected: Int) {

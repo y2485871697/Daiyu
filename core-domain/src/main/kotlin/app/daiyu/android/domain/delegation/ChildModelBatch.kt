@@ -10,7 +10,6 @@ import app.daiyu.android.domain.tools.*
 import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.LinkedBlockingQueue
-import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -35,6 +34,17 @@ class ChildModelDefinition(val poolKey: String, val parallelLimit: Int, val disp
         this.modelIdentity = modelIdentity
         this.groupToken = groupToken
     }
+    private var taskFactory: (() -> ChildModelDefinition)? = null
+    private var candidates: (() -> List<ChildModelDefinition>)? = null
+    private var choose: ((ChildModelDefinition) -> Boolean)? = null
+    fun taskScoped(factory: () -> ChildModelDefinition): ChildModelDefinition = apply { taskFactory = factory }
+    fun forTask(): ChildModelDefinition = taskFactory?.invoke() ?: this
+    fun scheduling(candidates: () -> List<ChildModelDefinition>,
+        select: (ChildModelDefinition) -> Boolean): ChildModelDefinition = apply {
+        this.candidates = candidates; this.choose = select
+    }
+    fun currentCandidates(): List<ChildModelDefinition> = candidates?.invoke() ?: listOf(current())
+    fun select(candidate: ChildModelDefinition): Boolean = choose?.invoke(candidate) ?: candidate.sameSelection(current())
     private var latest: (() -> ChildModelDefinition)? = null
     private var selection: Any? = null
     private var valid: () -> Boolean = { true }
@@ -75,14 +85,14 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
     private val sharedPool: ((ChildModelDefinition) -> ChildPoolLease)? = null,
     private val onProfilesChanged: () -> Unit = {},
     private val toolAssembly: ChildToolAssemblyFactory? = null,
-    private val diagnostics: ChildTaskDiagnostics? = null) : AutoCloseable {
+    private val diagnostics: ChildTaskDiagnostics? = null,
+    private val onPoolWaiting: (Boolean) -> Unit = {}) : AutoCloseable {
     private val models = models.toMap()
     private fun limits(models: Map<String, ChildModelDefinition>) = models.values.groupBy { it.poolKey }.mapValues { (_, entries) ->
         require(entries.map { it.parallelLimit }.distinct().size == 1) { "child_pool_limit_conflict" }
         ChildModelPool(entries.first().parallelLimit)
     }
     private val localPools = limits(this.models).toMutableMap()
-    private val limits: MutableMap<String, Semaphore> = localPools.mapValues { it.value.semaphore }.toMutableMap()
     fun configurationChanged(limit: (String) -> Int?) {
         val updates = synchronized(gate) { localPools.toMap() }
         updates.forEach { (key, pool) -> limit(key)?.let { pool.resize(it) } }
@@ -278,11 +288,11 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                         synchronized(gate) { activeChildren[record.owner] = activeChild }
                         childPause.observePause { trace(activeChild, ChildTaskDiagnosticPhase.PAUSED) }
                         trace(activeChild, ChildTaskDiagnosticPhase.ADMITTED)
-                        var waitingForPool = false
+                        val waitingForPool = AtomicBoolean(false)
                         fun poolWaiting(waiting: Boolean) {
                             childPause.schedulingBoundary(waiting)
-                            if (waitingForPool != waiting) {
-                                waitingForPool = waiting
+                            if (waitingForPool.getAndSet(waiting) != waiting) {
+                                onPoolWaiting(waiting)
                                 trace(activeChild, if (waiting) ChildTaskDiagnosticPhase.QUEUE_WAIT else ChildTaskDiagnosticPhase.QUEUE_READY)
                             }
                         }
@@ -315,9 +325,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                 }
                             }
                         }
-                        var permit: Semaphore? = null
-                        var acquired = false
                         var lease: ChildPoolLease? = null
+                        val waitingLeases = linkedMapOf<String, Pair<ChildModelDefinition, ChildPoolLease>>()
                         var journalStarted = false
                         // A permit belongs to this item until BOTH its worker and transport drain.
                         // Keep outstanding pinned through the lock-free release as well, so idle
@@ -335,45 +344,99 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                 else { itemReleased = true; true }
                             }
                             if (!release) return
-                            if (lease != null) lease?.close() else if (acquired) checkNotNull(permit).release()
+                            waitingLeases.values.forEach { it.second.close() }; waitingLeases.clear()
+                            lease?.close()
                             synchronized(gate) { outstanding--; profileReservations.remove(reservations[index]) }
                             onProfilesChanged()
                             notifyIfIdle()
+                        }
+                        fun closeWaitingLeases() {
+                            waitingLeases.values.forEach { it.second.close() }
+                            waitingLeases.clear()
+                        }
+                        var recordedSelection: ChildModelDefinition? = null
+                        fun recordSelection(selected: ChildModelDefinition) {
+                            val profileId = selected.profileId ?: assignment.profileId
+                            if (recordedSelection?.sameSelection(selected) == true && record.assignedProfileId == profileId &&
+                                recordedSelection?.requestModel == selected.requestModel) return
+                            if (record.assignedProfileId != profileId) {
+                                record = if (store == null) record.copy(assignedProfileId = profileId)
+                                else checkNotNull(store.reassigned(record, profileId, selected.display)) { "child_assignment_unconfirmed" }
+                            }
+                            store?.selected(record, selected.display)
+                            record = record.copy(display = selected.display)
+                            synchronized(gate) { activeChild.record = record; activeChild.selected = selected }
+                            recordedSelection = selected
+                        }
+                        fun selectionReady(selected: ChildModelDefinition): Boolean {
+                            check(!cancelled() && beforeDeadline())
+                            if (childPause.snapshot() != ChildTaskPauseState.ACTIVE) {
+                                lease?.close(); lease = null; poolSelection = null
+                                closeWaitingLeases(); poolWaiting(false)
+                                return false
+                            }
+                            return selected.sameSelection(currentDefinition()) && lease?.leaveBoundary() != false
                         }
                         fun awaitSelection(): ChildModelDefinition {
                             while (true) {
                                 check(!cancelled() && beforeDeadline())
                                 check(childPause.awaitBoundary(boundary = { lease?.enterBoundary() }))
-                                val selected = currentDefinition()
-                                check(selected.role == definition.role) { "child_role_changed" }
-                                if (poolSelection?.sameSelection(selected) != true) {
-                                    if (lease != null) lease?.close() else if (acquired) checkNotNull(permit).release()
-                                    acquired = false; lease = null; permit = null
-                                    lease = sharedPool?.invoke(selected)
-                                    permit = if (lease != null) null else synchronized(gate) {
-                                        localPools.getOrPut(selected.poolKey) { ChildModelPool(selected.parallelLimit) }
-                                            .also { limits[selected.poolKey] = it.semaphore }.semaphore
-                                    }
-                                    poolSelection = selected
+                                val current = currentDefinition()
+                                val choices = definition.currentCandidates().filter { it.role == definition.role }.distinctBy { it.poolKey }
+                                if (choices.isEmpty()) continue
+                                if (poolSelection?.sameSelection(current) != true) {
+                                    lease?.close()
+                                    lease = null; poolSelection = null
                                 }
-                                if (lease != null) {
-                                    acquired = checkNotNull(lease).tryAcquire()
-                                } else if (!acquired) acquired = checkNotNull(permit).tryAcquire(25, TimeUnit.MILLISECONDS)
-                                if (!acquired) { poolWaiting(true); Thread.sleep(25); continue }
+                                if (lease != null && checkNotNull(lease).tryAcquire()) {
+                                    if (definition.select(current) && current.sameSelection(currentDefinition()) &&
+                                        checkNotNull(lease).leaveBoundary()) {
+                                        poolWaiting(false)
+                                        if (!journalStarted) { store?.started(record); journalStarted = true }
+                                        recordSelection(current)
+                                        if (!selectionReady(current)) continue
+                                        return current
+                                    }
+                                    continue
+                                }
+                                // Probe the existing shared pools, never a second app-side capacity counter.
+                                if (lease != null && poolSelection != null) {
+                                    checkNotNull(lease).observeWaiting {}
+                                    waitingLeases.putIfAbsent(current.poolKey, current to checkNotNull(lease))
+                                }
+                                waitingLeases.entries.removeAll { (key, entry) ->
+                                    if (entry.second.closed || choices.none { it.poolKey == key && it.sameSelection(entry.first) }) {
+                                        entry.second.close(); true
+                                    } else false
+                                }
+                                choices.forEach { candidate ->
+                                    waitingLeases.getOrPut(candidate.poolKey) {
+                                        candidate to (sharedPool?.invoke(candidate) ?: synchronized(gate) {
+                                            localPools.getOrPut(candidate.poolKey) { ChildModelPool(candidate.parallelLimit) }.lease()
+                                        })
+                                    }
+                                }
+                                val ready = ChildPoolLease.acquireBalanced(waitingLeases.values.toList())
+                                if (ready == null) {
+                                    // Binding is accepted even while all compatible capacity is busy.
+                                    if (definition.select(current)) recordSelection(current)
+                                    poolWaiting(true); Thread.sleep(25); continue
+                                }
+                                val (selected, selectedLease) = ready
+                                waitingLeases.remove(selected.poolKey)
+                                closeWaitingLeases()
+                                if (lease !== selectedLease) lease?.close()
+                                lease = selectedLease; poolSelection = selected
+                                selectedLease.observeWaiting(::poolWaiting)
+                                if (!definition.select(selected)) continue
                                 check(!cancelled() && beforeDeadline())
                                 if (childPause.snapshot() != ChildTaskPauseState.ACTIVE) continue
                                 if (!selected.sameSelection(currentDefinition())) continue
-                                if (lease?.leaveBoundary() == false) { poolWaiting(true); Thread.sleep(25); continue }
+                                if (!selectedLease.leaveBoundary()) { poolWaiting(true); continue }
                                 poolWaiting(false)
                                 if (!journalStarted) { store?.started(record); journalStarted = true }
-                                check(!cancelled() && beforeDeadline())
-                                if (childPause.snapshot() != ChildTaskPauseState.ACTIVE) {
-                                    if (lease != null) lease?.close() else if (acquired) checkNotNull(permit).release()
-                                    acquired = false; lease = null; permit = null; poolSelection = null
-                                    poolWaiting(false)
-                                    continue
-                                }
-                                if (!selected.sameSelection(currentDefinition())) continue
+                                recordSelection(selected)
+                                if (!selectionReady(selected)) continue
                                 return selected
                             }
                         }
@@ -437,13 +500,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                             if (childPause.snapshot() != ChildTaskPauseState.ACTIVE) continue
                                             if (!selectedModel.sameSelection(currentDefinition())) continue
                                             if (lease?.leaveBoundary() == false) continue
-                                            val assignedProfile = selectedModel.profileId ?: assignment.profileId
-                                            if (record.assignedProfileId != assignedProfile) {
-                                                record = checkNotNull(store?.reassigned(record, assignedProfile, record.display)) { "child_assignment_unconfirmed" }.copy(status = ChildTaskStatus.QUEUED, text = "", detail = null)
-                                            }
-                                            store?.selected(record, selectedModel.display)
-                                            record = record.copy(display = selectedModel.display)
-                                            synchronized(gate) { activeChild.record = record; activeChild.selected = selectedModel }
+                                            recordSelection(selectedModel)
                                             check(!cancelled() && beforeDeadline())
                                             if (childPause.snapshot() != ChildTaskPauseState.ACTIVE) continue
                                             if (!selectedModel.sameSelection(currentDefinition())) continue

@@ -86,7 +86,7 @@ class SavedSubAgentRuntimeBindingsTest {
         assertEquals(listOf(changed.modelId, changed.modelId), captured.map { it.model })
     }
 
-    @Test fun committedPresetRequiresTheSameCompleteRequestIdentity() {
+    @Test fun committedPresetCanChangeRequestOptionsWithoutRejectingTheTask() {
         for (differentBody in listOf(false, true)) {
             val disk = HotConfigurationPreferences()
             val repository = ConversationSubAgentPreferences(disk)
@@ -100,15 +100,22 @@ class SavedSubAgentRuntimeBindingsTest {
             val resolve: (String, String) -> ModelSettings = { _, id ->
                 if (differentBody && id == other.id) saved.copy(requestOptions = saved.requestOptions.copy(customBody = """{"temperature":0.3}""")) else saved
             }
-            val bindings = SavedSubAgentRuntimeBindings { noNetwork }
+            val captured = mutableListOf<ProviderSnapshot>()
+            val bindings = SavedSubAgentRuntimeBindings { captured += it; noNetwork }
             fun latest() = repository.snapshot(owner)
             val definition = bindings.freeze(owner, latest(), source, resolve,
                 latestConfig = ::latest,
                 latestModel = { id -> bindings.freeze(owner, latest(), source, resolve).getValue(id) },
                 runtimeStart = repository.openRuntime(owner)).getValue(profile.id)
             repository.applyPreset(owner, preset.id)
-            assertEquals(!differentBody, definition.isValid())
-            if (!differentBody) assertEquals("replacement", definition.current().profileId)
+            assertTrue(definition.isValid())
+            val selected = definition.current()
+            assertEquals("replacement", selected.profileId)
+            selected.create()
+            assertEquals(child.modelId, captured.single().model)
+            val body = captured.single().requestOptions.customBody.let { if (it.isEmpty()) JSONObject() else JSONObject(it) }
+            if (differentBody) assertEquals(0.3, body.getDouble("temperature"), 0.0)
+            else assertFalse(body.has("temperature"))
         }
     }
 
@@ -134,18 +141,72 @@ class SavedSubAgentRuntimeBindingsTest {
                 runtimeStart = repository.openRuntime(owner)).getValue(profile.id)
             repository.update(owner) { it.copy(profiles = listOf(profile.copy(modelId = changed.id))) }
             repository.applyPreset(owner, preset.id)
-            assertEquals(matchesEdited, definition.isValid())
-            if (matchesEdited) {
-                val selected = definition.current()
-                assertEquals("replacement", selected.profileId)
-                assertEquals(changed.modelId, selected.display?.modelId)
-            } else {
-                repository.update(SubAgentConfigKey.Preset(preset.id)) {
-                    it.copy(profiles = listOf(profile.copy(id = "replacement", modelId = changed.id)))
-                }
-                repository.applyPreset(owner, preset.id)
-                assertFalse(definition.isValid())
-            }
+            assertTrue(definition.isValid())
+            val selected = definition.current()
+            assertEquals("replacement", selected.profileId)
+            assertEquals(if (matchesEdited) changed.modelId else child.modelId, selected.display?.modelId)
+
+        }
+    }
+
+    @Test fun forkedTasksSelectIndependentlyAcrossProvidersAndPreferActualApiModel() {
+        val repository = ConversationSubAgentPreferences(HotConfigurationPreferences())
+        repository.update(owner) { config }
+        val secondModel = child.copy(id = "other-record")
+        val otherProvider = provider.copy(id = "other-provider", models = listOf(secondModel))
+        val different = child.copy(id = "different-record", modelId = "different-api")
+        val source = listOf(provider.copy(models = listOf(child, different)), otherProvider)
+        val a = profile.copy(id = "a", parallelLimit = 2)
+        val b = profile.copy(id = "b", providerId = otherProvider.id, modelId = secondModel.id, parallelLimit = 1)
+        val c = profile.copy(id = "c", modelId = different.id)
+        val preset = repository.addPreset("mixed")
+        repository.update(SubAgentConfigKey.Preset(preset.id)) { it.copy(profiles = listOf(c, a, b)) }
+        val resolve: (String, String) -> ModelSettings = { providerId, modelId ->
+            saved.copy(endpoint = if (providerId == otherProvider.id) "https://other.invalid" else saved.endpoint,
+                model = if (modelId == different.id) different.modelId else child.modelId)
+        }
+        val bindings = SavedSubAgentRuntimeBindings { noNetwork }
+        fun latest() = repository.snapshot(owner)
+        val prototype = bindings.freeze(owner, config, source, resolve, latestConfig = ::latest,
+            latestModel = { id -> bindings.freeze(owner, latest(), source, resolve).getValue(id) },
+            runtimeStart = repository.openRuntime(owner)).getValue(profile.id)
+        val first = prototype.forTask(); val second = prototype.forTask()
+        assertNotSame(first, second)
+        repository.applyPreset(owner, preset.id)
+        val firstChoices = first.currentCandidates()
+        assertEquals(setOf("a", "b"), firstChoices.map { it.profileId }.toSet())
+        assertTrue(first.select(firstChoices.single { it.profileId == "b" }))
+        assertEquals("b", first.current().profileId)
+        assertEquals("a", second.current().profileId)
+        assertEquals(1, first.current().parallelLimit)
+        assertEquals(2, second.current().parallelLimit)
+        assertEquals(otherProvider.id, first.current().requestModel!!.providerId)
+        repository.update(SubAgentConfigKey.Preset(preset.id)) { it.copy(profiles = listOf(c)) }
+        repository.applyPreset(owner, preset.id)
+        assertTrue(first.isValid()); assertEquals("c", first.current().profileId)
+        assertEquals(different.modelId, first.current().requestModel!!.modelId)
+    }
+
+    @Test fun liveSameRoleEditsStayWithAAndOnlyOrphaningHandsOffToB() {
+        for (journaled in listOf(false, true)) for (delete in listOf(false, true)) {
+            val repository = ConversationSubAgentPreferences(HotConfigurationPreferences())
+            val a = profile.copy(id = "a"); val b = profile.copy(id = "b", parallelLimit = 1)
+            repository.update(owner) { config.copy(profiles = listOf(a, b)) }
+            val bindings = SavedSubAgentRuntimeBindings { noNetwork }
+            fun latest() = repository.snapshot(owner)
+            val definition = bindings.freeze(owner, latest(), listOf(provider), { _, _ -> saved }, latestConfig = ::latest,
+                latestModel = { id -> bindings.freeze(owner, latest(), listOf(provider), { _, _ -> saved }).getValue(id) },
+                runtimeStart = if (journaled) repository.openRuntime(owner) else null,
+                currentLifetime = { repository.profileLifetime(owner, it) }).getValue("a").forTask()
+            repository.update(owner) { it.copy(profiles = listOf(a.copy(name = "edited", parallelLimit = 2), b)) }
+            assertEquals("a", definition.current().profileId)
+            assertEquals(listOf("a"), definition.currentCandidates().map { it.profileId })
+            val peer = bindings.freeze(owner, latest(), listOf(provider), { _, _ -> saved }).getValue("b")
+            assertFalse(definition.select(peer))
+            repository.update(owner) { it.copy(profiles = if (delete) listOf(b) else listOf(a.copy(role = "implementation"), b)) }
+            assertTrue(definition.isValid())
+            assertEquals("b", definition.current().profileId)
+            assertEquals(listOf("b"), definition.currentCandidates().map { it.profileId })
         }
     }
 

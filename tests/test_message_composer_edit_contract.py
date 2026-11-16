@@ -8,8 +8,9 @@ UI = SRC / 'ui/screens/chat/conversation'
 class MessageComposerEditContract(unittest.TestCase):
     def test_editing_is_projected_without_replacing_the_persisted_draft(self):
         main = (SRC / 'MainActivity.kt').read_text()
-        self.assertIn('ComposerUi(text = inlineMessageEditor?.text ?: draft', main)
-        self.assertIn('selectionStart = inlineMessageEditor?.selectionStart ?: selectionStart', main)
+        self.assertIn('ComposerUi(text = if (hideSubmittedDraft) "" else inlineMessageEditor?.text ?: draft', main)
+        self.assertIn('selectionStart = if (hideSubmittedDraft) 0 else inlineMessageEditor?.selectionStart ?: selectionStart', main)
+        self.assertIn('val hideSubmittedDraft = inlineMessageEditor == null &&', main)
         edit = main.split('else if (editor != null) {', 1)[1].split('} else {', 1)[0]
         self.assertIn('editor.copy(text = next', edit)
         self.assertNotIn('database.draft', edit)

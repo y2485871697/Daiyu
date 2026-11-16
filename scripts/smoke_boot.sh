@@ -352,7 +352,8 @@ doubao_motion_reasoning_target = doubao_motion_target | {"app.daiyu.android.Cont
 doubao_motion_voice_target = doubao_motion_reasoning_target | {"app.daiyu.android.storage.ConversationModelBindingDatabaseTest"}
 doubao_motion_floating_target = doubao_motion_voice_target | {"app.daiyu.android.VoiceCallFloatingWindowTest"}
 doubao_motion_only = mode == "smoke" and sorted(raw_filter.split(",")) in (
-    sorted(doubao_motion_target), sorted(doubao_motion_reasoning_target), sorted(doubao_motion_voice_target), sorted(doubao_motion_floating_target), ["app.daiyu.android.VoiceCallFloatingWindowTest"])
+    sorted(doubao_motion_target), sorted(doubao_motion_reasoning_target), sorted(doubao_motion_voice_target), sorted(doubao_motion_floating_target), ["app.daiyu.android.VoiceCallFloatingWindowTest"],
+    ["app.daiyu.android.ChatComposerImeActivityTest", "app.daiyu.android.VoiceCallFloatingWindowTest"])
 doubao_motion_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
                          for name in raw_filter.split(",")} if doubao_motion_only else set()
 catalog_model_editor_target = "app.daiyu.android.ui.screens.settings.CatalogModelEditorLayoutTest"

@@ -23,6 +23,28 @@ class DoubaoMotionScopeTest(unittest.TestCase):
             self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=raw))[1])
         self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="release", SMOKE_TEST_CLASSES=floating))[1])
 
+    def test_floating_and_real_ime_use_one_exact_targeted_scope(self):
+        classes = ("app.daiyu.android.VoiceCallFloatingWindowTest", "app.daiyu.android.ChatComposerImeActivityTest")
+        for selected in (classes, tuple(reversed(classes))):
+            command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))
+            self.assertEqual("doubao-motion-targeted", scope)
+            self.assertIn("test_chat_ime_motion_contract", command)
+            self.assertIn("test_ime_frame_contract", command)
+            self.assertNotIn("discover", command)
+        self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="release", SMOKE_TEST_CLASSES=",".join(classes)))[1])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root, classes)
+            selected = []
+            for shard in range(4):
+                result = helper.select(root, shard, classes=",".join(classes), count=4)
+                self.assertEqual(0, result.returncode, result.stderr)
+                inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                selection = json.loads((root / "smoke/selection.json").read_text())
+                self.assertEqual(set(classes), set(inventory["all_classes"]))
+                selected.extend(selection["selected_classes"])
+            self.assertCountEqual(classes, selected)
+
     def fixture(self, root, classes=None):
         helper = discovery.SpeechPlatformDiscoveryTest()
         helper.fixture(root)

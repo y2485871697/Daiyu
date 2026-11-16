@@ -144,6 +144,7 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
             instrumentation.uiAutomation.executeShellCommand(command)).bufferedReader().use { it.readText().trim() }
         val scales = listOf("window_animation_scale", "transition_animation_scale", "animator_duration_scale")
             .associateWith { shell("settings get global $it") }
+        val anchorField = MainActivity::class.java.getDeclaredField("floatingCallAnchor").apply { isAccessible = true }
         try {
             scales.keys.forEach { shell("settings put global $it 1") }
             repeat(2) {
@@ -152,11 +153,20 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
                 val surface = node("chat-composer-surface").fetchSemanticsNode()
                 val header = node("chat-top-bar").fetchSemanticsNode()
                 val view = (surface.root as ViewRootForTest).view
+                var surfaceTopOffset = 0f
+                mainThread {
+                    val anchor = checkNotNull(anchorField.get(activity) as?
+                        app.daiyu.android.ui.screens.chat.conversation.DoubaoCallAnchor)
+                    surfaceTopOffset = surface.positionOnScreen.y - anchor.composerTop
+                }
                 val samples = mutableListOf<Pair<Float, Float>>()
+                val anchorSamples = mutableListOf<Pair<Float, Float>>()
                 val listener = android.view.ViewTreeObserver.OnPreDrawListener {
                     if (surface.layoutInfo.isPlaced && header.layoutInfo.isPlaced && samples.size < 240) {
                         samples += (surface.positionOnScreen.y + surface.size.height) to
                             (header.positionOnScreen.y + header.size.height)
+                        val anchor = anchorField.get(activity) as? app.daiyu.android.ui.screens.chat.conversation.DoubaoCallAnchor
+                        anchorSamples += (surface.positionOnScreen.y - surfaceTopOffset) to (anchor?.composerTop ?: Float.NaN)
                     }
                     true
                 }
@@ -178,6 +188,32 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
                     it.first < before.composerBottom - 2f && it.first > shown.composerBottom + 2f
                 })
                 frames.forEach { assertEquals(before.headerBottom, it.second, 2f) }
+                anchorSamples.forEach { (composerTop, anchorTop) ->
+                    assertEquals("opening anchor must come from this drawn composer frame", composerTop, anchorTop, 2f)
+                }
+                mainThread {
+                    samples.clear()
+                    anchorSamples.clear()
+                    view.viewTreeObserver.addOnPreDrawListener(listener)
+                }
+                try {
+                    dismissIme()
+                    settledFrame(visible = false, before = before)
+                } finally {
+                    mainThread { view.viewTreeObserver.removeOnPreDrawListener(listener) }
+                }
+                val closingFrames = samples.toList()
+                assertTrue("Actual intermediate dismissal motion missing: $closingFrames", closingFrames.any {
+                    it.first > shown.composerBottom + 2f && it.first < before.composerBottom - 2f
+                })
+                assertTrue("dismissal must produce anchor samples", anchorSamples.size > 2)
+                anchorSamples.forEach { (composerTop, anchorTop) ->
+                    assertEquals("dismissal anchor must not jump ahead or lag behind the composer", composerTop, anchorTop, 2f)
+                }
+                anchorSamples.zipWithNext().forEach { (previous, current) ->
+                    assertEquals("dismissal uses the composer's actual per-frame displacement",
+                        current.first - previous.first, current.second - previous.second, 2f)
+                }
             }
         } finally {
             scales.forEach { (key, value) ->

@@ -615,7 +615,16 @@ class VoiceCallFloatingWindowTest {
         var followed = androidx.compose.ui.geometry.Rect.Zero
         for (offset in listOf(-220f, -183f, -129f, -72f, -9f, 0f)) {
             val anchor = shifted(offset * density)
-            main { assertTrue(host.update(state, actions, anchor, inApp = true)) }
+            main {
+                val before = panel(root).bottom
+                val previousComposerTop = root.javaClass.getDeclaredMethod("getAnchor").apply { isAccessible = true }
+                    .invoke(root) as app.daiyu.android.ui.screens.chat.conversation.DoubaoCallAnchor
+                assertTrue(host.update(state, actions, anchor, inApp = true))
+                assertEquals("no deferred catch-up or final-inset teleport", anchor.composerTop - 10f * density,
+                    panel(root).bottom, 1f)
+                assertEquals("floating and composer must use the same per-frame displacement",
+                    anchor.composerTop - previousComposerTop.composerTop, panel(root).bottom - before, 1f)
+            }
             awaitCommittedDraw(root)
             main {
                 assertEquals("same-frame composer bottom alignment", anchor.composerTop - 10f * density,
@@ -645,6 +654,53 @@ class VoiceCallFloatingWindowTest {
             val manual = panel(next)
             assertTrue(host.update(state.copy(sessionKey = -31L), actions, shifted(-80f * density), inApp = true))
             assertEquals("manually moved calls do not re-anchor", manual, panel(next))
+        }
+        val squeezedState = state.copy(sessionKey = -34L)
+        val squeezed = full.copy(composerTop = 210f * density,
+            bounds = full.bounds.translate(androidx.compose.ui.geometry.Offset(0f, 210f * density - full.composerTop)))
+        main { assertTrue(host.update(squeezedState, actions, squeezed, inApp = true)) }
+        val compressed = windows.added.last()
+        await("genuinely squeezed fixture attached") { compressed.isLaidOut }
+        awaitCommittedDraw(compressed)
+        var compressedBounds = androidx.compose.ui.geometry.Rect.Zero
+        main {
+            compressedBounds = panel(compressed)
+            assertTrue("fixture must actually squeeze the expanded panel", compressedBounds.height < followed.height - 1f)
+            compressed.dispatchConfigurationChanged(android.content.res.Configuration(context.resources.configuration))
+            assertEquals("configuration must not anticipate the next composer frame", compressedBounds, panel(compressed))
+            move(compressed, 0f, 0f)
+            assertEquals("zero displacement is not a drag", compressedBounds, panel(compressed))
+        }
+        val now = SystemClock.uptimeMillis()
+        val touchX = compressedBounds.center.x
+        val touchY = compressedBounds.top + 16f * density
+        for ((action, time, x) in listOf(Triple(MotionEvent.ACTION_DOWN, now, touchX),
+            Triple(MotionEvent.ACTION_MOVE, now + 16, touchX + 1f),
+            Triple(MotionEvent.ACTION_UP, now + 32, touchX + 1f))) {
+            val event = MotionEvent.obtain(now, time, action, x, touchY, 0)
+            try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
+        }
+        main {
+            assertEquals("light touch must retain the squeezed height", compressedBounds, panel(compressed))
+            val shifted = squeezed.copy(composerTop = squeezed.composerTop + 4f * density)
+            assertTrue(host.update(squeezedState, actions, shifted, inApp = true))
+            assertEquals("light touch must retain composer following", compressedBounds.bottom + 4f * density,
+                panel(compressed).bottom, 1f)
+            compressedBounds = panel(compressed)
+            move(compressed, density, 0f)
+            assertEquals("valid drag immediately releases IME squeeze", followed.height, panel(compressed).height, 1f)
+        }
+        await("valid drag consumes its coalesced displacement") { panel(compressed).left > compressedBounds.left }
+        main {
+            val manual = panel(compressed)
+            assertTrue(host.update(squeezedState, actions, full, inApp = true))
+            assertEquals("IME retract preserves manual full-height placement", manual, panel(compressed))
+            compressed.dispatchConfigurationChanged(android.content.res.Configuration(context.resources.configuration))
+            assertEquals("configuration preserves manual full-height placement", manual, panel(compressed))
+            assertTrue(host.update(squeezedState.copy(presentation = DoubaoCallPresentation.MINI), actions,
+                squeezed, inApp = true))
+            assertTrue(host.update(squeezedState, actions, full, inApp = true))
+            assertEquals("mini round-trip must not revive the squeezed height", manual, panel(compressed))
         }
     }
 

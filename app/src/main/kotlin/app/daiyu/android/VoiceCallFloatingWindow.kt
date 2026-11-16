@@ -173,16 +173,20 @@ internal class VoiceCallFloatingWindow(context: Context,
         val width = if (mini) minOf(dp(250).toFloat(), current.expandedWidth) else current.expandedWidth
         val bottom = current.anchor?.let { it.composerTop - dp(10) }
         val topLimit = maxOf((host?.top ?: 0f) + dp(8), current.safeTop.toFloat())
-        current.expandedHeight = minOf(dp(374).toFloat(),
-            bottom?.let { (it - topLimit).coerceAtLeast(1f) } ?: (metrics.heightPixels - dp(100)).toFloat())
-        val height = if (mini) minOf(dp(67).toFloat(), current.expandedHeight) else current.expandedHeight
+        current.expandedHeight = fullHeight(current)
+        val fittedHeight = bottom?.let { (it - topLimit).coerceAtLeast(1f) } ?: current.expandedHeight
+        val height = minOf(if (mini) dp(67).toFloat() else current.expandedHeight, fittedHeight)
         val left = (host?.center?.x ?: (metrics.widthPixels / 2f)) - width / 2f
         val top = bottom?.minus(height) ?: (metrics.heightPixels * .18f)
         current.panelBounds = Rect(left, top, left + width, top + height)
         clamp(current)
     }
 
+    private fun fullHeight(current: CallWindow): Float = minOf(dp(374).toFloat(),
+        (app.resources.displayMetrics.heightPixels - current.safeTop - dp(48)).coerceAtLeast(1).toFloat())
+
     private fun resize(current: CallWindow) {
+        current.expandedHeight = fullHeight(current)
         val mini = current.picture.presentation == DoubaoCallPresentation.MINI
         val width = if (mini) minOf(dp(250).toFloat(), current.expandedWidth) else current.expandedWidth
         val height = if (mini) minOf(dp(67).toFloat(), current.expandedHeight) else current.expandedHeight
@@ -195,7 +199,11 @@ internal class VoiceCallFloatingWindow(context: Context,
     private fun move(current: CallWindow, delta: Offset) {
         if (window !== current || current.departing || current.inApp && current.entryGenie && current.motion.transforming) return
         if (delta == Offset.Zero) return
-        current.manuallyDragged = true
+        if (!current.manuallyDragged) {
+            current.manuallyDragged = true
+            resize(current)
+            if (current.removed) return
+        }
         current.pendingMove += delta
         if (!current.movePending) {
             current.movePending = true
@@ -361,7 +369,7 @@ internal class VoiceCallFloatingWindow(context: Context,
             super.onConfigurationChanged(newConfig)
             safeTop = safeTopInset()
             if (!departing && !removed) {
-                if (!manuallyDragged && inApp && anchor != null) placeInitial(this) else clamp(this)
+                if (manuallyDragged) resize(this) else clamp(this)
                 mainHandler.removeCallbacks(settleFrame)
                 mainHandler.post(settleFrame)
             }

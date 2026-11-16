@@ -22,7 +22,7 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +35,8 @@ import app.daiyu.android.ui.components.chatInputDismissTapModifier
 import app.daiyu.android.ui.components.hideChatInputIme
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -50,6 +52,24 @@ private class NativeChatStatusBarInsets(
         val composeTop = source.getTop(density)
         return ViewCompat.getRootWindowInsets(view)
             ?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())?.top ?: composeTop
+    }
+}
+
+private class ChatCallAnchorCoordinates {
+    var host: LayoutCoordinates? = null
+    var composer: LayoutCoordinates? = null
+    var voice: LayoutCoordinates? = null
+
+    fun read(): DoubaoCallAnchor? {
+        val host = host?.takeIf { it.isAttached && it.size.width > 0 } ?: return null
+        val composer = composer?.takeIf { it.isAttached && it.size.height > 0 } ?: return null
+        val voice = voice?.takeIf { it.isAttached && it.size.width > 0 } ?: return null
+        fun bounds(coordinates: LayoutCoordinates): Rect {
+            val topLeft = coordinates.positionOnScreen()
+            return Rect(topLeft.x, topLeft.y, topLeft.x + coordinates.size.width,
+                topLeft.y + coordinates.size.height)
+        }
+        return DoubaoCallAnchor(bounds(voice), composer.positionOnScreen().y, bounds(host))
     }
 }
 
@@ -137,17 +157,29 @@ internal fun DaiyuChatScreen(
     var voiceAnchor by remember(state.conversationKey) { mutableStateOf(Rect.Zero) }
     var composerBounds by remember(state.conversationKey) { mutableStateOf(Rect.Zero) }
     var overlayOrigin by remember { mutableStateOf(Offset.Zero) }
-    var overlayBounds by remember { mutableStateOf(Rect.Zero) }
-    var rootScreenOrigin by remember { mutableStateOf(Offset.Zero) }
+    val callCoordinates = remember(state.conversationKey) { ChatCallAnchorCoordinates() }
     val latestCallAnchorChanged by rememberUpdatedState(onCallAnchorChanged)
     val displayedTurns = submissionTurns(state.turns, state.submissionPreview)
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
-    LaunchedEffect(presentationActive, voiceAnchor, composerBounds, overlayBounds, rootScreenOrigin) {
-        if (presentationActive && voiceAnchor.width > 0f && composerBounds.height > 0f && overlayBounds.width > 0f)
-            latestCallAnchorChanged(DoubaoCallAnchor(voiceAnchor.translate(rootScreenOrigin),
-                composerBounds.top + rootScreenOrigin.y, overlayBounds.translate(rootScreenOrigin)))
+    DisposableEffect(view, presentationActive, callCoordinates) {
+        var reported: DoubaoCallAnchor? = null
+        val observer = view.viewTreeObserver
+        val listener = android.view.ViewTreeObserver.OnPreDrawListener {
+            if (presentationActive) callCoordinates.read()?.let { anchor ->
+                if (anchor != reported) {
+                    reported = anchor
+                    latestCallAnchorChanged(anchor)
+                }
+            }
+            true
+        }
+        observer.addOnPreDrawListener(listener)
+        onDispose {
+            if (observer.isAlive) observer.removeOnPreDrawListener(listener)
+            else view.viewTreeObserver.removeOnPreDrawListener(listener)
+        }
     }
     val statusBars = WindowInsets.statusBarsIgnoringVisibility
     val stableStatusBars = remember(view, statusBars) { NativeChatStatusBarInsets(view, statusBars) }
@@ -166,10 +198,7 @@ internal fun DaiyuChatScreen(
     ChatMenuLayer(modifier.fillMaxSize()) {
     Box(Modifier.fillMaxSize().onGloballyPositioned {
         overlayOrigin = it.positionInRoot()
-        overlayBounds = it.boundsInRoot()
-        val location = IntArray(2)
-        view.getLocationOnScreen(location)
-        rootScreenOrigin = Offset(location[0].toFloat(), location[1].toFloat())
+        callCoordinates.host = it
     }) {
     Column(
         Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
@@ -199,8 +228,12 @@ internal fun DaiyuChatScreen(
             }
         }, composer = { backdrop ->
             ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop,
-                modifier = Modifier.onGloballyPositioned { composerBounds = it.boundsInRoot() },
-                onVoiceAnchorBounds = { voiceAnchor = it }, callUi = callUi, callMotion = motionState.takeIf { callUi != null }, callEntryMotion = callEntryMotion,
+                modifier = Modifier.onGloballyPositioned {
+                    composerBounds = it.boundsInRoot()
+                    callCoordinates.composer = it
+                },
+                onVoiceAnchorBounds = { voiceAnchor = it },
+                onVoiceAnchorCoordinates = { callCoordinates.voice = it }, callUi = callUi, callMotion = motionState.takeIf { callUi != null }, callEntryMotion = callEntryMotion,
                 onInputFocusChanged = { focused ->
                     draftFocused = focused
                     if (presentationActive && focused && callUi?.presentation == DoubaoCallPresentation.EXPANDED) callActions.onMinimize()

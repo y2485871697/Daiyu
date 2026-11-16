@@ -336,6 +336,41 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertLess(admission.index('return'), admission.index('universalVoice.setModelPicker(true)'))
         self.assertIn('openChatModels(forVoiceCall = true)', admission)
 
+    def test_call_anchor_samples_live_coordinates_before_each_host_draw(self):
+        screen = (SRC / 'ui/screens/chat/conversation/ChatScreen.kt').read_text()
+        composer = (SRC / 'ui/screens/chat/conversation/ChatComposer.kt').read_text()
+        self.assertIn('private class ChatCallAnchorCoordinates', screen)
+        self.assertIn('coordinates.positionOnScreen()', screen)
+        self.assertIn('composer.positionOnScreen().y', screen)
+        self.assertIn('DisposableEffect(view, presentationActive, callCoordinates)', screen)
+        self.assertIn('OnPreDrawListener', screen)
+        self.assertIn('observer.addOnPreDrawListener(listener)', screen)
+        self.assertIn('observer.removeOnPreDrawListener(listener)', screen)
+        self.assertIn('latestCallAnchorChanged(anchor)', screen)
+        self.assertNotIn('LaunchedEffect(presentationActive, voiceAnchor', screen)
+        self.assertIn('onVoiceAnchorCoordinates(it)', composer)
+        floating = (SRC / 'VoiceCallFloatingWindow.kt').read_text()
+        configuration = floating.split('override fun onConfigurationChanged(', 1)[1].split('override fun onLayout(', 1)[0]
+        self.assertNotIn('placeInitial(', configuration)
+
+    def test_call_drag_releases_only_fitted_height_without_changing_motion_recipes(self):
+        floating = (SRC / 'VoiceCallFloatingWindow.kt').read_text()
+        placement = floating.split('private fun placeInitial(', 1)[1].split('private fun fullHeight(', 1)[0]
+        self.assertIn('current.expandedHeight = fullHeight(current)', placement)
+        self.assertIn('val fittedHeight = bottom?.let', placement)
+        move = floating.split('private fun move(', 1)[1].split('private fun applyMove(', 1)[0]
+        self.assertLess(move.index('if (delta == Offset.Zero) return'), move.index('current.manuallyDragged = true'))
+        self.assertIn('resize(current)', move)
+        self.assertIn('current.postOnAnimation(current.moveFrame)', move)
+        self.assertIn('internal const val CLOSE_MILLIS = 180L', floating)
+        fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt').read_text()
+        self.assertIn('valid drag immediately releases IME squeeze', fixture)
+        self.assertIn('light touch must retain composer following', fixture)
+        self.assertIn('IME retract preserves manual full-height placement', fixture)
+        ime = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ChatComposerImeActivityTest.kt').read_text()
+        self.assertIn('dismissal anchor must not jump ahead or lag behind the composer', ime)
+        self.assertIn('Actual intermediate dismissal motion missing', ime)
+
     def test_external_close_is_visual_only_and_detaches_after_its_own_animation(self):
         floating = (ROOT / 'app/src/main/kotlin/app/daiyu/android/VoiceCallFloatingWindow.kt').read_text()
         self.assertIn('TYPE_APPLICATION_OVERLAY', floating)

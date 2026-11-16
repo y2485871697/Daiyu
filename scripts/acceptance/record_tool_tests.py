@@ -895,6 +895,11 @@ def command_for(python, env):
                  or sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(VOICE_REFRESH_PLATFORM_CLASSES))):
         return [python, "-B", "-m", "unittest", *VOICE_REFRESH_MODULES, "-v"], "voice-refresh-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == [
+                "app.daiyu.android.ChatComposerImeActivityTest", "app.daiyu.android.VoiceCallFloatingWindowTest"]):
+        return [python, "-B", "-m", "unittest", *DOUBAO_MOTION_MODULES,
+                "test_chat_ime_motion_contract", "test_ime_frame_contract", "-v"], "doubao-motion-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (sorted(DOUBAO_MOTION_PLATFORM_CLASSES), sorted(DOUBAO_MOTION_REASONING_PLATFORM_CLASSES), sorted(DOUBAO_MOTION_VOICE_PLATFORM_CLASSES), sorted(DOUBAO_MOTION_FLOATING_PLATFORM_CLASSES), ["app.daiyu.android.VoiceCallFloatingWindowTest"])):
         return [python, "-B", "-m", "unittest", *DOUBAO_MOTION_MODULES, "-v"], "doubao-motion-targeted"
     if (env.get("SMOKE_MODE") == "smoke"

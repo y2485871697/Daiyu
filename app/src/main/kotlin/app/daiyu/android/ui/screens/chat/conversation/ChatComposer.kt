@@ -99,6 +99,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     isInputDismissInProgress: () -> Boolean = { false },
     onOpenWorkspace: () -> Unit = actions.onOpenWorkspace,
     onVoiceAnchorBounds: (Rect) -> Unit = {},
+    onVoiceAnchorCoordinates: (androidx.compose.ui.layout.LayoutCoordinates) -> Unit = {},
     callUi: DoubaoCallUi? = null,
     callMotion: DoubaoCallMotionState? = null,
     callEntryMotion: DoubaoCallMotionState? = null,
@@ -362,7 +363,10 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 callUi?.presentation == DoubaoCallPresentation.EXPANDED ||
                                     callUi?.presentation == DoubaoCallPresentation.CLOSING
                             },
-                            modifier = Modifier.onGloballyPositioned { onVoiceAnchorBounds(it.boundsInRoot()) },
+                            modifier = Modifier.onGloballyPositioned {
+                                onVoiceAnchorBounds(it.boundsInRoot())
+                                onVoiceAnchorCoordinates(it)
+                            },
                             onClick = { if (callUi != null || state.voiceMode in state.voiceModes) actions.onVoice() },
                             onLongClick = if (callUi != null || voiceMenuEnabled) ({
                                 val admitted = actions.onVoiceLongPress()

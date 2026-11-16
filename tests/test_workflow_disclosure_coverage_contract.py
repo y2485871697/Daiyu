@@ -43,6 +43,26 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertIn('disclosure.closingDetailHeight', work)
         self.assertIn('minOf(height, measuredHeight, closingLimit ?: height)', motion)
 
+    def test_total_card_animates_visible_pixels_and_waits_for_size_before_release(self):
+        extent = (CHAT / 'WorkflowCardExtent.kt').read_text()
+        work = (CHAT / 'WorkProcessCard.kt').read_text().split('internal fun WorkStepRow(', 1)[0]
+        motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
+        self.assertIn('Animatable(Offset.Zero, Offset.VectorConverter)', extent)
+        self.assertIn('minOf(measuredHeight, closingLimit ?: measuredHeight)', extent)
+        self.assertIn('velocity.x.coerceAtMost(0f)', extent)
+        self.assertIn('geometry.animateTo(Offset.Zero, spec, initialVelocity = Offset(', extent)
+        self.assertIn('placedGeometry == if (expanded)', extent)
+        self.assertIn('detailExtent.placed(it.size.height)', work)
+        self.assertIn('visibility.targetState = detailExtent.keepsContent(expanded)', work)
+        self.assertIn('targetExpanded = expanded, animationIdle = detailExtent.idle(expanded)', work)
+        self.assertIn('visibility.isIdle && animationIdle', motion)
+        self.assertIn('detailExtent.fullHeight = detail.height', work)
+        self.assertNotIn('shrinkVertically(', work)
+        device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowDisclosureDirectionTest.kt').read_text()
+        self.assertIn('testLongWorkflowManualAndAutomaticCollapseHasNoHiddenHeightPlateau', device)
+        self.assertIn('samples[3] < start - 1f', device)
+        self.assertIn('fullDetail > start * 2f', device)
+
     def test_supplemental_chat_disclosures_have_both_geometry_anchors_and_toggle(self):
         for name in ('QuestionCard.kt', 'ToolCategoryContent.kt', 'ChildTaskToolContent.kt', 'ChildTaskCardContent.kt'):
             with self.subTest(name=name):
@@ -128,7 +148,7 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
     def test_workflow_total_card_alone_has_fixed_top_collapse(self):
         source = (CHAT / 'WorkProcessCard.kt').read_text()
         self.assertEqual(1, source.count('collapseUp = true'))
-        self.assertIn('shrinkTowards = disclosure.collapseAlignment', source)
+        self.assertIn('detailExtent.contentOffset', source)
         self.assertIn('shrinkTowards = disclosure.alignment', source)
         motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         self.assertIn('if (collapseUp) Alignment.Top else alignment', motion)

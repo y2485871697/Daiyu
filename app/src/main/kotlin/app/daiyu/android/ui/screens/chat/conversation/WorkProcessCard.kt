@@ -3,6 +3,9 @@ package app.daiyu.android.ui.screens.chat.conversation
 import app.daiyu.android.ui.screens.settings.settingsDisclosureRotation
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExitTransition
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeIn
@@ -38,6 +41,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
@@ -68,8 +72,13 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     val currentOverride = expandedOverride.takeIf { overrideFinished == finishing && overrideStopped == stopped }
     val expanded = currentOverride ?: (!stopped && !finished)
     val visibility = remember(ownerKey) { MutableTransitionState(expanded) }
-    visibility.targetState = expanded
-    val disclosure = rememberWorkflowDisclosureMotion(ownerKey, visibility, collapseUp = true)
+    val detailExtent = remember(ownerKey) { WorkflowCardExtent(expanded) }
+    visibility.targetState = detailExtent.keepsContent(expanded)
+    val disclosure = rememberWorkflowDisclosureMotion(ownerKey, visibility, collapseUp = true,
+        targetExpanded = expanded, animationIdle = detailExtent.idle(expanded))
+    LaunchedEffect(expanded, if (expanded) detailExtent.fullHeight else 0) {
+        detailExtent.animate(expanded, disclosure.closingDetailHeight, disclosure.upwards)
+    }
     val fullyClosed = visibility.isIdle && !visibility.currentState && !visibility.targetState
     var contentMounted by remember(ownerKey) { mutableStateOf(false) }
     val disclosureHandoffReady = reasoningReady && fullyClosed && !contentMounted
@@ -87,7 +96,6 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     androidx.compose.runtime.SideEffect { if (!expanded || stopped) motions.suppress(items) }
     val colors = conversationColors()
     val title = work.title
-    val detailExtent = remember(ownerKey) { WorkflowCollapseExtent() }
     val progressSummary = work.progressSummary
     val shape = RoundedCornerShape(12.dp)
     CompositionLocalProvider(LocalWorkflowDisclosureParent provides disclosure,
@@ -125,17 +133,17 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                     if (expanded) "收起$title" else "展开$title", Modifier.size(14.dp).settingsDisclosureRotation(expanded), tint = colors.muted)
             }
         }
-        AnimatedVisibility(visibility, modifier = Modifier.layout { measurable, constraints ->
-            val detail = measurable.measure(constraints)
-            val height = detailExtent.measure(detail.height, expanded, disclosure.closingDetailHeight)
-            layout(detail.width, height) { detail.placeRelative(0, 0) }
-        }, enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment),
-            exit = fadeOut() + shrinkVertically(shrinkTowards = disclosure.collapseAlignment)) {
+        AnimatedVisibility(visibility, enter = fadeIn(), exit = ExitTransition.None) {
             DisposableEffect(ownerKey) {
                 contentMounted = true
                 onDispose { contentMounted = false }
             }
-            Column {
+            Column(Modifier.clipToBounds().onGloballyPositioned { detailExtent.placed(it.size.height) }.layout { measurable, constraints ->
+                val detail = measurable.measure(constraints)
+                detailExtent.fullHeight = detail.height
+                val height = detailExtent.measure(expanded, disclosure.closingDetailHeight)
+                layout(detail.width, height) { detail.placeRelative(0, detailExtent.contentOffset) }
+            }) {
                 HorizontalDivider(thickness = 1.dp, color = colors.line)
                 Column(Modifier.padding(start = 8.dp, end = 8.dp, top = 3.dp, bottom = 4.dp)) {
                     if (content != null) reasoningState.SaveableStateProvider("ordered-content") { content(expanded) }

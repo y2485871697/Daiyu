@@ -14,7 +14,7 @@ on:
       check_scope:
         description: 工作流程、环境圆点、发送状态、表格样式、冷启动、任务滚动、附件弹层、权限界面、终端输出或工具回执的定向检查范围
         type: choice
-        options: [workflow, environment-dots, composer-send, markdown-table, cold-start, session-switch, task-scroll, attachment-contracts, permission-contracts, terminal-output, tool-receipts, page-performance, rendering, legacy-restore, search-history, conversation-date, ime, message-actions, question-card]
+        options: [workflow-collapse, workflow, environment-dots, composer-send, markdown-table, cold-start, session-switch, task-scroll, attachment-contracts, permission-contracts, terminal-output, tool-receipts, page-performance, rendering, legacy-restore, search-history, conversation-date, ime, message-actions, question-card]
         default: workflow
 permissions:
   contents: read
@@ -136,6 +136,10 @@ jobs:
                           'test_branch_configuration_inheritance_contract.py', 'test_message_timestamp_style_contract.py')
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'question-card':
               patterns = ('test_question_card_readability_contract.py', 'test_stream_question_projection_contract.py', 'test_question_card_smoke_scope.py')
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-collapse':
+              patterns = ('test_workflow_disclosure_scope.py', 'test_workflow_disclosure_coverage_contract.py',
+                          'test_disclosure_consistency_contract.py', 'test_reasoning_flow_stability_contract.py',
+                          'test_tool_card_html_contract.py')
           for pattern in patterns:
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               discovered = suite.countTestCases()
@@ -243,6 +247,10 @@ jobs:
             filters=(--tests app.daiyu.android.question.QuestionCheckpointEvidenceTest
                      --tests app.daiyu.android.integration.tools.QuestionToolBridgeTest)
           fi
+          if [[ "$WORKFLOW_CHECK_SCOPE" == workflow-collapse ]]; then
+            classes=(WorkflowDisclosureMotionTest)
+            filters=()
+          fi
           for class in "${classes[@]}"; do
             filters+=(--tests "app.daiyu.android.ui.screens.chat.conversation.$class")
           done
@@ -304,6 +312,8 @@ jobs:
                           'ChatTurnMapperTest', 'AssistantWorkflowContentTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'question-card':
               expected = {'QuestionCheckpointEvidenceTest', 'QuestionToolBridgeTest'}
+          if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-collapse':
+              expected = {'WorkflowDisclosureMotionTest'}
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert names == expected, (names, expected)

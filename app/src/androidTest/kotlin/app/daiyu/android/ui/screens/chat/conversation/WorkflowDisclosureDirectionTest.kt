@@ -2,6 +2,8 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -14,6 +16,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
@@ -593,6 +596,72 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         animateNested("work-process-header", opening = false)
         assertDirection(true)
         assertEquals(originalIdentity, ui.onNodeWithTag("reply-identity:tail").fetchSemanticsNode().boundsInRoot.top, 2f)
+    }
+
+    fun testLongWorkflowManualAndAutomaticCollapseHasNoHiddenHeightPlateau() {
+        for (closing in listOf("manual", "complete", "stop")) {
+            var running by mutableStateOf(true)
+            var stopped by mutableStateOf(false)
+            var safeBottom = 0f
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                density = LocalDensity.current.density
+                Box(Modifier.size(320.dp, 420.dp).clipToBounds().onGloballyPositioned {
+                    safeBottom = it.boundsInWindow().top + 280f * density
+                }.verticalScroll(rememberScrollState())) {
+                    val viewport = remember {
+                        WorkflowDisclosureViewport({ true }, { Rect(0f, 0f, 10000f, safeBottom) }, {}, { false }, { _, _ -> 0f })
+                    }
+                    CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember {
+                        WorkflowDisclosureContext(viewport, "long-collapse:$closing") { running }
+                    }) {
+                        WorkProcessCard(WorkProcessUi(emptyList(), "13步长流程", running = running), "long-collapse:$closing", stopped = stopped,
+                            content = { Column { repeat(13) { Box(Modifier.fillMaxWidth().height(48.dp)) } } })
+                    }
+                }
+            } } }
+            ui.waitForIdle()
+            val fixedTop = top()
+            val header = ui.onNodeWithTag("work-process-header").fetchSemanticsNode().layoutInfo.coordinates
+            val headerBottom = header.boundsInWindow().bottom
+            val fullDetail = bottom() - fixedTop - header.size.height
+            val start = safeBottom - headerBottom
+            assertTrue("Fixture must contain more than twice its visible height", fullDetail > start * 2f)
+            ui.onNodeWithTag("work-process-header").assertIsDisplayed()
+            fun visibleDetail(): Float {
+                val surface = ui.onNodeWithTag("work-process-surface").fetchSemanticsNode().layoutInfo.coordinates
+                return (minOf(surface.boundsInWindow().top + surface.size.height, safeBottom) - headerBottom).coerceAtLeast(0f)
+            }
+            val samples = mutableListOf(start)
+            ui.mainClock.autoAdvance = false
+            try {
+                when (closing) {
+                    "complete" -> ui.runOnUiThread { running = false }
+                    "stop" -> ui.runOnUiThread { stopped = true }
+                    else -> touchHeader()
+                }
+                repeat(40) {
+                    ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                    val current = visibleDetail()
+                    assertEquals("Long card keeps its top during $closing", fixedTop, top(), 1f)
+                    assertTrue("Closing extent cannot grow: $samples -> $current", current <= samples.last() + 1f)
+                    samples += current
+                }
+                assertTrue("Visible closing starts within three logical frames: $samples", samples[3] < start - 1f)
+                samples.zipWithNext().drop(2).forEach { (before, after) ->
+                    if (before > start * .2f && before < start * .95f) {
+                        assertTrue("No visible middle plateau: $samples", after < before)
+                    }
+                }
+                assertTrue("Retain intermediate visible frames: $samples", samples.take(5).drop(1).any { it > 1f && it < start - 1f })
+                assertEquals(0f, samples.last(), 1f)
+                val settledBottom = bottom()
+                repeat(12) {
+                    ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                    assertEquals(fixedTop, top(), 1f)
+                    assertEquals(settledBottom, bottom(), 1f)
+                }
+            } finally { ui.mainClock.autoAdvance = true }
+        }
     }
 
 }

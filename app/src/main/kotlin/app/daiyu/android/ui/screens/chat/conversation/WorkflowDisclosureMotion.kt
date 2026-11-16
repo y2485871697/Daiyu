@@ -282,12 +282,14 @@ internal fun rememberWorkflowDisclosureMotion(
     key: String,
     visibility: MutableTransitionState<Boolean>,
     collapseUp: Boolean = false,
+    targetExpanded: Boolean = visibility.targetState,
+    animationIdle: Boolean = true,
 ): WorkflowDisclosureMotion {
     val context = LocalWorkflowDisclosureContext.current
     val parent = LocalWorkflowDisclosureParent.current
     val motion = remember(key, context, collapseUp, parent) { WorkflowDisclosureMotion(context, collapseUp, parent) }
-    motion.observeExpanded(visibility.targetState)
-    val idle = visibility.isIdle
+    motion.observeExpanded(targetExpanded)
+    val idle = visibility.isIdle && animationIdle
     motion.animationIdle = idle
     val closed = !visibility.currentState
     SideEffect { if (idle) motion.finish(closed) }

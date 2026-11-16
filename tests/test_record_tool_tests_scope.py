@@ -599,9 +599,22 @@ class PopupScrollScopeTest(unittest.TestCase):
                 self.assertEqual([python, "-B", "-m", "unittest", *self.MODULES, "-v"], command)
                 self.assertNotIn("discover", command)
 
+    def test_exact_occlusion_singleton_keeps_task_scroll_contracts(self):
+        target = "app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest"
+        for python in ("python", "python3"):
+            command, scope = recorder.command_for(python, dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=target))
+            self.assertEqual("task-scroll-targeted", scope)
+            self.assertEqual([python, "-B", "-m", "unittest", *recorder.TASK_SCROLL_MODULES, "-v"], command)
+            self.assertNotIn("discover", command)
+
     def test_partial_duplicate_extended_or_other_modes_do_not_reduce_coverage(self):
         full = ",".join(self.CLASSES)
-        invalid = [",".join(group) for size in range(len(self.CLASSES)) for group in itertools.combinations(self.CLASSES, size)]
+        invalid = [
+            ",".join(group)
+            for size in range(len(self.CLASSES))
+            for group in itertools.combinations(self.CLASSES, size)
+            if group != ("app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest",)
+        ]
         invalid += [full + ",unknown", full + "," + self.CLASSES[0], " " + full, full + " ", full + ","]
         for classes in invalid:
             self.assertEqual("full", recorder.command_for("python", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=classes))[1])

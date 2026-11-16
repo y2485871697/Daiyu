@@ -125,17 +125,17 @@ class PageBackGestureContractTest(unittest.TestCase):
     def test_navigation_boundary_copies_current_descendants_not_the_warm_bitmap(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
         boundary = layers.split('    private fun freezeForNavigation(', 1)[1].split('    private fun capture(', 1)[0]
-        for value in ('if (frame.navigationFrozen) return', 'frame.navigationFrozen = true', 'frame.warmup?.cancel()',
+        for value in ('if (frame.navigationFrozen) return', 'frame.navigationFrozen = true',
                       'frame.captures.toList().forEach { it.cancel() }', 'frame.frozen = true',
                       'frame.image = inherited', 'frame.ready = null', 'frame.readyGeneration = -1L',
-                      'capture(frame, captureBackPerformanceToken(), navigation = true)'):
+                      'capture(frame, captureBackPerformanceToken())'):
             self.assertIn(value, boundary)
         self.assertNotIn('frame.ready?.takeIf', boundary)
         self.assertNotIn('delay(', boundary)
         self.assertIn('if (returning) freeze(it) else freezeForNavigation(it)', layers)
-        self.assertIn('if (navigation) frame.frozen && frame.generation == generation else !frame.frozen', layers)
-        self.assertIn('if (navigation) frame.image = image', layers)
-        self.assertIn('frame.captures.any { !it.isCompleted && (!navigation || !it.isCancelled) }) return', layers)
+        self.assertIn('frame.frozen && frame.generation == generation', layers)
+        self.assertIn('frame.image = image', layers)
+        self.assertIn('frame.captures.any { !it.isCompleted && !it.isCancelled }) return', layers)
         self.assertIn('if (frame.frozen) drawContent()', self.host)
         self.assertIn('if (captureFromContent || frame.frozen) drawContent()', self.host)
         tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
@@ -144,7 +144,7 @@ class PageBackGestureContractTest(unittest.TestCase):
                        'testNestedLayerMovementThenImmediateEntryKeepsTargetAndLiveVerticalPosition'):
             self.assertIn('fun ' + method + '()', tests)
         self.assertIn('recorded, parent.generation', tests)
-        self.assertIn('prepared bitmap is still at A', tests)
+        self.assertIn('explicit baseline bitmap is still at A', tests)
         self.assertIn('commit must not change the vertical band', tests)
 
     def test_drag_motion_stays_in_layer_properties_and_cancel_keeps_a_settle_spring(self):
@@ -354,7 +354,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('if (image != null) drawImage(image)', preview)
         for guard in ('frame.readyGeneration = generation', 'frame.size == size',
                       'previewEpoch == epoch', 'frames[frame.key] === frame',
-                      '!frame.releaseRequested', 'frame.hasFreshImage',
+                      '!frame.releaseRequested', 'frame.captureEpoch == captureEpoch',
                       'withContext(NonCancellable) { snapshot(frame) }',
                       'frame.captures.toList().forEach { it.cancel() }'):
             self.assertIn(guard, layers)
@@ -362,16 +362,13 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('layers.setActive(resumed)', self.host)
         self.assertIn('var ready: ImageBitmap? = null', layers)
         self.assertIn('previewEpoch == epoch', layers)
-        self.assertIn('if (navigation) frame.frozen && frame.generation == generation else !frame.frozen', layers)
+        self.assertIn('frame.frozen && frame.generation == generation', layers)
         self.assertNotIn('if (frame.frozen) frame.image = image', layers)
         freeze = layers.split('private fun freeze(frame: Frame)', 1)[1].split('private fun freezeForNavigation(', 1)[0]
         self.assertIn('freezeForNavigation(frame)', freeze)
         self.assertNotIn('frame.ready?.takeIf', freeze)
-        self.assertIn('currentKey == frame.key', layers)
-        self.assertIn('!navigation && active && !closed', layers)
+        self.assertIn('frame.key != currentKey && frame.navigationFrozen', layers)
         self.assertIn('frame.captures.any { !it.isCompleted }', layers)
-        self.assertIn('previewEpoch != epoch || frame.captureEpoch != captureEpoch || frame.generation != generation', layers)
-        self.assertIn('if (frame.ready == null) withFrameNanos { } else delay(64)', layers)
         self.assertIn('retainedRootKey = "chat"', self.main)
         self.assertEqual(1, self.main.count('chatPageState.SaveableStateProvider('))
         self.assertIn('backHandlerEnabled = routeActive', self.main)
@@ -481,31 +478,29 @@ class PageBackGestureContractTest(unittest.TestCase):
         recorder = (APP / 'diagnostics/BackPerformanceRecorder.kt').read_text()
         self.assertIn('info.takeLast(MAX_COMPOSE_NAME)', recorder)
 
-    def test_motion_gates_only_warm_reads_not_exact_navigation_capture(self):
+    def test_production_has_no_live_page_warm_snapshot_scheduler(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
-        motion = layers.split('fun setMotionActive(value: Boolean)', 1)[1].split('fun setActive(', 1)[0]
-        self.assertIn('it.warmup?.cancel()', motion)
-        self.assertIn('else frames[currentKey]?.let { schedule(it) }', motion)
-        self.assertNotIn('capture.cancel()', motion)
-        self.assertNotIn('frame.image = null', motion)
-        schedule = layers.split('private fun schedule(frame: Frame)', 1)[1].split('private fun observeCaptures(', 1)[0]
-        self.assertIn('!active || motionActive || frame.frozen', schedule)
-        self.assertIn('active && !motionActive && !frame.frozen', schedule)
+        for removed in ('warmup', 'private fun schedule(', 'setMotionActive', 'withFrameNanos', 'delay('):
+            self.assertNotIn(removed, layers)
+        self.assertNotIn('layers.setMotionActive(', self.host)
+        recorded = layers.split('fun recorded(size: IntSize)', 1)[1].split('internal class Departure', 1)[0]
+        self.assertIn('generation++', recorded)
+        self.assertNotIn('capture(', recorded)
+        resume = layers.split('fun resume(frame: Frame)', 1)[1].split('private fun freeze(', 1)[0]
+        self.assertNotIn('capture(', resume)
         capture = layers.split('private fun capture(frame: Frame, sourceToken:', 1)[1].split('fun frame(', 1)[0]
-        self.assertIn('else if (motionActive || frame.frozen || frame.hasFreshImage) return', capture)
+        self.assertIn('!frame.frozen || frame.generation == 0L', capture)
         self.assertIn('withContext(NonCancellable) { snapshot(frame) }', capture)
-        self.assertIn('layers.setMotionActive(transitionRunning || state.active || state.gestureVisualActive || state.toolbarPending)', self.host)
-        regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
-        self.assertIn('fun testMotionSuspendsWarmCopiesButKeepsFinalNavigationAndDrain()', regression)
+        self.assertIn('frame.frozen && frame.generation == generation', capture)
+        self.assertIn('frame.captureEpoch == captureEpoch', capture)
+        self.assertIn('frame.releaseRequested && frame.captures.isEmpty()', capture)
 
     def test_continuous_redraw_uses_throttled_same_size_last_good_pixels(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
-        schedule = layers.split('private fun schedule(frame: Frame)', 1)[1].split('fun beginGesture(', 1)[0]
-        self.assertIn('frame.warmup?.isActive == true || frame.captures.any { !it.isCompleted }', schedule)
-        self.assertNotIn('frame.warmup?.cancel()', schedule)
-        self.assertLess(schedule.index('frame.warmup = null'), schedule.index('capture(frame, sourceToken)'))
-        capture = layers.split('private fun capture(frame: Frame, sourceToken: BackPerformanceRecorder.Token?, navigation: Boolean = false)', 1)[1].split('fun frame(', 1)[0]
-        self.assertIn('(if (navigation) frame.frozen && frame.generation == generation else !frame.frozen)', capture)
+        recorded = layers.split('fun recorded(size: IntSize)', 1)[1].split('internal class Departure', 1)[0]
+        self.assertNotIn('capture(', recorded)
+        capture = layers.split('private fun capture(frame: Frame, sourceToken:', 1)[1].split('fun frame(', 1)[0]
+        self.assertIn('frame.frozen && frame.generation == generation', capture)
         self.assertIn('image.width == size.width && image.height == size.height', capture)
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
         self.assertIn('fun testContinuousRedrawStillPreparesAndRefreshesPixels()', test)
@@ -528,8 +523,8 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertLess(replacement.index('frame.ready = image'), replacement.index('release(it)'))
         self.assertNotIn('frame.generation =', replacement)
         self.assertNotIn('frame.readyGeneration =', replacement)
-        schedule = layers.split('private fun schedule(frame: Frame)', 1)[1].split('fun beginGesture(', 1)[0]
-        self.assertIn('frame.generation == 0L', schedule)
+        capture = layers.split('private fun capture(frame: Frame, sourceToken:', 1)[1].split('fun frame(', 1)[0]
+        self.assertIn('frame.generation == 0L', capture)
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageBackStackActivityTest.kt').read_text()
         self.assertIn('fun testReturningVisitInheritsOnlyMatchingPreparedPixelsNotItsLayerOrGeneration()', test)
         retained = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageRetainedContentActivityTest.kt').read_text()
@@ -793,7 +788,7 @@ class PageBackGestureContractTest(unittest.TestCase):
 
     def test_pause_cancels_capture_but_keeps_covered_target_pixels(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
-        pause = layers.split('fun setActive(value: Boolean)', 1)[1].split('private fun schedule(', 1)[0]
+        pause = layers.split('fun setActive(value: Boolean)', 1)[1].split('private fun observeCaptures(', 1)[0]
         self.assertIn('if (active == value) return', pause)
         self.assertNotIn('clearPreviews()', pause)
         self.assertNotIn('previewEpoch++', pause)
@@ -801,14 +796,15 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('frame.captureEpoch++', pause)
         self.assertIn('frame.captureEpoch == captureEpoch', layers)
         self.assertIn('active || coveredFinalRead', layers)
-        self.assertIn('navigation && frame.key != currentKey && frame.navigationFrozen', layers)
+        self.assertIn('frame.key != currentKey && frame.navigationFrozen', layers)
         clear = layers.split('fun clearPreviews()', 1)[1].split('fun close()', 1)[0]
         self.assertIn('previewEpoch++', clear)
         self.assertIn('frame.captures.toList().forEach { it.cancel() }', pause)
         reset = pause.split('frames[currentKey]?.let { frame ->', 1)[1]
         self.assertIn('frame.image = null', reset)
         self.assertIn('frame.ready = null', reset)
-        self.assertIn('frames[currentKey]?.let { schedule(it) }', pause)
+        self.assertNotIn('capture(', pause)
+        self.assertNotIn('schedule(', pause)
         self.assertIn('if (event == Lifecycle.Event.ON_PAUSE) {', self.host)
         self.assertIn('layers.setActive(false)', self.host)
         self.assertIn('pauseEpoch++', self.host)
@@ -829,9 +825,9 @@ class PageBackGestureContractTest(unittest.TestCase):
                          '4 -> layers.frame("chat")', '5 -> target.size = IntSize(3, 2)',
                          '6 -> target.recorded(size)', 'if (boundary == 7) layers.setActive(false)',
                          'a submitted source layer must not release before its read drains',
-                         'copies[1].complete(finalPixels)', 'assertSame(target, layers.find("chat", size))',
+                         'copies[0].complete(finalPixels)', 'assertSame(target, layers.find("chat", size))',
                          'assertNull(target.ready)',
-                         'target.layer.isReleased', 'assertEquals("resume never submits another read for the covered page", 2, copies.size)'):
+                         'target.layer.isReleased', 'assertEquals("resume never submits another read for the covered page", 1, copies.size)'):
             self.assertIn(required, case)
 
     def test_preview_gate_evidence_uses_fixed_bounded_events_not_routes_or_pixels(self):
@@ -881,7 +877,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         for name in ('testUncoordinatedReturnAdvancesWhileCaptureIsPending', 'testColdUncoordinatedReturnDoesNotEnableLatePreview', 'testFrozenPreviewRejectsSameGenerationLateCopy'):
             self.assertIn('fun ' + name + '()', stack)
         self.assertIn('assertFalse(gate.isCompleted)', stack)
-        self.assertIn('cancelled warm pixels never become visible', stack)
+        self.assertIn('cancelled final pixels never become visible', stack)
         self.assertIn('even same-generation prepared pixels cannot replace the current tab', stack)
         for name in ('testUsageModelsImmediateGestureAndCancelKeepSelectedTabPixels',
                      'testUsageModelsDelayedGestureAndCancelKeepSelectedTabPixels',

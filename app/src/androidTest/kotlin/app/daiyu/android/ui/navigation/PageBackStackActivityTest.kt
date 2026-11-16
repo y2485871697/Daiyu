@@ -1,6 +1,8 @@
 package app.daiyu.android.ui.navigation
 
 import android.os.Build
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.activity.BackEventCompat
 import androidx.activity.ExperimentalActivityApi
 import androidx.activity.compose.setContent
@@ -67,11 +69,15 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         finally { if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(false) }
     }
 
+    private val exactPixels = mutableMapOf<PageBackPreviewLayers.Frame, ImageBitmap>()
+    private var explicitPrefetch = false
+
     private fun mount(local: Boolean = false, drawerPreviewSource: Boolean = false,
         gesturesEnabled: Boolean = true, rtl: Boolean = false, previewEnabled: Boolean = true,
         animateBackEnabled: Boolean = true, immediateCapture: Boolean = false) {
         // Motion-only fixtures can accept a pre-sampled unchanged source; pending-copy tests use real capture.
-        val exactPixels = mutableMapOf<PageBackPreviewLayers.Frame, ImageBitmap>()
+        exactPixels.clear()
+        explicitPrefetch = immediateCapture
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -81,16 +87,17 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                     PageBackGestureHost(routeKey = rendered, contentKey = if (rendered == "chat-sidebar") "chat" else rendered,
                         canNavigateBack = rendered == "settings", swipeDismissEnabled = gesturesEnabled, predictiveBackEnabled = gesturesEnabled,
                         dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
-                        captureFromContent = drawerPreviewSource && rendered == "chat",
+                        captureFromContent = true,
                         animateBackEnabled = animateBackEnabled,
                         previewCapture = { frame ->
                             capturedFrame = frame
                             if (immediateCapture && frame.navigationFrozen) checkNotNull(exactPixels[frame])
-                            else frame.layer.toImageBitmap().also { exactPixels[frame] = it }
+                            else frame.layer.toImageBitmap()
                         },
                         backTargetKey = if (rendered == "settings") "chat" else null) {
                         val registry = LocalPageBackStackPath.current?.registry
-                        androidx.compose.runtime.SideEffect { observedStack = registry }
+                        val current = LocalPageBackPreviewFrame.current
+                        androidx.compose.runtime.SideEffect { observedStack = registry; capturedFrame = current }
                         PageBackHandler(enabled = rendered == "settings", previewEnabled = previewEnabled) { backCount++; drawerPainted = false; screen = "chat" }
                         if (drawerPreviewSource && rendered != "settings") {
                             Box(Modifier.fillMaxSize()) {
@@ -112,7 +119,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                                 rendered == "chat-sidebar" -> Color.Green
                                 else -> Color.Blue
                             }
-                            Box(Modifier.fillMaxSize().background(color)) {
+                            Box(Modifier.fillMaxSize().pageBackPreviewSource().background(color)) {
                                 Box(Modifier.size(48.dp).testTag("page-return-button").clickable {
                                     backCount++
                                     if (local && localPage != null) localPage = if (localPage == 2) 1 else null
@@ -128,6 +135,41 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         dismissIme()
         ui.waitForIdle()
         captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun withFrozenCopies(block: (PageBackPreviewLayers, TestCoroutineScheduler,
+        MutableList<CompletableDeferred<ImageBitmap>>) -> Unit) {
+        lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
+        mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }
+        ui.waitForIdle()
+        mainThread {
+            val scheduler = TestCoroutineScheduler()
+            val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler))
+            val copies = mutableListOf<CompletableDeferred<ImageBitmap>>()
+            val layers = PageBackPreviewLayers(graphics, scope) {
+                CompletableDeferred<ImageBitmap>().also { copies.add(it) }.await()
+            }
+            try { block(layers, scheduler, copies) }
+            finally {
+                layers.close()
+                copies.forEach { if (!it.isCompleted) it.complete(ImageBitmap(2, 2)) }
+                scheduler.runCurrent(); scope.cancel()
+            }
+        }
+    }
+
+    private fun awaitRecordedFrame(source: () -> PageBackPreviewLayers.Frame?) {
+        captureScreenNode(ui.onNodeWithTag("page-back-surface"))
+        ui.waitUntil(5_000) {
+            source()?.let { !it.frozen && !it.releaseRequested && it.generation > 0L && it.size != IntSize.Zero } == true
+        }
+    }
+
+    private fun awaitFrozenPixels(source: () -> PageBackPreviewLayers.Frame?) {
+        ui.waitUntil(5_000) {
+            source()?.let { it.frozen && it.navigationFrozen && !it.releaseRequested && it.canDrawPreview } == true
+        }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -202,17 +244,15 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                     .sortedBy { it.getLong("start_offset_ns") }
                 val walls = slices.filter { it.getString("phase") == "CAPTURE_WALL" }
                     .sortedBy { it.getLong("start_offset_ns") }
-                assertEquals(4, slices.size)
-                assertEquals(2, prefixes.size)
-                assertEquals(2, walls.size)
+                assertEquals(2, slices.size)
+                assertEquals(1, prefixes.size)
+                assertEquals(1, walls.size)
                 prefixes.zip(walls).forEach { (prefix, wall) ->
                     assertEquals("COMPLETE", prefix.getString("result"))
                     assertEquals(wallResult, wall.getString("result"))
                     assertTrue(prefix.getLong("start_offset_ns") <= wall.getLong("start_offset_ns"))
                     assertTrue(wall.getLong("start_offset_ns") <= prefix.getLong("start_offset_ns") + prefix.getLong("elapsed_ns"))
                 }
-                assertTrue("warm launch ends before the final launch, not after its suspended drain",
-                    prefixes[0].getLong("start_offset_ns") + prefixes[0].getLong("elapsed_ns") <= prefixes[1].getLong("start_offset_ns"))
             }
             assertCapturePairs(0, "IN_FLIGHT")
             assertEquals(0, incidents[1].getJSONArray("capture_timings").length())
@@ -246,9 +286,12 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 layers.setActive(true)
                 frame.recorded(IntSize(2, 2))
                 scheduler.runCurrent()
+                assertEquals("recording alone never copies", 0, copies.size)
+                assertTrue(layers.beginGesture(frame))
                 val oldPosition = ImageBitmap(2, 2)
                 copies[0].complete(oldPosition); scheduler.runCurrent()
-                assertTrue(frame.hasFreshImage)
+                layers.resume(frame)
+                assertEquals(frame.generation, frame.readyGeneration)
                 val generation = frame.generation
                 assertTrue(layers.beginGesture(frame))
                 assertNull("gesture must not reuse old descendant positions", frame.image)
@@ -295,24 +338,25 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 val frame = layers.frame("settings")
                 layers.setActive(true)
                 frame.recorded(IntSize(2, 2)); scheduler.runCurrent()
-                assertEquals(1, copies.size)
+                assertEquals(0, copies.size)
+                layers.beginGesture(frame)
+                layers.resume(frame)
                 layers.freezeCurrent()
-                assertEquals("final copy is submitted before disposal while cancelled warm copy drains", 2, copies.size)
+                assertEquals("final copy is submitted before disposal while cancelled final copy drains", 2, copies.size)
                 layers.enter("detail")
                 copies[0].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
                 assertNull("old in-flight pixels cannot become the final target", frame.image)
                 val finalPixels = ImageBitmap(2, 2)
                 copies[1].complete(finalPixels); scheduler.runCurrent()
                 assertSame("only the pre-disposal final submission becomes the historical target", finalPixels, frame.image)
-                assertEquals("draining the old warm task never submits a post-disposal copy", 2, copies.size)
+                assertEquals("draining the old final task never submits a post-disposal copy", 2, copies.size)
                 layers.enter("other")
                 val other = layers.frame("other")
                 other.recorded(IntSize(2, 2)); scheduler.runCurrent()
-                copies[2].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
                 layers.freezeCurrent()
-                assertEquals(4, copies.size)
+                assertEquals(3, copies.size)
                 layers.setActive(false)
-                copies[3].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+                copies[2].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
                 assertNull("pause invalidates a submitted boundary image", other.image)
                 assertNull(other.ready)
             } finally {
@@ -346,9 +390,8 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                     val target = layers.frame("chat")
                     layers.setActive(true)
                     target.recorded(size); scheduler.runCurrent()
-                    copies.single().complete(ImageBitmap(2, 2)); scheduler.runCurrent()
                     layers.freezeCurrent()
-                    assertEquals("the final read is already submitted before leaving chat", 2, copies.size)
+                    assertEquals("the final read is already submitted before leaving chat", 1, copies.size)
                     if (boundary == 7) layers.setActive(false)
                     layers.enter("settings")
                     layers.frame("settings")
@@ -368,7 +411,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                         assertFalse("a submitted source layer must not release before its read drains", target.layer.isReleased)
                     }
                     val finalPixels = ImageBitmap(2, 2)
-                    copies[1].complete(finalPixels); scheduler.runCurrent()
+                    copies[0].complete(finalPixels); scheduler.runCurrent()
                     if (boundary < 2) {
                         assertSame("covered final pixels survive pause without re-reading hidden content", finalPixels, target.image)
                         assertSame(target, layers.find("chat", size))
@@ -381,7 +424,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                         assertNull(layers.find("chat", size))
                         if (boundary == 3) assertTrue("release waits for the submitted copy to drain", target.layer.isReleased)
                     }
-                    assertEquals("resume never submits another read for the covered page", 2, copies.size)
+                    assertEquals("resume never submits another read for the covered page", 1, copies.size)
                 } finally {
                     layers.close()
                     copies.forEach { if (!it.isCompleted) it.complete(ImageBitmap(2, 2)) }
@@ -402,31 +445,34 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                         swipeDismissEnabled = true, predictiveBackEnabled = false,
                         backTargetKey = if (rendered == "settings") "chat" else null,
                         dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
-                        previewCapture = { frame -> frames[frame.key] = frame; frame.layer.toImageBitmap() }) {
+                        captureFromContent = true,
+                        previewCapture = { frame -> frame.layer.toImageBitmap() }) {
+                        val current = LocalPageBackPreviewFrame.current
+                        androidx.compose.runtime.SideEffect { if (current != null) frames[rendered] = current }
                         PageBackHandler(enabled = rendered == "settings") { backCount++; screen = "chat" }
-                        if (rendered == "chat") Box(Modifier.fillMaxSize().background(Color.Red)) {
+                        if (rendered == "chat") Box(Modifier.fillMaxSize().pageBackPreviewSource().background(Color.Red)) {
                             Box(Modifier.fillMaxSize().then(Modifier.graphicsLayer { translationY = shift }).background(Color.Green))
-                        } else Box(Modifier.fillMaxSize().background(Color.Blue))
+                        } else Box(Modifier.fillMaxSize().pageBackPreviewSource().background(Color.Blue))
                     }
                 }
             }
         }
         dismissIme()
-        ui.waitUntil(timeoutMillis = 5000) { frames["chat"]?.hasFreshImage == true }
+        awaitRecordedFrame { frames["chat"] }
         ui.mainClock.autoAdvance = false
         try {
             val parent = checkNotNull(frames["chat"])
-            val oldBitmap = checkNotNull(parent.ready)
+            val oldBitmap = captureScreenNode(ui.onNodeWithTag("page-back-host"))
             val recorded = parent.generation
             mainThread { shift = 180f }
             ui.mainClock.advanceTimeByFrame()
             val moved = captureScreenNode(ui.onNodeWithTag("page-back-host")).toPixelMap()
             assertTrue("live descendant moved to B", moved[2, 90].red > .9f && moved[2, 90].green < .1f)
-            assertTrue("prepared bitmap is still at A", oldBitmap.toPixelMap()[2, 90].green > .9f)
+            assertTrue("explicit baseline bitmap is still at A", oldBitmap.toPixelMap()[2, 90].green > .9f)
             assertEquals("only the descendant layer moved", recorded, parent.generation)
             mainThread {
                 assertEquals("outer layer was not recorded again", recorded, parent.generation)
-                assertSame("navigation starts with the stale prepared bitmap", oldBitmap, parent.ready)
+                assertNull("live page has no speculative prepared bitmap", parent.ready)
                 assertFalse("the pixel regression starts without an in-flight warm copy", parent.captures.any { !it.isCompleted })
                 screen = "settings"
             }
@@ -462,197 +508,104 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun testMotionSuspendsWarmCopiesButKeepsFinalNavigationAndDrain() {
-        lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
-        mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }
-        ui.waitForIdle()
-        mainThread {
-            val scheduler = TestCoroutineScheduler()
-            val clock = object : MonotonicFrameClock {
-                override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R = onFrame(scheduler.currentTime * 1_000_000)
-            }
-            val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler) + clock)
-            val copies = mutableListOf<CompletableDeferred<ImageBitmap>>()
-            val layers = PageBackPreviewLayers(graphics, scope) {
-                CompletableDeferred<ImageBitmap>().also { copies.add(it) }.await()
-            }
-            try {
-                layers.enter("source")
-                val source = layers.frame("source")
-                layers.setActive(true)
-                source.recorded(IntSize(2, 2))
-                layers.setMotionActive(true)
-                scheduler.advanceTimeBy(200); scheduler.runCurrent()
-                assertEquals("motion cancels queued warm work before its first read", 0, copies.size)
-                layers.beginGesture(source)
-                assertEquals("fresh navigation pixels still submit during motion", 1, copies.size)
-                copies[0].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
-                assertTrue(source.canDrawPreview)
-
-                layers.enter("target")
-                val target = layers.frame("target")
-                target.recorded(IntSize(2, 2))
-                repeat(12) {
-                    target.recorded(IntSize(2, 2))
-                    scheduler.advanceTimeBy(16); scheduler.runCurrent()
-                }
-                assertEquals("destination animation frames never launch warm reads", 1, copies.size)
-                layers.setMotionActive(false)
-                scheduler.advanceTimeBy(65); scheduler.runCurrent()
-                assertEquals("idle destination resumes preparation", 2, copies.size)
-                layers.setMotionActive(true)
-                layers.setActive(false)
-                layers.setActive(true)
-                scheduler.runCurrent()
-                assertEquals("resuming lifecycle cannot bypass the motion gate", 2, copies.size)
-                copies[1].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
-                assertNull("pause still rejects the old in-flight copy", target.ready)
-                scheduler.advanceTimeBy(200); scheduler.runCurrent()
-                assertEquals("cancelled read drains without restarting during motion", 2, copies.size)
-                layers.setMotionActive(false)
-                scheduler.advanceTimeBy(65); scheduler.runCurrent()
-                assertEquals(3, copies.size)
-                layers.close()
-                assertFalse("a submitted source remains alive until its read drains", target.layer.isReleased)
-                copies[2].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
-                assertTrue(target.layer.isReleased)
-            } finally {
-                copies.forEach { it.complete(ImageBitmap(2, 2)) }
-                scheduler.runCurrent()
-                layers.close()
-                scope.cancel()
-            }
+        withFrozenCopies { layers, scheduler, copies ->
+            layers.enter("source")
+            val source = layers.frame("source")
+            layers.setActive(true)
+            repeat(12) { source.recorded(IntSize(2, 2)); scheduler.advanceTimeBy(16); scheduler.runCurrent() }
+            scheduler.advanceTimeBy(1_000); scheduler.runCurrent()
+            assertEquals("redraw and idle never submit speculative copies", 0, copies.size)
+            layers.setActive(false); layers.setActive(true); scheduler.runCurrent()
+            assertEquals("resume never starts a speculative copy", 0, copies.size)
+            assertTrue(layers.beginGesture(source))
+            assertEquals("only freeze submits the final copy", 1, copies.size)
+            layers.enter("destination")
+            val destination = layers.frame("destination")
+            repeat(12) { destination.recorded(IntSize(2, 2)); scheduler.advanceTimeBy(16); scheduler.runCurrent() }
+            assertEquals("destination animation never submits speculative copies", 1, copies.size)
+            val finalPixels = ImageBitmap(2, 2)
+            copies[0].complete(finalPixels); scheduler.runCurrent()
+            assertSame(finalPixels, source.image)
+            layers.freezeCurrent()
+            assertEquals(2, copies.size)
+            layers.close()
+            assertFalse("submitted source stays alive until its read drains", destination.layer.isReleased)
+            copies[1].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+            assertTrue(destination.layer.isReleased)
+            assertNull(destination.image)
+            assertNull(destination.ready)
         }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun testPreparedSnapshotRetainsLastGoodGenerationButRejectsInvalidEpochs() {
-        lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
-        mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }
-        ui.waitForIdle()
-        mainThread {
-            val scheduler = TestCoroutineScheduler()
-            val clock = object : MonotonicFrameClock {
-                override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R = onFrame(scheduler.currentTime * 1_000_000)
-            }
-            val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler) + clock)
-            val copies = mutableListOf<CompletableDeferred<ImageBitmap>>()
-            val layers = PageBackPreviewLayers(graphics, scope) {
-                CompletableDeferred<ImageBitmap>().also { copies.add(it) }.await()
-            }
-            try {
-                layers.enter("source")
-                val frame = layers.frame("source")
-                layers.setActive(true)
-                frame.recorded(IntSize(2, 2))
-                scheduler.advanceTimeBy(65); scheduler.runCurrent()
-                assertEquals(1, copies.size)
-                frame.recorded(IntSize(2, 2))
-                scheduler.advanceTimeBy(65); scheduler.runCurrent()
-                assertEquals("a layer has only one copy in flight", 1, copies.size)
-                val lastGood = ImageBitmap(2, 2)
-                copies[0].complete(lastGood); scheduler.runCurrent()
-                assertSame("completed same-size pixels remain usable during continuous redraw", lastGood, frame.ready)
-                assertFalse("last-good is not falsely marked fresh", frame.hasFreshImage)
-                assertEquals(frame.generation - 1, frame.readyGeneration)
-                scheduler.advanceTimeBy(65); scheduler.runCurrent()
-                assertEquals(2, copies.size)
-                val current = ImageBitmap(2, 2)
-                copies[1].complete(current); scheduler.runCurrent()
-                assertSame(current, frame.ready)
-                assertNull("warmup must not publish into live draw state", frame.image)
-                frame.recorded(IntSize(2, 2))
-                layers.beginGesture(frame)
-                assertNull("newer live pixels must not be replaced by a warm image", frame.image)
-                assertEquals("gesture submits a current-pixel copy", 3, copies.size)
-                copies[2].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
-
-                layers.clearPreviews()
-                frame.recorded(IntSize(3, 2))
-                scheduler.advanceTimeBy(65); scheduler.runCurrent()
-                assertEquals(4, copies.size)
-                layers.setActive(false)
-                layers.setActive(true)
-                scheduler.runCurrent()
-                assertEquals("resume waits for the old copy to drain", 4, copies.size)
-                copies[3].complete(ImageBitmap(3, 2)); scheduler.runCurrent()
-                assertNull("pause epoch must reject a late bitmap", frame.ready)
-                assertNull(frame.image)
-                assertEquals("draining the old epoch restarts resumed warmup", 5, copies.size)
-                val resumed = ImageBitmap(3, 2)
-                copies[4].complete(resumed); scheduler.runCurrent()
-                assertSame(resumed, frame.ready)
-
-                layers.clearPreviews()
-                frame.recorded(IntSize(3, 2))
-                layers.beginGesture(frame)
-                assertEquals("cold gesture submits one current-pixel copy without waiting", 6, copies.size)
-                assertFalse(frame.canDrawPreview)
-                copies[5].complete(ImageBitmap(3, 2)); scheduler.runCurrent()
-
-                layers.clearPreviews()
-                frame.recorded(IntSize(3, 2))
-                scheduler.advanceTimeBy(65); scheduler.runCurrent()
-                assertEquals(7, copies.size)
-                layers.close()
-                assertFalse("in-flight source must not release early", frame.layer.isReleased)
-                copies[6].complete(ImageBitmap(3, 2)); scheduler.runCurrent()
-                assertTrue(frame.layer.isReleased)
-                assertNull(frame.ready)
-                assertNull(frame.image)
-            } finally {
-                copies.forEach { it.complete(ImageBitmap(3, 2)) }
-                scheduler.runCurrent()
-                layers.close()
-                scope.cancel()
-            }
+        withFrozenCopies { layers, scheduler, copies ->
+            layers.enter("source")
+            val frame = layers.frame("source")
+            layers.setActive(true)
+            frame.recorded(IntSize(2, 2))
+            assertTrue(layers.beginGesture(frame))
+            frame.recorded(IntSize(2, 2))
+            copies[0].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+            assertNull("a changed generation rejects the final read", frame.image)
+            assertNull(frame.ready)
+            layers.resume(frame)
+            layers.beginGesture(frame)
+            copies[1].complete(ImageBitmap(3, 2)); scheduler.runCurrent()
+            assertNull("wrong bitmap dimensions cannot be published", frame.image)
+            layers.resume(frame)
+            layers.beginGesture(frame)
+            layers.clearPreviews()
+            copies[2].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
+            assertNull("global preview epoch rejects a late read", frame.image)
+            frame.recorded(IntSize(3, 2))
+            layers.beginGesture(frame)
+            layers.setActive(false); layers.setActive(true)
+            copies[3].complete(ImageBitmap(3, 2)); scheduler.runCurrent()
+            assertNull("pause epoch rejects a late bitmap", frame.ready)
+            assertNull(frame.image)
+            assertEquals("resume does not launch another copy", 4, copies.size)
+            layers.beginGesture(frame)
+            val current = ImageBitmap(3, 2)
+            copies[4].complete(current); scheduler.runCurrent()
+            assertSame("a new freeze can recover after invalidation", current, frame.image)
+            assertSame(current, frame.ready)
+            layers.resume(frame)
+            layers.beginGesture(frame)
+            layers.close()
+            assertFalse("in-flight source must not release early", frame.layer.isReleased)
+            copies[5].complete(ImageBitmap(3, 2)); scheduler.runCurrent()
+            assertTrue(frame.layer.isReleased)
+            assertNull(frame.image)
+            assertNull(frame.ready)
         }
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun testContinuousRedrawStillPreparesAndRefreshesPixels() {
-        lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
-        mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }
-        ui.waitForIdle()
-        mainThread {
-            val scheduler = TestCoroutineScheduler()
-            val clock = object : MonotonicFrameClock {
-                override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R = onFrame(scheduler.currentTime * 1_000_000)
-            }
-            val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler) + clock)
-            val copies = mutableListOf<CompletableDeferred<ImageBitmap>>()
-            val layers = PageBackPreviewLayers(graphics, scope) {
-                CompletableDeferred<ImageBitmap>().also { copies.add(it) }.await()
-            }
-            try {
-                layers.enter("settings")
-                val frame = layers.frame("settings")
-                layers.setActive(true)
-                frame.recorded(IntSize(2, 2))
-                scheduler.runCurrent()
-                assertEquals(1, copies.size)
-                repeat(4) { frame.recorded(IntSize(2, 2)); scheduler.advanceTimeBy(16); scheduler.runCurrent() }
-                val first = ImageBitmap(2, 2)
-                copies[0].complete(first); scheduler.runCurrent()
-                assertSame("continuous redraw must not starve the first prepared bitmap", first, frame.ready)
-                assertFalse(frame.hasFreshImage)
-                repeat(4) { frame.recorded(IntSize(2, 2)); scheduler.advanceTimeBy(16); scheduler.runCurrent() }
-                assertEquals("redraw must not restart the 64ms refresh window", 2, copies.size)
-                val second = ImageBitmap(2, 2)
-                copies[1].complete(second); scheduler.runCurrent()
-                assertSame(second, frame.ready)
-                assertTrue(frame.hasFreshImage)
-                val beforeFreeze = copies.size
-                assertTrue(layers.beginGesture(frame))
-                assertNull("warm pixels remain background-only", frame.image)
-                assertEquals("freezing samples current descendants once", beforeFreeze + 1, copies.size)
-                val frozen = ImageBitmap(2, 2)
-                copies[2].complete(frozen); scheduler.runCurrent()
-                assertSame(frozen, frame.image)
-            } finally {
-                layers.close()
-                copies.forEach { if (!it.isCompleted) it.complete(ImageBitmap(2, 2)) }
-                scheduler.runCurrent(); scope.cancel()
-            }
+        withFrozenCopies { layers, scheduler, copies ->
+            layers.enter("settings")
+            val frame = layers.frame("settings")
+            layers.setActive(true)
+            repeat(20) { frame.recorded(IntSize(2, 2)); scheduler.advanceTimeBy(16); scheduler.runCurrent() }
+            assertEquals("continuous redraw never copies the live page", 0, copies.size)
+            assertNull(frame.ready)
+            val generation = frame.generation
+            assertTrue(layers.beginGesture(frame))
+            assertEquals("freeze samples current descendants exactly once", 1, copies.size)
+            val finalPixels = ImageBitmap(2, 2)
+            copies[0].complete(finalPixels); scheduler.runCurrent()
+            assertSame(finalPixels, frame.image)
+            assertEquals(generation, frame.readyGeneration)
+            layers.resume(frame)
+            repeat(20) { frame.recorded(IntSize(2, 2)); scheduler.advanceTimeBy(16); scheduler.runCurrent() }
+            assertEquals("resumed redraw does not refresh background bitmaps", 1, copies.size)
+            assertNull(frame.image)
+            assertTrue(layers.beginGesture(frame))
+            val newPixels = ImageBitmap(2, 2)
+            copies[1].complete(newPixels); scheduler.runCurrent()
+            assertSame(newPixels, frame.image)
+            assertNotSame(finalPixels, frame.image)
         }
     }
 
@@ -674,14 +627,13 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 layers.setActive(true)
                 previous.recorded(IntSize(2, 2))
                 scheduler.runCurrent()
-                val warmPixels = checkNotNull(previous.ready)
+                assertNull(previous.ready)
                 previous.holdingForChild = true
                 previous.childChangeCaptured = true
                 previous.animateReturn = true
                 layers.enter("detail")
                 val pixels = checkNotNull(previous.ready)
-                assertNotSame("navigation replaces the warm bitmap", warmPixels, pixels)
-                assertEquals(2, copies)
+                assertEquals("navigation owns the only copy", 1, copies)
                 layers.frame("detail")
                 layers.enter("settings")
                 val returned = layers.frame("settings")
@@ -693,7 +645,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 assertEquals(IntSize(2, 2), returned.size)
                 assertEquals(0L, returned.generation)
                 assertEquals(-1L, returned.readyGeneration)
-                assertFalse("inherited pixels do not pretend the new layer was recorded", returned.hasFreshImage)
+                assertEquals("inherited pixels do not pretend the new layer was recorded", -1L, returned.readyGeneration)
                 assertFalse(returned.holdingForChild)
                 assertNull(returned.childChangeCaptured)
                 assertFalse(returned.animateReturn)
@@ -701,16 +653,15 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 assertSame(pixels, returned.image)
                 layers.resume(returned)
                 scheduler.advanceTimeBy(65); scheduler.runCurrent()
-                assertEquals("never copy an unrecorded replacement layer", 2, copies)
+                assertEquals("never copy an unrecorded replacement layer", 1, copies)
                 returned.recorded(IntSize(2, 2))
                 scheduler.advanceTimeBy(65); scheduler.runCurrent()
-                assertEquals(3, copies)
-                assertTrue("a real new recording replaces the inherited generation", returned.hasFreshImage)
-                assertNotSame(pixels, returned.ready)
+                assertEquals("recording does not copy", 1, copies)
+                assertNull(returned.inheritedImage)
                 val sourcePixels = returned.ready
                 returned.backTargetKey = "chat"
                 layers.freezeCurrent("chat")
-                assertEquals("ordinary local back samples current descendants", 4, copies)
+                assertEquals("ordinary local back samples current descendants", 2, copies)
                 assertNotSame(sourcePixels, returned.image)
                 assertTrue(returned.navigationFrozen)
                 layers.clearPreviews()
@@ -726,7 +677,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                     val rejected = layers.frame("settings", sourceKey = if (mismatch == "source") "other" else "settings",
                         contentKey = if (mismatch == "content") "other" else "settings")
                     assertNull("incompatible $mismatch must not cross visits", rejected.ready)
-                    assertEquals(IntSize.Zero, rejected.size)
+                    assertEquals(if (mismatch == "source" || mismatch == "content") IntSize.Zero else cached.size, rejected.size)
                     assertFalse(layers.beginGesture(rejected))
                 }
             } finally { layers.close(); scope.cancel() }
@@ -735,64 +686,34 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     fun testFrozenPreviewRejectsSameGenerationLateCopy() {
-        lateinit var graphics: androidx.compose.ui.graphics.GraphicsContext
-        mainThread { activity.setContent { graphics = LocalGraphicsContext.current; Box(Modifier.fillMaxSize()) } }
-        ui.waitForIdle()
-        mainThread {
-            val scheduler = TestCoroutineScheduler()
-            val clock = object : MonotonicFrameClock {
-                override suspend fun <R> withFrameNanos(onFrame: (Long) -> R): R = onFrame(scheduler.currentTime * 1_000_000)
-            }
-            val scope = CoroutineScope(SupervisorJob() + StandardTestDispatcher(scheduler) + clock)
-            val copies = mutableListOf<CompletableDeferred<ImageBitmap>>()
-            val layers = PageBackPreviewLayers(graphics, scope) {
-                CompletableDeferred<ImageBitmap>().also { copies.add(it) }.await()
-            }
-            try {
-                layers.enter("source")
-                val frame = layers.frame("source")
-                layers.setActive(true)
-                frame.recorded(IntSize(2, 2))
-                scheduler.advanceTimeBy(65); scheduler.runCurrent()
-                val oldTab = ImageBitmap(2, 2)
-                copies[0].complete(oldTab); scheduler.runCurrent()
-                val generation = frame.generation
-                assertTrue(frame.hasFreshImage)
-                // A descendant changed tab without another outer recording.
-                assertTrue(layers.beginGesture(frame))
-                assertNull("even same-generation prepared pixels cannot replace the current tab", frame.image)
-                assertEquals(2, copies.size)
-                val selectedTab = ImageBitmap(2, 2)
-                copies[1].complete(selectedTab); scheduler.runCurrent()
-                assertEquals(generation, frame.generation)
-                assertSame("gesture owns a new descendant snapshot", selectedTab, frame.image)
-                layers.resume(frame)
-                assertNull(frame.image)
-
-                frame.recorded(IntSize(2, 2))
-                scheduler.advanceTimeBy(65); scheduler.runCurrent()
-                assertEquals(3, copies.size)
-                assertTrue(layers.beginGesture(frame))
-                assertNull(frame.image)
-                assertEquals("gesture submits final pixels before the cancelled warm task drains", 4, copies.size)
-                copies[2].complete(oldTab); scheduler.runCurrent()
-                assertEquals("warm completion does not duplicate the already submitted final copy", 4, copies.size)
-                assertNull("cancelled warm pixels never become visible", frame.image)
-                copies[3].complete(selectedTab); scheduler.runCurrent()
-                assertSame(selectedTab, frame.image)
-                layers.resume(frame)
-
-                assertTrue(layers.beginGesture(frame))
-                assertEquals(5, copies.size)
-                layers.setActive(false)
-                copies[4].complete(oldTab); scheduler.runCurrent()
-                assertNull("pause rejects the final copy from its old epoch", frame.image)
-                assertEquals(5, copies.size)
-            } finally {
-                layers.close()
-                copies.forEach { if (!it.isCompleted) it.complete(ImageBitmap(2, 2)) }
-                scope.cancel(); scheduler.runCurrent()
-            }
+        withFrozenCopies { layers, scheduler, copies ->
+            layers.enter("source")
+            val frame = layers.frame("source")
+            layers.setActive(true)
+            frame.recorded(IntSize(2, 2))
+            layers.beginGesture(frame)
+            val oldTab = ImageBitmap(2, 2)
+            copies[0].complete(oldTab); scheduler.runCurrent()
+            layers.resume(frame)
+            val generation = frame.generation
+            assertTrue(layers.beginGesture(frame))
+            assertNull("even same-generation prepared pixels cannot replace the current tab", frame.image)
+            assertEquals(2, copies.size)
+            layers.resume(frame)
+            assertTrue(layers.beginGesture(frame))
+            assertEquals("a new freeze does not wait for the cancelled old read", 3, copies.size)
+            copies[1].complete(oldTab); scheduler.runCurrent()
+            assertNull("cancelled final pixels never become visible", frame.image)
+            val selectedTab = ImageBitmap(2, 2)
+            copies[2].complete(selectedTab); scheduler.runCurrent()
+            assertEquals(generation, frame.generation)
+            assertSame("gesture owns a new descendant snapshot", selectedTab, frame.image)
+            layers.resume(frame)
+            layers.beginGesture(frame)
+            layers.setActive(false)
+            copies[3].complete(oldTab); scheduler.runCurrent()
+            assertNull("pause rejects the final copy from its old epoch", frame.image)
+            assertEquals(4, copies.size)
         }
     }
 
@@ -808,7 +729,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     val rendered = screen
                     PageBackGestureHost(rendered, canNavigateBack = rendered == "settings",
-                        swipeDismissEnabled = false, predictiveBackEnabled = false,
+                        swipeDismissEnabled = true, predictiveBackEnabled = false,
                         dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
                         backTargetKey = if (rendered == "settings") "chat" else null,
                         captureFromContent = true, previewCapture = { frame ->
@@ -825,21 +746,29 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         }
         ui.waitForIdle()
         captureScreenNode(ui.onNodeWithTag("page-back-surface"))
-        mainThread { blockCopies = !withPreparedImage; screen = "settings" }
+        mainThread { screen = "settings" }
         ui.waitForIdle()
         captureScreenNode(ui.onNodeWithTag("page-back-surface"))
         if (withPreparedImage) {
-            ui.waitUntil(5_000) { currentFrame?.ready != null }
-            mainThread { blockCopies = true; paint = Color.Green }
+            ui.onNodeWithTag("page-back-host").performTouchInput {
+                down(Offset(width * .02f, height * .6f))
+                moveTo(Offset(width * .35f, height * .6f), 160)
+            }
+            awaitFrozenPixels { currentFrame }
+            ui.onNodeWithTag("page-back-host").performTouchInput { cancel() }
+            ui.mainClock.advanceTimeBy(1000)
+            awaitRecordedFrame { currentFrame }
+            mainThread { paint = Color.Green }
             captureScreenNode(ui.onNodeWithTag("page-back-surface"))
         }
-        ui.waitUntil(5_000) { copiesWaiting > 0 }
+        mainThread { blockCopies = true }
         ui.mainClock.autoAdvance = false
             mainThread { backCount++; screen = "chat" }
             assertEquals("uncoordinated route changes do not wait for capture", "chat", screen)
             assertEquals(1, backCount)
             assertFalse(gate.isCompleted)
             ui.mainClock.advanceTimeByFrame()
+            ui.waitUntil(5_000) { copiesWaiting > 0 }
             // A pending final copy must not display the obsolete prepared blue page.
             ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
             val returned = captureScreenNode(ui.onNodeWithTag("page-back-host")).toPixelMap()
@@ -919,7 +848,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             if (nested) mainThread { localPage = 1 }
             ui.mainClock.advanceTimeBy(1000)
             captureScreenNode(ui.onNodeWithTag("page-back-host"))
-            ui.waitUntil(5_000) { frame?.ready != null }
+            awaitRecordedFrame { frame }
             val source = checkNotNull(frame)
             sourceState = state
             if (cancelPredictionFirst) {
@@ -1070,7 +999,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             captureScreenNode(ui.onNodeWithTag("page-back-host"))
             ui.waitUntil(5_000) {
                 if (!ui.mainClock.autoAdvance) ui.mainClock.advanceTimeByFrame()
-                frames[page]?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true
+                frames[page]?.let { !it.frozen && !it.releaseRequested && it.generation > 0L && it.size != IntSize.Zero } == true
             }
         }
         fun applyInsets(value: IntSize) {
@@ -1090,12 +1019,13 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                         PageBackGestureHost(rendered, canNavigateBack = target != null,
                             swipeDismissEnabled = true, predictiveBackEnabled = true,
                             dispatchBack = { activity.onBackPressedDispatcher.onBackPressed() },
-                            backTargetKey = target,
-                            previewCapture = { frame -> frames[frame.key] = frame; frame.layer.toImageBitmap() }) {
+                            backTargetKey = target, captureFromContent = true,
+                            previewCapture = { frame -> frame.layer.toImageBitmap() }) {
                             val currentGesture = LocalPageBackGesture.current
-                            androidx.compose.runtime.SideEffect { gesture = currentGesture }
+                            val currentFrame = LocalPageBackPreviewFrame.current
+                            androidx.compose.runtime.SideEffect { gesture = currentGesture; if (currentFrame != null) frames[rendered] = currentFrame }
                             PageBackHandler(enabled = target != null, onBack = back)
-                            Box(Modifier.fillMaxSize().background(color(rendered))) {
+                            Box(Modifier.fillMaxSize().pageBackPreviewSource().background(color(rendered))) {
                                 app.daiyu.android.ui.components.MiuixBackButton(onClick = back,
                                     modifier = Modifier.testTag("nested-return-button"))
                             }
@@ -1111,6 +1041,8 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             val chat = checkNotNull(frames["chat"])
             val settings = checkNotNull(frames["settings"])
             val child = checkNotNull(frames["linux-settings"])
+            awaitFrozenPixels { chat }
+            awaitFrozenPixels { settings }
             realPauseResumeWithPausedFrames(activity, whilePaused = {
                 applyInsets(if (stableChange) recoveredInsets else IntSize.Zero)
                 ui.mainClock.advanceTimeByFrame()
@@ -1260,9 +1192,28 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
     fun testReturnButtonUsesRtlDirection() = assertOrdinaryReturnMotion(rtl = true)
 
     private fun awaitPreparedCurrentPixels() {
-        ui.waitUntil(timeoutMillis = 5_000) {
-            if (!ui.mainClock.autoAdvance) ui.mainClock.advanceTimeByFrame()
-            capturedFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true
+        awaitRecordedFrame { capturedFrame }
+        if (!explicitPrefetch) return
+        var source: PageBackPreviewLayers.Frame? = null
+        var result: Result<ImageBitmap>? = null
+        mainThread {
+            val frame = checkNotNull(capturedFrame)
+            source = frame
+            activity.lifecycleScope.launch { result = runCatching { frame.layer.toImageBitmap() } }
+        }
+        ui.waitUntil(5_000) {
+            var complete = false
+            instrumentation.runOnMainSync { complete = result != null }
+            complete
+        }
+        mainThread {
+            val frame = checkNotNull(source)
+            assertSame(frame, capturedFrame)
+            assertFalse(frame.frozen)
+            val image = checkNotNull(result).getOrThrow()
+            assertEquals(frame.size.width, image.width)
+            assertEquals(frame.size.height, image.height)
+            exactPixels[frame] = image
         }
     }
 

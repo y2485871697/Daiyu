@@ -1,6 +1,8 @@
 package app.daiyu.android.ui.navigation
 
 import android.os.Build
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.activity.BackEventCompat
 import androidx.activity.ExperimentalActivityApi
 import androidx.activity.compose.setContent
@@ -80,14 +82,15 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
     private var sliderValue by mutableStateOf(0.2f)
     private var inputText by mutableStateOf("a text field with selectable content")
     private var immediateCaptureRequests = 0
-    private var warmCaptureRequests = 0
+    private var frozenCaptureRequests = 0
+    private val exactPixels = mutableMapOf<PageBackPreviewLayers.Frame, ImageBitmap>()
     private var idleRequest by mutableStateOf(0)
     private val idleRoutes = mutableListOf<String>()
     private lateinit var horizontal: ScrollState
 
     private fun mount(horizontalChild: Boolean = false, clickableRows: Boolean = false, sliderChild: Boolean = false, textChild: Boolean = false, capturePreviousPage: Boolean = false, rtl: Boolean = false, immediateCapture: Boolean = false, lifecycleOwner: androidx.lifecycle.LifecycleOwner? = null, onPageComposition: () -> Unit = {}) {
         // Motion-only fixtures can accept a pre-sampled unchanged source; pending-copy tests use real capture.
-        val exactPixels = mutableMapOf<PageBackPreviewLayers.Frame, ImageBitmap>()
+        exactPixels.clear()
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -105,11 +108,12 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                         idleRequestKey = idleRequest,
                         onTransitionIdle = { idleRoutes.add(renderedRoute) },
                         previewCapture = { frame ->
-                            if (!frame.navigationFrozen) warmCaptureRequests++
+                            check(frame.frozen && frame.navigationFrozen)
+                            frozenCaptureRequests++
                             if (immediateCapture && frame.navigationFrozen) {
                                 immediateCaptureRequests++
                                 checkNotNull(exactPixels[frame])
-                            } else frame.layer.toImageBitmap().also { exactPixels[frame] = it }
+                            } else frame.layer.toImageBitmap()
                         }) {
                         val currentFrame = LocalPageBackPreviewFrame.current
                         val gestureState = LocalPageBackGesture.current
@@ -164,10 +168,13 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             val source = sourcePixels[2, sourcePixels.height / 2]
             assertTrue("source previous page must be red, actual=$source", source.red > 0.9f && source.blue < 0.1f)
         }
-        if (capturePreviousPage) prepareCurrentPixels()
+        if (capturePreviousPage) prepareCurrentPixels(prefetchForImmediateCapture = immediateCapture)
         mainThread { route = "test-page" }
         ui.waitForIdle()
-        if (capturePreviousPage) prepareCurrentPixels()
+        if (capturePreviousPage) {
+            awaitFrozenPixels { previousFrame }
+            prepareCurrentPixels(prefetchForImmediateCapture = immediateCapture)
+        }
     }
 
     @androidx.compose.runtime.Composable
@@ -383,6 +390,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                 (release.left - initial.left) / initial.width, "resumed target keeps red predecessor pixels")
             assertTrue("resumed gesture moves before commit", release.left > initial.left)
             assertEquals(0, backCount)
+            awaitFrozenPixels { current }
             if (prediction) mainThread { activity.onBackPressedDispatcher.onBackPressed() }
             else {
                 node("page-back-host").performTouchInput { up() }
@@ -872,6 +880,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             mainThread { activity.onBackPressedDispatcher.dispatchOnBackProgressed(BackEventCompat(0f, 0f, 0.6f, BackEventCompat.EDGE_RIGHT)) }
             ui.mainClock.advanceTimeBy(32)
             val release = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
+            awaitFrozenPixels { observedFrame }
             mainThread { activity.onBackPressedDispatcher.onBackPressed() } // includes the route frame
             val start = ui.onNodeWithTag("page-back-departure").assertExists().fetchSemanticsNode().boundsInRoot
             assertEquals("predictive release position stays continuous", release.left, start.left, 1.1f)
@@ -950,10 +959,10 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeBy(48)
             assertTrue("return or cancel settle cannot notify idle", idleRoutes.isEmpty())
             if (losePreview) ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
-            val warmBeforeSettle = warmCaptureRequests
+            val capturesBeforeSettle = frozenCaptureRequests
             ui.mainClock.advanceTimeBy(96)
             assertTrue("a missing overlay does not finish its return clock", idleRoutes.isEmpty())
-            assertEquals("settling cannot submit full-page warm copies", warmBeforeSettle, warmCaptureRequests)
+            assertEquals("settling must not submit additional source captures", capturesBeforeSettle, frozenCaptureRequests)
             ui.mainClock.advanceTimeBy(1200)
             ui.waitForIdle()
             assertEquals(listOf(if (commit) "previous-page" else "test-page"), idleRoutes)
@@ -993,6 +1002,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             val moving = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
             assertDimmedPreviousPage(backdrop, (moving.left - initial.left) / initial.width,
                 "swipe previous page must be red and dimmed")
+            awaitFrozenPixels { observedFrame }
             ui.onNodeWithTag("page-back-surface").performTouchInput { up() }
             ui.mainClock.advanceTimeByFrame()
             assertEquals("previous-page", route)
@@ -1024,6 +1034,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             }
             ui.mainClock.advanceTimeBy(32)
             ui.onNodeWithTag("page-back-target").assertExists()
+            awaitFrozenPixels { observedFrame }
             ui.onNodeWithTag("page-back-surface").performTouchInput { up() }
             ui.mainClock.advanceTimeByFrame()
             assertEquals("previous-page", route)
@@ -1037,11 +1048,44 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         } finally { ui.mainClock.autoAdvance = true }
     }
 
-    private fun prepareCurrentPixels() {
+    private fun awaitFrozenPixels(source: () -> PageBackPreviewLayers.Frame?) {
+        ui.waitUntil(5_000) {
+            var ready = false
+            instrumentation.runOnMainSync {
+                ready = source()?.let { it.frozen && it.navigationFrozen && !it.releaseRequested &&
+                    it.size.width > 0 && it.size.height > 0 && it.canDrawPreview } == true
+            }
+            ready
+        }
+    }
+
+    private fun prepareCurrentPixels(prefetchForImmediateCapture: Boolean = false) {
         captureScreenNode(ui.onNodeWithTag("page-back-surface"))
         ui.waitUntil(5_000) {
-            observedFrame?.let { it.key == route && !it.frozen && !it.releaseRequested && it.ready != null &&
-                it.size.width > 0 && it.size.height > 0 && it.readySize == it.size } == true
+            observedFrame?.let { it.key == route && !it.frozen && !it.releaseRequested &&
+                it.generation > 0L && it.size.width > 0 && it.size.height > 0 } == true
+        }
+        if (!prefetchForImmediateCapture) return
+        var source: PageBackPreviewLayers.Frame? = null
+        var result: Result<ImageBitmap>? = null
+        mainThread {
+            val frame = checkNotNull(observedFrame)
+            source = frame
+            activity.lifecycleScope.launch { result = runCatching { frame.layer.toImageBitmap() } }
+        }
+        ui.waitUntil(5_000) {
+            var completed = false
+            instrumentation.runOnMainSync { completed = result != null }
+            completed
+        }
+        mainThread {
+            val frame = checkNotNull(source)
+            assertSame(frame, observedFrame)
+            assertFalse(frame.frozen)
+            val pixels = checkNotNull(result).getOrThrow()
+            assertEquals(frame.size.width, pixels.width)
+            assertEquals(frame.size.height, pixels.height)
+            exactPixels[frame] = pixels
         }
     }
 
@@ -1068,6 +1112,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeBy(32)
             val released = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
             assertTrue("the release trajectory starts from a moving page", direction * (edge(released) - edge(initial)) > 0f)
+            awaitFrozenPixels { observedFrame }
             ui.onNodeWithTag("page-back-host").performTouchInput { up() }
             ui.runOnIdle {
                 assertEquals("previous-page", route)
@@ -1148,6 +1193,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
                 moveTo(Offset(width * .65f, height * .6f), 240)
             }
             ui.mainClock.advanceTimeBy(32)
+            awaitFrozenPixels { observedFrame }
             mainThread { currentColor = Color.Green }
             ui.mainClock.advanceTimeBy(32)
             val held = captureScreenNode(ui.onNodeWithTag("page-back-surface")).toPixelMap()
@@ -1216,8 +1262,6 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         captureScreenNode(ui.onNodeWithTag("page-back-surface"))
         mainThread { rendered = "usage" }
         awaitUniqueTag("usage-heatmap")
-        ui.waitUntil(5_000) { usageFrame?.ready != null }
-        val preparedOverview = checkNotNull(usageFrame?.ready)
         val modelTab = ui.onNodeWithTag("usage-tab:" + activity.getString(app.daiyu.android.R.string.stats_tab_models))
         val overviewPixels = captureScreenNode(modelTab).toPixelMap()
         val old = overviewPixels[overviewPixels.width / 4, overviewPixels.height / 2]
@@ -1231,17 +1275,9 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             val tabBeforeDrag = modelTab.fetchSemanticsNode().boundsInRoot
             val surfaceBeforeDrag = ui.onNodeWithTag("page-back-surface").fetchSemanticsNode().boundsInRoot
             val probeBeforeDrag = Offset(tabBeforeDrag.left + selectedPixels.width / 4, tabBeforeDrag.top + selectedPixels.height / 2)
-            mainThread {
-                // Pin the actual Overview capture to model a child-only redraw with unchanged generation.
-                val source = checkNotNull(usageFrame)
-                source.ready = preparedOverview
-                source.readySize = source.size
-                source.readyGeneration = source.generation
-                assertSame(preparedOverview, source.ready)
-            }
             assertTrue("pixel probe distinguishes selected Models from old Overview",
                 abs(selected.red - old.red) + abs(selected.green - old.green) + abs(selected.blue - old.blue) > .15f)
-            mainThread { assertFalse("Usage is idle before the gesture", checkNotNull(usageFrame).frozen) }
+            assertEquals("idle tab changes do not submit speculative copies", 0, blockedCopies)
             ui.mainClock.autoAdvance = false
             if (waitBeforeGesture) ui.mainClock.advanceTimeBy(128)
             ui.onNodeWithTag("page-back-host").performTouchInput {
@@ -1413,6 +1449,7 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             assertEquals(1, backCount)
             mainThread { route = "test-page" }
             ui.mainClock.advanceTimeBy(1000)
+            prepareCurrentPixels(prefetchForImmediateCapture = true)
             ui.onNodeWithTag("page-back-host").performTouchInput {
                 down(Offset(width * .05f, height * .6f))
                 moveTo(Offset(width * .8f, height * .6f), 200)

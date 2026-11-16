@@ -678,6 +678,17 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
 
     fun testRealChatSwipeReturnDrawsLiveContentWithoutRemount() = assertRealChatReturn(swipe = true)
 
+    private fun awaitFrozenPixels(source: () -> PageBackPreviewLayers.Frame?) {
+        ui.waitUntil(5_000) {
+            var ready = false
+            instrumentation.runOnMainSync {
+                ready = source()?.let { it.frozen && it.navigationFrozen && !it.releaseRequested &&
+                    it.size.width > 0 && it.size.height > 0 && it.canDrawPreview } == true
+            }
+            ready
+        }
+    }
+
     private fun assertRealChatReturn(swipe: Boolean, nested: Boolean = false, rtl: Boolean = false, topLevel: Boolean = false, resumePixels: Boolean = false, hiddenPauseResume: Boolean = false, backgroundToHome: Boolean = false, insetsRecovery: Boolean = false) {
         val drawingWasEnabled = HardwareRendererCompat.isDrawingEnabled()
         if (!drawingWasEnabled) HardwareRendererCompat.setDrawingEnabled(true)
@@ -698,11 +709,9 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
         var detailFrame: PageBackPreviewLayers.Frame? = null
         var settingsDetail by mutableStateOf(false)
         var observedStack: PageBackStackRegistry? = null
-        val exactPixels = mutableMapOf<PageBackPreviewLayers.Frame, androidx.compose.ui.graphics.ImageBitmap>()
         val insetsProbe = PageBackInsetsProbe()
         // Legacy platform insets cannot preserve separate synthetic navigation-bar and IME types.
         val initialInsets = IntSize(12, 0)
-        var immediateCaptureRequests = 0
         val draft = ComposerUi("retained draft", selectionStart = 2, selectionEnd = 5)
         val actions = ChatScreenActions()
         val turns = List(12) { ChatTurnUi.User("u$it", "earlier row $it") } +
@@ -728,10 +737,8 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                                         "settings" -> settingsFrame = frame
                                         else -> detailFrame = frame
                                     }
-                                    if (!swipe && frame.navigationFrozen) {
-                                        immediateCaptureRequests++
-                                        checkNotNull(exactPixels[frame])
-                                    } else frame.layer.toImageBitmap().also { exactPixels[frame] = it }
+                                    check(frame.frozen && frame.navigationFrozen)
+                                    frame.layer.toImageBitmap()
                                 },
                                 retainedRootContent = {
                                     DisposableEffect(Unit) { mounts++; onDispose { disposals++ } }
@@ -797,7 +804,6 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             val baseline = baselinePixels[(baselinePixels.width * .05f).toInt(), baselinePixels.height / 2]
             assertTrue("the baseline probe must actually hit the green live-chat marker: $baseline",
                 baseline.green > .85f && baseline.red < .15f && baseline.blue < .15f)
-            ui.waitUntil(5_000) { chatFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true }
             val originalMessage = answer.fetchSemanticsNode().id
             val originalBounds = answer.fetchSemanticsNode().boundsInRoot
             val originalComposer = ui.onNodeWithTag("chat-draft").fetchSemanticsNode().id
@@ -811,12 +817,12 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
             }
             ui.mainClock.advanceTimeBy(1000)
             captureScreenNode(ui.onNodeWithTag("page-back-host"))
-            ui.waitUntil(5_000) { settingsFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true }
+            awaitFrozenPixels { chatFrame }
             if (nested) {
                 mainThread { if (topLevel) route = "appearance" else settingsDetail = true }
                 ui.mainClock.advanceTimeBy(1000)
                 captureScreenNode(ui.onNodeWithTag("page-back-host"))
-                ui.waitUntil(5_000) { detailFrame?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true }
+                awaitFrozenPixels { settingsFrame }
             }
             if (hiddenPauseResume) {
                 if (backgroundToHome) {
@@ -858,20 +864,15 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                     assertTrue("the real Compose system bars observed the zero recovery edge", IntSize.Zero in insetsProbe.observations)
                 }
                 captureScreenNode(ui.onNodeWithTag("page-back-host"))
-                ui.waitUntil(5_000) {
-                    val live = if (nested) detailFrame else settingsFrame
-                    live?.let { !it.frozen && !it.releaseRequested && it.ready != null && it.readySize == it.size } == true
-                }
+                awaitFrozenPixels { chatFrame }
+                if (nested) awaitFrozenPixels { settingsFrame }
             }
             mainThread { recordReturnFrames = true; marker = Color.Magenta }
             val beforeReturnDraws = liveDraws
             ui.mainClock.autoAdvance = false
             if (nested) {
                 if (insetsRecovery) assertEquals("system-bar recovery must not manufacture an IME", 0, insetsProbe.observedImeBottom)
-                val preparedDetail = checkNotNull(detailFrame)
                 val preparedSettings = checkNotNull(settingsFrame)
-                assertTrue("prepared child owns this visit: key=${preparedDetail.key} frozen=${preparedDetail.frozen} released=${preparedDetail.releaseRequested}",
-                    !preparedDetail.frozen && !preparedDetail.releaseRequested && preparedDetail.readySize == preparedDetail.size)
                 assertTrue("settings target owns frozen pixels before first down: key=${preparedSettings.key} frozen=${preparedSettings.frozen} ready=${preparedSettings.ready != null} size=${preparedSettings.size}",
                     !preparedSettings.releaseRequested && preparedSettings.canDrawPreview)
                 ui.onNodeWithTag("page-back-host").performTouchInput {
@@ -883,6 +884,8 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                     }
                 }
                 ui.mainClock.advanceTimeByFrame()
+                awaitFrozenPixels { detailFrame }
+                val preparedDetail = checkNotNull(detailFrame)
                 assertTrue("child gesture locks its prepared pixels: key=${preparedDetail.key} frozen=${preparedDetail.frozen} image=${preparedDetail.image != null} animate=${preparedDetail.animateReturn} target=${preparedDetail.backTargetKey} latest=${preparedDetail === detailFrame} bars=${insetsProbe.observed} ime=${insetsProbe.observedImeBottom}",
                     preparedDetail.frozen && preparedDetail.canDrawPreview && preparedDetail.animateReturn)
                 ui.onNodeWithTag("page-back-target").assertExists()
@@ -925,6 +928,7 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                 val dragProgress = if (rtl) (firstHost.right - dragging.right) / firstHost.width
                     else (dragging.left - firstHost.left) / firstHost.width
                 assertTrue("second gesture immediately owns visible motion: $dragProgress", dragProgress > 0f && dragProgress < .18f)
+                awaitFrozenPixels { settingsFrame }
                 val targetPixels = captureScreenNode(ui.onNodeWithTag("page-back-host")).toPixelMap()
                 val target = targetPixels[(targetPixels.width * if (rtl) .95f else .05f).toInt(), targetPixels.height / 2]
                 assertTrue("second gesture reveals cached green chat, not the child or blank: $target",
@@ -943,12 +947,12 @@ class PageRetainedContentActivityTest : WiredActivityTestCase() {
                     moveTo(Offset(width * .70f, height * .6f), 160)
                 }
                 ui.mainClock.advanceTimeByFrame()
+                awaitFrozenPixels { settingsFrame }
                 ui.onNodeWithTag("page-back-host").performTouchInput { up() }
             } else {
                 ui.runOnUiThread { activity.onBackPressedDispatcher.onBackPressed() }
                 awaitOrdinaryReturnCommit { route == "chat" }
             }
-            if (!swipe) assertTrue("ordinary-motion fixture accepted its unchanged final source", immediateCaptureRequests > 0)
             assertEquals("both committed releases invoke their callbacks", if (nested) 2 else 1, detailBacks)
             assertEquals("chat", route)
             assertEquals(if (nested) 2 else 1, detailBacks)

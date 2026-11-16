@@ -610,7 +610,6 @@ internal fun PageBackGestureHost(
     state.transitionBlocked = (activeDeparture && departure?.forward != true) ||
         (state.previewAllowed && !state.active && state.gestureVisualActive)
     SideEffect {
-        layers.setMotionActive(transitionRunning || state.active || state.gestureVisualActive || state.toolbarPending)
         if (!state.active && !transitionRunning && !state.gestureVisualActive) {
             layers.resume(frame)
             state.restorePreview()

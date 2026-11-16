@@ -572,7 +572,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
     }
 
     fun testNewEdgesWaitForUpstreamIncoming() {
-        val initial = listOf(MessageContentUi.Tool(first))
+        val initial: List<MessageContentUi> = listOf(MessageContentUi.Tool(first))
         var items by mutableStateOf(initial)
         val motions = WorkflowNodeMotions(initial)
         var parts: Map<Int, WorkflowLineMotion> = emptyMap()

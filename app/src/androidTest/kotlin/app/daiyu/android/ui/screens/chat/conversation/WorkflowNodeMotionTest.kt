@@ -3,6 +3,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.State
@@ -64,17 +65,19 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             background = conversationColors().surface.copy(alpha = 1f)
             success = conversationColors().success
             error = conversationColors().error
-            Box(Modifier.width(300.dp).background(background).testTag("motion-raster")) {
-                CompositionLocalProvider(LocalWorkflowNodeMotions provides motions, LocalWorkflowNodeMotionEnabled provides motionEnabled) {
-                    if (mounted) {
-                        if (thought) WorkflowLineScope(incoming?.let { WorkflowLineMotion(incoming = WorkflowLinePart(it, 1, 2)) }, 0.dp) {
-                            ReasoningStepRow("motion", reasoning, allowLiveTiming = flowRunning,
-                                generationComplete = !flowRunning, stopped = !flowRunning)
-                        } else if (incoming != null) WorkflowLineScope(WorkflowLineMotion(incoming = WorkflowLinePart(incoming, 1, 2)), 0.dp) {
-                            WorkStepRow(rows.first(), flowRunning = flowRunning)
-                        } else MessageContent(content(), ChatScreenActions(), null,
-                            markdown = false, flowRunning = flowRunning, workflowTimeline = true,
-                            entryVisible = { it != "tool:motion-b" || nextAdmitted })
+            Box(Modifier.safeDrawingPadding()) {
+                Box(Modifier.width(300.dp).background(background).testTag("motion-raster")) {
+                    CompositionLocalProvider(LocalWorkflowNodeMotions provides motions, LocalWorkflowNodeMotionEnabled provides motionEnabled) {
+                        if (mounted) {
+                            if (thought) WorkflowLineScope(incoming?.let { WorkflowLineMotion(incoming = WorkflowLinePart(it, 1, 2)) }, 0.dp) {
+                                ReasoningStepRow("motion", reasoning, allowLiveTiming = flowRunning,
+                                    generationComplete = !flowRunning, stopped = !flowRunning)
+                            } else if (incoming != null) WorkflowLineScope(WorkflowLineMotion(incoming = WorkflowLinePart(incoming, 1, 2)), 0.dp) {
+                                WorkStepRow(rows.first(), flowRunning = flowRunning)
+                            } else MessageContent(content(), ChatScreenActions(), null,
+                                markdown = false, flowRunning = flowRunning, workflowTimeline = true,
+                                entryVisible = { it != "tool:motion-b" || nextAdmitted })
+                        }
                     }
                 }
             }

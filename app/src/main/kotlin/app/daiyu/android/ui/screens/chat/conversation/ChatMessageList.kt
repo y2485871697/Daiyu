@@ -1218,7 +1218,8 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
                     reasoningBody = { reported, connector ->
                         ReasoningStepRow(ownerKey, reported, connector,
                             allowLiveTiming = live, generationComplete = generationComplete, stopped = stopped,
-                            revealResetEpoch = revealResetEpoch, onVisibleAdvance = { if (expanded) onVisibleAdvance() },
+                            revealResetEpoch = revealResetEpoch, parentExpanded = expanded,
+                            onVisibleAdvance = { if (expanded) onVisibleAdvance() },
                             onHandoffReady = { if (it) handoff.complete(reported) })
                     }, entryBody = { key, body ->
                         // Live output must not start one AnimatedVisibility transition for every appended step;

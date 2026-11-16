@@ -68,6 +68,7 @@ internal fun ReportedReasoningCard(
     embedded: Boolean = false,
     nanoTime: () -> Long = System::nanoTime,
     revealResetEpoch: Long = 0L,
+    parentExpanded: Boolean = true,
     onVisibleAdvance: () -> Unit = {},
     onHandoffReady: (Boolean) -> Unit = {},
 ) {
@@ -91,7 +92,7 @@ internal fun ReportedReasoningCard(
             val streamingProjection = remember(ownerKey, summary.itemId) { !generationComplete }
             val sourceWindow = LocalReasoningSourceWindows.current[summary.itemId]
             val projection = rememberMarkdownProjection(listOf(text), streaming = streamingProjection, windows = listOf(sourceWindow))
-            val revealEnabled = !manuallyCollapsed && (!stopped || currentOverride == true) && hasReportedReasoningText(text)
+            val revealEnabled = parentExpanded && !manuallyCollapsed && (!stopped || currentOverride == true) && hasReportedReasoningText(text)
             val reveal = key(revealEnabled) {
                 rememberMarkdownReveal(
                     listOf(MarkdownTypingSource(summary.itemId, text, sourceWindow)), projection,
@@ -246,6 +247,7 @@ internal fun ReasoningStepRow(
     generationComplete: Boolean = !allowLiveTiming,
     stopped: Boolean = false,
     revealResetEpoch: Long = 0L,
+    parentExpanded: Boolean = true,
     onVisibleAdvance: () -> Unit = {},
     onHandoffReady: (Boolean) -> Unit = {},
 ) {
@@ -274,7 +276,8 @@ internal fun ReasoningStepRow(
         Column(Modifier.weight(1f)) {
             ReportedReasoningCard("$ownerKey:reasoning:${reported.itemId}", listOf(reported),
                 allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, stopped = stopped, embedded = true,
-                revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance, onHandoffReady = onHandoffReady)
+                revealResetEpoch = revealResetEpoch, parentExpanded = parentExpanded,
+                onVisibleAdvance = onVisibleAdvance, onHandoffReady = onHandoffReady)
         }
     }
 }

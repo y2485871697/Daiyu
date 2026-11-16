@@ -193,13 +193,19 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = true
     }
 
-    fun testOuterWorkCollapseAndReopenDoNotReplay() {
+    fun testOuterWorkCollapseAndReopenDoNotReplay() = assertOuterWorkCollapse(Path.WORK, 400)
+
+    fun testOuterWorkRapidReopenDoesNotReplayHiddenThought() = assertOuterWorkCollapse(Path.WORK, 32)
+
+    fun testMixedWorkRapidReopenDoesNotReplayHiddenThought() = assertOuterWorkCollapse(Path.MIXED, 32)
+
+    private fun assertOuterWorkCollapse(path: Path, closedMillis: Long) {
         val first = "工作思考" + "甲".repeat(80)
         val hidden = first + "乙".repeat(180)
         val next = hidden + "丙".repeat(180)
         prepare(first, hidden, next)
         ui.mainClock.autoAdvance = false
-        var value by mutableStateOf(turn(Path.WORK, first))
+        var value by mutableStateOf(turn(path, first))
         var advances = 0
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -207,14 +213,55 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             }
         } }
         await { visibleText().contains(first) }
-        ui.onNodeWithTag("work-process-header").performClick()
-        mainThread { value = turn(Path.WORK, hidden) }
-        ui.mainClock.advanceTimeBy(400)
         assertEquals(0, advances)
         ui.onNodeWithTag("work-process-header").performClick()
-        await { visibleText().contains(hidden) }
+        mainThread { value = turn(path, hidden) }
+        ui.mainClock.advanceTimeBy(closedMillis)
         assertEquals(0, advances)
-        mainThread { value = turn(Path.WORK, next) }
+        ui.onNodeWithTag("work-process-header").performClick()
+        await { assertEquals(0, advances); visibleText().contains(hidden) }
+        assertEquals(0, advances)
+        mainThread { value = turn(path, next) }
+        await { advances > 0 }
+        assertFalse(visibleText().contains(next))
+        await { visibleText().contains(next) }
+        ui.mainClock.autoAdvance = true
+    }
+
+    fun testOuterWorkRapidReopenKeepsManualThoughtCollapse() {
+        val first = "已折叠思考" + "甲".repeat(80)
+        val hidden = first + "乙".repeat(180)
+        val next = hidden + "丙".repeat(180)
+        prepare(first, hidden, next)
+        ui.mainClock.autoAdvance = false
+        var value by mutableStateOf(turn(Path.MIXED, first))
+        var advances = 0
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                AssistantTurn(value, ChatScreenActions(), onVisibleAdvance = { advances++ })
+            }
+        } }
+        await { visibleText().contains(first) }
+        val owner = "assistant:reasoning:r"
+        ui.onNodeWithTag("reported-reasoning-header:$owner").performClick()
+        await {
+            ui.onNodeWithTag("reported-reasoning-header:$owner").fetchSemanticsNode()
+                .config[SemanticsProperties.StateDescription] == "已折叠"
+        }
+        ui.onNodeWithTag("work-process-header").performClick()
+        mainThread { value = turn(Path.MIXED, hidden) }
+        ui.mainClock.advanceTimeBy(32)
+        ui.onNodeWithTag("work-process-header").performClick()
+        await {
+            ui.onNodeWithTag("reported-reasoning-header:$owner").fetchSemanticsNode()
+                .config[SemanticsProperties.StateDescription] == "已折叠"
+        }
+        ui.mainClock.advanceTimeBy(320)
+        ui.onNodeWithTag("reported-reasoning-content:$owner").assertDoesNotExist()
+        assertEquals(0, advances)
+        ui.onNodeWithTag("reported-reasoning-header:$owner").performClick()
+        await { assertEquals(0, advances); visibleText().contains(hidden) }
+        mainThread { value = turn(Path.MIXED, next) }
         await { advances > 0 }
         assertFalse(visibleText().contains(next))
         await { visibleText().contains(next) }

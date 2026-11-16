@@ -169,7 +169,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                                                 showConnector = segment.steps.isNotEmpty() || work.segments.drop(segmentIndex + 1)
                                                     .any { it.steps.isNotEmpty() || it.reasoning != null },
                                                 allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, stopped = stopped,
-                                                revealResetEpoch = revealResetEpoch,
+                                                revealResetEpoch = revealResetEpoch, parentExpanded = expanded,
                                                 onVisibleAdvance = { if (expanded) onVisibleAdvance() },
                                                 onHandoffReady = { if (it) sequence.complete(reported) })
                                         }

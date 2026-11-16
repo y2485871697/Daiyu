@@ -247,3 +247,45 @@ class TaskScrollComplementScopeTests(unittest.TestCase):
                     self.assertNotEqual(0, result.returncode)
                     self.assertIn('Expected comma-separated complete instrumentation class names', result.stderr)
                     self.assertNotIn('Ambiguous instrumentation test declaration', result.stderr)
+
+
+class StreamingOcclusionScopeTests(unittest.TestCase):
+    target = 'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest'
+
+    def test_exact_single_class_keeps_all_task_scroll_contracts(self):
+        command, scope = recorder.command_for('python3', dict(SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=self.target))
+        self.assertEqual('task-scroll-targeted', scope)
+        self.assertEqual(['python3', '-B', '-m', 'unittest', *recorder.TASK_SCROLL_MODULES, '-v'], command)
+        self.assertNotIn('discover', command)
+
+    def test_only_exact_single_class_is_newly_approved(self):
+        c = self.target
+        for raw in ('', ' ', c + ',' + c, c + ',', ',' + c, c + ',,', ' ' + c, c + ' ',
+                    c + chr(9), chr(10) + c, c + ',app.daiyu.android.UnknownTest',
+                    'app.daiyu.android.UnknownTest,' + c, 'ChatStreamingOcclusionTest', c + '#method'):
+            with self.subTest(raw=raw):
+                self.assertEqual('full', recorder.command_for('python3', dict(SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=raw))[1])
+        for mode in ('', 'compile', 'candidate', 'daily', 'release'):
+            self.assertEqual('full', recorder.command_for('python3', dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=c))[1])
+
+    def test_single_class_receipt_preserves_failure_and_tools_cwd(self):
+        old = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                os.chdir(directory)
+                env = dict(GITHUB_SHA='d' * 40, GITHUB_RUN_ID='15', GITHUB_RUN_ATTEMPT='1',
+                           SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=self.target)
+                with patch.dict(os.environ, env, clear=True), patch.object(
+                        recorder.subprocess, 'call', return_value=9) as call, patch.object(
+                        recorder.sys, 'stdout', SimpleNamespace(buffer=io.BytesIO())):
+                    self.assertEqual(9, recorder.record('python3'))
+                    receipt = json.loads(Path('tool-evidence/receipt.json').read_text())
+                    self.assertEqual('task-scroll-targeted', receipt['scope'])
+                    self.assertEqual(9, receipt['exit_code'])
+                    self.assertEqual(dict(sha='d' * 40, run_id=15, attempt=1), receipt['identity'])
+                    self.assertEqual(call.call_args.args[0], receipt['command'])
+                    root = Path(recorder.__file__).resolve().parents[2]
+                    self.assertEqual(root, call.call_args.kwargs['cwd'])
+                    self.assertEqual(str(root / 'tests'), call.call_args.kwargs['env']['PYTHONPATH'].split(os.pathsep)[0])
+            finally:
+                os.chdir(old)

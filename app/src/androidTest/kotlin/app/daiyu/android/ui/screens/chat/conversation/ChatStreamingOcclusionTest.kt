@@ -230,21 +230,57 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         verifyTerminalPacedText(seed, full)
     }
 
-    private fun verifyTerminalPacedText(seed: String, full: String) {
-        val expectedSeed = markdownBlocksDisplayText(defaultMarkdownParser(seed))
+    fun testTerminalPacedToolAnswerKeepsItsActualPaintedEndNearComposer() {
+        verifyTerminalPacedToolAnswer()
+    }
+
+    fun testTerminalPacedToolAnswerKeepsItsPaintedEndAcrossResume() {
+        verifyTerminalPacedToolAnswer(resumeAtFrame = 180)
+    }
+
+    private fun verifyTerminalPacedToolAnswer(resumeAtFrame: Int? = null) {
+        val seed = "**1. 第一项**\n" + "当前说明已经显示，后续内容仍应持续绘制。".repeat(3)
+        val full = seed + "\n\n**2. 第二项**\n" + "第二段正文逐字增加，不能预占后续段落高度。".repeat(6) +
+            "\n\n**3. 第三项**\n" + "第三段之后还有总述，正文与真实滚动范围应同步。".repeat(6) +
+            "\n\n**总体来看**：" + "总述应连续显示而不是等输出结束才恢复。".repeat(6) +
+            "\n\n需要展开其中的某一项吗？"
+        verifyTerminalPacedText(seed, full, withTools = true, resumeAtFrame = resumeAtFrame)
+    }
+
+    private fun verifyTerminalPacedText(seed: String, full: String, withTools: Boolean = false, resumeAtFrame: Int? = null) {
+        val expectedSeed = if (withTools) "" else markdownBlocksDisplayText(defaultMarkdownParser(seed))
         val expectedFull = markdownBlocksDisplayText(defaultMarkdownParser(full))
         for (parser in listOf(defaultMarkdownParser, streamingMarkdownParser)) {
             for (text in listOf(seed, full)) {
                 markdownProjectionCache.put(MarkdownProjection(listOf(text), mapOf(text to parser(text)), parser))
             }
         }
-        var turn by mutableStateOf(ChatTurnUi.Assistant("paced-tail", finalText = seed,
-            status = RunStatus.RUNNING, isStreaming = true))
+        fun turnFor(text: String, complete: Boolean): ChatTurnUi.Assistant {
+            if (!withTools) return ChatTurnUi.Assistant("paced-tail", finalText = text,
+                status = if (complete) RunStatus.COMPLETED else RunStatus.RUNNING, isStreaming = !complete)
+            val blocks = List(2) { index ->
+                MessageBlock.Tool(ToolInvocation(ToolCallId("paced-tool-$index"), "lookup", "{}"), "done")
+            } + MessageBlock.Text("paced-answer", text)
+            val message = Message(MessageId("paced-tail"), ConversationId("paced-conversation"), RunId("paced-run"),
+                "assistant", blocks, if (complete) RunStatus.COMPLETED else RunStatus.RUNNING)
+            return (ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant).copy(isStreaming = !complete)
+        }
+        var turn by mutableStateOf(turnFor(if (withTools) "" else seed, complete = false))
         val fixedRequest = ChatScrollRequest(1)
         val ready = java.util.concurrent.atomic.AtomicBoolean(false)
         val reports = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
+        var contentActive by mutableStateOf(true)
+        lateinit var registry: androidx.lifecycle.LifecycleRegistry
+        var geometry: () -> String = { "" }
         mainThread {
+            val owner = object : androidx.lifecycle.LifecycleOwner {
+                override val lifecycle = androidx.lifecycle.LifecycleRegistry(this).also { registry = it }
+            }
+            registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
             activity.setContent {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    androidx.lifecycle.compose.LocalLifecycleOwner provides owner,
+                    app.daiyu.android.ui.navigation.LocalPageContentActive provides contentActive) {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     density = LocalDensity.current.density
                     Box(Modifier.size(320.dp, 420.dp).background(Color.White).testTag("paced-host")) {
@@ -252,12 +288,18 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                             ChatConversationLayers(Modifier.size(320.dp, 420.dp), messages = { inset ->
                                 ChatMessageList(List(6) { ChatTurnUi.User("paced-history-$it", "history $it") } + turn,
                                     ChatScreenActions(), scrollRequest = fixedRequest, composerBottomInset = inset,
+                                    turnExtras = {
+                                        LocalWorkflowDisclosureContext.current?.viewport?.let { viewport ->
+                                            geometry = { viewport.diagnostics() }
+                                        }
+                                    },
                                     onPresentationReady = { ready.set(it); reports += it; report(it) })
                             }, composer = {
                                 Box(Modifier.fillMaxWidth().height(96.dp).testTag("paced-composer"))
                             })
                         }
                     }
+                }
                 }
             }
         }
@@ -291,19 +333,36 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var unreadyFrames = 0
         var paintedGrowth = 0
         var finished = false
+        var resumed = false
         ui.mainClock.autoAdvance = false
         try {
             ui.runOnUiThread {
                 reports.clear()
-                turn = turn.copy(finalText = full, status = RunStatus.COMPLETED, isStreaming = false)
+                turn = turnFor(full, complete = true)
             }
             for (index in 0 until 640) {
+                if (index == resumeAtFrame) {
+                    ui.runOnUiThread {
+                        registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED
+                        contentActive = false
+                    }
+                    frame()
+                    ui.runOnUiThread {
+                        registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
+                        contentActive = true
+                    }
+                    resumed = true
+                }
                 frame()
                 val layouts = textLayouts()
                 val displayed = displayed(layouts)
                 val height = layouts.sumOf { it.second.size.height }
                 assertTrue("Revealed text must remain an append-only prefix", expectedFull.startsWith(displayed) && displayed.startsWith(previousText))
                 if (!ready.get()) unreadyFrames++
+                if (displayed.isEmpty()) {
+                    assertTrue("A completed tool answer must begin drawing without a long admission stall: ${geometry()}", index < 90)
+                    continue
+                }
                 if (displayed.length > previousText.length) growthFrames++
                 if (height > previousHeight) heightGrowth++
                 val bottom = layouts.maxOf { (node, result) ->
@@ -313,7 +372,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 val gap = (composerTop - bottom) / density
                 val settled = ready.get() && displayed == expectedFull
                 assertTrue("Actual text must clear the composer: frame=$index gap=$gap", gap >= ChatTailClearance.value - 2f / density)
-                assertTrue("Large blank after actual text: frame=$index gap=$gap ready=${ready.get()}",
+                assertTrue("Large blank after actual text: frame=$index gap=$gap ready=${ready.get()} ${geometry()}",
                     gap <= ChatTailClearance.value + if (settled) 64f else 26f)
                 if (displayed.length >= capturedLength + 30) {
                     val nextPixels = pixels()
@@ -330,6 +389,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             assertTrue("Keep several seconds of terminal-paced output", unreadyFrames > 120 && growthFrames > 120)
             assertTrue("Wrap across several real text lines", heightGrowth >= 5)
             assertTrue("Check actual painted growth repeatedly", paintedGrowth >= 5)
+            assertTrue("Exercise the requested foreground recovery", resumeAtFrame == null || resumed)
             assertTrue("Finish within the same visit without remounting", finished)
             assertEquals(expectedFull, displayed(textLayouts()))
         } finally { ui.mainClock.autoAdvance = true }

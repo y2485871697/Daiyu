@@ -357,7 +357,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         fun pixels(layouts: List<Pair<SemanticsNode, androidx.compose.ui.text.TextLayoutResult>> = emptyList()): IntArray {
             val host = ui.onNodeWithTag("paced-host")
             val bounds = host.fetchSemanticsNode().boundsInRoot
-            val image = host.captureToImage().toPixelMap()
+            val bitmap = host.captureToImage()
+            val image = bitmap.toPixelMap()
             val lastLine = layouts.mapNotNull { (node, result) ->
                 (0 until result.lineCount).lastOrNull { line ->
                     result.layoutInput.text.text.substring(result.getLineStart(line), result.getLineEnd(line)).isNotBlank()
@@ -373,7 +374,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     val color = image[x, y]
                     if (color.red < .8f && color.green < .8f && color.blue < .8f) ink++
                 }
-                if (ink <= 2) saveDiagnostic(image, "ink-${ui.mainClock.currentTime}",
+                if (ink <= 2) saveDiagnostic(bitmap, "ink-${ui.mainClock.currentTime}",
                     "ink=$ink roi=$left,$top,$right,$bottom " + frameDiagnostic(-1, Float.NaN, layouts))
                 assertTrue("The latest revealed line must actually paint in its own bounds: ${geometry()}", ink > 2)
             }

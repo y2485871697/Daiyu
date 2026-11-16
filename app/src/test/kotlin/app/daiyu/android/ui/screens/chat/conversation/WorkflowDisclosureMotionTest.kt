@@ -60,6 +60,32 @@ class WorkflowDisclosureMotionTest {
         assertFalse(context.followingOnPress)
         assertNull(context.active)
     }
+    @Test fun pressKeepsAnAnimatingAnchorUntilTheClickCanClaimIt() {
+        val viewportState = WorkflowDisclosureViewport({ false }, { viewport }, {}, { true }, { _, _ -> 0f })
+        val owner = WorkflowDisclosureMotion(WorkflowDisclosureContext(viewportState, "turn") { false })
+        viewportState.active = owner
+        viewportState.pointerDown(false)
+        assertSame(owner, viewportState.active)
+        viewportState.claimGesture()
+        viewportState.pointerUp()
+        assertSame(owner, viewportState.active)
+        viewportState.pointerDown(false)
+        assertSame(owner, viewportState.active)
+        viewportState.pointerUp()
+        assertNull(viewportState.active)
+    }
+
+    @Test fun draggingStillCancelsAnAnchorRetainedByThePress() {
+        val viewportState = WorkflowDisclosureViewport({ true }, { viewport }, {}, { true }, { _, _ -> 0f })
+        viewportState.active = WorkflowDisclosureMotion(WorkflowDisclosureContext(viewportState, "turn") { true })
+        viewportState.pointerDown(true)
+        viewportState.cancelAnchor()
+        viewportState.claimGesture()
+        viewportState.pointerUp()
+        assertNull(viewportState.active)
+        assertFalse(viewportState.followingOnPress)
+    }
+
     @Test fun reversedWorkflowCollapseNeverGrowsAndReopeningRetainsTheNewExtent() {
         val extent = WorkflowCollapseExtent()
         assertEquals(44, extent.measure(44, expanded = true))

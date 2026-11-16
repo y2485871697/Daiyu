@@ -89,6 +89,18 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertLess(start, request)
         self.assertLess(request, release)
 
+    def test_press_retains_the_live_anchor_until_a_disclosure_claims_the_click(self):
+        motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
+        down = motion.split('fun pointerDown(', 1)[1].split('fun claimGesture()', 1)[0]
+        self.assertIn('active?.retainAnchor(gesture)', down)
+        self.assertNotIn('active = null', down)
+        self.assertIn('if (!disclosureClaimed) active = null', motion)
+        self.assertIn('context?.viewport?.claimGesture()', motion)
+        source = (CHAT / 'ChatMessageList.kt').read_text()
+        press = source.split('disclosureViewport.pointerDown(followBottom)', 1)[1].split('contentPadding =', 1)[0]
+        self.assertIn('awaitPointerEvent(PointerEventPass.Final)', press)
+        self.assertIn('disclosureViewport.pointerUp()', press)
+
     def test_transition_idle_settles_the_physical_anchor_before_release(self):
         source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         finish = source.split('private fun finishIfSettled()', 1)[1].split('fun dispose()', 1)[0]

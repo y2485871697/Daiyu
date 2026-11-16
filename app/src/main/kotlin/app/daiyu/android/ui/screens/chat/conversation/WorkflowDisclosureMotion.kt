@@ -49,13 +49,22 @@ internal class WorkflowDisclosureViewport(
 ) {
     var followingOnPress = false
     var diagnostics: () -> String = { "" }
+    private var disclosureClaimed = false
     var gesture = 0L
     var active by mutableStateOf<WorkflowDisclosureMotion?>(null)
 
     fun pointerDown(following: Boolean) {
         followingOnPress = following
         gesture++
-        active = null
+        disclosureClaimed = false
+        active?.retainAnchor(gesture)
+    }
+
+    fun claimGesture() { disclosureClaimed = true }
+
+    fun pointerUp() {
+        followingOnPress = false
+        if (!disclosureClaimed) active = null
     }
 
     fun cancelAnchor() {
@@ -172,7 +181,10 @@ internal class WorkflowDisclosureMotion(
         return true
     }
 
+    fun retainAnchor(gesture: Long) { anchorGesture = gesture }
+
     fun toggle(opening: Boolean) {
+        context?.viewport?.claimGesture()
         closingDetailHeight = if (!opening) {
             val placedContainer = container?.takeIf { it.isAttached }
             val placedHeader = header?.takeIf { it.isAttached }

@@ -485,7 +485,15 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                 val initialHeight = ui.onNodeWithTag("work-process-surface")
                     .fetchSemanticsNode().layoutInfo.coordinates.size.height
                 var changedHeight = false
-                ui.onNodeWithTag(headerTag).performTouchInput { click() }
+                if (!opening) {
+                    ui.onNodeWithTag(headerTag).performTouchInput { down(center) }
+                    repeat(3) {
+                        phase = "pressed-before-reversal frame=$it"
+                        ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                        assertReadingAnchor()
+                    }
+                    ui.onNodeWithTag(headerTag).performTouchInput { up() }
+                } else ui.onNodeWithTag(headerTag).performTouchInput { click() }
                 repeat(frames) {
                     phase = "opening=$opening frames=$frames frame=$it"
                     ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()

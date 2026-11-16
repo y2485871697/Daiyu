@@ -896,7 +896,8 @@ internal fun ChatMessageList(
                 followBottom = false; wasDragged = false
                 consumedScrollSerial = currentScrollSerial
                 touchEpoch++
-                do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
+                do { val event = awaitPointerEvent(PointerEventPass.Final) } while (event.changes.any { it.pressed })
+                disclosureViewport.pointerUp()
             }
         },
             contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 11.dp, bottom = composerBottomInset + ChatTailClearance),

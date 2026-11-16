@@ -42,7 +42,9 @@ class ReasoningTypewriterContract(unittest.TestCase):
         self.assertIn('onVisibleAdvance = { if (expanded) onVisibleAdvance() }', fallback)
         row = (CHAT / 'ReportedReasoningCard.kt').read_text().partition('internal fun ReasoningStepRow(')[2]
         self.assertTrue(row)
-        self.assertIn('revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance', row)
+        self.assertIn('revealResetEpoch = revealResetEpoch', row)
+        self.assertIn('parentExpanded = parentExpanded', row)
+        self.assertIn('onVisibleAdvance = onVisibleAdvance', row)
         self.assertIn('onHandoffReady = onHandoffReady', row)
 
     def test_child_disclosure_resets_baseline_and_parent_identity_survives_exit(self):

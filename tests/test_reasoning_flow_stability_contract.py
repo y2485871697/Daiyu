@@ -61,9 +61,18 @@ class ReasoningFlowStabilityContractTest(unittest.TestCase):
 
     def test_completed_thought_has_a_check_without_tool_success_fabrication(self):
         s = self.read('ReportedReasoningCard.kt')
-        self.assertIn('val complete = reported.activeSinceNanos == null', s)
+        self.assertIn('val complete = generationComplete || reported.activeSinceNanos == null', s)
         self.assertIn('if (complete) Icon(DaiyuIcons.Check', s)
         self.assertNotIn('WorkStepState.OK', s)
+
+    def test_reasoning_activity_does_not_use_sampling_permission_as_completion(self):
+        s = self.read('ReportedReasoningCard.kt')
+        self.assertIn('val isThinking = !stopped && !generationComplete && isReportedReasoningActive(reported)', s)
+        self.assertIn('generationComplete: Boolean = !isReportedReasoningActive(reported)', s)
+        self.assertIn('generationComplete: Boolean = reported.activeSinceNanos == null', s)
+        self.assertIn('ReasoningElapsedTime(ownerKey, rememberReasoningTiming(reported), isThinking && allowLiveTiming', s)
+        self.assertNotIn('isReportedReasoningActive(reported, allowLiveTiming)', s)
+        self.assertNotIn('generationComplete: Boolean = !allowLiveTiming', s)
 
     def test_timeline_and_compression_async_changes_reproject_exact_aliases(self):
         main = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()

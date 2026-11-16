@@ -215,6 +215,105 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testTerminalPacedTextKeepsItsActualPaintedEndNearComposer() {
+        val seed = "已显示的正文用于测量当前可见末行。".repeat(24)
+        val full = seed + "最后一段还在逐字输出，不能预留空白或暂停绘制。".repeat(20)
+        for (parser in listOf(defaultMarkdownParser, streamingMarkdownParser)) {
+            for (text in listOf(seed, full)) {
+                markdownProjectionCache.put(MarkdownProjection(listOf(text), mapOf(text to parser(text)), parser))
+            }
+        }
+        var turn by mutableStateOf(ChatTurnUi.Assistant("paced-tail", finalText = seed,
+            status = RunStatus.RUNNING, isStreaming = true))
+        val fixedRequest = ChatScrollRequest(1)
+        val ready = java.util.concurrent.atomic.AtomicBoolean(false)
+        val reports = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    density = LocalDensity.current.density
+                    Box(Modifier.size(320.dp, 420.dp).background(Color.White).testTag("paced-host")) {
+                        ChatPageHost("paced-visit") { _, report ->
+                            ChatConversationLayers(Modifier.size(320.dp, 420.dp), messages = { inset ->
+                                ChatMessageList(List(6) { ChatTurnUi.User("paced-history-$it", "history $it") } + turn,
+                                    ChatScreenActions(), scrollRequest = fixedRequest, composerBottomInset = inset,
+                                    onPresentationReady = { ready.set(it); reports += it; report(it) })
+                            }, composer = {
+                                Box(Modifier.fillMaxWidth().height(96.dp).testTag("paced-composer"))
+                            })
+                        }
+                    }
+                }
+            }
+        }
+        ui.waitForIdle()
+        ui.waitUntil(5_000) { ready.get() }
+        val text = ui.onNodeWithTag("message-content-text:0", useUnmergedTree = true)
+        text.assertTextEquals(seed)
+        fun textLayout(): androidx.compose.ui.text.TextLayoutResult {
+            val results = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+            text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(results) }
+            return results.single()
+        }
+        fun pixels(): IntArray {
+            val image = ui.onNodeWithTag("paced-host").captureToImage().toPixelMap()
+            return IntArray(image.width * image.height) { index ->
+                image[index % image.width, index / image.width].hashCode()
+            }
+        }
+        var previousPixels = pixels()
+        var capturedLength = seed.length
+        var previousText = seed
+        var previousHeight = textLayout().size.height
+        var heightGrowth = 0
+        var growthFrames = 0
+        var unreadyFrames = 0
+        var paintedGrowth = 0
+        var finished = false
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread {
+                reports.clear()
+                turn = turn.copy(finalText = full, status = RunStatus.COMPLETED, isStreaming = false)
+            }
+            for (index in 0 until 640) {
+                frame()
+                val result = textLayout()
+                val displayed = result.layoutInput.text.text
+                assertTrue("Revealed text must remain an append-only prefix", full.startsWith(displayed) && displayed.startsWith(previousText))
+                if (!ready.get()) unreadyFrames++
+                if (displayed.length > previousText.length) growthFrames++
+                if (result.size.height > previousHeight) heightGrowth++
+                val node = text.fetchSemanticsNode()
+                val bottom = node.positionInRoot.y + result.getLineBottom(result.lineCount - 1)
+                val composerTop = ui.onNodeWithTag("paced-composer").fetchSemanticsNode().boundsInRoot.top
+                val gap = (composerTop - bottom) / density
+                val settled = ready.get() && displayed == full
+                assertTrue("Actual text must clear the composer: frame=$index gap=$gap", gap >= ChatTailClearance.value - 2f / density)
+                assertTrue("Large blank after actual text: frame=$index gap=$gap ready=${ready.get()}",
+                    gap <= ChatTailClearance.value + if (settled) 64f else 26f)
+                if (displayed.length >= capturedLength + 30) {
+                    val nextPixels = pixels()
+                    assertFalse("Text grew but the displayed page froze at frame=$index", previousPixels.contentEquals(nextPixels))
+                    previousPixels = nextPixels
+                    capturedLength = displayed.length
+                    paintedGrowth++
+                }
+                previousText = displayed
+                previousHeight = result.size.height
+                if (settled) { finished = true; break }
+            }
+            assertTrue("Exercise terminal formatting before reveal is settled", reports.contains(false))
+            assertTrue("Keep several seconds of terminal-paced output", unreadyFrames > 120 && growthFrames > 120)
+            assertTrue("Wrap across several real text lines", heightGrowth >= 5)
+            assertTrue("Check actual painted growth repeatedly", paintedGrowth >= 5)
+            assertTrue("Finish within the same visit without remounting", finished)
+            text.assertTextEquals(full)
+        } finally { ui.mainClock.autoAdvance = true }
+        ui.waitForIdle()
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testStreamingGrowthKeepsTailAboveComposer() {
         mount()
         ui.mainClock.autoAdvance = false

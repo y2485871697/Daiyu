@@ -203,4 +203,64 @@ class VoiceCallFloatingWindowTest {
             assertEquals(0, (root as ViewGroup).childCount)
         }
     }
+
+    @Test fun foregroundPreparationKeepsTheSameComposedWindowAcrossBackgroundUpdates() {
+        val state = picture(-7L)
+        main { host.update(state, actions, visible = false) }
+        await("transparent prepared surface laid out") { windows.added.single().isLaidOut }
+        val root = windows.added.single()
+        main {
+            assertFalse(host.isShowing(state.sessionKey))
+            assertEquals(0f, (root.layoutParams as WindowManager.LayoutParams).alpha, 0f)
+            assertTrue((root.layoutParams as WindowManager.LayoutParams).flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0)
+            repeat(3) {
+                host.update(state, actions)
+                assertTrue(host.isShowing(state.sessionKey))
+                assertEquals(1f, (root.layoutParams as WindowManager.LayoutParams).alpha, 0f)
+                assertEquals(0, (root.layoutParams as WindowManager.LayoutParams).flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+                host.update(state.copy(reply = "same call"), actions)
+                host.update(state, actions, visible = false)
+                assertFalse(host.isShowing(state.sessionKey))
+                assertTrue(root.isAttachedToWindow)
+            }
+            assertEquals(listOf(root), windows.added)
+            assertTrue(windows.removals.isEmpty())
+            assertTrue(completed.isEmpty())
+            assertEquals(0, hangups)
+        }
+    }
+
+    @Test fun hiddenCloseCompletesOnceWithoutAnimatingAnInvisibleWindow() {
+        val state = picture(-8L)
+        main { host.update(state, actions, visible = false) }
+        await("hidden close surface laid out") { windows.added.single().isLaidOut }
+        main {
+            val root = windows.added.single()
+            host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), actions)
+            assertFalse(root.isAttachedToWindow)
+            host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), actions)
+            assertEquals(listOf(state.sessionKey), completed)
+            assertEquals(listOf(root), windows.removals)
+            assertEquals(0, hangups)
+        }
+    }
+
+    @Test fun detachedPreparedSurfaceIsRebuiltInsteadOfReusingADestroyedComposition() {
+        val state = picture(-9L)
+        main { host.update(state, actions, visible = false) }
+        await("prepared detach surface laid out") { windows.added.single().isLaidOut }
+        val root = windows.added.single()
+        main {
+            windows.detachExternally(root)
+            host.update(state, actions)
+            assertEquals(2, windows.added.size)
+            assertNotSame(root, windows.added.last())
+        }
+        await("replacement surface visible") { host.isShowing(state.sessionKey) && windows.added.last().isLaidOut }
+        main {
+            assertEquals(Lifecycle.State.DESTROYED, (root as LifecycleOwner).lifecycle.currentState)
+            assertTrue(completed.isEmpty())
+            assertEquals(0, hangups)
+        }
+    }
 }

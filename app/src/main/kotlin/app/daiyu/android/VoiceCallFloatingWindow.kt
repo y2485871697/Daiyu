@@ -41,10 +41,10 @@ internal class VoiceCallFloatingWindow(context: Context,
     private val mainHandler = Handler(Looper.getMainLooper())
 
     fun isShowing(key: Long): Boolean = window?.let {
-        it.picture.sessionKey == key && !it.departing && it.isAttachedToWindow
+        it.picture.sessionKey == key && it.presented && !it.departing && it.isAttachedToWindow
     } == true
 
-    fun update(state: DoubaoCallUi, actions: DoubaoCallActions) {
+    fun update(state: DoubaoCallUi, actions: DoubaoCallActions, visible: Boolean = true) {
         checkMain()
         if (closed) return
         val permitted = Settings.canDrawOverlays(app)
@@ -61,9 +61,9 @@ internal class VoiceCallFloatingWindow(context: Context,
         if (!permitted) { hide(); return }
         if (exiting.any { it.picture.sessionKey == state.sessionKey }) return
         val previous = window
-        val current = if (previous == null || previous.picture.sessionKey != state.sessionKey || previous.departing) {
+        val current = if (previous == null || previous.picture.sessionKey != state.sessionKey || previous.departing || previous.detached) {
             previous?.let { remove(it, completed = false) }
-            val created = CallWindow(state, actions)
+            val created = CallWindow(state, actions, visible)
             window = created
             val metrics = app.resources.displayMetrics
             created.params.x = ((metrics.widthPixels - created.params.width) / 2).coerceAtLeast(0)
@@ -75,10 +75,21 @@ internal class VoiceCallFloatingWindow(context: Context,
         } else previous
         current.actions = actions
         current.picture = state
+        present(current, visible)
         resize(current)
     }
 
-    /** Returning to the app transfers presentation only; it never hangs up the call. */
+    private fun present(current: CallWindow, visible: Boolean) {
+        if (current.presented == visible) return
+        current.presented = visible
+        current.params.alpha = if (visible) 1f else 0f
+        current.params.flags = if (visible) current.params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+            else current.params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        try { windows.updateViewLayout(current, current.params) }
+        catch (_: RuntimeException) { remove(current, completed = false) }
+    }
+
+    /** Final removal or permission revocation; a normal foreground handoff stays precomposed. */
     fun hide() {
         checkMain()
         window?.let { remove(it, completed = false) }
@@ -99,7 +110,7 @@ internal class VoiceCallFloatingWindow(context: Context,
         current.params.flags = current.params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         try { windows.updateViewLayout(current, current.params) }
         catch (_: RuntimeException) { remove(current, completed = true); return }
-        if (!current.isLaidOut || !ValueAnimator.areAnimatorsEnabled()) {
+        if (!current.presented || !current.isLaidOut || !ValueAnimator.areAnimatorsEnabled()) {
             remove(current, completed = true)
             return
         }
@@ -158,11 +169,13 @@ internal class VoiceCallFloatingWindow(context: Context,
     private fun dp(value: Int) = (value * app.resources.displayMetrics.density).roundToInt()
     private fun checkMain() { check(Looper.myLooper() == Looper.getMainLooper()) }
 
-    private inner class CallWindow(initial: DoubaoCallUi, initialActions: DoubaoCallActions) :
+    private inner class CallWindow(initial: DoubaoCallUi, initialActions: DoubaoCallActions, initiallyVisible: Boolean) :
         FrameLayout(app), LifecycleOwner, SavedStateRegistryOwner {
         var picture by mutableStateOf(initial)
         var actions by mutableStateOf(initialActions)
         var departing by mutableStateOf(false)
+        var presented by mutableStateOf(initiallyVisible)
+        var detached = false
         var removed = false
         val params = WindowManager.LayoutParams(
             minOf(dp(if (initial.presentation == DoubaoCallPresentation.MINI) 250 else 380), (app.resources.displayMetrics.widthPixels - dp(20)).coerceAtLeast(1)),
@@ -173,6 +186,8 @@ internal class VoiceCallFloatingWindow(context: Context,
                 gravity = Gravity.TOP or Gravity.START
                 title = "代鱼语音通话"
                 windowAnimations = 0
+                alpha = if (initiallyVisible) 1f else 0f
+                if (!initiallyVisible) flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
             }
         private val ownerLifecycle = LifecycleRegistry(this)
         private val savedState = SavedStateRegistryController.create(this)
@@ -190,7 +205,7 @@ internal class VoiceCallFloatingWindow(context: Context,
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
                 setContent {
                     androidx.compose.material3.MaterialTheme {
-                        FloatingVoiceCallContent(picture, actions, !departing) { move(this@CallWindow, it) }
+                        FloatingVoiceCallContent(picture, actions, presented && !departing) { move(this@CallWindow, it) }
                     }
                 }
             }
@@ -212,6 +227,7 @@ internal class VoiceCallFloatingWindow(context: Context,
         }
         override fun onDetachedFromWindow() {
             super.onDetachedFromWindow()
+            detached = true
             // ViewGroup is still dispatching child detachment during this callback.
             mainHandler.post(releaseAfterDetach)
         }

@@ -280,7 +280,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         speaker = false,
     )
 
-    private fun mount(height: Dp? = null, initialState: DoubaoCallUi? = null, onSelectModel: () -> Unit = {}, onModelLongPress: (() -> Unit)? = null) {
+    private fun mount(height: Dp? = null, initialState: DoubaoCallUi? = null, onSelectModel: () -> Unit = {}, onModelLongPress: (() -> Unit)? = null, onPresentationReady: ((Long) -> Unit)? = null) {
         activity = startMain()
         ui.mainClock.autoAdvance = false
         mainThread {
@@ -307,6 +307,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
                             DoubaoCallOverlay(state, DoubaoCallActions(
                                 onSelectModel = onSelectModel,
                                 onModelLongPress = onModelLongPress,
+                                onPresentationReady = onPresentationReady,
                                 onExpand = { call = call?.copy(presentation = DoubaoCallPresentation.EXPANDED) },
                                 onMinimize = { call = call?.copy(presentation = DoubaoCallPresentation.MINI) },
                                 onHangUp = {
@@ -332,7 +333,7 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         }
         ui.mainClock.advanceTimeByFrame()
         ui.waitForIdle()
-        awaitMotionStart(1f)
+        if (initialState?.skipEntryAnimation != true) awaitMotionStart(1f)
     }
 
     private fun awaitMotionStart(target: Float) {
@@ -1055,6 +1056,30 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         }
     }
 
+
+    fun testReturningCallDrawsStableWithoutReplayingItsDialAnimation() {
+        val ready = mutableListOf<Long>()
+        val state = session().copy(skipEntryAnimation = true)
+        mount(initialState = state, onPresentationReady = { ready += it })
+        advanceOverlayFrames(4)
+        ui.runOnIdle {
+            assertFalse(motion.transforming)
+            assertFalse(motion.progress.isRunning)
+            assertEquals(1f, motion.progress.value, 0f)
+            assertTrue(ready.contains(state.sessionKey))
+        }
+        ui.onNodeWithTag("doubao-call-hang-up").assertIsEnabled()
+    }
+
+    fun testPresentationReadyIsNotReportedForTheUnfinishedDialAnimation() {
+        val ready = mutableListOf<Long>()
+        val state = session()
+        mount(initialState = state, onPresentationReady = { ready += it })
+        ui.runOnIdle { assertTrue(ready.isEmpty()) }
+        finishOpening()
+        advanceOverlayFrames(2)
+        ui.runOnIdle { assertTrue(ready.contains(state.sessionKey)) }
+    }
 }
 
 /** Deterministic native pixels: exact radii/colours, CSS phases, and a live mini clock. */

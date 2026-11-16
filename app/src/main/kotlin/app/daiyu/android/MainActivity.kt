@@ -2541,7 +2541,9 @@ class MainActivity : ComponentActivity() {
                             val pageAssistant = projectedAssistants.firstOrNull {
                                 it.id == (if (selected == null) activeAssistant else selected?.assistantId)
                             }
-                            val pageCallUi = shownVoiceCall()
+                            val pageCallUi = shownVoiceCall()?.let {
+                                if (floatingCallReturnKey == it.sessionKey) it.copy(skipEntryAnimation = true) else it
+                            }
                             val pageCallActions = if (voiceCallPresentation.state != null) voiceCallActions() else doubaoCallActions()
                                     val mediaLease = imageHost.mediaPreviews
                                     val mediaGallery = remember(chatState.turns, mediaLease, messageMediaSnapshot, displayWindow) {
@@ -3842,17 +3844,54 @@ class MainActivity : ComponentActivity() {
     private val floatingCallDelegate = lazy { VoiceCallFloatingWindow(applicationContext) }
     private val floatingCall get() = floatingCallDelegate.value
     private var floatingCallClosed = false
+    private var floatingCallReturnKey by mutableStateOf<Long?>(null)
+    private var floatingCallRouteInline = false
+    private var floatingCallHandoffEpoch by mutableStateOf(0L)
+    private var floatingCallReadyPosted: Pair<Long, Long>? = null
     private var pendingFloatingCallAction: Pair<Long, () -> Unit>? = null
 
     private fun refreshFloatingCall() {
         if (floatingCallClosed) return
         val shown = shownVoiceCall()
-        if (voiceForeground && retainedPage == "chat" && !sidebarVisible) {
-            if (floatingCallDelegate.isInitialized()) floatingCall.hide()
-        } else if (shown != null && activityUsable()) {
+        val inline = voiceForeground && retainedPage == "chat" && !sidebarVisible
+        if (floatingCallRouteInline != inline) {
+            floatingCallRouteInline = inline
+            floatingCallHandoffEpoch++
+            floatingCallReadyPosted = null
+        }
+        if (shown != null && activityUsable()) {
+            if (inline && shown.presentation == DoubaoCallPresentation.CLOSING) {
+                floatingCallReturnKey = null
+                if (floatingCallDelegate.isInitialized()) floatingCall.hide()
+                return
+            }
+            if (!inline) floatingCallReturnKey = shown.sessionKey
+            val returning = inline && floatingCallReturnKey == shown.sessionKey
+            if (inline && !returning) floatingCallReturnKey = null
             floatingCall.update(shown, if (voiceCallPresentation.state != null) voiceCallActions(external = true)
-                else doubaoCallActions(external = true))
-        } else if (floatingCallDelegate.isInitialized()) floatingCall.dismiss()
+                else doubaoCallActions(external = true), visible = !inline || returning)
+        } else if (floatingCallDelegate.isInitialized()) {
+            floatingCallReturnKey = null
+            if (inline) floatingCall.hide() else floatingCall.dismiss()
+        }
+    }
+
+    private fun finishVoiceCallHandoff(key: Long, epoch: Long) {
+        fun current() = !floatingCallClosed && activityUsable() && voiceForeground &&
+            retainedPage == "chat" && !sidebarVisible && floatingCallHandoffEpoch == epoch &&
+            floatingCallReturnKey == key && shownVoiceCall()?.let {
+                it.sessionKey == key && it.presentation != DoubaoCallPresentation.CLOSING
+            } == true
+        val receipt = key to epoch
+        if (!current() || floatingCallReadyPosted == receipt) return
+        floatingCallReadyPosted = receipt
+        window.decorView.postOnAnimation {
+            if (current()) {
+                floatingCallReturnKey = null
+                refreshFloatingCall()
+            }
+            if (floatingCallReadyPosted == receipt) floatingCallReadyPosted = null
+        }
     }
 
     private fun returnToVoiceCall(key: Long, action: () -> Unit) {
@@ -3888,12 +3927,15 @@ class MainActivity : ComponentActivity() {
     private fun voiceCallActions(external: Boolean = false): DoubaoCallActions {
         val shown = voiceCallPresentation.state ?: return DoubaoCallActions()
         val key = shown.sessionKey
+        val surfaceEpoch = floatingCallHandoffEpoch
         fun current() = activityUsable() &&
             (if (external) (voiceCallServiceReady || shown.endedAtMillis != null) && floatingCall.isShowing(key)
-             else voiceForeground && retainedPage == "chat" && !sidebarVisible) && voiceCallPresentation.state?.let {
+             else voiceForeground && retainedPage == "chat" && !sidebarVisible && floatingCallReturnKey != key) && voiceCallPresentation.state?.let {
                 it.sessionKey == key && it.presentation != DoubaoCallPresentation.CLOSING
             } == true
         return DoubaoCallActions(
+            onPresentationReady = if (!external && floatingCallReturnKey == key)
+                { readyKey -> finishVoiceCallHandoff(readyKey, surfaceEpoch) } else null,
             onExpand = { if (current()) voiceCallPresentation.present(key, DoubaoCallPresentation.EXPANDED) },
             onMinimize = { if (current()) voiceCallPresentation.present(key, DoubaoCallPresentation.MINI) },
             onHangUp = { if (current()) closeVoiceCall(key) },
@@ -3932,12 +3974,15 @@ class MainActivity : ComponentActivity() {
     private fun doubaoCallActions(external: Boolean = false): DoubaoCallActions {
         val shown = doubaoCallPresentation.state ?: return DoubaoCallActions()
         val key = shown.sessionKey
+        val surfaceEpoch = floatingCallHandoffEpoch
         fun current() = activityUsable() &&
             (if (external) (voiceCallServiceReady || shown.endedAtMillis != null) && floatingCall.isShowing(key)
-             else voiceForeground && retainedPage == "chat" && !sidebarVisible) && doubaoCallPresentation.state?.let {
+             else voiceForeground && retainedPage == "chat" && !sidebarVisible && floatingCallReturnKey != key) && doubaoCallPresentation.state?.let {
                 it.sessionKey == key && it.presentation != DoubaoCallPresentation.CLOSING
             } == true
         return DoubaoCallActions(
+            onPresentationReady = if (!external && floatingCallReturnKey == key)
+                { readyKey -> finishVoiceCallHandoff(readyKey, surfaceEpoch) } else null,
             onExpand = { if (current()) doubaoCallPresentation.expand(key) },
             onMinimize = { if (current()) doubaoCallPresentation.minimize(key) },
             onHangUp = { if (current()) closeDoubaoCall(key) },
@@ -6236,6 +6281,8 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onPause() {
+        voiceForeground = false
+        refreshFloatingCall()
         chatReturnRefresh = null
         suspendMessageActionEditor()
         suspendOrdinaryDialogActions()
@@ -6289,8 +6336,6 @@ class MainActivity : ComponentActivity() {
         (application as ChatApplication).let { app ->
             if (app.petSettingsNavigator === openPetSettings) app.petSettingsNavigator = null
         }
-        voiceForeground = false
-        refreshFloatingCall()
         voiceConversationDialogOwner = null
         unknownBranchOutcome = null // unmount only; the controller receipt is not consumed
         stopCascadeVoice()

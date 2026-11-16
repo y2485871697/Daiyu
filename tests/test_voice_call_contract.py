@@ -216,6 +216,25 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertNotIn('invalidateConfiguredVoice()', sidebar)
         self.assertIn('foreground = activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible', activity)
 
+    def test_handoff_prepares_the_same_surface_and_waits_for_an_inline_draw(self):
+        activity = (SRC / 'MainActivity.kt').read_text()
+        floating = (SRC / 'VoiceCallFloatingWindow.kt').read_text()
+        overlay = (SRC / 'ui/screens/chat/conversation/DoubaoCallOverlay.kt').read_text()
+        self.assertIn('visible = !inline || returning', activity)
+        self.assertIn('floatingCallHandoffEpoch == epoch', activity)
+        self.assertIn('window.decorView.postOnAnimation', activity)
+        self.assertIn('skipEntryAnimation = true', activity)
+        pause = activity.split('override fun onPause() {', 1)[1].split('chatReturnRefresh = null', 1)[0]
+        self.assertIn('voiceForeground = false', pause)
+        self.assertIn('refreshFloatingCall()', pause)
+        self.assertIn('it.presented && !it.departing', floating)
+        self.assertIn('alpha = if (initiallyVisible) 1f else 0f', floating)
+        self.assertIn('previous.detached', floating)
+        self.assertIn('!current.presented || !current.isLaidOut', floating)
+        self.assertIn('firstPresentation && !state.skipEntryAnimation', overlay)
+        self.assertIn('presentationView.post { ready(state.sessionKey) }', overlay)
+        self.assertIn('!closing && !morphing && progress.value == 1f', overlay)
+
     def test_external_close_is_visual_only_and_detaches_after_its_own_animation(self):
         floating = (ROOT / 'app/src/main/kotlin/app/daiyu/android/VoiceCallFloatingWindow.kt').read_text()
         self.assertIn('TYPE_APPLICATION_OVERLAY', floating)

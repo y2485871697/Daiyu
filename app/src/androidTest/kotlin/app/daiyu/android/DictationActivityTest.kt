@@ -697,4 +697,56 @@ class DictationActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+
+    fun testMainHandoffWaitsForItsDrawAndRejectsThePreviousReturnEpoch() {
+        fun shell(command: String) = android.os.ParcelFileDescriptor.AutoCloseInputStream(
+            instrumentation.uiAutomation.executeShellCommand(command)).bufferedReader().use { it.readText().trim() }
+        fun value(name: String): Any? = MainActivity::class.java.getDeclaredField(name)
+            .apply { isAccessible = true }.get(activity)
+        val packageName = instrumentation.targetContext.packageName
+        val oldMode = Regex("SYSTEM_ALERT_WINDOW: (allow|ignore|deny|default|foreground)")
+            .find(shell("appops get $packageName SYSTEM_ALERT_WINDOW"))?.groupValues?.get(1) ?: "default"
+        shell("appops set $packageName SYSTEM_ALERT_WINDOW allow")
+        var floatingCleanup: VoiceCallFloatingWindow? = null
+        lateinit var floating: VoiceCallFloatingWindow
+        lateinit var owner: VoiceCallPresentationOwner
+        var key = 0L
+        try {
+            mainThread {
+                owner = value("voiceCallPresentation") as VoiceCallPresentationOwner
+                owner.begin(null, "presentation-only", android.os.SystemClock.elapsedRealtime(), null, "GPT")
+                key = checkNotNull(owner.state).sessionKey
+                call("refreshFloatingCall")
+                floating = (value("floatingCallDelegate") as Lazy<*>).value as VoiceCallFloatingWindow
+                floatingCleanup = floating
+                assertFalse(floating.isShowing(key))
+                field(activity, "voiceForeground", false)
+                call("refreshFloatingCall")
+            }
+            awaitControl("same call externally shown") { floating.isShowing(key) }
+            mainThread {
+                field(activity, "voiceForeground", true)
+                call("refreshFloatingCall")
+                assertTrue("resume alone must not hide the external call", floating.isShowing(key))
+                val epoch = call("getFloatingCallHandoffEpoch") as Long
+                call("finishVoiceCallHandoff", key, epoch)
+                field(activity, "voiceForeground", false)
+                call("refreshFloatingCall")
+                field(activity, "voiceForeground", true)
+                call("refreshFloatingCall")
+                call("finishVoiceCallHandoff", key, epoch)
+                assertTrue("previous return epoch cannot hide this surface", floating.isShowing(key))
+            }
+            awaitControl("current inline draw hands back the surface") { !floating.isShowing(key) }
+            mainThread {
+                assertNotNull(owner.state)
+                assertNull(call("getFloatingCallReturnKey"))
+            }
+            assertEquals(0, platform.creates)
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            mainThread { floatingCleanup?.hide() }
+            shell("appops set $packageName SYSTEM_ALERT_WINDOW $oldMode")
+        }
+    }
 }

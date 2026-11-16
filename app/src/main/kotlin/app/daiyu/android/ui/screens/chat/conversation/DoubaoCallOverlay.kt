@@ -107,6 +107,7 @@ data class DoubaoCallUi(
     val replyTextComplete: Boolean = false,
     val transcriptTextComplete: Boolean = false,
     val browsing: Boolean = false,
+    val skipEntryAnimation: Boolean = false,
 )
 
 data class DoubaoCallActions(
@@ -119,6 +120,7 @@ data class DoubaoCallActions(
     val onToggleSpeaker: () -> Unit = {},
     val onToggleCaptions: () -> Unit = {},
     val onCloseAnimationFinished: (Long) -> Unit = {},
+    val onPresentationReady: ((Long) -> Unit)? = null,
 )
 
 internal class DoubaoCallMotionState {
@@ -220,6 +222,7 @@ private fun DoubaoCallSession(
     motion: DoubaoCallMotionState,
 ) {
     val density = LocalDensity.current
+    val presentationView = androidx.compose.ui.platform.LocalView.current
     val captionScroll = rememberScrollState()
     val captionFollow = remember { CallCaptionFollow() }
     LaunchedEffect(state.captionEpoch, state.captionsEnabled) {
@@ -276,7 +279,7 @@ private fun DoubaoCallSession(
             }
             DoubaoCallPresentation.EXPANDED -> {
                 frozenBitmap = null
-                if (firstPresentation) {
+                if (firstPresentation && !state.skipEntryAnimation) {
                     motion.transforming = true
                     // Never start the clock on an empty/unrecorded GraphicsLayer.
                     snapshotFlow { snapshotReady }.first { it }
@@ -408,6 +411,11 @@ private fun DoubaoCallSession(
                     if (!morphing || (closing && frozenBitmap == null && progress.value == 1f)) {
                         drawImage(checkNotNull(recordedShadow), topLeft = Offset(-padding, -padding))
                         drawLayer(layer)
+                        if (!closing && !morphing && progress.value == 1f) {
+                            latestActions.onPresentationReady?.let { ready ->
+                                presentationView.post { ready(state.sessionKey) }
+                            }
+                        }
                     } else {
                         // Never replay the full live display list once per strip.
                         val bitmap = frozenBitmap ?: return@drawWithContent

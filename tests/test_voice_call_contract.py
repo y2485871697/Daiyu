@@ -269,6 +269,20 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertIn('assertTouchDispatch(root, emptyList()) { motion.transforming = false }', fixture)
         self.assertIn('listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)', fixture)
 
+    def test_external_fade_draw_observer_is_scoped_to_the_native_animation(self):
+        fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt').read_text()
+        fade = fixture.split('private fun awaitNativeFade(', 1)[1].split('private fun assertTouchDispatch(', 1)[0]
+        self.assertIn('await("complete visible baseline before external close") { drewBaseline }', fade)
+        self.assertIn('root.postOnAnimation(redrawWhileClosing)', fade)
+        self.assertIn('if (!closing || drewIntermediateFrame || !root.isAttachedToWindow) return', fade)
+        self.assertIn('root.postOnAnimation(this)', fade)
+        self.assertIn('root.removeCallbacks(redrawWhileClosing)', fade)
+        self.assertIn('windows.onDraw = { view ->', fade)
+        self.assertIn('root.alpha > 0f && root.alpha < 1f', fade)
+        self.assertIn('root.scaleX < 1f && root.scaleY < 1f', fade)
+        self.assertIn('await(message) { drewIntermediateFrame }', fade)
+        self.assertEqual(2, fade.count('root.invalidate()'))
+
     def test_native_raster_capture_waits_for_each_backdrop_without_weakening_pixels(self):
         fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt').read_text()
         raster = fixture.split('fun frozenSystemWindowPanelHasNoOpacityJumpWhenItBecomesLive()', 1)[1]

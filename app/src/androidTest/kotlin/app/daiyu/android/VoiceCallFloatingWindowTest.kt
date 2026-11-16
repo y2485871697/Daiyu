@@ -85,6 +85,13 @@ class VoiceCallFloatingWindowTest {
         var drewIntermediateFrame = false
         var closing = false
         val frames = mutableListOf<String>()
+        val redrawWhileClosing = object : Runnable {
+            override fun run() {
+                if (!closing || drewIntermediateFrame || !root.isAttachedToWindow) return
+                root.invalidate()
+                root.postOnAnimation(this)
+            }
+        }
         try {
             main {
                 check(windows.onDraw == null)
@@ -101,7 +108,7 @@ class VoiceCallFloatingWindowTest {
                 root.invalidate()
             }
             await("complete visible baseline before external close") { drewBaseline }
-            main { closing = true; close() }
+            main { closing = true; root.postOnAnimation(redrawWhileClosing); close() }
             await(message) { drewIntermediateFrame }
         } catch (failure: AssertionError) {
             var snapshot = ""
@@ -112,7 +119,7 @@ class VoiceCallFloatingWindowTest {
             }
             throw AssertionError("$message; $snapshot", failure)
         } finally {
-            main { windows.onDraw = null }
+            main { root.removeCallbacks(redrawWhileClosing); windows.onDraw = null }
         }
     }
     private fun assertTouchDispatch(root: View, expected: List<Int>, transition: () -> Unit = {}) {

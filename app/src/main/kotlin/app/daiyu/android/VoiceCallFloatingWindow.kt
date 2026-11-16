@@ -8,6 +8,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewTreeObserver
 import android.view.WindowManager
@@ -152,9 +153,6 @@ internal class VoiceCallFloatingWindow(context: Context,
         current.inApp = false
         if (current.picture.presentation == DoubaoCallPresentation.CLOSING)
             current.picture = current.picture.copy(presentation = current.livePresentation)
-        current.params.flags = current.params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-        try { windows.updateViewLayout(current, current.params) }
-        catch (_: RuntimeException) { remove(current, completed = true); return }
         if (!current.isLaidOut || !ValueAnimator.areAnimatorsEnabled()) {
             remove(current, completed = true)
             return
@@ -233,12 +231,10 @@ internal class VoiceCallFloatingWindow(context: Context,
         val top = frame.top.roundToInt().coerceAtLeast(0)
         val width = (frame.right.roundToInt() - left).coerceAtLeast(1)
         val height = (frame.bottom.roundToInt() - top).coerceAtLeast(1)
-        val flags = if (morphing || current.departing) current.params.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
-            else current.params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
         if (current.params.x == left && current.params.y == top && current.params.width == width &&
-            current.params.height == height && current.params.flags == flags) return
+            current.params.height == height) return
         current.params.x = left; current.params.y = top
-        current.params.width = width; current.params.height = height; current.params.flags = flags
+        current.params.width = width; current.params.height = height
         if (!current.isAttachedToWindow) return
         try { windows.updateViewLayout(current, current.params) }
         catch (_: RuntimeException) { remove(current, completed = current.departing); onUnavailable() }
@@ -356,6 +352,11 @@ internal class VoiceCallFloatingWindow(context: Context,
             addView(composition, LayoutParams(metrics.widthPixels, metrics.heightPixels))
             viewTreeObserver.addOnPreDrawListener(syncOrigin)
         }
+        private val inputBlocked get() = departing || genieClosing || inApp && entryGenie && motion.transforming
+        override fun onInterceptTouchEvent(event: MotionEvent): Boolean =
+            inputBlocked || super.onInterceptTouchEvent(event)
+        override fun onTouchEvent(event: MotionEvent): Boolean =
+            inputBlocked || super.onTouchEvent(event)
         override fun onConfigurationChanged(newConfig: android.content.res.Configuration) {
             super.onConfigurationChanged(newConfig)
             safeTop = safeTopInset()

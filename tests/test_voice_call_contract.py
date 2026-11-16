@@ -257,6 +257,18 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertIn('internal fun FloatingVoiceCallSurface(', overlay)
         self.assertIn('firstPresentation && animationAllowed && !state.skipEntryAnimation', overlay)
 
+    def test_call_transition_consumes_touches_without_system_opacity_clamp(self):
+        floating = (SRC / 'VoiceCallFloatingWindow.kt').read_text()
+        self.assertNotIn('FLAG_NOT_TOUCHABLE', floating)
+        self.assertIn('private val inputBlocked get() = departing || genieClosing || inApp && entryGenie && motion.transforming', floating)
+        self.assertIn('inputBlocked || super.onInterceptTouchEvent(event)', floating)
+        self.assertIn('inputBlocked || super.onTouchEvent(event)', floating)
+        fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt').read_text()
+        self.assertIn('assertInputPolicy(params)', fixture)
+        self.assertIn('listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_CANCEL)', fixture)
+        self.assertIn('assertTouchDispatch(root, emptyList()) { motion.transforming = false }', fixture)
+        self.assertIn('listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)', fixture)
+
     def test_native_raster_capture_waits_for_each_backdrop_without_weakening_pixels(self):
         fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt').read_text()
         raster = fixture.split('fun frozenSystemWindowPanelHasNoOpacityJumpWhenItBecomesLive()', 1)[1]
@@ -315,7 +327,9 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertIn('TYPE_APPLICATION_OVERLAY', floating)
         self.assertIn('FLAG_NOT_FOCUSABLE', floating)
         self.assertIn('FLAG_NOT_TOUCH_MODAL', floating)
-        self.assertIn('FLAG_NOT_TOUCHABLE', floating)
+        self.assertNotIn('FLAG_NOT_TOUCHABLE', floating)
+        self.assertIn('inputBlocked || super.onInterceptTouchEvent(event)', floating)
+        self.assertIn('inputBlocked || super.onTouchEvent(event)', floating)
         self.assertIn('alpha(0f).scaleX(.88f).scaleY(.88f)', floating)
         self.assertIn('window === current', floating)
         self.assertIn('withEndAction', floating)

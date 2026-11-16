@@ -3,6 +3,7 @@ package app.daiyu.android
 import android.content.Context
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -40,14 +41,24 @@ class VoiceCallFloatingWindowTest {
         var onDraw: ((View) -> Unit)? = null
         override fun updateViewLayout(view: View, params: ViewGroup.LayoutParams) {
             if (failUpdate) throw SecurityException("synthetic overlay update rejection")
+            assertInputPolicy(params)
             updates++
             actual.updateViewLayout(view, params)
         }
         override fun addView(view: View, params: ViewGroup.LayoutParams) {
             if (failAdd) throw SecurityException("synthetic overlay rejection")
+            assertInputPolicy(params)
             assertFalse("a new call window must not overlap an existing one", added.any { it.isAttachedToWindow })
             view.viewTreeObserver.addOnDrawListener { onDraw?.invoke(view) }
             actual.addView(view, params); added.add(view)
+        }
+        private fun assertInputPolicy(layout: ViewGroup.LayoutParams) {
+            val params = layout as WindowManager.LayoutParams
+            assertEquals("WM must not clamp an untouchable overlay to 80% opacity", 0,
+                params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+            assertEquals(1f, params.alpha, 0f)
+            assertTrue(params.flags and WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE != 0)
+            assertTrue(params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL != 0)
         }
         override fun removeViewImmediate(view: View) { removals.add(view); actual.removeViewImmediate(view) }
         fun detachExternally(view: View) { actual.removeViewImmediate(view) }
@@ -102,6 +113,27 @@ class VoiceCallFloatingWindowTest {
             throw AssertionError("$message; $snapshot", failure)
         } finally {
             main { windows.onDraw = null }
+        }
+    }
+    private fun assertTouchDispatch(root: View, expected: List<Int>, transition: () -> Unit = {}) {
+        val container = root as ViewGroup
+        val received = mutableListOf<Int>()
+        val probe = View(context).apply {
+            setOnTouchListener { _, event -> received += event.actionMasked; true }
+        }
+        container.addView(probe, ViewGroup.LayoutParams(root.width, root.height))
+        probe.layout(0, 0, root.width, root.height)
+        val now = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, root.width / 2f, root.height / 2f, 0)
+        val up = MotionEvent.obtain(now, now + 16, MotionEvent.ACTION_UP, root.width / 2f, root.height / 2f, 0)
+        try {
+            assertTrue(root.dispatchTouchEvent(down))
+            transition()
+            root.dispatchTouchEvent(up)
+            assertEquals(expected, received)
+        } finally {
+            container.removeView(probe)
+            down.recycle(); up.recycle()
         }
     }
     private fun picture(key: Long = -2L, mini: Boolean = false) = DoubaoCallUi(key, "original-conversation",
@@ -161,9 +193,11 @@ class VoiceCallFloatingWindowTest {
         val root = windows.added.single()
         awaitNativeFade(root, "distinct external fade and scale progressed") {
             // Production stops audio synchronously before publishing this visual close.
-            host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), actions)
+            assertTouchDispatch(root, listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_CANCEL)) {
+                host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), actions)
+            }
             assertFalse(host.isShowing(state.sessionKey))
-            assertTrue((root.layoutParams as WindowManager.LayoutParams).flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0)
+            assertTouchDispatch(root, emptyList())
             assertTrue(root.isAttachedToWindow)
         }
         await("animation removes the window") { !root.isAttachedToWindow }
@@ -495,9 +529,12 @@ class VoiceCallFloatingWindowTest {
         tapMinimize(root)
         await("real control remains clickable after window translation") { minimizes == 2 }
         main {
-            host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), callbacks, anchor, motion, inApp = true)
-            host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), callbacks, anchor, motion, inApp = true)
+            assertTouchDispatch(root, listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_CANCEL)) {
+                host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), callbacks, anchor, motion, inApp = true)
+                host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), callbacks, anchor, motion, inApp = true)
+            }
             assertFalse(host.isShowing(state.sessionKey))
+            assertTouchDispatch(root, emptyList())
         }
         await("close reverses the original Genie clock") {
             root.isAttachedToWindow && motion.transforming && motion.progress.value > 0f && motion.progress.value < 1f
@@ -702,10 +739,15 @@ class VoiceCallFloatingWindowTest {
                 scope.launch { motion.progress.stop(); motion.progress.snapTo(.999f) }
             }
             await("near-end frozen native panel") { motion.transforming && motion.progress.value == .999f }
+            main { assertTouchDispatch(root, emptyList()) }
             val frozenDark = capture(root, "frozen-dark", android.graphics.Color.BLACK)
             val frozenLight = capture(root, "frozen-light", android.graphics.Color.WHITE)
-            main { scope.launch { motion.progress.snapTo(1f); motion.transforming = false } }
+            main {
+                assertTouchDispatch(root, emptyList()) { motion.transforming = false }
+                scope.launch { motion.progress.snapTo(1f) }
+            }
             await("actual live branch after frozen raster") { liveReady }
+            main { assertTouchDispatch(root, listOf(MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP)) }
             val liveDeadline = SystemClock.uptimeMillis() + 2_000
             capture(root, "live-dark", android.graphics.Color.BLACK, liveDeadline).recycle()
             val live = capture(root, "live-light", android.graphics.Color.WHITE, liveDeadline)

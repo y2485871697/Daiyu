@@ -330,4 +330,102 @@ class VoiceCallFloatingWindowTest {
             assertEquals(0, hangups)
         }
     }
+
+    private fun callAnchor(): app.daiyu.android.ui.screens.chat.conversation.DoubaoCallAnchor {
+        val metrics = context.resources.displayMetrics
+        val d = metrics.density
+        val w = metrics.widthPixels.toFloat()
+        val h = metrics.heightPixels.toFloat()
+        return app.daiyu.android.ui.screens.chat.conversation.DoubaoCallAnchor(
+            androidx.compose.ui.geometry.Rect(w - 56 * d, h - 76 * d, w - 36 * d, h - 56 * d),
+            h - 96 * d, androidx.compose.ui.geometry.Rect(0f, 0f, w, h))
+    }
+
+    private fun tapMinimize(root: View) {
+        var x = 0f
+        var y = 0f
+        main {
+            val origin = IntArray(2)
+            root.getLocationOnScreen(origin)
+            val inset = 38f * context.resources.displayMetrics.density
+            x = origin[0] + root.width - inset
+            y = origin[1] + inset
+        }
+        val now = SystemClock.uptimeMillis()
+        val down = android.view.MotionEvent.obtain(now, now, android.view.MotionEvent.ACTION_DOWN, x, y, 0)
+        val up = android.view.MotionEvent.obtain(now, now + 16, android.view.MotionEvent.ACTION_UP, x, y, 0)
+        try {
+            instrumentation.sendPointerSync(down)
+            instrumentation.sendPointerSync(up)
+        } finally {
+            down.recycle()
+            up.recycle()
+        }
+    }
+
+    @Test fun inAppEntrySettlesTouchableAndCloseUsesGenieWithoutNativeFade() {
+        val state = picture(-13L)
+        val anchor = callAnchor()
+        val motion = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallMotionState()
+        var ready = false
+        var minimizes = 0
+        val callbacks = actions.copy(onPresentationReady = { if (it == state.sessionKey) ready = true },
+            onMinimize = { minimizes++ })
+        main { assertTrue(host.update(state, callbacks, anchor, motion, inApp = true)) }
+        await("in-app entry returns the same window to a touchable bounded frame") {
+            windows.added.singleOrNull()?.let { root ->
+                val params = root.layoutParams as WindowManager.LayoutParams
+                ready && root.isLaidOut && root.width == params.width && root.height == params.height &&
+                    motion.progress.value == 1f && !motion.transforming &&
+                    params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE == 0
+            } == true
+        }
+        val root = windows.added.single()
+        tapMinimize(root)
+        await("real minimize tap reaches the settled Compose control") { minimizes == 1 }
+        main {
+            host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), callbacks, anchor, motion, inApp = true)
+            host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), callbacks, anchor, motion, inApp = true)
+            assertFalse(host.isShowing(state.sessionKey))
+        }
+        await("close reverses the original Genie clock") {
+            root.isAttachedToWindow && motion.transforming && motion.progress.value > 0f && motion.progress.value < 1f
+        }
+        main {
+            assertEquals(1f, root.alpha, 0f)
+            assertEquals(1f, root.scaleX, 0f)
+            assertEquals(1f, root.scaleY, 0f)
+        }
+        await("Genie completion removes the system window") { !root.isAttachedToWindow }
+        main {
+            assertEquals(listOf(state.sessionKey), completed)
+            assertEquals(listOf(root), windows.removals)
+            assertEquals(0, hangups)
+        }
+    }
+
+    @Test fun leavingAppKeepsTheSameWindowAndOnlyExternalCloseFades() {
+        val state = picture(-14L).copy(skipEntryAnimation = true)
+        val anchor = callAnchor()
+        main { host.update(state, actions, anchor, inApp = true) }
+        await("in-app global window laid out") { windows.added.single().isLaidOut }
+        val root = windows.added.single()
+        main {
+            assertTrue(host.update(state, actions, anchor, inApp = false))
+            assertSame(root, windows.added.single())
+            assertTrue(windows.removals.isEmpty())
+            assertTrue(host.isShowing(state.sessionKey))
+            host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), actions, anchor, inApp = false)
+        }
+        await("only the external close uses native fade") {
+            root.isAttachedToWindow && root.alpha > 0f && root.alpha < 1f && root.scaleX < 1f
+        }
+        await("external close detaches") { !root.isAttachedToWindow }
+        main {
+            assertEquals(listOf(state.sessionKey), completed)
+            assertEquals(listOf(root), windows.removals)
+            assertEquals(0, hangups)
+        }
+    }
+
 }

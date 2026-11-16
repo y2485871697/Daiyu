@@ -220,8 +220,9 @@ class FloatingVoiceCallContract(unittest.TestCase):
         activity = (SRC / 'MainActivity.kt').read_text()
         floating = (SRC / 'VoiceCallFloatingWindow.kt').read_text()
         refresh = activity.split('private fun refreshFloatingCall() {', 1)[1].split('private fun returnToVoiceCall(', 1)[0]
-        self.assertIn('floatingCall.update(shown, actions)', refresh)
-        self.assertNotIn('voiceForeground', refresh)
+        self.assertIn('floatingCall.update(shown, actions, floatingCallAnchor, floatingCallButtonMotion,', refresh)
+        self.assertIn('inApp = voiceForeground', refresh)
+        self.assertNotIn('if (voiceForeground)', refresh)
         self.assertNotIn('retainedPage', refresh)
         self.assertNotIn('floatingCallReturnKey', activity)
         self.assertNotIn('floatingCallHandoffEpoch', activity)
@@ -231,6 +232,20 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertIn('previous.detached', floating)
         self.assertIn('TYPE_APPLICATION_OVERLAY', floating)
         self.assertIn('onUnavailable()', floating)
+
+    def test_global_window_keeps_in_app_genie_and_scopes_fade_to_external_close(self):
+        floating = (SRC / 'VoiceCallFloatingWindow.kt').read_text()
+        dismiss = floating.split('private fun dismiss(current: CallWindow)', 1)[1].split('private fun fade(', 1)[0]
+        self.assertIn('if (current.inApp)', dismiss)
+        self.assertIn('current.genieClosing = true', dismiss)
+        self.assertIn('} else fade(current)', dismiss)
+        self.assertIn('LaunchedEffect(inApp, genieClosing, motion.transforming)', floating)
+        self.assertIn('FLAG_LAYOUT_IN_SCREEN', floating)
+        self.assertIn('composition.translationX = -origin[0].toFloat()', floating)
+        self.assertIn('composition.translationY = -origin[1].toFloat()', floating)
+        overlay = (SRC / 'ui/screens/chat/conversation/DoubaoCallOverlay.kt').read_text()
+        self.assertIn('internal fun FloatingVoiceCallSurface(', overlay)
+        self.assertIn('firstPresentation && animationAllowed && !state.skipEntryAnimation', overlay)
 
     def test_call_configuration_uses_overlay_dialog_without_replacing_the_call(self):
         activity = (SRC / 'MainActivity.kt').read_text()

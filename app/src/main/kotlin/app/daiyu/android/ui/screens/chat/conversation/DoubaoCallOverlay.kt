@@ -123,6 +123,8 @@ data class DoubaoCallActions(
     val onPresentationReady: ((Long) -> Unit)? = null,
 )
 
+internal data class DoubaoCallAnchor(val bounds: Rect, val composerTop: Float, val hostBounds: Rect)
+
 internal class DoubaoCallMotionState {
     val progress = Animatable(0f)
     var transforming by mutableStateOf(true)
@@ -222,7 +224,6 @@ private fun DoubaoCallSession(
     motion: DoubaoCallMotionState,
 ) {
     val density = LocalDensity.current
-    val presentationView = androidx.compose.ui.platform.LocalView.current
     val captionScroll = rememberScrollState()
     val captionFollow = remember { CallCaptionFollow() }
     LaunchedEffect(state.captionEpoch, state.captionsEnabled) {
@@ -232,19 +233,10 @@ private fun DoubaoCallSession(
         state.presentation != DoubaoCallPresentation.CLOSING &&
             state.visualState !in setOf(DoubaoCallVisualState.ERROR, DoubaoCallVisualState.ENDED), searching = state.searching,
         searchCompletion = state.searchCompletion, resetKey = state.captionEpoch, browsing = state.browsing)
-    val layer = rememberGraphicsLayer()
-    val progress = motion.progress
-    var snapshotReady by remember { mutableStateOf(false) }
-    var recordedShadow by remember { mutableStateOf<ImageBitmap?>(null) }
-    var frozenBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
-    // Keep the last live surface for closing; a morph reuses one padded raster.
-    var presented by remember { mutableStateOf(false) }
-    var completionReported by remember { mutableStateOf(false) }
     var retainedMini by remember { mutableStateOf(state.presentation == DoubaoCallPresentation.MINI) }
     var expandedDrag by remember { mutableStateOf(Offset.Zero) }
     var miniDrag by remember { mutableStateOf(Offset.Zero) }
     val latestActions by rememberUpdatedState(actions)
-    val latestState by rememberUpdatedState(state)
     val closing = state.presentation == DoubaoCallPresentation.CLOSING
     // 保留关闭前的状态和字幕，避免 CLOSING 同时带来的 ENDED 或新字幕改变退场内容。
     // 子图层仍可变化，退场画面由下方栅格快照固定。
@@ -268,69 +260,6 @@ private fun DoubaoCallSession(
         }
     }
 
-    LaunchedEffect(state.presentation) {
-        val firstPresentation = !presented
-        presented = true
-        when (state.presentation) {
-            DoubaoCallPresentation.MINI -> {
-                motion.transforming = false
-                frozenBitmap = null
-                progress.snapTo(1f)
-            }
-            DoubaoCallPresentation.EXPANDED -> {
-                frozenBitmap = null
-                if (firstPresentation && !state.skipEntryAnimation) {
-                    motion.transforming = true
-                    // Never start the clock on an empty/unrecorded GraphicsLayer.
-                    snapshotFlow { snapshotReady }.first { it }
-                    val shadow = checkNotNull(recordedShadow)
-                    val content = layer.toImageBitmap()
-                    coroutineContext.ensureActive()
-                    val bitmap = content.restoreLegacyCallCaptureAlpha().withCallPanelShadow(shadow)
-                    coroutineContext.ensureActive()
-                    frozenBitmap = bitmap
-                    progress.animateTo(1f, tween(DoubaoGenieGeometry.DURATION_MILLIS, easing = CallMotionEasing))
-                } else {
-                    // Minimize/restore is intentionally immediate, not another Genie entrance.
-                    progress.snapTo(1f)
-                }
-                motion.transforming = false
-                frozenBitmap = null
-            }
-            DoubaoCallPresentation.CLOSING -> {
-                motion.transforming = true
-                // A display list can reference mutable child layers. Rasterize the last recorded
-                // live frame BEFORE reversing; never record the owner's CLOSING/ENDED content.
-                // If closed before the first draw, the draw pass supplies one fallback recording.
-                snapshotFlow { snapshotReady }.first { it }
-                if (frozenBitmap == null) {
-                    val shadow = checkNotNull(recordedShadow)
-                    val content = layer.toImageBitmap()
-                    coroutineContext.ensureActive()
-                    val bitmap = content.restoreLegacyCallCaptureAlpha().withCallPanelShadow(shadow)
-                    coroutineContext.ensureActive()
-                    frozenBitmap = bitmap
-                }
-                val remaining = (DoubaoGenieGeometry.DURATION_MILLIS * progress.value).roundToInt()
-                progress.animateTo(0f, tween(remaining.coerceAtLeast(1), easing = CallMotionEasing))
-                // Give the p=0 surface a draw opportunity before the owner unmounts it. A zero
-                // duration scale has no extra wait; both directions already honor the system scale.
-                if ((coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f) > 0f) withFrameNanos { }
-                
-                coroutineContext.ensureActive()
-                if (!completionReported && latestState.sessionKey == state.sessionKey &&
-                    latestState.presentation == DoubaoCallPresentation.CLOSING) {
-                    completionReported = true
-                    motion.transforming = false
-                    latestActions.onCloseAnimationFinished(state.sessionKey)
-                }
-            }
-        }
-    }
-
-    DisposableEffect(motion) {
-        onDispose { motion.transforming = false }
-    }
     BackHandler(enabled = state.presentation == DoubaoCallPresentation.EXPANDED) {
         latestActions.onMinimize()
     }
@@ -382,78 +311,176 @@ private fun DoubaoCallSession(
                     while (true) awaitPointerEvent(PointerEventPass.Initial).changes.forEach { it.consume() }
                 }
             } else Modifier
-        val cornerRadius = if (mini) 23.dp else 29.dp
-        val shape = RoundedCornerShape(cornerRadius)
-        val panelSize = IntSize(panelWidth.roundToInt(), panelHeight.roundToInt())
-        val shadow = remember(panelSize, cornerRadius, density) {
-            with(density) { createCallPanelShadow(panelSize, cornerRadius) }
-        }
-        Box(
-            Modifier
-                .offset { IntOffset(panelBounds.left.roundToInt(), panelBounds.top.roundToInt()) }
-                .size(with(density) { panelWidth.toDp() }, with(density) { panelHeight.toDp() })
-                .then(closeInput)
-                .testTag(if (mini) "doubao-call-mini" else "doubao-call-expanded")
-                .drawWithContent {
-                    if (size.width <= 0f || size.height <= 0f) return@drawWithContent
-                    val outset = CallShadowOutset.roundToPx()
-                    val padding = outset.toFloat()
-                    val captureSize = IntSize(size.width.roundToInt() + outset * 2,
-                        size.height.roundToInt() + outset * 2)
-                    if (!morphing || !snapshotReady) {
-                        layer.record(size = IntSize(size.width.roundToInt(), size.height.roundToInt())) {
-                            this@drawWithContent.drawContent()
-                        }
-                        recordedShadow = shadow
-                        snapshotReady = true
-                    }
-                    // Preserve the last visible frame while the closing raster is prepared.
-                    if (!morphing || (closing && frozenBitmap == null && progress.value == 1f)) {
-                        drawImage(checkNotNull(recordedShadow), topLeft = Offset(-padding, -padding))
-                        drawLayer(layer)
-                        if (!closing && !morphing && progress.value == 1f) {
-                            latestActions.onPresentationReady?.let { ready ->
-                                presentationView.post { ready(state.sessionKey) }
-                            }
-                        }
-                    } else {
-                        // Never replay the full live display list once per strip.
-                        val bitmap = frozenBitmap ?: return@drawWithContent
-                        // At full size, composite the translucent raster once, without strip clips.
-                        if (progress.value == 1f) {
-                            drawImage(bitmap, dstOffset = IntOffset(-outset, -outset), dstSize = captureSize)
-                            return@drawWithContent
-                        }
-                        val sourceWidth = bitmap.width.toFloat()
-                        val sourceHeight = bitmap.height.toFloat()
-                        val endpointSize = with(density) { 20.dp.toPx() }
-                        val anchor = DoubaoGenieGeometry.Bounds(
-                            anchorBounds.center.x - endpointSize / 2f - panelBounds.left,
-                            anchorBounds.center.y - endpointSize / 2f - panelBounds.top,
-                            endpointSize, endpointSize,
-                        ).outset(padding * endpointSize / size.width, padding * endpointSize / size.height)
-                        val panel = DoubaoGenieGeometry.Bounds(0f, 0f, size.width, size.height).outset(padding)
-                        DoubaoGenieGeometry.strips(progress.value, anchor, panel, sourceWidth, sourceHeight).forEach { strip ->
-                            withTransform({
-                                transform(Matrix(strip.matrix))
-                                clipRect(0f, 0f, sourceWidth, strip.sourceHeight)
-                                translate(0f, -strip.sourceY)
-                            }) {
-                                drawImage(bitmap)
-                            }
-                        }
-                    }
-                }
-                .clip(shape)
-                .background(if (mini) Color(0xFFFCFAFF) else Color(0xFFFDFBFF))
-                .border(1.dp, Color.White, shape),
-        ) {
+        CallGeniePanel(state, actions, panelBounds, anchorBounds, motion, mini,
+            modifier = closeInput) { interactive ->
             if (mini) {
                 MiniCallContent(picture, clock, interactive, dragHandle, latestActions.onExpand, running = !closing && !morphing, compressionState = compressionState)
             } else {
                 ExpandedCallContent(picture, clock, interactive, dragHandle, latestActions, running = !closing && !morphing, compressionState = compressionState, captionScroll = captionScroll, captionFollow = captionFollow, captions = captions)
             }
         }
+    }
+}
+
+/** Same captured raster, geometry and clock for chat previews and the system call window. */
+@Composable
+private fun CallGeniePanel(
+    state: DoubaoCallUi,
+    actions: DoubaoCallActions,
+    panelBounds: Rect,
+    anchorBounds: Rect,
+    motion: DoubaoCallMotionState,
+    mini: Boolean,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    animationAllowed: Boolean = true,
+    content: @Composable (Boolean) -> Unit,
+) {
+    val density = LocalDensity.current
+    val presentationView = androidx.compose.ui.platform.LocalView.current
+    val layer = rememberGraphicsLayer()
+    val progress = motion.progress
+    var snapshotReady by remember { mutableStateOf(false) }
+    var recordedShadow by remember { mutableStateOf<ImageBitmap?>(null) }
+    var frozenBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var presented by remember { mutableStateOf(false) }
+    var completionReported by remember { mutableStateOf(false) }
+    val latestActions by rememberUpdatedState(actions)
+    val latestState by rememberUpdatedState(state)
+    val closing = state.presentation == DoubaoCallPresentation.CLOSING
+    val morphing = closing || (!mini && motion.transforming)
+    LaunchedEffect(state.presentation, animationAllowed) {
+        val firstPresentation = !presented
+        presented = true
+        when (state.presentation) {
+            DoubaoCallPresentation.MINI -> {
+                motion.transforming = false
+                frozenBitmap = null
+                progress.snapTo(1f)
+            }
+            DoubaoCallPresentation.EXPANDED -> {
+                frozenBitmap = null
+                if (firstPresentation && animationAllowed && !state.skipEntryAnimation) {
+                    motion.transforming = true
+                    // Never start the clock on an empty/unrecorded GraphicsLayer.
+                    snapshotFlow { snapshotReady }.first { it }
+                    val shadow = checkNotNull(recordedShadow)
+                    val content = layer.toImageBitmap()
+                    coroutineContext.ensureActive()
+                    val bitmap = content.restoreLegacyCallCaptureAlpha().withCallPanelShadow(shadow)
+                    coroutineContext.ensureActive()
+                    frozenBitmap = bitmap
+                    progress.animateTo(1f, tween(DoubaoGenieGeometry.DURATION_MILLIS, easing = CallMotionEasing))
+                } else {
+                    // Minimize/restore is intentionally immediate, not another Genie entrance.
+                    progress.snapTo(1f)
+                }
+                motion.transforming = false
+                frozenBitmap = null
+            }
+            DoubaoCallPresentation.CLOSING -> {
+                motion.transforming = true
+                // A display list can reference mutable child layers. Rasterize the last recorded
+                // live frame BEFORE reversing; never record the owner's CLOSING/ENDED content.
+                // If closed before the first draw, the draw pass supplies one fallback recording.
+                snapshotFlow { snapshotReady }.first { it }
+                if (frozenBitmap == null) {
+                    val shadow = checkNotNull(recordedShadow)
+                    val content = layer.toImageBitmap()
+                    coroutineContext.ensureActive()
+                    val bitmap = content.restoreLegacyCallCaptureAlpha().withCallPanelShadow(shadow)
+                    coroutineContext.ensureActive()
+                    frozenBitmap = bitmap
+                }
+                val remaining = (DoubaoGenieGeometry.DURATION_MILLIS * progress.value).roundToInt()
+                progress.animateTo(0f, tween(remaining.coerceAtLeast(1), easing = CallMotionEasing))
+                // Give the p=0 surface a draw opportunity before the owner unmounts it. A zero
+                // duration scale has no extra wait; both directions already honor the system scale.
+                if ((coroutineContext[MotionDurationScale]?.scaleFactor ?: 1f) > 0f) withFrameNanos { }
+                
+                coroutineContext.ensureActive()
+                if (!completionReported && latestState.sessionKey == state.sessionKey &&
+                    latestState.presentation == DoubaoCallPresentation.CLOSING) {
+                    completionReported = true
+                    motion.transforming = false
+                    latestActions.onCloseAnimationFinished(state.sessionKey)
+                }
+            }
+        }
+    }
+
+    DisposableEffect(motion) {
+        onDispose { motion.transforming = false }
+    }
+    val panelWidth = panelBounds.width
+    val panelHeight = panelBounds.height
+    val cornerRadius = if (mini) 23.dp else 29.dp
+    val shape = RoundedCornerShape(cornerRadius)
+    val panelSize = IntSize(panelWidth.roundToInt(), panelHeight.roundToInt())
+    val shadow = remember(panelSize, cornerRadius, density) {
+        with(density) { createCallPanelShadow(panelSize, cornerRadius) }
+    }
+    Box(
+        Modifier
+            .offset { IntOffset(panelBounds.left.roundToInt(), panelBounds.top.roundToInt()) }
+            .size(with(density) { panelWidth.toDp() }, with(density) { panelHeight.toDp() })
+            .then(modifier)
+            .testTag(if (mini) "doubao-call-mini" else "doubao-call-expanded")
+            .drawWithContent {
+                if (size.width <= 0f || size.height <= 0f) return@drawWithContent
+                val outset = CallShadowOutset.roundToPx()
+                val padding = outset.toFloat()
+                val captureSize = IntSize(size.width.roundToInt() + outset * 2,
+                    size.height.roundToInt() + outset * 2)
+                if (!morphing || !snapshotReady) {
+                    layer.record(size = IntSize(size.width.roundToInt(), size.height.roundToInt())) {
+                        this@drawWithContent.drawContent()
+                    }
+                    recordedShadow = shadow
+                    snapshotReady = true
+                }
+                // Preserve the last visible frame while the closing raster is prepared.
+                if (!morphing || (closing && frozenBitmap == null && progress.value == 1f)) {
+                    drawImage(checkNotNull(recordedShadow), topLeft = Offset(-padding, -padding))
+                    drawLayer(layer)
+                    if (!closing && !morphing && progress.value == 1f) {
+                        latestActions.onPresentationReady?.let { ready ->
+                            presentationView.post { ready(state.sessionKey) }
+                        }
+                    }
+                } else {
+                    // Never replay the full live display list once per strip.
+                    val bitmap = frozenBitmap ?: return@drawWithContent
+                    // At full size, composite the translucent raster once, without strip clips.
+                    if (progress.value == 1f) {
+                        drawImage(bitmap, dstOffset = IntOffset(-outset, -outset), dstSize = captureSize)
+                        return@drawWithContent
+                    }
+                    val sourceWidth = bitmap.width.toFloat()
+                    val sourceHeight = bitmap.height.toFloat()
+                    val endpointSize = with(density) { 20.dp.toPx() }
+                    val anchor = DoubaoGenieGeometry.Bounds(
+                        anchorBounds.center.x - endpointSize / 2f - panelBounds.left,
+                        anchorBounds.center.y - endpointSize / 2f - panelBounds.top,
+                        endpointSize, endpointSize,
+                    ).outset(padding * endpointSize / size.width, padding * endpointSize / size.height)
+                    val panel = DoubaoGenieGeometry.Bounds(0f, 0f, size.width, size.height).outset(padding)
+                    DoubaoGenieGeometry.strips(progress.value, anchor, panel, sourceWidth, sourceHeight).forEach { strip ->
+                        withTransform({
+                            transform(Matrix(strip.matrix))
+                            clipRect(0f, 0f, sourceWidth, strip.sourceHeight)
+                            translate(0f, -strip.sourceY)
+                        }) {
+                            drawImage(bitmap)
+                        }
+                    }
+                }
+            }
+            .clip(shape)
+            .background(if (mini) Color(0xFFFCFAFF) else Color(0xFFFDFBFF))
+            .border(1.dp, Color.White, shape),
+    ) {
+        content(enabled && !morphing)
     }
 }
 
@@ -864,7 +891,7 @@ private fun CallGlyph(control: CallControl, color: Color, modifier: Modifier, ac
 /** Bounded system-window content: no composer anchor, full-screen scrim or in-app Genie. */
 @Composable
 internal fun FloatingVoiceCallContent(state: DoubaoCallUi, actions: DoubaoCallActions,
-    enabled: Boolean, onDrag: (Offset) -> Unit) {
+    enabled: Boolean, onDrag: (Offset) -> Unit, decorated: Boolean = true) {
     key(state.sessionKey) {
         val mini = state.presentation == DoubaoCallPresentation.MINI
         val scroll = rememberScrollState()
@@ -888,13 +915,37 @@ internal fun FloatingVoiceCallContent(state: DoubaoCallUi, actions: DoubaoCallAc
         }
         val shape = RoundedCornerShape(if (mini) 23.dp else 29.dp)
         Box(Modifier.fillMaxSize().testTag("voice-call-floating-content")
-            .clip(shape).background(if (mini) Color(0xFFFCFAFF) else Color(0xFFFDFBFF))
-            .border(1.dp, Color.White, shape)) {
+            .then(if (decorated) Modifier.clip(shape)
+                .background(if (mini) Color(0xFFFCFAFF) else Color(0xFFFDFBFF))
+                .border(1.dp, Color.White, shape) else Modifier)) {
             if (mini) MiniCallContent(state, callClock(state), enabled, handle, actions.onExpand,
                 running = enabled, compressionState = indicator)
             else ExpandedCallContent(state, callClock(state), enabled, handle, actions,
                 running = enabled, compressionState = indicator, captionScroll = scroll,
                 captionFollow = follow, captions = captions)
+        }
+    }
+}
+
+/** The native window is only a viewport; both animation directions use the original Genie. */
+@Composable
+internal fun FloatingVoiceCallSurface(state: DoubaoCallUi, actions: DoubaoCallActions,
+    panelBounds: Rect, anchorBounds: Rect, motion: DoubaoCallMotionState,
+    animationAllowed: Boolean, enabled: Boolean, onDrag: (Offset) -> Unit) {
+    key(state.sessionKey) {
+        var lastLivePicture by remember { mutableStateOf(state) }
+        var closingPicture by remember { mutableStateOf<DoubaoCallUi?>(null) }
+        val closing = state.presentation == DoubaoCallPresentation.CLOSING
+        if (closing && closingPicture == null)
+            closingPicture = lastLivePicture.copy(endedAtMillis = SystemClock.elapsedRealtime())
+        val picture = if (closing) checkNotNull(closingPicture) else state
+        SideEffect { if (!closing) { lastLivePicture = state; closingPicture = null } }
+        Box(Modifier.fillMaxSize()) {
+            CallGeniePanel(state, actions, panelBounds, anchorBounds, motion,
+                mini = picture.presentation == DoubaoCallPresentation.MINI, enabled = enabled,
+                animationAllowed = animationAllowed) { interactive ->
+                FloatingVoiceCallContent(picture, actions, interactive, onDrag, decorated = false)
+            }
         }
     }
 }

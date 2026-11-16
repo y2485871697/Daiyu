@@ -154,7 +154,7 @@ class DoubaoMotionScopeTest(unittest.TestCase):
                     selection = json.loads((root / "smoke/selection.json").read_text())
                     self.assertEqual("targeted", inventory["discovery_scope"])
                     self.assertEqual(set(classes), set(inventory["all_classes"]))
-                    self.assertEqual(13, inventory["all_classes"][floating])
+                    self.assertEqual(15, inventory["all_classes"][floating])
                     self.assertEqual(sum(inventory["all_classes"][name] for name in selection["selected_classes"]), selection["expected_tests"])
                     selected.extend(selection["selected_classes"])
                     expected += selection["expected_tests"]

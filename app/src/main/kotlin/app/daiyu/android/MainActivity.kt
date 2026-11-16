@@ -2585,6 +2585,16 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }, speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId,
                                         onPresentationReady = onReady,
+                                        callEntryMotion = floatingCallButtonMotion.takeIf {
+                                            shownVoiceCall()?.let { call -> call.sessionKey == floatingCallMotionKey &&
+                                                call.presentation == DoubaoCallPresentation.EXPANDED } == true
+                                        },
+                                        onCallAnchorChanged = { anchor ->
+                                            if (routeActive && pageCurrent && presented && !sidebarVisible && floatingCallAnchor != anchor) {
+                                                floatingCallAnchor = anchor
+                                                refreshFloatingCall()
+                                            }
+                                        },
                                         menuAvailable = retainedPage == "chat" && !sidebarVisible,
                                         readAutomaticCompression = { pageCompression },
                                         dedicatedTool = { step -> DedicatedQuestion(step, routeActive && pageCurrent && presented) },
@@ -3860,6 +3870,9 @@ class MainActivity : ComponentActivity() {
         return admitted
     }
 
+    private var floatingCallAnchor: DoubaoCallAnchor? = null
+    private var floatingCallMotionKey: Long? = null
+    private var floatingCallButtonMotion by mutableStateOf<DoubaoCallMotionState?>(null)
     private val floatingCallDelegate = lazy {
         VoiceCallFloatingWindow(applicationContext, onUnavailable = {
             if (!floatingCallClosed && shownVoiceCall() != null) {
@@ -3877,7 +3890,12 @@ class MainActivity : ComponentActivity() {
         val shown = shownVoiceCall()
         if (shown != null && activityUsable()) {
             val actions = if (voiceCallPresentation.state != null) voiceCallActions() else doubaoCallActions()
-            if (!floatingCall.update(shown, actions) && shown.presentation != DoubaoCallPresentation.CLOSING) {
+            if (floatingCallMotionKey != shown.sessionKey) {
+                floatingCallMotionKey = shown.sessionKey
+                floatingCallButtonMotion = DoubaoCallMotionState()
+            }
+            if (!floatingCall.update(shown, actions, floatingCallAnchor, floatingCallButtonMotion,
+                    inApp = voiceForeground) && shown.presentation != DoubaoCallPresentation.CLOSING) {
                 invalidateConfiguredVoice()
                 voiceConfigurationToast("通话悬浮窗不可用，请检查悬浮窗权限")
             }
@@ -3959,6 +3977,7 @@ class MainActivity : ComponentActivity() {
         if (doubaoCallPresentation.beginClose(key, SystemClock.elapsedRealtime())) {
             if (pendingFloatingCallAction?.first == key) pendingFloatingCallAction = null
             try { remoteVoice.stopDuplex(key) } catch (_: Exception) { voiceConfigurationToast("语音资源释放未确认") }
+            refreshFloatingCall()
         }
     }
 

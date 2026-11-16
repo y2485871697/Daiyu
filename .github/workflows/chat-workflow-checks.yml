@@ -7,6 +7,10 @@ on:
         description: 检查目标完整提交SHA
         type: string
         required: true
+      contract_tools_sha:
+        description: 仅task-scroll可选；固定修正后的契约工具提交，不改变被检源码或重新打包
+        type: string
+        default: ''
       check_id:
         description: 本次定向检查标识
         type: string
@@ -39,6 +43,40 @@ jobs:
         run: |
           test -n "$EXPECTED_SHA"
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+      - name: 核对独立契约工具参数
+        if: inputs.contract_tools_sha != ''
+        env:
+          CONTRACT_TOOLS_SHA: ${{ inputs.contract_tools_sha }}
+        run: |
+          test "$WORKFLOW_CHECK_SCOPE" = task-scroll
+          [[ "$CONTRACT_TOOLS_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - name: 固定独立契约工具
+        if: inputs.contract_tools_sha != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.contract_tools_sha }}
+          path: .contract-tools-source
+          persist-credentials: false
+      - name: 仅更新定向测量契约工具并记录来源
+        if: inputs.contract_tools_sha != ''
+        env:
+          CONTRACT_TOOLS_SHA: ${{ inputs.contract_tools_sha }}
+        run: |
+          test "$(git -C .contract-tools-source rev-parse HEAD)" = "$CONTRACT_TOOLS_SHA"
+          python3 -B - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          name = 'tests/test_streaming_occlusion_contract.py'
+          target = Path(name)
+          tool = Path('.contract-tools-source') / name
+          before, after = target.read_bytes(), tool.read_bytes()
+          receipt = dict(source_sha=os.environ['EXPECTED_SHA'], tools_sha=os.environ['CONTRACT_TOOLS_SHA'],
+                         file=name, source_sha256=hashlib.sha256(before).hexdigest(),
+                         tools_sha256=hashlib.sha256(after).hexdigest())
+          target.write_bytes(after)
+          Path('workflow-checks').mkdir(exist_ok=True)
+          Path('workflow-checks/contract-tools.json').write_text(json.dumps(receipt, indent=2) + '\n')
+          PY
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
         with:
           distribution: temurin
@@ -333,6 +371,9 @@ jobs:
                         attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), tests=sum(int(s.attrib['tests']) for s in suites),
                         check_scope=os.environ['WORKFLOW_CHECK_SCOPE'], classes=sorted(names), contracts=json.loads(Path('workflow-checks/contracts.json').read_text()),
                         task_outcomes=outcomes, apk_built=False, instrumentation_run=False)
+          tools = Path('workflow-checks/contract-tools.json')
+          if tools.exists():
+              record['contract_tools'] = json.loads(tools.read_text())
           Path('workflow-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
           print(json.dumps(record, ensure_ascii=False))
           PY
@@ -357,6 +398,10 @@ jobs:
       EXPECTED_SHA: ${{ inputs.expected_sha }}
       CONTRACT_SCOPE: ${{ inputs.check_scope }}
     steps:
+      - name: 拒绝非任务滚动范围的独立契约工具
+        env:
+          CONTRACT_TOOLS_SHA: ${{ inputs.contract_tools_sha }}
+        run: test -z "$CONTRACT_TOOLS_SHA"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ inputs.expected_sha }}

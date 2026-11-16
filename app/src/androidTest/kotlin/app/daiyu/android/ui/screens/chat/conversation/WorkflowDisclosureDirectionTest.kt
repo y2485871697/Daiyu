@@ -1,6 +1,15 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
+import app.daiyu.android.domain.question.QuestionIdentity
+import app.daiyu.android.domain.question.QuestionOption
+import app.daiyu.android.domain.question.QuestionRecord
+import app.daiyu.android.domain.question.UserQuestion
 import androidx.compose.foundation.background
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -664,4 +673,143 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         }
     }
 
+
+    fun testFirstQuestionReplacementKeepsHeadersWithThePhysicalList() = verifyQuestionArrival(true)
+
+    fun testQuestionAsTheFirstAssistantKeepsHeadersWithThePhysicalList() = verifyQuestionArrival(false)
+
+    fun testDelayedHistoricalQuestionDoesNotStartLiveArrival() = verifyQuestionArrival(true, historical = true)
+
+    fun testQuestionArrivalDoesNotReplayForHistoryOrTheSameQuestion() {
+        val state = StreamingTailViewport(true)
+        state.registerQuestionBaseline(listOf("delayed-history"))
+        state.onQuestionPresented("delayed-history", baseline = false)
+        assertFalse(state.followCatchup)
+        state.onQuestionPresented("history", baseline = true)
+        assertFalse(state.followCatchup)
+        state.onQuestionPresented("history", baseline = false)
+        assertFalse(state.followCatchup)
+        state.onQuestionPresented("live", baseline = false)
+        assertTrue(state.followCatchup)
+        state.followCatchup = false
+        state.onQuestionPresented("live", baseline = false)
+        assertFalse(state.followCatchup)
+        state.bounded = false
+        state.onQuestionPresented("completed", baseline = false)
+        assertFalse(state.followCatchup)
+    }
+
+    private fun verifyQuestionArrival(withPlaceholder: Boolean, historical: Boolean = false) {
+        val identity = QuestionIdentity("arrival", "run", "tail", "question")
+        val question = UserQuestion("多出的一小时", "如果今天能多出一小时自由时间，你最想用来做什么？", listOf(
+            QuestionOption("rest", "好好休息，放松一下", "让自己从忙碌中缓一缓，保留属于自己的休息时间。"),
+            QuestionOption("learn", "学习一项感兴趣的技能", "选择一直想尝试的事情，从一个简单的小步骤开始。"),
+            QuestionOption("move", "运动或出门走走", "离开屏幕，去附近散步，或者做一项喜欢的运动。"),
+            QuestionOption("family", "陪伴家人或朋友", "一起聊聊天，享受不被工作打断的相处时间。")))
+        val record = QuestionRecord(identity.storageKey, question)
+        val owner = WorkStepOwnerUi(identity.conversationId, identity.runId, "tail")
+        val userText = "用问答卡片向我提问一个问题"
+        var projected by mutableStateOf(historical)
+        var presented by mutableStateOf(false)
+        var questionCoordinates: LayoutCoordinates? = null
+        data class ArrivalFrame(val geometry: String, val top: Float?)
+        val frames = java.util.Collections.synchronizedList(mutableListOf<ArrivalFrame>())
+        val marker = Color.Magenta
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            density = LocalDensity.current.density
+            BoxWithConstraints(Modifier.size(320.dp, 420.dp).testTag("question-arrival-root")) {
+                val step = WorkStepUi("question", "向用户提问", "", WorkStepState.PENDING,
+                    owner = owner, toolName = "ask_user", dedicatedKey = if (projected) identity.storageKey else null,
+                    renderKey = "arrival:run:tail:question:0")
+                val cards = if (presented) mapOf((owner to identity.callId) to record) else emptyMap()
+                val turn = ChatTurnUi.Assistant("tail", status = RunStatus.RUNNING, isStreaming = true,
+                    workProcess = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), "等待回答", running = true),
+                    content = listOf(MessageContentUi.Tool(step)))
+                ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { inset ->
+                    ChatMessageList(listOf(ChatTurnUi.User("user", userText)) +
+                        if (withPlaceholder || presented) listOf(turn) else emptyList(),
+                        ChatScreenActions(), composerBottomInset = inset,
+                        dedicatedTool = { tool ->
+                            val questionRecord = if (tool.toolName == "ask_user" && tool.owner != null)
+                                cards[tool.owner to tool.toolCallId]?.takeIf { it.callId == tool.dedicatedKey } else null
+                            if (questionRecord == null) false else {
+                                val viewport = LocalWorkflowDisclosureContext.current?.viewport
+                                QuestionCard(identity, questionRecord, true, submit = { _, _, _ -> fail("Arrival must not submit") },
+                                    modifier = Modifier.onPlaced { questionCoordinates = it }.drawWithContent {
+                                        drawContent()
+                                        drawRect(marker, Offset.Zero, Size(size.width, 3.dp.toPx()))
+                                        frames.add(ArrivalFrame(viewport?.diagnostics?.invoke().orEmpty(),
+                                            questionCoordinates?.takeIf { it.isAttached }?.positionInRoot()?.y))
+                                    })
+                                true
+                            }
+                        })
+                }, composer = { Box(Modifier.fillMaxWidth().height(96.dp).testTag("question-arrival-composer")) })
+            }
+        } } }
+        ui.waitForIdle()
+        if (withPlaceholder) ui.onNodeWithTag("tool-step-header:question").assertIsDisplayed()
+        ui.runOnUiThread { projected = true }
+        ui.waitForIdle()
+        if (withPlaceholder) ui.onNodeWithTag("tool-step-header:question").assertIsDisplayed()
+        ui.onAllNodesWithTag("question-card").assertCountEquals(0)
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread { presented = true }
+            var pixelFrames = 0
+            var firstDrawChecked = false
+            repeat(160) { frame ->
+                ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                val sample = synchronized(frames) { frames.lastOrNull() }
+                val safe = ui.onNodeWithTag("question-arrival-composer").fetchSemanticsNode().boundsInRoot.top - 8f * density
+                val top = sample?.top
+                val rootTop = ui.onNodeWithTag("question-arrival-root").fetchSemanticsNode().boundsInRoot.top
+                if (!historical && sample != null && !firstDrawChecked) {
+                    val first = synchronized(frames) { frames.first() }
+                    assertNotNull("The first actual draw has placed coordinates: $first", first.top)
+                    assertTrue("The first card head enters inside its actual viewport: $first", first.top!! >= rootTop && first.top!! + 3f * density < safe)
+                    assertEquals("Check pixels without advancing past the first drawn position", first.top!!, top!!, 1f)
+                    firstDrawChecked = true
+                }
+                if (sample != null && top != null && top >= rootTop && top + 3f * density < safe) {
+                    val pixels = ui.onNodeWithTag("question-arrival-root").captureToImage().toPixelMap()
+                    val y = (top - rootTop + density).toInt()
+                    assertTrue("Card-head sample must be inside the captured image", y in 0 until pixels.height)
+                    val colored = (0 until pixels.width).count { x -> val p = pixels[x, y]
+                        p.red > .8f && p.blue > .8f && p.green < .3f }
+                    assertTrue("The real card top must be painted, not clipped by an old viewport: frame=$frame top=$top ${sample.geometry}",
+                        colored > pixels.width / 2)
+                    pixelFrames++
+                }
+            }
+            val drawn = synchronized(frames) { frames.toList() }
+            assertTrue("Observe the incoming question's actual first draw", drawn.isNotEmpty())
+            fun value(frame: ArrivalFrame, name: String): Float =
+                Regex("(?:^| )" + name + "=([^ ]+)").find(frame.geometry)?.groupValues?.get(1)?.toFloatOrNull()
+                    ?: error("Missing $name in $frame")
+            val entering = drawn.filter { value(it, "origin") >= -1f && value(it, "H") > value(it, "viewport") }
+            assertTrue("Exercise a tall card before its physical lazy slot leaves the viewport: ${drawn.take(3)}", entering.isNotEmpty())
+            if (historical) {
+                val first = entering.first()
+                assertFalse("A delayed historical record must not arm live catchup: $first", first.geometry.contains("catchup=true"))
+                assertTrue("Historical resolution retains normal immediate-tail behavior: $first", value(first, "a") > value(first, "q") + 1f)
+            } else {
+                entering.forEach {
+                    assertEquals("Every actual incoming draw retains the physical list origin instead of jumping to the inner tail: $it",
+                        value(it, "q"), value(it, "a"), 1f)
+                }
+                assertTrue("The physical list follows through real intermediate positions, not one snap",
+                    drawn.map { value(it, "origin").toInt() }.distinct().size >= 3)
+                assertTrue("Check the first visible card-head frame in pixels", firstDrawChecked && pixelFrames > 0)
+            }
+            ui.onAllNodesWithTag("question-card").assertCountEquals(1)
+            ui.onNodeWithTag("tool-step-header:question").assertDoesNotExist()
+            val safeBottom = ui.onNodeWithTag("question-arrival-composer").fetchSemanticsNode().boundsInRoot.top - 8f * density
+            val tail = ui.onNodeWithTag("chat-turn:tail").fetchSemanticsNode().layoutInfo.coordinates
+            var tailBottom = 0f
+            ui.runOnUiThread { tailBottom = tail.positionInRoot().y + tail.size.height }
+            assertEquals("Physical follow must still finish at the original safe edge", safeBottom, tailBottom, 2f)
+            assertTrue("Arrival hands back to normal follow rather than leaving catchup armed", !geometry().contains("catchup=true"))
+        } finally { ui.mainClock.autoAdvance = true }
+    }
 }

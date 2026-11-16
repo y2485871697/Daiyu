@@ -135,6 +135,8 @@ private fun QuestionCardContent(
     val isError = draft.reply == Reply.SAVED_REFRESH_FAILED || (!completed &&
         (session.validation.isNotEmpty() || draft.reply == Reply.REJECTED || draft.reply == Reply.UNCONFIRMED))
     SideEffect { session.bind(record, value, canAnswer, submit) }
+    val questionArrival = LocalQuestionCardArrival.current
+    SideEffect { questionArrival(owner.storageKey) }
     DisposableEffect(session) {
         session.attach()
         val changed: () -> Unit = { session.refresh() }

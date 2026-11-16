@@ -49,6 +49,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.neverEqualPolicy
 import androidx.compose.runtime.produceState
@@ -105,6 +107,8 @@ private class FollowClearanceLayout : RemeasurementModifier {
 // The lazy item keeps the full content extent H. Only its interactive viewport is
 // bounded (V), and placed at q inside that extent. Content has an ordinary scroll
 // offset a, so its *unclipped* origin is itemOrigin + q - a, not itemOrigin.
+internal val LocalQuestionCardArrival = staticCompositionLocalOf<(String) -> Unit> { {} }
+
 internal class StreamingTailViewport(initiallyBounded: Boolean) {
     var bounded by mutableStateOf(initiallyBounded)
     var migrating by mutableStateOf(false)
@@ -119,6 +123,15 @@ internal class StreamingTailViewport(initiallyBounded: Boolean) {
     var viewportCoordinates by mutableStateOf<LayoutCoordinates?>(null, neverEqualPolicy())
     var anchorCorrection = ""
     var scroller: ScrollableState? = null
+    private val presentedQuestions = mutableSetOf<String>()
+
+    fun registerQuestionBaseline(keys: List<String>) {
+        presentedQuestions.addAll(keys)
+    }
+
+    fun onQuestionPresented(key: String, baseline: Boolean) {
+        if (presentedQuestions.add(key) && bounded && !baseline) followCatchup = true
+    }
 }
 
 @Composable
@@ -135,8 +148,12 @@ internal fun StreamingTailContainer(
     listViewportHeight: () -> Int = {
         listCoordinates()?.size?.height ?: (viewportHeight() + clearance())
     },
+    initialContent: Boolean = false,
     content: @Composable () -> Unit,
 ) {
+    val questionArrival = remember(state, initialContent) {
+        { key: String -> state.onQuestionPresented(key, initialContent) }
+    }
     val innerScroll = rememberScrollableState { delta ->
         val old = state.scrollOffset
         state.scrollOffset = (old - delta).coerceIn(0f, state.maxOffset.toFloat())
@@ -158,7 +175,11 @@ internal fun StreamingTailContainer(
             state.itemOrigin = list.localPositionOf(coordinates, Offset.Zero).y
         }
     }, content = {
-        Layout(content = { Column(content = { content() }) }, modifier = Modifier
+        Layout(content = {
+            CompositionLocalProvider(LocalQuestionCardArrival provides questionArrival) {
+                Column(content = { content() })
+            }
+        }, modifier = Modifier
             .testTag("chat-stream-viewport:$itemKey")
             .onPlaced { state.viewportCoordinates = it }
             .drawWithContent {
@@ -352,8 +373,16 @@ internal fun ChatMessageList(
     val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
     val tailAssistant = turns.lastOrNull() as? ChatTurnUi.Assistant
     val nestedStates = remember { mutableMapOf<String, StreamingTailViewport>() }
+    val initialQuestionContent = initialPositionPending || resumeFollowPending || !pageActive || !scrollResumed ||
+        !presentationActive || retainingRows
     assistantTurns.forEach { (key, turn) ->
-        nestedStates.getOrPut(key) { StreamingTailViewport(turn.status == RunStatus.RUNNING) }
+        val state = nestedStates.getOrPut(key) { StreamingTailViewport(turn.status == RunStatus.RUNNING) }
+        if (initialQuestionContent) {
+            val questions = turn.workflowContent().steps.mapNotNull {
+                (it as? MessageContentUi.Tool)?.step?.takeIf { it.toolName == "ask_user" }?.dedicatedKey
+            }
+            SideEffect { state.registerQuestionBaseline(questions) }
+        }
     }
     SideEffect { nestedStates.keys.retainAll(assistantTurns.keys) }
     val unboundedTail = remember { StreamingTailViewport(false) }
@@ -961,6 +990,7 @@ internal fun ChatMessageList(
                             protectClearance = { turn.listKey == assistantOwnerKey && followBottom },
                             viewportHeight = { viewportHeightPx.intValue - currentOcclusionPx - with(density) { 11.dp.roundToPx() + ChatTailClearance.roundToPx() } },
                             listViewportHeight = { viewportHeightPx.intValue },
+                            initialContent = initialQuestionContent,
                             content = turnContent)
                     } else turnContent()
                 }

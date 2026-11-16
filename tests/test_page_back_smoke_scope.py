@@ -82,30 +82,32 @@ class PageBackSmokeScopeTests(unittest.TestCase):
                 SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
 
     def test_gesture_retained_pair_receipt_keeps_current_tools_and_frozen_identity(self):
-        old = Path.cwd()
-        try:
-            with tempfile.TemporaryDirectory() as directory:
-                os.chdir(directory)
-                env = dict(GITHUB_SHA='b' * 40, EXPECTED_SHA='a' * 40, GITHUB_RUN_ID='14',
-                           GITHUB_RUN_ATTEMPT='1', SMOKE_MODE='smoke',
-                           SMOKE_TEST_CLASSES=','.join((CLASSES[0], CLASSES[3])))
-                with patch.dict(os.environ, env, clear=True), patch.object(
-                        recorder.subprocess, 'check_output', return_value='a' * 40 + '\n'), patch.object(
-                        recorder.subprocess, 'call', return_value=9) as call, patch.object(
-                        recorder.sys, 'stdout', SimpleNamespace(buffer=io.BytesIO())):
-                    self.assertEqual(9, recorder.record('python3'))
-                    receipt = json.loads(Path('tool-evidence/receipt.json').read_text())
-                    tools = Path(recorder.__file__).resolve().parents[2]
-                    self.assertEqual(tools, call.call_args.kwargs['cwd'])
-                    self.assertEqual(str(tools / 'tests'), call.call_args.kwargs['env']['PYTHONPATH'].split(os.pathsep)[0])
-                    self.assertEqual(dict(sha='a' * 40, run_id=14, attempt=1), receipt['identity'])
-                    self.assertEqual('b' * 40, receipt['workflow_sha'])
-                    self.assertEqual('b' * 40, receipt['validation_tools_sha'])
-                    self.assertEqual('page-back-targeted', receipt['scope'])
-                    self.assertEqual(9, receipt['exit_code'])
-                    self.assertEqual(call.call_args.args[0], receipt['command'])
-        finally:
-            os.chdir(old)
+        for selected in ((CLASSES[0], CLASSES[3]), CLASSES,
+                         (*CLASSES, 'app.daiyu.android.MessageActionsActivityTest')):
+            old = Path.cwd()
+            try:
+                with tempfile.TemporaryDirectory() as directory:
+                    os.chdir(directory)
+                    env = dict(GITHUB_SHA='b' * 40, EXPECTED_SHA='a' * 40, GITHUB_RUN_ID='14',
+                               GITHUB_RUN_ATTEMPT='1', SMOKE_MODE='smoke',
+                               SMOKE_TEST_CLASSES=','.join(selected))
+                    with patch.dict(os.environ, env, clear=True), patch.object(
+                            recorder.subprocess, 'check_output', return_value='a' * 40 + '\n'), patch.object(
+                            recorder.subprocess, 'call', return_value=9) as call, patch.object(
+                            recorder.sys, 'stdout', SimpleNamespace(buffer=io.BytesIO())):
+                        self.assertEqual(9, recorder.record('python3'))
+                        receipt = json.loads(Path('tool-evidence/receipt.json').read_text())
+                        tools = Path(recorder.__file__).resolve().parents[2]
+                        self.assertEqual(tools, call.call_args.kwargs['cwd'])
+                        self.assertEqual(str(tools / 'tests'), call.call_args.kwargs['env']['PYTHONPATH'].split(os.pathsep)[0])
+                        self.assertEqual(dict(sha='a' * 40, run_id=14, attempt=1), receipt['identity'])
+                        self.assertEqual('b' * 40, receipt['workflow_sha'])
+                        self.assertEqual('b' * 40, receipt['validation_tools_sha'])
+                        self.assertEqual('page-back-targeted', receipt['scope'])
+                        self.assertEqual(9, receipt['exit_code'])
+                        self.assertEqual(call.call_args.args[0], receipt['command'])
+            finally:
+                os.chdir(old)
 
     def test_return_with_message_actions_keeps_exact_targeted_command_and_inventory(self):
         extra = 'app.daiyu.android.MessageActionsActivityTest'
@@ -166,7 +168,9 @@ class PageBackSmokeScopeTests(unittest.TestCase):
                     self.assertEqual(9, receipt['exit_code'])
                     self.assertEqual(dict(sha='c' * 40, run_id=14, attempt=1), receipt['identity'])
                     self.assertEqual(call.call_args.args[0], receipt['command'])
-                    self.assertTrue(call.call_args.kwargs['env']['PYTHONPATH'].startswith(str(Path('tests').resolve())))
+                    tools = Path(recorder.__file__).resolve().parents[2]
+                    self.assertEqual(tools, call.call_args.kwargs['cwd'])
+                    self.assertEqual(str(tools / 'tests'), call.call_args.kwargs['env']['PYTHONPATH'].split(os.pathsep)[0])
             finally:
                 os.chdir(old)
 

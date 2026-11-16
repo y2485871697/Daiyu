@@ -43,11 +43,47 @@ class ChatTimelineContractTest(unittest.TestCase):
         self.assertIn('postReconnectNotice(', callback)
 
     def test_resume_does_not_hold_controller_monitor_while_entering_budget(self):
-        resume = source('ChatController.kt').split('internal fun resume(owner:Message):Boolean', 1)[1].split('internal fun stopMain(', 1)[0]
-        capture, call = resume.split('val accepted = lifetime.runner.resume()', 1)
-        self.assertIn('current to current.childPauseEpoch\n        }', capture)
-        self.assertIn('if (accepted) synchronized(this)', call)
-        self.assertIn('resources === lifetime && ownedRunner(owner) === lifetime.runner', call)
+        controller = source('ChatController.kt')
+        resume = controller.split(
+            '    internal fun resume(owner:Message):Boolean', 1
+        )[1].split('    private fun childNeedsStopChoice(', 1)[0]
+
+        def normalized(text):
+            return ' '.join(re.sub(r'//[^\n]*', '', text).split())
+
+        self.assertEqual(normalized("""
+            = resume(owner, null)
+            private fun resume(owner: Message, browserPauseEpoch: Long?): Boolean {
+                val (lifetime, pauseEpoch) = synchronized(this) {
+                    val current = resources?.takeIf {
+                        it.runner === ownedRunner(owner) &&
+                        it.browserVisual?.automationHeld != true
+                    } ?: return false
+                    current to current.childPauseEpoch
+                }
+                if (lifetime.runner.state().contextLimited) {
+                    synchronized(this) {
+                        problem = "上下文超限，请先压缩后继续"; notifyChanged()
+                    }
+                    return false
+                }
+                val accepted = if (browserPauseEpoch == null) lifetime.runner.resume()
+                    else lifetime.runner.resumeBrowserPause(browserPauseEpoch)
+                if (accepted) synchronized(this) {
+                    if (resources === lifetime && ownedRunner(owner) === lifetime.runner) {
+                        resumePausedChildren(lifetime, pauseEpoch)
+                        notifyChanged()
+                    }
+                }
+                return accepted
+            }
+        """), normalized(resume))
+        self.assertRegex(
+            controller,
+            r'(?m)^    internal fun resume\(owner:Message\):Boolean'
+            r' = resume\(owner, null\)$',
+        )
+        self.assertIn('resumeOriginal = { epoch -> resume(assistant, epoch) }', controller)
 
     def test_repeat_summary_is_rejected_before_full_history_expansion(self):
         publish = source('context/ContextService.kt').split('internal fun publishRunCompression(', 1)[1].split('internal fun publishRunArchive(', 1)[0]

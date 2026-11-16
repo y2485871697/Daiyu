@@ -424,7 +424,7 @@ class PetPresentationTest : WiredActivityTestCase() {
     }
 
     fun testRealOverlayStaysPaintedAcrossDragFramesBeforeReleaseAndCancel() {
-        mainThread {
+        instrumentation.runOnMainSync {
             activity.setContent {
                 AndroidView(modifier = Modifier.fillMaxSize(), factory = { context ->
                     View(context).apply { setBackgroundColor(android.graphics.Color.WHITE) }

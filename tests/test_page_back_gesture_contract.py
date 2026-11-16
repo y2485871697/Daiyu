@@ -732,6 +732,17 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('val value = exit.value', self.host)
         self.assertNotIn('departure.progress + (1f - departure.progress) * exit.value', self.host)
 
+    def test_only_natural_uncommitted_swipe_seeds_cancel_velocity(self):
+        reset = self.host.split('    fun reset(', 1)[1].split('private class PageBackCallbackSession', 1)[0]
+        self.assertIn('releaseVelocity: Float = 0f', reset)
+        self.assertIn('initialVelocity = releaseVelocity.coerceAtLeast(0f)', reset)
+        self.assertNotIn('pageBackInitialVelocity', reset)
+        pointer = self.host.split('var cancelVelocity = 0f', 1)[1].split('state.reset(owner, releaseVelocity = cancelVelocity)', 1)[0]
+        self.assertIn('if (claimed && change.changedToUp())', pointer)
+        self.assertIn('if (!commit) cancelVelocity = screensPerSecond', pointer)
+        self.assertIn('if (commit && state.alive) state.dispatchBack(screensPerSecond)', pointer)
+        self.assertLess(pointer.index('if (claimed && change.changedToUp())'), pointer.index('if (!commit) cancelVelocity'))
+
     def test_completion_clock_is_owned_by_prepared_request_not_destination_effect(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
         motion = (APP / 'ui/navigation/PageBackMotion.kt').read_text()
@@ -860,7 +871,10 @@ class PageBackGestureContractTest(unittest.TestCase):
         base = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation'
         gestures = (base / 'PageBackGesturesActivityTest.kt').read_text()
         stack = (base / 'PageBackStackActivityTest.kt').read_text()
-        for name in ('testReleaseVelocityContinuesIntoDeparture', 'testPinnedPixelsSurviveContentUpdateUntilCommit', 'testCancelledGestureRestoresCurrentLivePixels', 'testPointerProgressUpdatesDoNotRecomposePageContentPerFrame'):
+        for name in ('testReleaseVelocityContinuesIntoDeparture', 'testPinnedPixelsSurviveContentUpdateUntilCommit', 'testCancelledGestureRestoresCurrentLivePixels', 'testPointerProgressUpdatesDoNotRecomposePageContentPerFrame',
+                     'testCancelSpringKeepsPositiveVelocityAndClampsNegative',
+                     'testNaturalCancelUpKeepsMomentumButPointerCancelDoesNot',
+                     'testNaturalCancelUpKeepsMomentumButPointerCancelDoesNotInRtl'):
             self.assertIn('fun ' + name + '()', gestures)
         self.assertIn('afterFirstFrame <= beforeGesture + 1', gestures)
         self.assertIn('afterFirstFrame, pageCompositions', gestures)

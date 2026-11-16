@@ -199,7 +199,7 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
         gestureVisualActive = previewAllowed && nextProgress > 0f
     }
 
-    fun reset(owner: Any? = null, immediate: Boolean = false) {
+    fun reset(owner: Any? = null, immediate: Boolean = false, releaseVelocity: Float = 0f) {
         synchronousTrace("daiyu.back.reset") {
             if (owner != null && this.owner !== owner) return
             BackPerformance.safely {
@@ -226,7 +226,8 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
             val newSettleJob = scope.launch(start = CoroutineStart.LAZY) {
                 val settle = Animatable(start)
                 try {
-                    settle.animateTo(0f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f)) {
+                    settle.animateTo(0f, spring(dampingRatio = 1f, stiffness = 146f, visibilityThreshold = 0.0025f),
+                        initialVelocity = releaseVelocity.coerceAtLeast(0f)) {
                         visualProgress = value
                     }
                 } finally {
@@ -662,6 +663,7 @@ internal fun PageBackGestureHost(
                     val velocity = VelocityTracker().also { it.addPointerInputChange(down) }
                     var claimed = false
                     var consumedMovement = false
+                    var cancelVelocity = 0f
                     try {
                         while (true) {
                             // The return overlay blocks children; observe ahead of it until the next swipe claims.
@@ -682,6 +684,7 @@ internal fun PageBackGestureHost(
                                         screensPerSecond <= -1f -> false
                                         else -> dx >= threshold
                                     }
+                                    if (!commit) cancelVelocity = screensPerSecond
                                     if (commit && state.alive) state.dispatchBack(screensPerSecond) { currentBack() }
                                 }
                                 break
@@ -708,7 +711,7 @@ internal fun PageBackGestureHost(
                             change.consume()
                         }
                     } finally {
-                        state.reset(owner)
+                        state.reset(owner, releaseVelocity = cancelVelocity)
                     }
                 }
             } else Modifier,

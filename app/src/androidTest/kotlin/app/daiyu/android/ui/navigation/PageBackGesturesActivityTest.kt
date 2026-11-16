@@ -547,6 +547,95 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    private fun cancelProgress() = ui.runOnIdle { checkNotNull(observedState).visualProgress }
+
+    private fun cancelSamples() = List(4) {
+        ui.mainClock.advanceTimeByFrame()
+        cancelProgress()
+    }
+
+    private fun assertCancelRestored() {
+        ui.mainClock.advanceTimeBy(1000)
+        assertEquals(0f, cancelProgress(), 0f)
+        ui.onNodeWithTag("page-back-target").assertDoesNotExist()
+        ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
+        assertEquals("test-page", route)
+        assertEquals(0, backCount)
+    }
+
+    fun testCancelSpringKeepsPositiveVelocityAndClampsNegative() {
+        predictive = false
+        mount(capturePreviousPage = true, immediateCapture = true)
+        ui.mainClock.autoAdvance = false
+        try {
+            val state = checkNotNull(observedState)
+            fun trace(velocity: Float?): List<Float> {
+                mainThread {
+                    val owner = Any()
+                    state.update(owner, .1f, predictive = false)
+                    if (velocity == null) state.reset(owner)
+                    else state.reset(owner, releaseVelocity = velocity)
+                }
+                return cancelSamples().also { assertCancelRestored() }
+            }
+            val default = trace(null)
+            val zero = trace(0f)
+            val negative = trace(-.8f)
+            val positive = trace(.8f)
+            zero.indices.forEach {
+                assertEquals(zero[it], default[it], .00001f)
+                assertEquals(zero[it], negative[it], .00001f)
+            }
+            assertTrue(zero.last() < .1f)
+            assertTrue("cancel keeps the measured forward momentum", positive.drop(1).any { it > .101f })
+            mainThread {
+                val owner = Any()
+                state.update(owner, .1f, predictive = false)
+                state.reset(owner, immediate = true, releaseVelocity = .8f)
+                assertEquals(0f, state.visualProgress, 0f)
+                assertFalse(state.gestureVisualActive)
+                assertFalse(state.active)
+            }
+            cancelSamples().forEach { assertEquals(0f, it, 0f) }
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    private fun assertNaturalCancelUpKeepsMomentumButPointerCancelDoesNot(rtl: Boolean) {
+        predictive = false
+        mount(capturePreviousPage = true, immediateCapture = true, rtl = rtl)
+        ui.mainClock.autoAdvance = false
+        try {
+            for (naturalUp in listOf(true, false)) {
+                ui.onNodeWithTag("page-back-host").performTouchInput {
+                    fun x(fraction: Float) = width * if (rtl) 1f - fraction else fraction
+                    down(Offset(x(.05f), height * .6f))
+                    repeat(8) {
+                        moveTo(Offset(x(.05f + .012f * (it + 1)), height * .6f), 16)
+                    }
+                }
+                val release = cancelProgress()
+                assertTrue(release > 0f && release < .2f)
+                ui.onNodeWithTag("page-back-host").performTouchInput {
+                    if (naturalUp) { advanceEventTime(1); up() } else cancel()
+                }
+                val samples = cancelSamples()
+                if (naturalUp) {
+                    assertTrue("natural up carries forward velocity into cancel", samples.drop(1).any { it > release + .001f })
+                } else {
+                    assertTrue("forced cancel must not inherit pointer velocity", samples.all { it <= release + .00001f })
+                    assertTrue(samples.zipWithNext().all { (a, b) -> b <= a + .00001f })
+                }
+                assertCancelRestored()
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testNaturalCancelUpKeepsMomentumButPointerCancelDoesNot() =
+        assertNaturalCancelUpKeepsMomentumButPointerCancelDoesNot(rtl = false)
+
+    fun testNaturalCancelUpKeepsMomentumButPointerCancelDoesNotInRtl() =
+        assertNaturalCancelUpKeepsMomentumButPointerCancelDoesNot(rtl = true)
+
     fun testNewSwipeInterruptsCancelledReturnWithoutWaitingForSpring() {
         predictive = false
         mount(capturePreviousPage = true)

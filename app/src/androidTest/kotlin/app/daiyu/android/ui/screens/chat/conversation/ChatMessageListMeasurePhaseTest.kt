@@ -108,6 +108,87 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
         mainThread { assertEquals(0, state.maxOffset); assertEquals(0f, state.scrollOffset, 0.001f) }
     }
 
+    fun testBoundedContentGrowthUpdatesLazyItemExtentWithoutChangingViewportHeight() {
+        val state = StreamingTailViewport(initiallyBounded = true)
+        val listState = androidx.compose.foundation.lazy.LazyListState()
+        var contentHeight by mutableStateOf(400.dp)
+        var testDensity: androidx.compose.ui.unit.Density? = null
+        mount {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            testDensity = density
+            androidx.compose.foundation.lazy.LazyColumn(state = listState) {
+                item("bounded-tail") {
+                    StreamingTailContainer(state, { null }, "growth-probe", true,
+                        follows = { false }, clearance = { 0 },
+                        viewportHeight = { with(density) { 120.dp.roundToPx() } }) {
+                        Box(Modifier.size(100.dp, contentHeight))
+                    }
+                }
+            }
+        }
+        for (height in listOf(400.dp, 900.dp, 500.dp)) {
+            val expectedHeight = with(checkNotNull(testDensity)) { height.roundToPx() }
+            mainThread { contentHeight = height }
+            ui.waitForIdle()
+            ui.onNodeWithTag("chat-stream-viewport:growth-probe").assertHeightIsEqualTo(120.dp)
+            mainThread {
+                assertEquals(expectedHeight, state.contentHeight)
+                assertEquals("LazyColumn must retain the new full extent while V stays fixed",
+                    expectedHeight, listState.layoutInfo.visibleItemsInfo.single().size)
+            }
+        }
+    }
+
+    fun testPrefetchedStreamingTailMeasuresWithoutPlacingItsContent() {
+        val state = StreamingTailViewport(initiallyBounded = true)
+        val subcomposition = androidx.compose.ui.layout.SubcomposeLayoutState()
+        val placements = java.util.concurrent.atomic.AtomicInteger()
+        val measures = java.util.concurrent.atomic.AtomicInteger()
+        var activate by mutableStateOf(false)
+        var widthPx = 0
+        var viewportPx = 0
+        var bodyPx = 0
+        val prefetchedBody: @Composable () -> Unit = {
+            StreamingTailContainer(state, { null }, "prefetch-probe", true,
+                follows = { false }, clearance = { 0 }, viewportHeight = { viewportPx },
+                onViewportMeasure = { measures.incrementAndGet() }) {
+                androidx.compose.ui.layout.Layout(content = {}) { _, _ ->
+                    layout(widthPx, bodyPx) { placements.incrementAndGet() }
+                }
+            }
+        }
+        mount {
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            widthPx = with(density) { 100.dp.roundToPx() }
+            viewportPx = with(density) { 120.dp.roundToPx() }
+            bodyPx = with(density) { 1000.dp.roundToPx() }
+            androidx.compose.ui.layout.SubcomposeLayout(state = subcomposition) { constraints ->
+                val body = if (activate) subcompose("prefetched-tail", prefetchedBody).single()
+                    .measure(constraints.copy(minHeight = 0, maxHeight = androidx.compose.ui.unit.Constraints.Infinity))
+                    else null
+                layout(constraints.maxWidth, constraints.maxHeight) { body?.placeRelative(0, 0) }
+            }
+        }
+        var disposePrefetch: () -> Unit = { }
+        try {
+            mainThread {
+                val slot = subcomposition.precompose("prefetched-tail", prefetchedBody)
+                disposePrefetch = { slot.dispose() }
+                assertEquals(1, slot.placeablesCount)
+                slot.premeasure(0, androidx.compose.ui.unit.Constraints.fixedWidth(widthPx))
+                assertTrue("The prefetch must really measure the viewport", measures.get() > 0)
+                assertEquals(bodyPx, state.contentHeight)
+                assertEquals("Premeasure must not force placement to resolve a height alignment line",
+                    0, placements.get())
+            }
+            mainThread { activate = true }
+            ui.waitForIdle()
+            assertTrue("The same prefetched body must place when its slot becomes visible", placements.get() > 0)
+        } finally {
+            mainThread { disposePrefetch() }
+        }
+    }
+
     fun testFollowGateChangeAfterMeasureCannotPublishHalfATailTransform() {
         val state = StreamingTailViewport(initiallyBounded = true)
         var following = true

@@ -89,11 +89,19 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
 
     def test_full_extent_is_a_parent_measure_dependency_even_when_the_viewport_is_fixed(self):
         source = (CHAT / 'ChatMessageList.kt').read_text()
-        self.assertIn('HorizontalAlignmentLine(::maxOf)', source)
-        self.assertIn('alignmentLines = mapOf(StreamingTailContentHeight to body.height)', source)
-        self.assertIn('val contentHeight = viewport[StreamingTailContentHeight]', source)
+        self.assertIn('var contentHeight by androidx.compose.runtime.mutableIntStateOf(0)', source)
+        self.assertIn('state.contentHeight = body.height', source)
+        self.assertIn('val contentHeight = state.contentHeight', source)
         self.assertIn('layout(viewport.width, contentHeight)', source)
-        self.assertNotIn('state.contentHeight = body.height', source)
+        self.assertNotIn('StreamingTailContentHeight', source)
+        self.assertNotIn('HorizontalAlignmentLine', source)
+        inner = source.index('state.contentHeight = body.height')
+        outer_measure = source.index('val viewport = measurables.single().measure', inner)
+        self.assertLess(outer_measure, source.index('val contentHeight = state.contentHeight', outer_measure))
+        tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatMessageListMeasurePhaseTest.kt').read_text()
+        self.assertIn('testBoundedContentGrowthUpdatesLazyItemExtentWithoutChangingViewportHeight', tests)
+        self.assertIn('testPrefetchedStreamingTailMeasuresWithoutPlacingItsContent', tests)
+        self.assertIn('slot.premeasure(0,', tests)
 
     def test_transient_zero_consumption_does_not_move_the_saved_cycle_edge(self):
         source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()

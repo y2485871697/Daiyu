@@ -14,7 +14,6 @@ import androidx.compose.foundation.gestures.stopScroll
 import androidx.compose.foundation.MutatePriority
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.Layout
-import androidx.compose.ui.layout.HorizontalAlignmentLine
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
@@ -91,7 +90,6 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 internal val ChatTailClearance = 8.dp
-private val StreamingTailContentHeight = HorizontalAlignmentLine(::maxOf)
 
 private class FollowClearanceLayout : RemeasurementModifier {
     var remeasurement: Remeasurement? = null
@@ -184,18 +182,19 @@ internal fun StreamingTailContainer(
             onViewportMeasure?.invoke()
             val currentViewportHeight = viewportHeight().coerceAtLeast(1)
             val body = measurables.single().measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+            // Publish H without querying alignment lines: prefetch must measure, not place this subtree.
+            state.contentHeight = body.height
             // Position-dependent clipping is resolved after this item's current origin is placed.
             val height = if (state.bounded) minOf(body.height, currentViewportHeight) else body.height
-            layout(body.width, height, alignmentLines = mapOf(StreamingTailContentHeight to body.height)) {
+            layout(body.width, height) {
                 body.placeRelative(0, -state.scrollOffset.roundToInt())
             }
         }
     }) { measurables, constraints ->
         val currentListHeight = listViewportHeight()
         val viewport = measurables.single().measure(constraints.copy(minHeight = 0))
-        // Full extent remains a measure dependency even when the bounded viewport size is unchanged.
-        val contentHeight = viewport[StreamingTailContentHeight]
-        state.contentHeight = contentHeight
+        // This snapshot read remeasures the full extent even when the bounded viewport stays fixed.
+        val contentHeight = state.contentHeight
         layout(viewport.width, contentHeight) {
             // onPlaced runs after this item's parent placement, before its child
             // placement. No assumption about LazyListState publishing a measure.

@@ -131,7 +131,7 @@ class DoubaoMotionScopeTest(unittest.TestCase):
         script = (root / "scripts/smoke_boot.sh").read_text()
         self.assertIn('doubao_motion_floating_target = doubao_motion_voice_target | {"app.daiyu.android.VoiceCallFloatingWindowTest"}', script)
         self.assertIn("sorted(doubao_motion_floating_target)", script)
-        setup = script.split('  if test "$api" = 26 && test "${SMOKE_MODE:-}" = smoke &&', 1)[1].split('  instrumentation_options=()', 1)[0]
+        setup = script.split('  if { test "$api" = 26 || test "$api" = 37; } && test "${SMOKE_MODE:-}" = smoke &&', 1)[1].split('  instrumentation_options=()', 1)[0]
         self.assertIn('test "${SMOKE_TEST_CLASSES:-}" = "' + full + '"', setup)
 
     def test_real_floating_junit4_source_is_discovered_in_one_and_four_shards(self):

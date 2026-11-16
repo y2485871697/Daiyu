@@ -49,7 +49,10 @@ class VoiceCallContractTest(unittest.TestCase):
         self.assertIn('VoiceCallModelMemory.readOrInitialize(db)', database)
         self.assertIn('isTemporaryVoice(id.value)) VoiceCallModelMemory.write(db, replacement)', database)
         main = (SRC / 'MainActivity.kt').read_text()
-        self.assertIn('onModelLongPress = { if (current()) openVoiceThinking(key) }', main)
+        actions = main.split('private fun voiceCallActions(external: Boolean = false)', 1)[1].split('private fun closeDoubaoCall(', 1)[0]
+        self.assertIn('onModelLongPress = { if (current()) {\n'
+                      '                if (external) returnToVoiceCall(key) { openVoiceThinking(key) } else openVoiceThinking(key)\n'
+                      '            } },', actions)
         self.assertIn('controller.setVoiceCallReasoning(voice, effort)', main)
         self.assertIn('needsModelSelection = model == null', controller)
         self.assertIn('if (created.needsModelSelection)', main)

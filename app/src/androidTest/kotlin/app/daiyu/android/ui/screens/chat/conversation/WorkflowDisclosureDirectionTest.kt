@@ -472,10 +472,11 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         val readingAnchor = position("reading-anchor")
         val footerAnchor = position("reading-footer")
         assertTrue("The existing reading marker must be visible", readingAnchor >= listTop && readingAnchor < safeBottom)
+        var phase = "ready"
         fun assertReadingAnchor() {
-            assertEquals("Upward opening and downward collapse must not move the following text: ${geometry(headerTag)}",
+            assertEquals("Upward opening and downward collapse must not move the following text ($phase): ${geometry(headerTag)} parent=${geometry()}",
                 readingAnchor, position("reading-anchor"), 1f)
-            assertEquals("The same operation must not move the remainder after the workflow: ${geometry(headerTag)}",
+            assertEquals("The same operation must not move the remainder after the workflow ($phase): ${geometry(headerTag)} parent=${geometry()}",
                 footerAnchor, position("reading-footer"), 1f)
         }
         ui.mainClock.autoAdvance = false
@@ -486,6 +487,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                 var changedHeight = false
                 ui.onNodeWithTag(headerTag).performTouchInput { click() }
                 repeat(frames) {
+                    phase = "opening=$opening frames=$frames frame=$it"
                     ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
                     assertDirection(true, headerTag)
                     assertReadingAnchor()
@@ -503,6 +505,8 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                 ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
                 assertReadingAnchor()
             }
+            assertTrue("A settled disclosure must release the outer follower: ${geometry()}",
+                " owner=null" in geometry())
         } finally { ui.mainClock.autoAdvance = true }
     }
 

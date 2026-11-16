@@ -197,6 +197,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
     val visibility = remember(step.renderKey) { MutableTransitionState(expanded) }
     visibility.targetState = expanded
     val disclosure = rememberWorkflowDisclosureMotion(step.renderKey, visibility)
+    val detailExtent = remember(step.renderKey) { WorkflowCollapseExtent() }
     val running = step.activity in setOf(ToolActivityUi.RUNNING, ToolActivityUi.PREPARING, ToolActivityUi.PAUSING, ToolActivityUi.PAUSED)
     val tint = when {
         step.state == WorkStepState.FAILED -> colors.error
@@ -257,7 +258,11 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
                         if (expanded) "收起操作详情" else "展开操作详情", Modifier.size(14.dp).settingsDisclosureRotation(expanded), tint = colors.muted)
                 }
             }
-            AnimatedVisibility(visibility, enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment),
+            AnimatedVisibility(visibility, modifier = Modifier.layout { measurable, constraints ->
+                val detail = measurable.measure(constraints)
+                val height = detailExtent.measure(detail.height, expanded, disclosure.closingDetailHeight)
+                layout(detail.width, height) { detail.placeRelative(0, 0) }
+            }, enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment),
                 exit = fadeOut() + shrinkVertically(shrinkTowards = disclosure.alignment)) {
                 CompositionLocalProvider(LocalToolOutputContext provides ToolOutputContext(step.name, stateLabel)) {
                     Column(Modifier.padding(bottom = 4.dp).then(

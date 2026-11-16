@@ -61,9 +61,9 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
 
     def test_disclosure_scroll_moves_the_window_not_only_its_clipped_contents(self):
         source = (CHAT / 'ChatMessageList.kt').read_text()
-        anchor = source.split('correctAnchor = { itemKey, delta ->', 1)[1].split('fun canFollowBottom()', 1)[0]
+        anchor = source.split('correctAnchor = { itemKey, remaining ->', 1)[1].split('fun canFollowBottom()', 1)[0]
         self.assertIn('listState.dispatchRawDelta(delta)', anchor)
-        self.assertIn('it.size != viewport.contentHeight', anchor)
+        self.assertLess(anchor.index('forceRemeasure()'), anchor.index('val delta = remaining()'))
         self.assertNotIn('viewport.scrollOffset =', anchor)
         self.assertIn('disclosureViewport.active == null', source)
 
@@ -84,10 +84,27 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         self.assertIn('anchorGesture == viewport.gesture && !correctingAnchor', source)
         start = source.index('correctingAnchor = true')
-        request = source.index('viewport.correctAnchor(it.itemKey, delta)', start)
+        request = source.index('viewport.correctAnchor(context.itemKey)', start)
         release = source.index('finally { correctingAnchor = false }', request)
         self.assertLess(start, request)
         self.assertLess(request, release)
+
+    def test_transition_idle_settles_the_physical_anchor_before_release(self):
+        source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
+        finish = source.split('private fun finishIfSettled()', 1)[1].split('fun dispose()', 1)[0]
+        self.assertIn('if (!finishPending || !animationIdle) return', finish)
+        self.assertLess(finish.index('boundary.correctAnchor(settling = true)'), finish.index('releaseAnchor(force = false)'))
+        self.assertIn('(anchorRequester ?: this).finishIfSettled()', source)
+        self.assertIn('return abs(anchorDelta()) <= .5f', source)
+        self.assertIn('if (anchorRequester != null) return', source)
+        device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowDisclosureDirectionTest.kt').read_text()
+        self.assertIn('A settled disclosure must release the outer follower', device)
+
+    def test_tool_spring_reversal_reuses_the_placed_extent_guard(self):
+        source = (CHAT / 'WorkProcessCard.kt').read_text().split('internal fun WorkStepRow(', 1)[1]
+        self.assertIn('val detailExtent = remember(step.renderKey) { WorkflowCollapseExtent() }', source)
+        self.assertIn('detailExtent.measure(detail.height, expanded, disclosure.closingDetailHeight)', source)
+        self.assertIn('shrinkTowards = disclosure.alignment', source)
 
     def test_chat_helper_preserves_exit_input_and_focus_guards(self):
         source = (CHAT / 'WorkflowExpandableContent.kt').read_text()

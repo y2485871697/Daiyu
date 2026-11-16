@@ -381,19 +381,18 @@ internal fun ChatMessageList(
             resumeFollow = { if (pageActive && scrollResumed && !currentDragging) followBottom = true },
             canAnchor = { pageActive && scrollResumed && !currentDragging && !initialPositionPending && !currentRetainingRows && !currentNestedTail.migrating &&
                 (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial) && !exactNavigationOwnsScroll },
-            correctAnchor = { itemKey, delta ->
+            correctAnchor = { itemKey, remaining ->
                 var consumed = 0f
                 if (clearanceLayout.active && !clearanceLayout.correcting && nestedStates[itemKey]?.migrating != true) {
                     clearanceLayout.correcting = true
                     try {
                         val viewport = nestedStates[itemKey]
-                        if (viewport?.bounded == true && listState.layoutInfo.visibleItemsInfo
-                                .any { it.key == itemKey && it.size != viewport.contentHeight }) {
-                            clearanceLayout.remeasurement?.forceRemeasure()
-                        }
+                        // Finish pending item measurement before sampling its physical anchor.
+                        clearanceLayout.remeasurement?.forceRemeasure()
+                        val delta = remaining()
                         // Move the reading window with its content; an inner offset would clip the headers at its old top.
                         val before = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == itemKey }
-                        consumed = listState.dispatchRawDelta(delta)
+                        if (abs(delta) > .5f) consumed = listState.dispatchRawDelta(delta)
                         if (abs(consumed) > .5f) clearanceLayout.remeasurement?.forceRemeasure()
                         val after = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == itemKey }
                         viewport?.anchorCorrection = "delta=$delta consumed=$consumed before=${before?.offset}/${before?.size} after=${after?.offset}/${after?.size}"

@@ -45,7 +45,7 @@ internal class WorkflowDisclosureViewport(
     val bounds: () -> Rect?,
     val resumeFollow: () -> Unit,
     val canAnchor: () -> Boolean,
-    val correctAnchor: (String, Float) -> Float,
+    val correctAnchor: (String, () -> Float) -> Float,
 ) {
     var followingOnPress = false
     var diagnostics: () -> String = { "" }
@@ -99,6 +99,7 @@ internal class WorkflowDisclosureMotion(
     private var pressGesture = -1L
     private var anchorRequester: WorkflowDisclosureMotion? = null
     private var borrowedBoundary: WorkflowDisclosureMotion? = null
+    private var finishPending = false
     var animationIdle = true
 
     val headerModifier: Modifier get() = Modifier.onGloballyPositioned {
@@ -110,7 +111,8 @@ internal class WorkflowDisclosureMotion(
             this[WorkflowDisclosureGeometry] = {
                 "up=$upwards expanded=$expanded chosen=$cycleChosen active=${context?.viewport?.active === this@WorkflowDisclosureMotion}" +
                     " gesture=$anchorGesture/${context?.viewport?.gesture} topAnchor=$anchorAtTop saved=$anchorTop/$anchorBottom" +
-                    " borrowed=${borrowedBoundary != null} requester=${anchorRequester != null} idle=$animationIdle" +
+                    " borrowed=${borrowedBoundary != null} requester=${anchorRequester != null} idle=$animationIdle pending=$finishPending" +
+                    " owner=${context?.viewport?.active?.let { owner -> "${owner.anchorTop}/${owner.anchorBottom}/${owner.anchorDelta()}" }}" +
                     " requested=$lastRequested consumed=$lastConsumed container=${container?.takeIf { it.isAttached }?.let { c -> c.positionInWindow().y to c.size.height }} " +
                     context?.viewport?.diagnostics?.invoke().orEmpty()
             }
@@ -127,21 +129,35 @@ internal class WorkflowDisclosureMotion(
         container = coordinates
         val viewport = context?.viewport
         if (viewport != null && viewport.active === this && anchorGesture == viewport.gesture && !correctingAnchor) {
-            if (!viewport.canAnchor()) viewport.active = null
-            else {
-                val delta = if (anchorAtTop) coordinates.positionInWindow().y - anchorTop
-                    else coordinates.positionInWindow().y + coordinates.size.height - anchorBottom
-                if (abs(delta) > .5f) context?.let {
-                    correctingAnchor = true
-                    try {
-                        lastRequested = delta
-                        val consumed = viewport.correctAnchor(it.itemKey, delta)
-                        lastConsumed = consumed
-                        // Preserve the cycle edge while an owning item measure is still pending.
-                    } finally { correctingAnchor = false }
-                }
-            }
+            correctAnchor()
+            (anchorRequester ?: this).finishIfSettled()
         }
+    }
+
+    private fun anchorDelta(): Float {
+        val placed = container?.takeIf { it.isAttached } ?: return 0f
+        return if (anchorAtTop) placed.positionInWindow().y - anchorTop
+            else placed.positionInWindow().y + placed.size.height - anchorBottom
+    }
+
+    private fun correctAnchor(settling: Boolean = false): Boolean {
+        val context = context ?: return true
+        val viewport = context.viewport
+        if (viewport.active !== this || anchorGesture != viewport.gesture) return true
+        if (correctingAnchor) return false
+        if (!viewport.canAnchor()) {
+            viewport.active = null
+            return true
+        }
+        if (settling || abs(anchorDelta()) > .5f) {
+            correctingAnchor = true
+            try {
+                lastConsumed = viewport.correctAnchor(context.itemKey) {
+                    anchorDelta().also { lastRequested = it }
+                }
+            } finally { correctingAnchor = false }
+        }
+        return abs(anchorDelta()) <= .5f
     }
 
     private fun chooseDirection(following: Boolean): Boolean {
@@ -157,18 +173,19 @@ internal class WorkflowDisclosureMotion(
     }
 
     fun toggle(opening: Boolean) {
-        closingDetailHeight = if (collapseUp && !opening) {
+        closingDetailHeight = if (!opening) {
             val placedContainer = container?.takeIf { it.isAttached }
             val placedHeader = header?.takeIf { it.isAttached }
             if (placedContainer != null && placedHeader != null) {
                 var height = (placedContainer.size.height - placedHeader.size.height).coerceAtLeast(0)
-                context?.viewport?.bounds?.invoke()?.let { safe ->
+                if (collapseUp) context?.viewport?.bounds?.invoke()?.let { safe ->
                     height = minOf(height, (safe.bottom - placedHeader.positionInWindow().y -
                         placedHeader.size.height).toInt().coerceAtLeast(0))
                 }
                 height
             } else null
         } else null
+        finishPending = false
         releaseAnchor(force = true)
         val viewport = context?.viewport
         val following = context?.outputActive?.invoke() == true &&
@@ -231,8 +248,18 @@ internal class WorkflowDisclosureMotion(
     }
 
     fun finish(closed: Boolean = false) {
-        releaseAnchor(force = false)
+        if (anchorRequester != null) return
+        finishPending = true
+        finishIfSettled()
         if (closed) cycleChosen = false
+    }
+
+    private fun finishIfSettled() {
+        if (!finishPending || !animationIdle) return
+        val boundary = borrowedBoundary ?: this
+        if (!boundary.correctAnchor(settling = true)) return
+        finishPending = false
+        releaseAnchor(force = false)
     }
 
     fun dispose() { releaseAnchor(force = true) }

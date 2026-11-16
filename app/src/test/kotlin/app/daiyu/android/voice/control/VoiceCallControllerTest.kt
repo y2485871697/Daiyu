@@ -589,4 +589,33 @@ class VoiceCallControllerTest {
         c.stop(permit)
     }
 
+
+    @Test fun browserResultsCanContinueWithoutACallCountLimitAndStreamSpeechBeforeFinal() {
+        val f = Fake(); val c = VoiceCallController(f)
+        val permit = c.start(profile)!!; f.finishRecognition(); f.accept(owner)
+        val deliver = f.observations.single().body
+        repeat(12) {
+            deliver(VoiceAssistantBody(owner, "", VoiceBodyStatus.STREAMING, browsing = true)); f.flush()
+            assertTrue(c.state.value.browsing)
+            deliver(VoiceAssistantBody(owner, "", VoiceBodyStatus.STREAMING, browsing = false)); f.flush()
+            assertFalse(c.state.value.browsing)
+            assertTrue(c.state.value.active)
+        }
+        val first = "已经取得可读资料。"
+        deliver(VoiceAssistantBody(owner, first, VoiceBodyStatus.STREAMING, browsing = true)); f.flush()
+        assertEquals(first, c.state.value.reply)
+        assertEquals(first to false, f.outputs.single().bodies.last())
+        assertTrue(c.state.value.browsing)
+        val final = first + "我先告诉你已经确认的部分。"
+        deliver(VoiceAssistantBody(owner, final, VoiceBodyStatus.COMPLETE)); f.flush()
+        assertEquals(final, c.state.value.reply)
+        assertEquals(final to true, f.outputs.single().bodies.last())
+        assertFalse(c.state.value.browsing)
+        assertTrue(f.stopped.isEmpty())
+        f.outputs.single().drained(); f.flush()
+        assertTrue(c.state.value.active)
+        assertEquals(permit, c.state.value.permitId)
+        c.stop(permit)
+    }
+
 }

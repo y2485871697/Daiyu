@@ -57,6 +57,24 @@ class VoiceCallFloatingWindowTest {
         }
         assertTrue(message, satisfied)
     }
+    private fun awaitNativeFade(root: View, message: String, close: () -> Unit) {
+        var drewIntermediateFrame = false
+        var observer: android.view.ViewTreeObserver? = null
+        val probe = android.view.ViewTreeObserver.OnDrawListener {
+            if (root.isAttachedToWindow && root.alpha > 0f && root.alpha < 1f &&
+                root.scaleX < 1f && root.scaleY < 1f) drewIntermediateFrame = true
+        }
+        try {
+            main {
+                observer = root.viewTreeObserver
+                observer!!.addOnDrawListener(probe)
+                close()
+            }
+            await(message) { drewIntermediateFrame }
+        } finally {
+            main { observer?.takeIf { it.isAlive }?.removeOnDrawListener(probe) }
+        }
+    }
     private fun picture(key: Long = -2L, mini: Boolean = false) = DoubaoCallUi(key, "original-conversation",
         presentation = if (mini) DoubaoCallPresentation.MINI else DoubaoCallPresentation.EXPANDED,
         startedAtMillis = SystemClock.elapsedRealtime(), title = "GPT", responseLabel = "助手", modelSelectable = true)
@@ -106,15 +124,12 @@ class VoiceCallFloatingWindowTest {
         main { host.update(state, actions) }
         await("laid out before close") { windows.added.single().isLaidOut }
         val root = windows.added.single()
-        main {
+        awaitNativeFade(root, "distinct external fade and scale progressed") {
             // Production stops audio synchronously before publishing this visual close.
             host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), actions)
             assertFalse(host.isShowing(state.sessionKey))
             assertTrue((root.layoutParams as WindowManager.LayoutParams).flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE != 0)
             assertTrue(root.isAttachedToWindow)
-        }
-        await("distinct external fade and scale progressed") {
-            root.isAttachedToWindow && root.alpha > 0f && root.alpha < 1f && root.scaleX < 1f && root.scaleY < 1f
         }
         await("animation removes the window") { !root.isAttachedToWindow }
         main {
@@ -419,18 +434,16 @@ class VoiceCallFloatingWindowTest {
         main { host.update(state, actions, anchor, inApp = true) }
         await("in-app global window laid out") { windows.added.single().isLaidOut }
         val root = windows.added.single()
-        main {
+        awaitNativeFade(root, "only the external close uses native fade") {
             assertTrue(host.update(state, actions, anchor, inApp = false))
             assertSame(root, windows.added.single())
             assertTrue(windows.removals.isEmpty())
             assertTrue(host.isShowing(state.sessionKey))
             host.update(state.copy(presentation = DoubaoCallPresentation.CLOSING), actions, anchor, inApp = false)
         }
-        await("only the external close uses native fade") {
-            root.isAttachedToWindow && root.alpha > 0f && root.alpha < 1f && root.scaleX < 1f
-        }
         await("external close detaches") { !root.isAttachedToWindow }
         main {
+            assertSame(root, windows.added.single())
             assertEquals(listOf(state.sessionKey), completed)
             assertEquals(listOf(root), windows.removals)
             assertEquals(0, hangups)

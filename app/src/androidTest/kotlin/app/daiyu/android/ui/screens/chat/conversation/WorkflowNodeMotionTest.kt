@@ -45,6 +45,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
     private var rows by mutableStateOf(listOf(first))
     private lateinit var density: Density
     private var background = Color.Unspecified
+    private var lineContrast = 0f
     private var success = Color.Unspecified
     private var error = Color.Unspecified
     private var flowRunning by mutableStateOf(true)
@@ -68,6 +69,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current
             background = conversationColors().surface.copy(alpha = 1f)
+            lineContrast = distance(conversationColors().line.compositeOver(background), background)
             success = conversationColors().success
             error = conversationColors().error
             Box(Modifier.safeDrawingPadding()) {
@@ -395,7 +397,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             val fullBody = bodyInk(end)
             assertTrue(fullLine.isNotEmpty() && fullLine.all { it > .005f })
             val waiting = samples.filter { sample -> sample.connector.size == fullLine.size &&
-                sample.connector.zip(fullLine).any { (now, full) -> now < full * .9f } }
+                sample.connector.any { it < lineContrast * .9f } }
             assertTrue("must observe a line crossing completed narration", waiting.isNotEmpty())
             val failureIndex = samples.indexOfFirst { sample -> sample in waiting &&
                 (sample.body > fullBody * .01f || sample.ink > .03f) }
@@ -408,10 +410,10 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                 }
                 java.io.File(directory, "narration-frame$failureIndex.txt").writeText(buildString {
                     appendLine("density=${density.density} background=$background raster=$raster first=$a narration=$textBefore")
-                    appendLine("target=${ui.onNodeWithTag("tool-step:motion-b").fetchSemanticsNode().boundsInRoot} fullBody=$fullBody")
+                    appendLine("target=${ui.onNodeWithTag("tool-step:motion-b").fetchSemanticsNode().boundsInRoot} fullBody=$fullBody lineContrast=$lineContrast")
                     samples.forEachIndexed { index, sample ->
                         val missing = sample.connector.zip(fullLine).mapIndexedNotNull { row, (now, full) ->
-                            if (now < full * .9f) "$row:$now/$full" else null
+                            if (now < lineContrast * .9f) "$row:$now/$full" else null
                         }
                         appendLine("frame=$index body=${sample.body} ink=${sample.ink} lineSize=${sample.connector.size} missing=${missing.joinToString()}")
                     }

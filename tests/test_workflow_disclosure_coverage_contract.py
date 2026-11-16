@@ -140,6 +140,15 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowDisclosureDirectionTest.kt').read_text()
         self.assertIn('A settled disclosure must release the outer follower', device)
 
+    def test_idle_settlement_leaves_lazy_subcomposition_before_forcing_measure(self):
+        source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
+        effect = source.split('LaunchedEffect(motion, idle, closed) {', 1)[1].split('DisposableEffect(motion)', 1)[0]
+        self.assertIn('if (idle)', effect)
+        self.assertLess(effect.index('withFrameNanos { }'), effect.index('motion.finish(closed)'))
+        self.assertNotIn('SideEffect', source)
+        self.assertIn('onDispose { motion.dispose() }', source)
+        self.assertIn('(anchorRequester ?: this).finishIfSettled()', source)
+
     def test_tool_spring_reversal_reuses_the_placed_extent_guard(self):
         source = (CHAT / 'WorkProcessCard.kt').read_text().split('internal fun WorkStepRow(', 1)[1]
         self.assertIn('val detailExtent = remember(step.renderKey) { WorkflowCollapseExtent() }', source)

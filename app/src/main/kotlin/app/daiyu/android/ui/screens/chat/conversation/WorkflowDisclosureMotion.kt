@@ -7,7 +7,8 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -292,7 +293,13 @@ internal fun rememberWorkflowDisclosureMotion(
     val idle = visibility.isIdle && animationIdle
     motion.animationIdle = idle
     val closed = !visibility.currentState
-    SideEffect { if (idle) motion.finish(closed) }
+    LaunchedEffect(motion, idle, closed) {
+        if (idle) {
+            // Lazy subcomposition may apply during measure; settle only after that stack has returned.
+            withFrameNanos { }
+            motion.finish(closed)
+        }
+    }
     DisposableEffect(motion) { onDispose { motion.dispose() } }
     return motion
 }

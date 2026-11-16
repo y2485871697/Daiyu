@@ -86,3 +86,21 @@ class VoiceBrowserSmokeScopeTest(unittest.TestCase):
                           ("smoke", CLASS + "," + other + ",app.daiyu.android.UnknownTest")):
             self.assertNotEqual("voice-browser-targeted", recorder.command_for("python", dict(
                 SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
+
+    def test_voice_browser_queue_is_limited_to_the_two_exact_smoke_lists(self):
+        workflow = (ROOT / ".github/workflows/build.yml").read_text()
+        concurrency = workflow.split("\nconcurrency:\n", 1)[1].split("\njobs:\n", 1)[0]
+        group = next(line for line in concurrency.splitlines() if line.startswith("  group: "))
+        other = "app.daiyu.android.DictationActivityTest"
+        suffix = (
+            "${{ inputs.mode == 'smoke' && (inputs.smoke_classes == '" + CLASS
+            + "' || inputs.smoke_classes == '" + CLASS + "," + other
+            + "') && '-voice-browser' || '' }}"
+        )
+        self.assertTrue(group.endswith(suffix), group)
+        self.assertEqual(1, group.count("-voice-browser"))
+        original = group[:-len(suffix)]
+        self.assertTrue(original.startswith("  group: daiyu-${{ inputs.mode }}-${{ github.ref }}"))
+        self.assertNotIn(CLASS, original)
+        self.assertNotIn(other, original)
+        self.assertIn("  cancel-in-progress: false", concurrency.splitlines())

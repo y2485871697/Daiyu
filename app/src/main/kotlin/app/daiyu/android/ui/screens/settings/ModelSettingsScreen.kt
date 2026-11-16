@@ -18,6 +18,7 @@ import androidx.compose.runtime.referentialEqualityPolicy
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import app.daiyu.android.ui.icons.modelNameOpticalAlignment
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsPropertyKey
@@ -126,6 +127,7 @@ internal fun ModelSettingsScreen(
     speechOnly: Boolean = false,
     onOAuthLogin: (() -> Unit)? = null,
     oauthLoginRunning: Boolean = false,
+    saveSucceeded: Boolean = false,
 ) {
     val oauthOnly = draft.oauth != null || onOAuthLogin != null
     val latestDraft by rememberUpdatedSettingsDraft(draft)
@@ -146,6 +148,8 @@ internal fun ModelSettingsScreen(
             it.protocol == draft.protocol && it.apiKey == draft.apiKey && it.model == draft.model &&
             it.anthropicVersion == draft.anthropicVersion && it.customHeaders == draft.customHeaders
     } == true
+    val showSaveSuccess = providerName != null && saveSucceeded && !LocalProviderConfigurationSavePending.current &&
+        fieldsSaveError == null && errorText.isNullOrBlank()
     SettingsScaffoldPage(title = pageTitle, onBack = { connection.cancel(); balance.cancel(); onBack() }, modifier = modifier, listState = listState) {
         headerContent()
         item(key = "model_connection") {
@@ -299,6 +303,12 @@ internal fun ModelSettingsScreen(
                         .fillMaxWidth().heightIn(min = 48.dp),
                 )
             }
+        }
+        if (showSaveSuccess) item(key = "provider_saved") {
+            Text("已保存", style = MiuixTheme.textStyles.body2, color = Color(0xFF34B233),
+                textAlign = TextAlign.Center,
+                modifier = Modifier.testTag("model-save-status").fillMaxWidth()
+                    .padding(horizontal = 28.dp, vertical = 8.dp))
         }
         if (onDelete != null) item(key = "provider_delete") {
             ProviderActionButton(text = "删除提供商", enabled = enabled, onClick = {

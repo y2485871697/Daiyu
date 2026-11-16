@@ -78,6 +78,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     catalogConnectionSaved: Boolean = true,
     configurationContent: @Composable (ProviderConfigurationForm) -> Unit = { it.Content() },
     configurationSavePending: Boolean = false,
+    configurationSaveSucceeded: Boolean = false,
 ) {
     val scope = rememberCoroutineScope()
     var state by remember(persistence) { mutableStateOf(CatalogImportSession.State()) }
@@ -201,6 +202,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
             catalogEnabled = enabled && !state.saving,
             enabled = enabled && !state.saving,
             savePending = configurationSavePending,
+            saveSucceeded = configurationSaveSucceeded,
             // Deliberately no legacy clickable remote result list: that list changes the active draft.
         ))
         state.selection?.let { selection ->

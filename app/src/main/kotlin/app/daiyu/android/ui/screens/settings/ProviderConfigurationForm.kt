@@ -44,6 +44,7 @@ internal class ProviderConfigurationForm(
     val catalogEnabled: Boolean = true,
     val enabled: Boolean = true,
     val savePending: Boolean = false,
+    val saveSucceeded: Boolean = false,
     val engineeringUi: Boolean = false,
     val testConnection: ModelConnectionTester? = null,
     val onManageLocalModels: (() -> Unit)? = null,
@@ -89,7 +90,7 @@ internal class ProviderConfigurationForm(
                 onManageLocalModels = onManageLocalModels, pageTitle = pageTitle, headerContent = headerContent,
                 showCatalog = showCatalog, providerName = providerName, testBalance = testBalance,
                 onDelete = onDelete, speechOnly = speechOnly, onOAuthLogin = onOAuthLogin,
-                oauthLoginRunning = oauthLoginRunning,
+                oauthLoginRunning = oauthLoginRunning, saveSucceeded = saveSucceeded,
             )
         }
     }

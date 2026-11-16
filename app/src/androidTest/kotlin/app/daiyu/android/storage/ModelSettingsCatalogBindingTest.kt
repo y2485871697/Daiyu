@@ -118,8 +118,13 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         assertEquals(before.activeSlotId, registered.activeSlotId)
         val editor = repository.editor(added.slotId)
         assertEquals(connection, repository.editing(editor).settings)
-        val empty = repository.catalogSnapshot(editor)
-        assertTrue(empty.models.isEmpty())
+        val empty = repository.withEditor(editor) { it.localModelCatalogSnapshot() }
+        assertNotNull("registerConfigured must publish a ready local directory", empty)
+        val savedCatalog = checkNotNull(empty)
+        assertTrue(savedCatalog.models.isEmpty())
+        assertTrue(savedCatalog.providerIdentity.isNotBlank())
+        val reopened = ProviderRepository(context, primary = store)
+        assertEquals(savedCatalog, reopened.withEditor(reopened.editor(added.slotId)) { it.localModelCatalogSnapshot() })
         try {
             connection.validate()
             fail("connection without a model must not run")
@@ -130,7 +135,7 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         repository.withEditor(editor) { target ->
             val custom = CatalogModelEdit("manual-id", "My model", "8192", true, false).newRecord()
             assertEquals(CatalogCommitResult.COMMITTED, target.modelCatalog.compareAndAppend(
-                empty.providerIdentity, empty.revision, listOf(custom)) { false })
+                savedCatalog.providerIdentity, savedCatalog.revision, listOf(custom)) { false })
             assertEquals("", target.load().model)
             target.selectCatalogModel(connection, target.localModelCatalogSnapshot()!!.selectionFor("manual-id")!!)
             assertEquals("manual-id", target.loadForRun().model)

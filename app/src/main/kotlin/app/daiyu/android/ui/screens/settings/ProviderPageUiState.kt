@@ -6,6 +6,8 @@ import androidx.compose.runtime.mutableStateOf
 /** Presentation only; a validated resumed detail may reuse this without reviving its old owner. */
 internal class ProviderPageUiState {
     val configurationListState = LazyListState()
+    val configurationSaved = mutableStateOf(false)
+    @Volatile var configurationSaveCommitted = false
     var modelListState = LazyListState()
         private set
     val modelTab = mutableStateOf(false)

@@ -268,8 +268,10 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                     creating?.revoke(); creating = null
                 }
                 detail = ready
+                if (savedPageUi != null) ready.pageUi.configurationSaved.value = savedPageUi.configurationSaveCommitted
                 openingSlot = null; savedReadbackUi = null
             }, onFailure = { openingSlot = null;
+                (savedPageUi ?: restore?.pageUi)?.configurationSaved?.value = false
                 // A successful write is not permission to keep editing an unverified baseline.
                 if (savedPageUi != null) closeDetail()
                 pausedDraft = null; notice = "详情读取失败或已变化，请刷新后重新打开。"
@@ -427,11 +429,14 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 "请先在配置页保存提供商配置，再添加或拉取模型。",
                 listState = newProvider.pageUi.modelListState, queryState = newProvider.pageUi.modelQuery)
             else configurationContent(ProviderConfigurationForm(draft, { if (current(p) && enabled && busy == null && !controller.dataBusy && creating === newProvider && newProvider.draft === draft) {
-                newProvider.balanceTestJob?.cancel(); newProvider.balanceTestJob = null; newProvider.error = null; newProvider.draft = it
+                newProvider.balanceTestJob?.cancel(); newProvider.balanceTestJob = null; newProvider.error = null
+                newProvider.pageUi.configurationSaved.value = false; newProvider.draft = it
             } },
                 onSave = { submitted ->
                     val expected = registry
                     if (current(p) && enabled && creating === newProvider && newProvider.draft === submitted && expected != null) {
+                        newProvider.pageUi.configurationSaved.value = false
+                        newProvider.pageUi.configurationSaveCommitted = false
                         val value = runCatching {
                             ProviderRegistry.requireValidName(submitted.providerName.orEmpty().trim())
                             require(!newProvider.oauthOnly || submitted.oauth != null)
@@ -462,6 +467,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                                 val runtime = kotlinx.coroutines.runBlocking { controller.providerBalances.get(added.slotId) }
                                 repo.withEditor(repo.editor(added.slotId)) { admit(); kotlinx.coroutines.runBlocking { runtime.save(checkNotNull(submitted.providerBalanceConfiguration(added.slotId))) } }
                             }
+                            newProvider.pageUi.configurationSaveCommitted = true
                             created
                         }
                     }
@@ -515,6 +521,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
             val detailTitle = pageTitleOverride ?: d.name
             val save: (ModelSettingsDraftUi) -> Unit = { submitted ->
                 if (live() && enabled && busy == null && !controller.dataBusy && d.draft === submitted) {
+                    d.pageUi.configurationSaved.value = false
+                    d.pageUi.configurationSaveCommitted = false
                     val value = runCatching {
                         require(!app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(saved.endpoint) ||
                             app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(submitted.endpoint)) { "请使用豆包语音服务地址" }
@@ -545,6 +553,12 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                                 replaceBalanceConfiguration = submitted.providerBalanceConfiguration(d.editor.slotId) != d.balanceConfiguration,
                                 balanceConfiguration = submitted.providerBalanceConfiguration(d.editor.slotId), expectedBalanceConfiguration = d.balanceConfiguration) { success ->
                                 if (busy === ticket) busy = null
+                                if (success && visit.get() && detail === d) {
+                                    d.pageUi.configurationSaveCommitted = true
+                                    if (!live()) {
+                                        savedReadbackUi = d.pageUi; openingSlot = d.editor.slotId; pendingOpen = true
+                                    }
+                                }
                                 if (live()) {
                                     if (success && initialSlot == ProviderRegistry.PRIMARY && d.editor.slotId == ProviderRegistry.PRIMARY) {
                                         d.revoke(); p.revoke(); onDetailBack()
@@ -557,7 +571,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 }
             }
             val change: (ModelSettingsDraftUi) -> Unit = { if (live() && enabled && busy == null && !controller.dataBusy && d.draft === draft) {
-                d.balanceTestJob?.cancel(); d.balanceTestJob = null; d.error = null; d.draft = it
+                d.balanceTestJob?.cancel(); d.balanceTestJob = null; d.error = null
+                d.pageUi.configurationSaved.value = false; d.draft = it
             } }
             val balanceTest: ProviderBalanceTester = { value, requestCancelled, deliver ->
                 val configuration = value.providerBalanceConfiguration(d.editor.slotId)?.takeIf { runCatching { it.validateProviderBinding(); it.queryEnabled }.getOrDefault(false) }
@@ -653,6 +668,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 } else configurationContent(ProviderConfigurationForm(draft, change, save, {}, { back() },
                     modifier = connectionModifier, headerContent = tabs, showCatalog = false,
                     pageTitle = detailTitle, providerName = d.name, enabled = enabled, savePending = configurationSavePending,
+                    saveSucceeded = d.pageUi.configurationSaved.value && d.live.get(),
                     engineeringUi = engineeringUi, testConnection = connection,
                     credentialUnavailable = d.editing.credentialUnavailable, requestOptionsUnavailable = d.editing.requestOptionsUnavailable,
                     headersUnavailable = d.editing.headersUnavailable,
@@ -680,6 +696,7 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                 testConnection = connection, localModelActions = actions, testBalance = balanceTest,
                 onDelete = delete, pageUi = d.pageUi, modelScrollBehavior = modelScrollBehavior,
                 configurationContent = configurationContent, configurationSavePending = configurationSavePending,
+                configurationSaveSucceeded = d.pageUi.configurationSaved.value && d.live.get(),
                 speechOnly = app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(d.editing.settings.endpoint))
         } else if (loading) {
             SettingsScaffoldPage("模型提供商", { back() }) { item { SettingsNote("正在读取提供商详情") } }

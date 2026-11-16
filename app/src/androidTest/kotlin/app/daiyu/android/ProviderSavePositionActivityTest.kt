@@ -70,6 +70,21 @@ class ProviderSavePositionActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText("正在读取提供商详情").assertDoesNotExist()
     }
 
+    private fun assertSavedFeedback(title: String) {
+        reveal("provider-delete", title, lazyKey = "provider_delete")
+        val feedback = node("model-save-status").assertTextEquals("已保存").assertIsDisplayed()
+        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+        feedback.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        assertEquals(androidx.compose.ui.graphics.Color(0xFF34B233), layouts.single().layoutInput.style.color)
+        assertEquals(androidx.compose.ui.text.style.TextAlign.Center, layouts.single().layoutInput.style.textAlign)
+        val save = node("model-save").fetchSemanticsNode().boundsInRoot
+        val status = feedback.fetchSemanticsNode().boundsInRoot
+        val delete = node("provider-delete").fetchSemanticsNode().boundsInRoot
+        assertTrue("feedback is below save", save.bottom <= status.top)
+        assertTrue("feedback is above delete", status.bottom <= delete.top)
+        assertEquals(save.center.x, status.center.x, 1f)
+    }
+
     fun testFirstRegistrationAndFollowingEditSaveKeepOneFormAndBottomPosition() {
         val previous = fixture.controller.providers.snapshot()
         showProviders()
@@ -87,7 +102,18 @@ class ProviderSavePositionActivityTest : WiredActivityTestCase() {
         val saved = fixture.controller.providers.editing(editor).settings
         assertEquals("https://position.invalid", saved.endpoint)
         assertEquals("position-test-key", saved.apiKey)
-        val catalog = fixture.controller.providers.withEditor(editor) { it.modelCatalogSnapshot() }
+        val catalog = fixture.controller.providers.withEditor(editor) { it.localModelCatalogSnapshot() }
+        assertNotNull("the first save must initialize the catalog without a test-side migration", catalog)
+        assertTrue(checkNotNull(catalog).models.isEmpty())
+        reveal("settings-radio:模型", "Position provider", lazyKey = "provider-tabs").performClick()
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("local-model-add").fetchSemanticsNodes().singleOrNull()?.config
+                ?.contains(SemanticsProperties.Disabled) == false
+        }
+        node("local-model-add").assertIsEnabled()
+        ui.onNodeWithText("请先在配置页保存 Base URL 和 API Key，再添加或拉取模型。").assertDoesNotExist()
+        node("settings-radio:配置").performClick()
+        assertSavedFeedback("Position provider")
 
         reveal("provider-name", "Position provider").performTextReplacement("Renamed position provider")
         saveAtBottom("Position provider", "Renamed position provider")
@@ -101,6 +127,8 @@ class ProviderSavePositionActivityTest : WiredActivityTestCase() {
 
         reveal("provider-name", "Renamed position provider").performTextReplacement("Third position name")
         node("provider-name").assertTextContains("Third position name")
+        reveal("model-save", "Renamed position provider", lazyKey = "model_save")
+        node("model-save-status").assertDoesNotExist()
         saveAtBottom("Renamed position provider", "Third position name")
         assertEquals("Third position name", fixture.controller.providers.snapshot().providers.single { it.slotId == slot }.name)
 
@@ -113,6 +141,8 @@ class ProviderSavePositionActivityTest : WiredActivityTestCase() {
         awaitModelEditor()
         assertNotSame(first.first, form().first)
         assertNotSame(first.second, form().second)
+        reveal("model-save", previous.providers.single { it.slotId == other }.name, lazyKey = "model_save")
+        node("model-save-status").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
     }
 
@@ -143,6 +173,7 @@ class ProviderSavePositionActivityTest : WiredActivityTestCase() {
         val failedForm = form()
         node("model-save").performClick()
         reveal("model-save-error", currentTitle, lazyKey = "model_save").assertIsDisplayed()
+        node("model-save-status").assertDoesNotExist()
         assertSame(failedForm.first, form().first)
         assertSame(failedForm.second, form().second)
         assertEquals(before, fixture.settings.load())
@@ -228,6 +259,7 @@ class ProviderSavePositionActivityTest : WiredActivityTestCase() {
             held.get(5, TimeUnit.SECONDS)
             awaitSavedForm(title)
             ui.onNodeWithTag("model-save-error").assertDoesNotExist()
+            assertSavedFeedback(title)
             reveal("provider-name", title).performTextReplacement("Editable after blocked save")
             node("provider-name").assertTextContains("Editable after blocked save")
             assertEquals(0, fixture.opens.get())

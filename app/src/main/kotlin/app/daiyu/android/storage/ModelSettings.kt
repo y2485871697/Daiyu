@@ -481,7 +481,7 @@ class ModelSettingsStore internal constructor(
                 } else if (settings.model.isBlank()) emptyList() else listOf(CatalogModelParameters.fromCurrent(settings))
                 modelCatalog.replaceRegisteredProvider(initialModels)
                 catalogReplaced = true
-                if (speechOnly) modelCatalog.register(initialModels)
+                modelCatalog.register(initialModels)
                 check(preferences.edit().remove(CATALOG_PENDING).commit()) { "提供商目录保存未确认" }
             } else {
                 if (previousConnection.model.isNotBlank() && previousConnection.model != settings.model && !previousEditing.requestOptionsUnavailable) {

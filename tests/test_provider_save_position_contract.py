@@ -11,6 +11,53 @@ def source(name):
 
 
 class ProviderSavePositionContractTest(unittest.TestCase):
+    def test_first_connection_save_registers_before_clearing_recovery_gate(self):
+        settings = (ROOT / "app/src/main/kotlin/app/daiyu/android/storage/ModelSettings.kt").read_text()
+        save = settings.split("fun save(settings:ModelSettings", 1)[1]
+        replacement = save.split("modelCatalog.replaceRegisteredProvider(initialModels)", 1)[1]
+        self.assertLess(replacement.index("modelCatalog.register(initialModels)"),
+                        replacement.index("remove(CATALOG_PENDING)"))
+        self.assertNotIn("if (speechOnly) modelCatalog.register(initialModels)", replacement)
+        route = source("ProviderManagementRoute.kt")
+        self.assertIn("it.localModelCatalogSnapshot()", route)
+        android = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ProviderSavePositionActivityTest.kt").read_text()
+        first = android.split("fun testFirstRegistrationAndFollowingEditSaveKeepOneFormAndBottomPosition()", 1)[1].split("fun testExistingProvider", 1)[0]
+        self.assertIn("it.localModelCatalogSnapshot()", first)
+        self.assertNotIn("it.modelCatalogSnapshot()", first)
+        self.assertIn('node("local-model-add").assertIsEnabled()', first)
+
+    def test_saved_feedback_requires_readback_and_clears_on_edits_and_new_attempts(self):
+        route = source("ProviderManagementRoute.kt")
+        opening = route.split("fun open(", 1)[1].split("fun mutate(", 1)[0]
+        self.assertLess(opening.index("detail = ready"),
+                        opening.index("if (savedPageUi != null) ready.pageUi.configurationSaved.value = savedPageUi.configurationSaveCommitted"))
+        self.assertEqual(4, route.count("configurationSaved.value = false"))
+        self.assertIn("val configurationSaved = mutableStateOf(false)", source("ProviderPageUiState.kt"))
+        self.assertIn("saveSucceeded = d.pageUi.configurationSaved.value && d.live.get()", route)
+        self.assertIn("configurationSaveSucceeded = d.pageUi.configurationSaved.value && d.live.get()", route)
+        self.assertIn("saveSucceeded = configurationSaveSucceeded", source("ProviderCatalogSettingsScreen.kt"))
+        self.assertIn("saveSucceeded = saveSucceeded", source("ProviderConfigurationForm.kt"))
+        screen = source("ModelSettingsScreen.kt")
+        self.assertIn("saveSucceeded && !LocalProviderConfigurationSavePending.current", screen)
+        self.assertIn("fieldsSaveError == null && errorText.isNullOrBlank()", screen)
+        self.assertLess(screen.index('item(key = "model_save")'), screen.index('item(key = "provider_saved")'))
+        self.assertLess(screen.index('item(key = "provider_saved")'), screen.index('item(key = "provider_delete")'))
+        self.assertIn('Text("已保存", style = MiuixTheme.textStyles.body2, color = Color(0xFF34B233)', screen)
+        self.assertIn("textAlign = TextAlign.Center", screen)
+        self.assertIn('testTag("model-save-status")', screen)
+
+    def test_partial_registration_and_paused_callbacks_do_not_forge_or_lose_receipts(self):
+        route = source("ProviderManagementRoute.kt")
+        creation = route.split("onSave = { submitted ->", 1)[1].split("}, onFetchCatalog", 1)[0]
+        self.assertLess(creation.index("runtime.save("), creation.index("newProvider.pageUi.configurationSaveCommitted = true"))
+        self.assertIn("newProvider.pageUi.configurationSaveCommitted = false", creation)
+        callback = route.split("balanceConfiguration = submitted.providerBalanceConfiguration(d.editor.slotId)", 1)[1].split("} catch", 1)[0]
+        self.assertIn("success && visit.get() && detail === d", callback)
+        self.assertIn("d.pageUi.configurationSaveCommitted = true", callback)
+        self.assertIn("savedReadbackUi = d.pageUi; openingSlot = d.editor.slotId; pendingOpen = true", callback)
+        opening = route.split("fun open(", 1)[1].split("fun mutate(", 1)[0]
+        self.assertIn("(savedPageUi ?: restore?.pageUi)?.configurationSaved?.value = false", opening)
+
     def test_provider_actions_match_the_balance_button_horizontal_inset(self):
         self.assertIn("LocalSettingsPageStyle provides true", source("SettingsScaffold.kt"))
         card = source("SettingsUiComponents.kt").split("internal fun SettingsCard(", 1)[1].split("internal fun SettingsRow(", 1)[0]
@@ -154,7 +201,7 @@ class ProviderSavePositionContractTest(unittest.TestCase):
     def test_cloud_regression_fixtures_use_their_actual_host_and_initialized_catalog(self):
         android = ROOT / "app/src/androidTest/kotlin/app/daiyu/android"
         position = (android / "ProviderSavePositionActivityTest.kt").read_text()
-        self.assertIn("val catalog = fixture.controller.providers.withEditor(editor) { it.modelCatalogSnapshot() }", position)
+        self.assertIn("val catalog = fixture.controller.providers.withEditor(editor) { it.localModelCatalogSnapshot() }", position)
         self.assertIn("assertEquals(catalog?.providerIdentity, currentCatalog?.providerIdentity)", position)
         self.assertIn("assertEquals(previous.activeSlotId, registered.activeSlotId)", position)
         body = (android / "RequestBodyFieldsActivityTest.kt").read_text()

@@ -1085,7 +1085,7 @@ internal fun AssistantTurn(
     val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING, windows = bodySources.map { it.window })
     val contentReady = projection?.sources == sources && projection?.windows.orEmpty() == bodySources.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty()
     val generationComplete = turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady
-    var answerReleased by rememberSaveable(turn.listKey) {
+    var answerReleased by rememberSaveable(turn.listKey, ordered.work != null) {
         mutableStateOf(ordered.work == null && reasoningReady && ordered.body.isNotEmpty())
     }
     val canReleaseWithoutWorkflow = ordered.work == null && reasoningReady

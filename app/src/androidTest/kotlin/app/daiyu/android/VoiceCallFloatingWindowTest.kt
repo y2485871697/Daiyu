@@ -40,6 +40,7 @@ class VoiceCallFloatingWindowTest {
         }
         override fun addView(view: View, params: ViewGroup.LayoutParams) {
             if (failAdd) throw SecurityException("synthetic overlay rejection")
+            assertFalse("a new call window must not overlap an existing one", added.any { it.isAttachedToWindow })
             actual.addView(view, params); added.add(view)
         }
         override fun removeViewImmediate(view: View) { removals.add(view); actual.removeViewImmediate(view) }
@@ -143,7 +144,7 @@ class VoiceCallFloatingWindowTest {
         }
     }
 
-    @Test fun lateOldExitCannotRemoveANewCallAndDestroyDoesNotWaitForAnimation() {
+    @Test fun newCallReleasesTheOldWindowBeforeAttachingAndDestroyDoesNotWaitForAnimation() {
         val old = picture()
         main { host.update(old, actions) }
         await("first surface laid out") { windows.added.single().isLaidOut }
@@ -152,14 +153,17 @@ class VoiceCallFloatingWindowTest {
             val departing = windows.added.single()
             host.dismiss()
             host.update(next, actions)
-            assertTrue("new call must not truncate the old exit", departing.isAttachedToWindow)
-            assertTrue(completed.isEmpty())
+            assertFalse("old window must leave before the new one attaches", departing.isAttachedToWindow)
+            assertEquals(listOf(old.sessionKey), completed)
+            assertEquals(listOf(departing), windows.removals)
             host.update(old.copy(presentation = DoubaoCallPresentation.CLOSING), actions)
         }
         await("new session attached") { host.isShowing(next.sessionKey) }
         SystemClock.sleep(VoiceCallFloatingWindow.CLOSE_MILLIS + 40)
         main {
             assertTrue(host.isShowing(next.sessionKey))
+            assertEquals(2, windows.added.size)
+            assertEquals(listOf(windows.added.first()), windows.removals)
             assertEquals(listOf(old.sessionKey), completed)
             host.close()
             assertFalse(windows.added.last().isAttachedToWindow)

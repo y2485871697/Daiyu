@@ -86,6 +86,7 @@ internal class VoiceCallFloatingWindow(context: Context,
         }
         if (!permitted) { hide(); return false }
         if (exiting.any { it.picture.sessionKey == state.sessionKey }) return true
+        exiting.toList().forEach { remove(it, completed = true) }
         val previous = window
         val current = if (previous == null || previous.picture.sessionKey != state.sessionKey || previous.departing || previous.detached) {
             previous?.let { remove(it, completed = false) }

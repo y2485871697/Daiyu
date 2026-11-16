@@ -236,8 +236,12 @@ internal class PetOverlayHost(
                 MotionEvent.ACTION_DOWN -> {
                     val bounds = android.graphics.Rect()
                     val sprite = findViewById<View>(app.daiyu.android.R.id.pet_sprite)
-                    spriteGesture = sprite != null && sprite.getGlobalVisibleRect(bounds) &&
+                    spriteGesture = sprite != null && sprite.getLocalVisibleRect(bounds) && run {
+                        val screen = IntArray(2)
+                        sprite.getLocationOnScreen(screen)
+                        bounds.offset(screen[0], screen[1])
                         bounds.contains(event.rawX.roundToInt(), event.rawY.roundToInt())
+                    }
                     downX = event.rawX; downY = event.rawY
                     originX = placement(this).spriteX; originY = placement(this).spriteY; dragging = false
                 }

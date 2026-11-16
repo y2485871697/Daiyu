@@ -275,7 +275,7 @@ class PetPresentationTest : WiredActivityTestCase() {
         assertEquals(expected, stable())
     }
 
-    fun testRealOverlayFirstDrawSpeechGrowthAndDismissalPreserveAnchor() {
+    private fun mountOverlay() {
         val packageName = instrumentation.targetContext.packageName
         android.os.ParcelFileDescriptor.AutoCloseInputStream(
             instrumentation.uiAutomation.executeShellCommand("appops set $packageName SYSTEM_ALERT_WINDOW allow")
@@ -291,6 +291,10 @@ class PetPresentationTest : WiredActivityTestCase() {
             val frame = (field.get(host) as PetOverlayWindowOwner<*>).window as FrameLayout
             root = frame; recordFrames(frame)
         }
+    }
+
+    fun testRealOverlayFirstDrawSpeechGrowthAndDismissalPreserveAnchor() {
+        mountOverlay()
         val expected = stable()
         val text = "主人，米饭已经吃完啦，我会继续陪着你。"
         repeat(3) {
@@ -308,4 +312,70 @@ class PetPresentationTest : WiredActivityTestCase() {
             assertTrue("Overlay visible frames moved: $visibleFrames", visibleFrames.all { it == expected })
         }
     }
+
+    private fun overlayTouch(action: Int, screenX: Float, screenY: Float) {
+        val frame = checkNotNull(root)
+        val origin = IntArray(2); frame.getLocationOnScreen(origin)
+        val time = android.os.SystemClock.uptimeMillis()
+        val event = android.view.MotionEvent.obtain(time, time, action, screenX, screenY, 0)
+        event.offsetLocation(-origin[0].toFloat(), -origin[1].toFloat())
+        try { assertTrue(frame.dispatchTouchEvent(event)) } finally { event.recycle() }
+    }
+
+    fun testRealOverlayDragAtNonzeroWindowOriginSavesAndRestoresPosition() {
+        mountOverlay()
+        val before = stable()
+        val downX = before.right - 4f
+        val downY = before.bottom - 4f
+        instrumentation.runOnMainSync {
+            overlayTouch(android.view.MotionEvent.ACTION_DOWN, downX, downY)
+            overlayTouch(android.view.MotionEvent.ACTION_MOVE, downX - 14f, downY - 16f)
+            overlayTouch(android.view.MotionEvent.ACTION_MOVE, downX - 28f, downY - 34f)
+            assertEquals(-28f, checkNotNull(root).translationX)
+            assertEquals(-34f, checkNotNull(root).translationY)
+            overlayTouch(android.view.MotionEvent.ACTION_UP, downX - 28f, downY - 34f)
+            val settings = checkNotNull(controller).snapshot().state.settings
+            assertEquals(42, settings.x)
+            assertEquals(86, settings.y)
+        }
+        val expected = Rect(before).apply { offset(-28, -34) }
+        assertEquals(expected, stable())
+        instrumentation.runOnMainSync {
+            val host = checkNotNull(overlay)
+            val current = checkNotNull(controller)
+            current.updateSettings(current.snapshot().state.settings.copy(globalVisible = false))
+            host.sync(current.snapshot())
+            current.updateSettings(current.snapshot().state.settings.copy(globalVisible = true))
+            host.sync(current.snapshot())
+            val field = PetOverlayHost::class.java.getDeclaredField("owner").apply { isAccessible = true }
+            root = (field.get(host) as PetOverlayWindowOwner<*>).window as FrameLayout
+        }
+        assertEquals(expected, stable())
+    }
+
+    fun testRealOverlayCancelRestoresPositionAndSmallMovementStillClicks() {
+        mountOverlay()
+        val before = stable()
+        val downX = before.right - 4f
+        val downY = before.bottom - 4f
+        instrumentation.runOnMainSync {
+            var clicks = 0
+            sprite().setOnClickListener { clicks++ }
+            overlayTouch(android.view.MotionEvent.ACTION_DOWN, downX, downY)
+            overlayTouch(android.view.MotionEvent.ACTION_MOVE, downX - 14f, downY - 16f)
+            overlayTouch(android.view.MotionEvent.ACTION_MOVE, downX - 28f, downY - 34f)
+            overlayTouch(android.view.MotionEvent.ACTION_CANCEL, downX - 28f, downY - 34f)
+            assertEquals(0f, checkNotNull(root).translationX)
+            assertEquals(0f, checkNotNull(root).translationY)
+            assertEquals(70, checkNotNull(controller).snapshot().state.settings.x)
+            assertEquals(120, checkNotNull(controller).snapshot().state.settings.y)
+            assertEquals(0, clicks)
+            overlayTouch(android.view.MotionEvent.ACTION_DOWN, downX, downY)
+            overlayTouch(android.view.MotionEvent.ACTION_MOVE, downX - 2f, downY - 2f)
+            overlayTouch(android.view.MotionEvent.ACTION_UP, downX - 2f, downY - 2f)
+            assertEquals(1, clicks)
+        }
+        assertEquals(before, stable())
+    }
+
 }

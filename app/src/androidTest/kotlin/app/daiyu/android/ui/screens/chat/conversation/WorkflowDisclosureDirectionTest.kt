@@ -411,9 +411,6 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             val header = supplementalHeader(kind)
             if (kind == "question") {
                 ui.onNodeWithTag(header).assert(SemanticsMatcher.expectValue(
-                    androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
-                ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
-                ui.onNodeWithTag(header).assert(SemanticsMatcher.expectValue(
                     androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠"))
             }
             ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()

@@ -10,6 +10,7 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.TextLayoutResult
@@ -40,8 +41,10 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
     private val note = "请保留我填写的补充说明"
     private var submissions = 0
     private var submitted: QuestionAnswer? = null
+    private var pendingReply: ((Reply) -> Unit)? = null
+    private val answerPermission = androidx.compose.runtime.mutableStateOf(true)
 
-    private fun show(dark: Boolean, fontScale: Float, answer: QuestionAnswer? = null, reply: Reply = Reply.SAVED, twoLineLabel: Boolean = false) {
+    private fun show(dark: Boolean, fontScale: Float, answer: QuestionAnswer? = null, reply: Reply = Reply.SAVED, twoLineLabel: Boolean = false, deferReply: Boolean = false) {
         val question = UserQuestion("下一步操作", prompt, listOf(
             QuestionOption("keep", label, description), QuestionOption("change", if (twoLineLabel) "调整配置\n保留已有数据" else "调整配置")),
             recommendedOptionId = "keep")
@@ -50,16 +53,16 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
             activity.setContent {
                 val density = LocalDensity.current
                 CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
-                    key(dark, fontScale, answer, reply, twoLineLabel) {
+                    key(dark, fontScale, answer, reply, twoLineLabel, deferReply) {
                         AgentAppTheme(AppearanceSettings(
                             themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT),
                             applyInterfaceScale = false) {
                             Column(Modifier.width(300.dp).verticalScroll(rememberScrollState()).testTag("question-scroll")) {
-                                QuestionCard(owner, record, answer == null, submit = { identity, value, done ->
+                                QuestionCard(owner, record, answer == null && answerPermission.value, submit = { identity, value, done ->
                                     assertEquals(owner, identity)
                                     submissions++
                                     submitted = value
-                                    done(reply)
+                                    if (deferReply) pendingReply = done else done(reply)
                                 })
                             }
                         }
@@ -73,6 +76,33 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
     private fun scrollTo(tag: String): SemanticsNodeInteraction {
         node("question-scroll").scrollToDescendant(hasTestTag(tag))
         return node(tag).assertIsDisplayed()
+    }
+
+    private fun assertExpanded() {
+        node("question-toggle").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
+    }
+
+    private fun assertCollapsed() {
+        node("question-toggle").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠"))
+        node("question-option:0").assertDoesNotExist()
+        node("question-submit").assertDoesNotExist()
+    }
+
+    private fun openArchived() {
+        assertCollapsed()
+        scrollTo("question-toggle").performClick()
+        ui.waitForIdle()
+        assertExpanded()
+    }
+
+    private fun selectOption(index: Int) {
+        val before = submissions
+        scrollTo("question-option:$index").performClick()
+        ui.waitForIdle()
+        assertExpanded()
+        node("question-submit").assertExists()
+        assertEquals(before, submissions)
+        scrollTo("question-option:$index").assertIsSelected()
     }
 
     private fun layout(text: String, size: Int): TextLayoutResult {
@@ -112,6 +142,7 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
     }
 
     private fun assertArchived(selected: Int) {
+        openArchived()
         node("question-submit").assertDoesNotExist()
         for (index in 0..3) {
             node("question-option:$index").assertIsNotEnabled()
@@ -143,12 +174,13 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
             node("question-option:0").assertIsNotSelected()
             node("question-option:1").assertIsNotSelected()
             show(dark, fontScale, answer = QuestionAnswer.Selected("keep", note))
+            assertArchived(0)
             layout(label, 15)
             layout(description, 14)
             layout(note, 15)
-            assertArchived(0)
             scrollTo("question-option:1").performTouchInput { click() }
             node("question-option:0").assertIsSelected()
+            node("question-toggle").assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
             scrollTo("question-note").performTouchInput { click() }
             ui.onAllNodes(isFocused()).assertCountEquals(0)
             layout(note, 15)
@@ -159,11 +191,11 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
 
     fun testOtherHidesNoteRetainsDraftAndArchivesOnlyVisibleAnswer() {
         show(dark = false, fontScale = 1.3f)
-        scrollTo("question-option:0").performClick()
+        selectOption(0)
         val notes = scrollTo("question-note")
         val noteBounds = notes.fetchSemanticsNode().boundsInRoot
         notes.performTextReplacement(note)
-        scrollTo("question-option:2").performClick()
+        selectOption(2)
         node("question-note").assertDoesNotExist()
         val other = scrollTo("question-other")
         val otherBounds = other.fetchSemanticsNode().boundsInRoot
@@ -173,9 +205,9 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
         assertTrue(abs(otherBounds.width - noteBounds.width) <= 1f)
         other.performTextReplacement(custom)
         layout(custom, 15)
-        scrollTo("question-option:0").performClick()
+        selectOption(0)
         scrollTo("question-note").assertTextContains(note)
-        scrollTo("question-option:2").performClick()
+        selectOption(2)
         node("question-note").assertDoesNotExist()
         scrollTo("question-other").assertTextContains(custom)
         scrollTo("question-submit").assertIsEnabled().performClick()
@@ -194,9 +226,26 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testEveryPendingChoiceStaysExpandedWithoutSubmittingAndKeepsDraft() {
+        show(dark = false, fontScale = 1f)
+        scrollTo("question-note").performTextReplacement(note)
+        for (index in 0..3) {
+            selectOption(index)
+            if (index == 2) {
+                scrollTo("question-other").performTextReplacement(custom)
+                node("question-note").assertDoesNotExist()
+            } else scrollTo("question-note").assertTextContains(note)
+        }
+        selectOption(2)
+        scrollTo("question-other").assertTextContains(custom)
+        scrollTo("question-submit").assertIsEnabled()
+        assertEquals(0, submissions)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testSelectedAnswerKeepsNoteAfterLiveSubmissionAndRemount() {
         show(dark = false, fontScale = 1f)
-        scrollTo("question-option:1").performClick()
+        selectOption(1)
         scrollTo("question-note").performTextReplacement(note)
         scrollTo("question-submit").performClick()
         ui.waitForIdle()
@@ -213,7 +262,7 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
         show(dark = false, fontScale = 1f)
         scrollTo("question-note").assertExists()
         ui.onAllNodes(hasSetTextAction()).assertCountEquals(1)
-        scrollTo("question-option:2").performClick()
+        selectOption(2)
         scrollTo("question-other").assertExists()
         node("question-note").assertDoesNotExist()
         for (blank in listOf<String?>(null, "", " \n\t")) {
@@ -237,7 +286,7 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
     fun testBlankNoteDisappearsAfterLiveSubmissionAndStaysHiddenOnRemount() {
         for (index in listOf(0, 3)) for (blank in listOf("", " \n\t")) {
             show(dark = false, fontScale = 1f)
-            scrollTo("question-option:$index").performClick()
+            selectOption(index)
             scrollTo("question-note").performTextReplacement(blank)
             scrollTo("question-submit").performClick()
             ui.waitForIdle()
@@ -273,19 +322,67 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
             assertEquals(1, layout("其他…", 15).lineCount)
             assertEquals(2, layout("调整配置\n保留已有数据", 15).lineCount)
             for (index in 0..3) assertCentered(index)
-            scrollTo("question-option:1").performClick()
+            selectOption(1)
             assertCentered(1)
-            scrollTo("question-option:2").performClick()
+            selectOption(2)
             assertCentered(2)
             show(dark = true, fontScale = fontScale, answer = QuestionAnswer.Selected("change", note), twoLineLabel = true)
+            assertArchived(1)
             assertEquals(2, layout("调整配置\n保留已有数据", 15).lineCount)
             for (index in 0..3) assertCentered(index)
         }
     }
 
+    fun testSubmissionWaitsForConfirmedSaveBeforeCollapsingAndCanBeReopened() {
+        show(dark = false, fontScale = 1f, deferReply = true)
+        selectOption(0)
+        scrollTo("question-note").performTextReplacement(note)
+        scrollTo("question-submit").performClick()
+        ui.waitForIdle()
+        assertExpanded()
+        node("question-submit").assertIsNotEnabled()
+        node("question-option:0").assertIsSelected().assertIsNotEnabled()
+        assertEquals(1, submissions)
+        mainThread { checkNotNull(pendingReply).invoke(Reply.SAVED) }
+        ui.waitForIdle()
+        assertArchived(0)
+        mainThread { answerPermission.value = false }
+        ui.waitForIdle()
+        assertExpanded()
+        mainThread { answerPermission.value = true }
+        ui.waitForIdle()
+        assertExpanded()
+        layout(note, 15)
+        scrollTo("question-option:1").performTouchInput { click() }
+        assertExpanded()
+        node("question-option:0").assertIsSelected()
+        scrollTo("question-toggle").performClick()
+        ui.waitForIdle()
+        assertCollapsed()
+        openArchived()
+        assertEquals(1, submissions)
+    }
+
+    fun testRejectedAndUnconfirmedSubmissionsStayExpanded() {
+        for (reply in listOf(Reply.REJECTED, Reply.UNCONFIRMED)) {
+            show(dark = false, fontScale = 1f, reply = reply)
+            selectOption(1)
+            scrollTo("question-note").performTextReplacement(note)
+            scrollTo("question-submit").performClick()
+            ui.waitForIdle()
+            assertExpanded()
+            node("question-option:1").assertIsSelected()
+            scrollTo("question-note").assertTextContains(note)
+            node("question-submit").assertExists()
+            if (reply == Reply.REJECTED) node("question-submit").assertIsEnabled()
+            else node("question-submit").assertIsNotEnabled()
+        }
+        assertEquals(2, submissions)
+    }
+
     fun testSavedRefreshFailureStillArchivesWithoutEnablingResubmission() {
         show(dark = false, fontScale = 1f, reply = Reply.SAVED_REFRESH_FAILED)
-        scrollTo("question-option:0").performClick()
+        selectOption(0)
         scrollTo("question-note").performTextReplacement(note)
         scrollTo("question-submit").performClick()
         ui.waitForIdle()

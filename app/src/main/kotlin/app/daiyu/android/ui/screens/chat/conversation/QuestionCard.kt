@@ -34,6 +34,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -149,11 +150,17 @@ private fun QuestionCardContent(
     val colors = questionCardColors()
     val shape = RoundedCornerShape(14.dp)
     var expanded by remember(owner) {
-        mutableStateOf(true)
+        mutableStateOf(!archived)
     }
     val visibility = remember(owner) { MutableTransitionState(expanded) }
     visibility.targetState = expanded
     val disclosure = rememberWorkflowDisclosureMotion(owner.storageKey, visibility)
+    LaunchedEffect(owner, archived) {
+        if (archived && expanded) {
+            disclosure.toggle(opening = false)
+            expanded = false
+        }
+    }
     val headingInteraction = remember { MutableInteractionSource() }
     val headingFocused by headingInteraction.collectIsFocusedAsState()
     val headingStatus = when {

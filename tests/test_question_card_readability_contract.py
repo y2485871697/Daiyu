@@ -36,10 +36,28 @@ class QuestionCardReadabilityContractTest(unittest.TestCase):
         for token in ('val archived = confirmedAnswer != null', 'val selection = confirmedAnswer ?: draft.selection',
                       'confirmedAnswer.text else draft.other', 'confirmedAnswer.note.orEmpty() else draft.note',
                       'if (value.interrupted && !archived)', 'if (editable || archived) 1f else .5f',
-                      'if (!archived) {', 'mutableStateOf(true)'):
+                      'if (!archived) {', 'mutableStateOf(!archived)'):
             self.assertIn(token, text)
         self.assertNotIn('已选择：', text)
         self.assertEqual(1, text.count('value.question.options.forEachIndexed'))
+
+    def test_only_confirmed_submission_collapses_and_choices_stay_open(self):
+        text = CARD.read_text()
+        self.assertIn('LaunchedEffect(owner, archived)', text)
+        self.assertIn('if (archived && expanded)', text)
+        effect = text.split('LaunchedEffect(owner, archived)', 1)[1].split('val headingInteraction', 1)[0]
+        self.assertIn('disclosure.toggle(opening = false)', effect)
+        self.assertIn('expanded = false', effect)
+        choices = text.split('value.question.options.forEachIndexed', 1)[1].split('if (value.question.allowNote', 1)[0]
+        self.assertNotIn('expanded =', choices)
+        self.assertNotIn('disclosure.toggle', choices)
+        self.assertNotIn('selectAnswer(', text)
+        for token in ('testEveryPendingChoiceStaysExpandedWithoutSubmittingAndKeepsDraft',
+                      'testSubmissionWaitsForConfirmedSaveBeforeCollapsingAndCanBeReopened',
+                      'testRejectedAndUnconfirmedSubmissionsStayExpanded',
+                      'testSavedRefreshFailureStillArchivesWithoutEnablingResubmission',
+                      'private fun openArchived()', 'assertCollapsed()', 'Reply.UNCONFIRMED'):
+            self.assertIn(token, DEVICE.read_text())
 
     def test_archived_field_is_complete_static_text_not_an_input_target(self):
         text = CARD.read_text()

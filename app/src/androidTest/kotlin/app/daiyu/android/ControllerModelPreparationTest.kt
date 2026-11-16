@@ -50,13 +50,15 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
             instrumentation.waitForIdleSync()
         } finally { main { f.controller.unobserve(listener) } }
     }
-    private fun fresh(interactiveEnabled: Boolean? = true, factory: (ModelSettings) -> ModelPort): Fixture {
+    private fun fresh(interactiveEnabled: Boolean? = true,
+        initialSettings: ModelSettings = ModelSettings("https://example.invalid", "fixture-model", "fixture-key", true),
+        factory: (ModelSettings) -> ModelPort): Fixture {
         val id = UUID.randomUUID().toString()
         val app = FixtureApplication(testContext(instrumentation.targetContext, "controller-model-$id-"))
         val db = ConversationDatabase(app)
         val alias = "app.daiyu.android.test.model.$id"
         val settings = ModelSettingsStore(app, alias)
-        settings.save(ModelSettings("https://example.invalid", "fixture-model", "fixture-key", true))
+        settings.save(initialSettings)
         val preferences = app.getSharedPreferences("conversation-ui", 0)
         if (interactiveEnabled != null) check(preferences.edit().putBoolean("interactive_mode", interactiveEnabled).commit())
         val controller = ChatController(app, db, settings, preferences, factory, providerBalanceHost = { app.balances })
@@ -478,9 +480,10 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         for (access in app.daiyu.android.browser.session.BrowserAccess.entries) {
             val probe = CatalogProbe()
             val frozen = AtomicReference<ModelSettings>()
-            val f = fresh { config -> frozen.set(config); probe }
-            f.settings.save(ModelSettings("https://example.invalid", "gpt-6.1-sol", "fixture-key", true,
-                requestOptions = app.daiyu.android.model.ProviderRequestOptions(openAiWebSearchEnabled = true)))
+            val f = fresh(initialSettings = ModelSettings("https://example.invalid", "gpt-6.1-sol", "fixture-key", true,
+                requestOptions = app.daiyu.android.model.ProviderRequestOptions(openAiWebSearchEnabled = true))) {
+                config -> frozen.set(config); probe
+            }
             f.controller.browserSettings.save(app.daiyu.android.browser.BrowserSettings(access))
             val conversation = f.db.create("default", temporaryVoice = true)
             if (access == app.daiyu.android.browser.session.BrowserAccess.READ_ONLY) {

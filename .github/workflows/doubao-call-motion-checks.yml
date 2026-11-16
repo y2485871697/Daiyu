@@ -115,7 +115,7 @@ jobs:
               selected_classes=os.environ['SMOKE_TEST_CLASSES'].split(',')), ensure_ascii=False) + '\n')
           PYIDENTITY
       - name: 仅执行冻结源码的定向契约
-        run: GITHUB_SHA="$EXPECTED_SHA" python3 scripts/acceptance/record_tool_tests.py --python python3
+        run: python3 .motion-validation-tools/scripts/acceptance/record_tool_tests.py --python python3
       - name: 核对compile来源门禁的增量单测
         shell: bash
         env:

@@ -83,3 +83,48 @@ class DoubaoMotionScopeTest(unittest.TestCase):
             source = root / "app/src/androidTest/kotlin/app/daiyu/android/ControllerReasoningFreezeTest.kt"
             source.unlink()
             self.assertNotEqual(0, helper.select(root, classes=",".join(classes)).returncode)
+
+    def test_floating_extension_requires_all_six_classes_and_discovers_each_once(self):
+        classes = recorder.DOUBAO_MOTION_FLOATING_PLATFORM_CLASSES
+        self.assertEqual(6, len(classes))
+        self.assertEqual("app.daiyu.android.VoiceCallFloatingWindowTest", classes[0])
+        self.assertEqual(recorder.DOUBAO_MOTION_VOICE_PLATFORM_CLASSES, classes[1:])
+        for selected in (classes, tuple(reversed(classes))):
+            command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))
+            self.assertEqual("doubao-motion-targeted", scope)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.DOUBAO_MOTION_MODULES, "-v"], command)
+            self.assertNotIn("discover", command)
+        # Removing the floating class is the intentionally supported legacy five-class scope.
+        invalid = [classes[:i] + classes[i + 1:] for i in range(1, len(classes))]
+        invalid += [(*classes, classes[0]), (*classes, "app.daiyu.android.OtherTest")]
+        for selected in invalid:
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))[1])
+        self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="release", SMOKE_TEST_CLASSES=",".join(classes)))[1])
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); helper = self.fixture(root, classes)
+            selected = []
+            for shard in range(4):
+                result = helper.select(root, shard, classes=",".join(classes))
+                self.assertEqual(0, result.returncode, result.stderr)
+                inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                selection = json.loads((root / "smoke/selection.json").read_text())
+                self.assertEqual("targeted", inventory["discovery_scope"])
+                self.assertEqual({name: i + 1 for i, name in enumerate(classes)}, inventory["all_classes"])
+                selected.extend(selection["selected_classes"])
+            self.assertCountEqual(classes, selected)
+            source = root / "app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt"
+            source.unlink()
+            self.assertNotEqual(0, helper.select(root, classes=",".join(classes)).returncode)
+
+    def test_floating_scope_is_shared_by_workflow_and_native_discovery(self):
+        root = Path(__file__).resolve().parents[1]
+        full = ",".join(recorder.DOUBAO_MOTION_FLOATING_PLATFORM_CLASSES)
+        workflow = (root / ".github/workflows/doubao-call-motion-checks.yml").read_text()
+        self.assertIn("  SMOKE_TEST_CLASSES: " + full, workflow)
+        self.assertIn("run: python3 .motion-validation-tools/scripts/acceptance/record_tool_tests.py --python python3", workflow)
+        self.assertNotIn('GITHUB_SHA="$EXPECTED_SHA" python3 scripts/acceptance/record_tool_tests.py', workflow.split("  layout:", 1)[1])
+        script = (root / "scripts/smoke_boot.sh").read_text()
+        self.assertIn('doubao_motion_floating_target = doubao_motion_voice_target | {"app.daiyu.android.VoiceCallFloatingWindowTest"}', script)
+        self.assertIn("sorted(doubao_motion_floating_target)", script)
+        setup = script.split('  if test "$api" = 26 && test "${SMOKE_MODE:-}" = smoke &&', 1)[1].split('  instrumentation_options=()', 1)[0]
+        self.assertIn('test "${SMOKE_TEST_CLASSES:-}" = "' + full + '"', setup)

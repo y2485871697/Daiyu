@@ -35,7 +35,7 @@ class CallEntryCorrectionsContractTest(unittest.TestCase):
 
     def test_long_press_has_activity_recheck_without_invalidation_and_no_disabled_closing(self):
         self.assertIn('onVoiceLongPress = { admitVoiceModePicker() && currentChat() }', self.main)
-        admission = self.main.split('private fun admitVoiceModePicker(): Boolean', 1)[1].split('private fun shownVoiceCall', 1)[0]
+        admission = self.main.split('private fun admitVoiceModePicker(): Boolean', 1)[1].split('private val floatingCallDelegate', 1)[0]
         self.assertIn('voiceModePickerAdmitted(doubaoCallPresentation.state != null || voiceCallPresentation.state != null,', admission)
         self.assertIn('if (!admitted) voiceConfigurationToast("请先挂断")', admission)
         for forbidden in ('invalidate', 'stopDuplex', '.clear(', 'voiceEntryMode ='):

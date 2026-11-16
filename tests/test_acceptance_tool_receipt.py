@@ -59,6 +59,39 @@ class ChildStopReceiptScopeTest(unittest.TestCase):
                 os.chdir(previous)
 
 
+class DoubaoMotionReceiptScopeTest(unittest.TestCase):
+    def test_frozen_motion_scope_uses_current_tools_and_preserves_both_identities(self):
+        previous = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                os.chdir(directory)
+                for code in (0, 3):
+                    env = dict(GITHUB_SHA="b" * 40, GITHUB_RUN_ID="43", GITHUB_RUN_ATTEMPT="2",
+                               EXPECTED_SHA="a" * 40, SMOKE_MODE="smoke",
+                               SMOKE_TEST_CLASSES=",".join(producer.DOUBAO_MOTION_FLOATING_PLATFORM_CLASSES))
+                    def child(command, stdout, stderr, env=None, cwd=None):
+                        self.assertEqual(ROOT, cwd)
+                        self.assertTrue(env["PYTHONPATH"].startswith(str(ROOT / "tests")))
+                        self.assertEqual(["python3", "-B", "-m", "unittest", *producer.DOUBAO_MOTION_MODULES, "-v"], command)
+                        self.assertNotIn("discover", command)
+                        stdout.write(b"frozen motion scope raw output\n")
+                        return code
+                    console = io.BytesIO()
+                    with patch.dict(os.environ, env, clear=True), \
+                            patch.object(producer.subprocess, "check_output", return_value="a" * 40 + "\n"), \
+                            patch.object(producer.subprocess, "call", side_effect=child), \
+                            patch.object(producer.sys, "stdout", SimpleNamespace(buffer=console)):
+                        self.assertEqual(code, producer.record("python3"))
+                    receipt = json.loads(Path("tool-evidence/receipt.json").read_text())
+                    self.assertEqual(code, receipt["exit_code"])
+                    self.assertEqual("a" * 40, receipt["identity"]["sha"])
+                    self.assertEqual("b" * 40, receipt["validation_tools_sha"])
+                    self.assertEqual("doubao-motion-targeted", receipt["scope"])
+                    self.assertEqual(b"frozen motion scope raw output\n", Path("tool-evidence/unittest.log").read_bytes())
+            finally:
+                os.chdir(previous)
+
+
 PROVIDER_SAVE_CLASSES = (
     "app.daiyu.android.ProviderSavePositionActivityTest",
     "app.daiyu.android.ControllerProviderSaveNoticeTest",

@@ -59,6 +59,22 @@ class SavedSubAgentRuntimeBindingsTest {
         assertEquals(listOf(saved.model), captured.map { it.model })
     }
 
+    @Test fun childDisablesNativeSearchWithoutRemovingOrdinarySearchPreference() {
+        val captured = mutableListOf<ProviderSnapshot>()
+        val bindings = SavedSubAgentRuntimeBindings { captured += it; noNetwork }
+        val options = ProviderRequestOptions(customBody = """{"enable_search":true}""", openAiWebSearchEnabled = true)
+        val configured = saved.copy(endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1", model = "qwen-plus",
+            protocol = ProviderProtocol.CHAT_COMPLETIONS, requestOptions = options)
+        bindings.freeze(owner, config, listOf(provider), { _, _ -> configured }).getValue(profile.id).current().create()
+        val childSettings = captured.single().asModelSettings()
+        assertTrue(childSettings.requestOptions.searchToolsEnabled)
+        assertFalse(childSettings.requestOptions.preferNativeSearch)
+        val wire = childSettings.requestOptions.apply(NativeCompletionRequest.body(childSettings, org.json.JSONArray(), emptyList(), null),
+            childSettings.protocol, false)
+        assertFalse(wire.has("enable_search"))
+        assertEquals(options.customBody, childSettings.requestOptions.customBody)
+    }
+
     private val owner = SubAgentConfigKey.Conversation("conversation")
     private val child = SubAgentModel("selected-record", "exact-api-model")
     private val provider = SubAgentProvider("explicit-provider", "Explicit", listOf(child))

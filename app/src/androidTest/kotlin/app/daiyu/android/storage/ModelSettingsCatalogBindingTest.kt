@@ -46,7 +46,7 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         val snapshot = store.modelCatalogSnapshot()
         val ticket = snapshot.selectionFor("search-a")!!
         val disabled = app.daiyu.android.model.catalog.CatalogModelEdit.from(ticket.record)
-            .copy(searchTools = false).applyTo(ticket.record)
+            .copy(searchTools = false, preferNativeSearch = false).applyTo(ticket.record)
         assertEquals(app.daiyu.android.model.catalog.CatalogLocalEditResult.APPLIED,
             store.modelCatalog.replaceSelection(ticket, disabled) { false })
         assertFalse(store.loadForRun().requestOptions.openAiWebSearchEnabled)
@@ -69,6 +69,8 @@ class ModelSettingsCatalogBindingTest : InstrumentationTestCase() {
         assertFalse(reopened.loadForRun().requestOptions.openAiWebSearchEnabled)
         reopened.selectCatalogModel(reopened.load(), reopened.modelCatalogSnapshot().selectionFor("search-a")!!)
         assertTrue(reopened.loadForRun().requestOptions.openAiWebSearchEnabled)
+        assertFalse(reopened.loadForRun().requestOptions.preferNativeSearch)
+        assertFalse(store.loadForRun().requestOptions.preferNativeSearch)
         assertFalse(reopened.modelCatalogSnapshot().models.single { it.id == "search-b" }.settings.requestOptions.openAiWebSearchEnabled)
     }
 

@@ -58,6 +58,7 @@ data class ProviderRequestOptions(
         if (customBody.isEmpty() && speedMode == null && !codex && anthropicVersion == null && !nativeSearchEnabled && !voiceTextOnly) return base
         validate(protocol, nativeSearchEnabled)
         val merged = if (customBody.isEmpty()) base else RequestBodyMerge.merge(base, parseBody())
+        if (!nativeSearchEnabled) NATIVE_SEARCH_FIELDS.forEach(merged::remove)
         if (protocol == ProviderProtocol.RESPONSES) GptServiceTier.apply(merged, speedMode, codex)
         if (voiceTextOnly) {
             merged.remove("audio")

@@ -41,19 +41,62 @@ class NavigationCallbacksTest {
     @Test fun `request during handoff is denied without poisoning resumed navigation`() {
         val h = Harness()
         h.live = false
-        assertTrue(pageRequestBlocked(h.live, a) { h.gate.failed(it) })
+        assertTrue(pageRequestBlocked(h.live, a, true) { h.gate.failed(it) })
         assertEquals(NavigationCallbacks.Phase.IDLE, h.gate.phase)
         assertTrue(h.rejections.isEmpty())
         h.live = true
-        assertFalse(pageRequestBlocked(h.live, a) { h.gate.failed(it) })
+        assertFalse(pageRequestBlocked(h.live, a, true) { h.gate.failed(it) })
         h.load(a)
         assertTrue(h.finish(a))
         assertTrue(h.gate.returned(true))
-        assertTrue(pageRequestBlocked(h.live, "file:///private") { h.gate.failed(it) })
+        assertTrue(pageRequestBlocked(h.live, "file:///private", true) { h.gate.failed(it) })
         assertEquals(NavigationCallbacks.Phase.QUARANTINED, h.gate.phase)
         assertEquals(listOf("BROWSER_OPENMINIS_PAGE_URL_BLOCKED"), h.rejections)
         h.live = false
-        assertTrue(pageRequestBlocked(h.live, b) { fail("retired request must stay denied") })
+        assertTrue(pageRequestBlocked(h.live, b, true) { fail("retired request must stay denied") })
+    }
+
+    @Test fun `matched finish is not invalidated by the former navigation deadline`() {
+        var now = 0L
+        val reasons = mutableListOf<String>()
+        val gate = NavigationCallbacks({ true }, { _, _ -> true }, { reasons += it }, nowNanos = { now })
+        assertTrue(gate.begin(a, 55_000))
+        assertTrue(gate.directLoad(a))
+        assertTrue(gate.onStarted(a))
+        now = 6_000_000_000L
+        assertTrue(gate.onFinished(a, "title", a) {})
+        now = 31_000_000_000L
+        assertTrue(gate.returned(true))
+        assertEquals(NavigationCallbacks.Phase.IDLE, gate.phase)
+        assertTrue(reasons.isEmpty())
+    }
+
+    @Test fun `blocked subresources cannot retire loading finished or idle main document`() {
+        for (stage in listOf("loading", "finished", "idle")) {
+            val h = Harness()
+            h.load(a)
+            if (stage != "loading") assertTrue(h.finish(a))
+            if (stage == "idle") assertTrue(h.gate.returned(true))
+            val phase = h.gate.phase
+            for (url in listOf("file:///private", "https://accounts.google.com/login", "data:text/html,blocked")) {
+                assertTrue(pageRequestBlocked(h.live, url, false) { h.gate.failed(it) })
+                assertFalse(h.gate.allowOverride(url, false))
+                assertEquals(phase, h.gate.phase)
+            }
+            if (stage == "loading") assertTrue(h.finish(a))
+            if (stage != "idle") assertTrue(h.gate.returned(true))
+            assertTrue(h.rejections.isEmpty())
+            assertEquals(listOf(a), h.upstreamFinishes)
+        }
+    }
+
+    @Test fun `forbidden main request still quarantines a finished document`() {
+        val h = Harness()
+        h.load(a)
+        assertTrue(h.finish(a))
+        assertTrue(pageRequestBlocked(h.live, "https://accounts.google.com/login", true) { h.gate.failed(it) })
+        assertFalse(h.gate.returned(true))
+        assertEquals(NavigationCallbacks.Phase.QUARANTINED, h.gate.phase)
     }
 
     @Test fun `fresh distinct navigations and reads can continue on same resource`() {

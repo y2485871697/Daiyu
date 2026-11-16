@@ -42,15 +42,30 @@ class BrowserManualStateContractTest(unittest.TestCase):
         blocked = host.split('private fun blocked(', 1)[1].split('private fun fenced(', 1)[0]
         self.assertIn('if (humanControl())', blocked)
         self.assertIn('if (mainFrame) navigation.cancelManualLoad()', blocked)
-        self.assertIn('else navigation.failed("BROWSER_OPENMINIS_PAGE_URL_BLOCKED")', blocked)
+        self.assertIn('else if (mainFrame) navigation.failed("BROWSER_OPENMINIS_PAGE_URL_BLOCKED")', blocked)
         request = host.split('private fun requestBlocked(', 1)[1].split('private fun postRequestFailure', 1)[0]
-        self.assertIn('pageRequestBlocked(live(), url)', request)
+        self.assertIn('pageRequestBlocked(live(), url, mainFrame)', request)
         self.assertIn('if (!humanControl()) postRequestFailure(reason)', request)
-        self.assertIn('if (requestBlocked(request.url.toString())) return denied()', host)
+        self.assertIn('if (requestBlocked(request.url.toString(), request.isForMainFrame)) return denied()', host)
         self.assertIn('if (!blocked(url, request.isForMainFrame))', host)
+        self.assertIn('if (requestBlocked(url, false)) denied()', host)
         self.assertIn('ByteArrayInputStream("BROWSER_OPENMINIS_URL_BLOCKED"', host)
         # Renderer failure still quarantines; no blanket swallowing of real unknown outcomes.
         self.assertIn('navigation.failed("BROWSER_OPENMINIS_RENDERER_FAILED")', host)
+
+    def test_navigation_confirmation_does_not_wait_for_optional_metadata_js(self):
+        host = (HOST / 'AndroidOpenMinisBrowserHost.kt').read_text()
+        navigate = host.split('val answer = if (navigating)', 1)[1].split('} else active.execute(input)', 1)[0]
+        self.assertEqual(1, navigate.count('view.loadUrl('))
+        self.assertIn('NavigationCallbacks.Phase.FINISHED', navigate)
+        self.assertIn('check(navigation.returned(true))', navigate)
+        self.assertIn('pageURL = url', navigate)
+        self.assertNotIn('evaluateJavascript', navigate)
+        self.assertNotIn('active.execute', navigate)
+        gate = (HOST / 'NavigationCallbacks.kt').read_text()
+        budget = gate.split('private fun available()', 1)[1].split('private fun permittedKey', 1)[0]
+        self.assertIn('Phase.AWAITING_START, Phase.LOADING, Phase.FORWARDING', budget)
+        self.assertNotIn('Phase.FINISHED', budget)
 
     def test_manual_history_is_not_a_fallible_page_snapshot_write(self):
         host = (HOST / 'AndroidOpenMinisBrowserHost.kt').read_text()

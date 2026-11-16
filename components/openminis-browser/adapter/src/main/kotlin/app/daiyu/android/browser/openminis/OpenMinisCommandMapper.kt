@@ -116,7 +116,7 @@ internal object OpenMinisCommandMapper {
         val args = command.arguments
         return when (command.action) {
             "navigate" -> {
-                // Manager.navigate has a fixed timeout and never consumes input.timeoutMs.
+                // The host uses its fixed main-frame completion window, not input.timeoutMs.
                 require("timeout_ms" !in args) { "BROWSER_OPENMINIS_NAVIGATION_TIMEOUT_UNSUPPORTED" }
                 BrowserActionInput(BrowserAction.NAVIGATE, url = args["url"] as String)
             }

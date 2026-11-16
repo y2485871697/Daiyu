@@ -26,10 +26,10 @@ object OpenMinisNavigationPolicy {
 }
 
 /** A temporarily unbound execution lease denies requests without retiring its reusable allocation. */
-internal fun pageRequestBlocked(live: Boolean, url: String?, reject: (String) -> Unit): Boolean {
+internal fun pageRequestBlocked(live: Boolean, url: String?, mainFrame: Boolean, reject: (String) -> Unit): Boolean {
     if (!live) return true
     if (OpenMinisNavigationPolicy.permits(url)) return false
-    reject("BROWSER_OPENMINIS_PAGE_URL_BLOCKED")
+    if (mainFrame) reject("BROWSER_OPENMINIS_PAGE_URL_BLOCKED")
     return true
 }
 

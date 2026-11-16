@@ -35,6 +35,7 @@ class ModelNativeSearchSupportTest {
             Triple(ProviderProtocol.RESPONSES, "gpt-4.1", "https://api.openai.com/v1"),
             Triple(ProviderProtocol.CHAT_COMPLETIONS, "qwen-plus", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
             Triple(ProviderProtocol.GEMINI, "gemini-2.5-flash", "https://generativelanguage.googleapis.com/v1beta"),
+            Triple(ProviderProtocol.GEMINI, "models/gemini-2.5-flash", "https://generativelanguage.googleapis.com/v1beta"),
             Triple(ProviderProtocol.MESSAGES, "claude-sonnet-4-5", "https://api.anthropic.com/v1"))
         for ((protocol, model, host) in supported) assertTrue("$protocol/$model", ModelNativeSearchSupport.supports(protocol, model, host))
         for ((protocol, model, host) in listOf(Triple(ProviderProtocol.CHAT_COMPLETIONS, "grok-4", endpoint),
@@ -67,6 +68,22 @@ class ModelNativeSearchSupportTest {
         assertFalse(updated.settings.requestOptions.searchToolsEnabled)
         assertFalse(updated.settings.requestOptions.preferNativeSearch)
         assertTrue(CatalogModelEdit("new", "New").preferNativeSearch)
+    }
+
+    @Test fun customBodyCannotReenableSearchAfterEffectivePolicyDisablesIt() {
+        val custom = """{"enable_search":true,"enable_enhancement":true,"web_search":{"enable":true}}"""
+        val options = ProviderRequestOptions(customBody = custom, openAiWebSearchEnabled = true)
+        val base = app.daiyu.android.storage.ModelSettings("https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus", "synthetic", false,
+            protocol = ProviderProtocol.CHAT_COMPLETIONS, requestOptions = options)
+        val variants = listOf(base.copy(requestOptions = options.copy(openAiWebSearchEnabled = false)),
+            base.copy(requestOptions = options.copy(preferNativeSearch = false)), base.copy(model = "unsupported"))
+        for (settings in variants) {
+            val body = settings.requestOptions.apply(NativeCompletionRequest.body(settings, JSONArray(), listOf(tool), null),
+                settings.protocol, settings.requestOptions.nativeSearchEnabled(settings.protocol, settings.model, settings.endpoint, listOf(tool)))
+            for (field in listOf("enable_search", "enable_enhancement", "web_search")) assertFalse(body.has(field))
+            assertEquals(custom, settings.requestOptions.customBody)
+            assertEquals("lookup", body.getJSONArray("tools").getJSONObject(0).getJSONObject("function").getString("name"))
+        }
     }
 
     @Test fun preferenceOffOrUnsupportedNeverSendsNativeChatFields() {

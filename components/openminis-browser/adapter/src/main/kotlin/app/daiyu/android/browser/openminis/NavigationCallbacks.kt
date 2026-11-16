@@ -51,8 +51,8 @@ internal class NavigationCallbacks(
 
     @Synchronized fun manualOverride(url: String, mainFrame: Boolean): Boolean {
         if (!isManual || !available()) return false
+        if (!mainFrame) return permits(url)
         val key = permittedKey(url) ?: return false
-        if (!mainFrame) return true
         if (phase == Phase.IDLE) {
             used += key
             epochUrls += key
@@ -84,8 +84,8 @@ internal class NavigationCallbacks(
         if (phase != Phase.IDLE) return fail("BROWSER_OPENMINIS_NAVIGATION_UNKNOWN")
         require(timeoutMillis in 1..60_000)
         begunNanos = nowNanos()
-        // Fixed upstream completes its deferred with Unit after 30 seconds even on timeout.
-        // A later finish must not retroactively convert that timeout to a confirmed operation.
+        // Keep the host main-frame completion window capped at 30 seconds.
+        // A later finish cannot retroactively confirm an expired navigation.
         budgetNanos = minOf(timeoutMillis, 30_000) * 1_000_000
         val key = permittedKey(url) ?: return false
         if (key in used) return fail("BROWSER_OPENMINIS_NAVIGATION_URL_REUSE")
@@ -114,8 +114,8 @@ internal class NavigationCallbacks(
     @Synchronized
     fun allowOverride(url: String, mainFrame: Boolean): Boolean {
         if (!available()) return false
+        if (!mainFrame) return permits(url)
         val key = permittedKey(url) ?: return false
-        if (!mainFrame) return true
         if (!directLoadSeen || phase !in setOf(Phase.AWAITING_START, Phase.LOADING)) {
             return fail("BROWSER_OPENMINIS_NAVIGATION_UNKNOWN")
         }
@@ -238,7 +238,8 @@ internal class NavigationCallbacks(
     private fun available(): Boolean {
         if (phase == Phase.QUARANTINED) return false
         if (!live()) { phase = Phase.QUARANTINED; return false }
-        if (phase != Phase.IDLE && budgetNanos > 0 && nowNanos() - begunNanos >= budgetNanos) {
+        if (phase in setOf(Phase.AWAITING_START, Phase.LOADING, Phase.FORWARDING) &&
+            budgetNanos > 0 && nowNanos() - begunNanos >= budgetNanos) {
             return fail("BROWSER_OPENMINIS_NAVIGATION_TIMEOUT")
         }
         return true

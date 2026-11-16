@@ -527,8 +527,24 @@ private class AndroidBlankResource(
             val active = ensureManager()
             check(live()) { "BROWSER_OPENMINIS_RESOURCE_RETIRED" }
             if (input.action == BrowserAction.SCREENSHOT) awaitVisualState()
-            // 通过固定版本的上游 BrowserUseManager 执行。
-            val answer = active.execute(input)
+            // 导航使用匹配的主框架完成回调，其它动作仍交给固定版本管理器。
+            val answer = if (navigating) {
+                // Navigation is confirmed by the matched main-frame callback, not optional DOM metadata.
+                view.loadUrl(checkNotNull(input.url))
+                while (navigation.phase != NavigationCallbacks.Phase.FINISHED) {
+                    check(!destroyed && live() && navigation.phase != NavigationCallbacks.Phase.QUARANTINED) {
+                        "BROWSER_OPENMINIS_NAVIGATION_UNKNOWN"
+                    }
+                    kotlinx.coroutines.delay(16)
+                }
+                yield()
+                check(navigation.returned(true)) { "BROWSER_OPENMINIS_NAVIGATION_UNKNOWN" }
+                val url = view.url.orEmpty()
+                BrowserActionResult(text = buildString {
+                    append("Navigated to ").append(url)
+                    view.title?.takeIf(String::isNotBlank)?.let { append("\n  Title: ").append(it) }
+                }, pageURL = url)
+            } else active.execute(input)
             // Manual browsing bypasses upstream's untokened finish callback. Screenshot labels
             // must describe the actual WebView, not the manager's last model-navigation state.
             val result = if (input.action == BrowserAction.SCREENSHOT) answer.copy(
@@ -539,12 +555,6 @@ private class AndroidBlankResource(
                     }.joinToString("\n"),
                 pageURL = view.url,
             ) else answer
-            if (navigating) {
-                // Upstream completes its deferred BEFORE recording history. Let the callback
-                // unwind (and the gate commit FINISHED) before publishing the operation result.
-                yield()
-                check(navigation.returned(result.success)) { "BROWSER_OPENMINIS_NAVIGATION_UNKNOWN" }
-            }
             check(live()) { "BROWSER_OPENMINIS_RESOURCE_RETIRED" }
             // The mapper decodes a strict private body frame. Do not corrupt its length or
             // consume queued dialog diagnostics; the next ordinary result may report them.
@@ -679,7 +689,7 @@ private class GuardedClient(
         if (OpenMinisNavigationPolicy.permits(url)) return false
         if (humanControl()) {
             if (mainFrame) navigation.cancelManualLoad()
-        } else navigation.failed("BROWSER_OPENMINIS_PAGE_URL_BLOCKED")
+        } else if (mainFrame) navigation.failed("BROWSER_OPENMINIS_PAGE_URL_BLOCKED")
         return true
     }
 
@@ -718,8 +728,8 @@ private class GuardedClient(
 
     // Request callbacks are not UI callbacks. Never take navigation's monitor on that thread:
     // UI owns registry -> navigation ordering, and a request must not invert it.
-    private fun requestBlocked(url: String?): Boolean =
-        pageRequestBlocked(live(), url) { reason ->
+    private fun requestBlocked(url: String?, mainFrame: Boolean): Boolean =
+        pageRequestBlocked(live(), url, mainFrame) { reason ->
             if (!humanControl()) postRequestFailure(reason)
         }
     private fun postRequestFailure(reason: String) {
@@ -728,7 +738,7 @@ private class GuardedClient(
 
     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
         // Runs on WebView's request thread. Never approve history or touch native view here.
-        if (requestBlocked(request.url.toString())) return denied()
+        if (requestBlocked(request.url.toString(), request.isForMainFrame)) return denied()
         val replacement = try { requestOverride?.invoke(request) } catch (_: Exception) {
             postRequestFailure("BROWSER_OPENMINIS_REQUEST_OVERRIDE_FAILED")
             return denied()
@@ -739,7 +749,7 @@ private class GuardedClient(
 
     @Suppress("DEPRECATION")
     override fun shouldInterceptRequest(view: WebView, url: String): WebResourceResponse? =
-        if (requestBlocked(url)) denied() else upstream.shouldInterceptRequest(view, url)
+        if (requestBlocked(url, false)) denied() else upstream.shouldInterceptRequest(view, url)
 
     override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
         fenced {
@@ -754,7 +764,7 @@ private class GuardedClient(
 
     override fun onPageFinished(view: WebView, url: String?) {
         fenced {
-            if (blocked(url)) return@fenced
+            if (blocked(url, true)) return@fenced
             val finished = navigation.onFinished(url, view.title.orEmpty(), view.url) {
                 upstream.onPageFinished(view, url)
             }

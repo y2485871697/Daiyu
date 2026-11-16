@@ -32,7 +32,7 @@ internal object ModelNativeSearchSupport {
                 NativeSearchPolicy.Family.STEPFUN -> id.startsWith("step-") && !id.startsWith("step-5-preview")
                 else -> false
             }
-            ProviderProtocol.GEMINI -> family in setOf(NativeSearchPolicy.Family.GOOGLE, NativeSearchPolicy.Family.COMPATIBLE) && id.startsWith("gemini-")
+            ProviderProtocol.GEMINI -> family in setOf(NativeSearchPolicy.Family.GOOGLE, NativeSearchPolicy.Family.COMPATIBLE) && id.removePrefix("models/").startsWith("gemini-")
             ProviderProtocol.MESSAGES -> when (family) {
                 NativeSearchPolicy.Family.ANTHROPIC, NativeSearchPolicy.Family.COMPATIBLE -> id.startsWith("claude-")
                 NativeSearchPolicy.Family.MINIMAX -> id.startsWith("minimax-")

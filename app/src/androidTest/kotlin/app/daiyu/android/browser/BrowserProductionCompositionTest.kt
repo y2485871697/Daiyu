@@ -40,6 +40,7 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
         roots.add(root)
         val owner = BrowserOwner("instrumentation-${UUID.randomUUID()}", kind)
         val html = "<html><head><title>Browser fixture</title></head><body>0123456789abcdefghijklmnop</body></html>"
+        val blockedFrameHtml = html.replace("</body>", "<iframe src='https://accounts.google.com/login'></iframe></body>")
         return main {
             AndroidBrowserRunHost(context, BrowserGrant(owner, access), root,
                 cookieEnvPath = { _, file -> file.toString() },
@@ -48,9 +49,12 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
                 },
                 historyApproval = OpenMinisHistoryApproval { _, url, _ -> historyApprovals.add(url); true },
                 requestOverride = { request ->
-                    check(request.url.host == "browser-fixture.invalid")
+                    check(request.url.host == "browser-fixture.invalid") {
+                        "blocked subresource reached the response override"
+                    }
                     val marker = if (request.isForMainFrame) mainFrameRequests?.incrementAndGet() else null
-                    val response = if (marker == null) html else html.replace("<title>Browser fixture</title>",
+                    val page = if (request.url.path == "/blocked-subframe") blockedFrameHtml else html
+                    val response = if (marker == null) page else page.replace("<title>Browser fixture</title>",
                         "<title>Browser fixture $marker</title>")
                     WebResourceResponse("text/html", "UTF-8", ByteArrayInputStream(response.toByteArray()))
                 },
@@ -63,6 +67,18 @@ class BrowserProductionCompositionTest : InstrumentationTestCase() {
         val outcome = host.execute(mapOf(*args))
         assertTrue("Expected Confirmed action=${mapOf(*args)["action"]}, got $outcome", outcome is BrowserOutcome.Confirmed)
         return outcome as BrowserOutcome.Confirmed
+    }
+
+    fun testBlockedSubframeDoesNotDiscardCompletedNavigation() {
+        val requests = java.util.concurrent.atomic.AtomicInteger()
+        val host = host(mainFrameRequests = requests)
+        confirmed(host, "action" to "new_tab")
+        val opened = confirmed(host, "action" to "navigate", "url" to "https://browser-fixture.invalid/blocked-subframe")
+        assertTrue(opened.result.text.contains("Navigated to https://browser-fixture.invalid/blocked-subframe"))
+        assertEquals(1, requests.get())
+        val body = confirmed(host, "action" to "get_text", "selector" to "body", "max_chars" to 200).result.text
+        assertTrue(body.contains("0123456789"))
+        assertEquals(1, requests.get())
     }
 
     fun testRealNavigationBodyPagingAndJpeg() {

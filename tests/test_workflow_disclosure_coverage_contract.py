@@ -16,6 +16,17 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertIn('force || boundary.animationIdle', motion)
         self.assertIn('onDispose { motion.dispose() }', motion)
 
+    def test_bottom_reading_anchor_keeps_the_existing_physical_edge(self):
+        motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
+        capture = motion.split('private fun captureAnchor(', 1)[1].split('private fun releaseAnchor(', 1)[0]
+        self.assertIn('anchorBottom = anchorTop + it.size.height', capture)
+        self.assertNotIn('safe.bottom', capture)
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowDisclosureDirectionTest.kt').read_text()
+        self.assertIn('testUpwardToolAndDownwardCollapseKeepTheLowerReadingBoundaryStill', source)
+        self.assertIn('testBoundedUpwardToolAndDownwardCollapseKeepTheLowerReadingBoundaryStill', source)
+        self.assertIn('readingAnchor, position("reading-anchor"), 1f', source)
+        self.assertIn('footerAnchor, position("reading-footer"), 1f', source)
+
     def test_external_catchup_survives_unwrapping_until_the_same_owner_is_settled(self):
         source = (CHAT / 'ChatMessageList.kt').read_text()
         self.assertNotIn('if (!state.bounded || !protect) state.followCatchup = false', source)

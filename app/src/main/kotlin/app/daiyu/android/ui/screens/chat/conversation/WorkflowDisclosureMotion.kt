@@ -213,7 +213,6 @@ internal class WorkflowDisclosureMotion(
         container?.takeIf { it.isAttached }?.let {
             anchorTop = it.positionInWindow().y
             anchorBottom = anchorTop + it.size.height
-            viewport.bounds()?.let { safe -> anchorBottom = minOf(anchorBottom, safe.bottom) }
             viewport.active = this
         } ?: run { anchorRequester = null; viewport.active = null }
     }

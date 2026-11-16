@@ -422,6 +422,96 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         }
     }
 
+    private fun assertLowerReadingBoundaryIsStationary(status: RunStatus, streaming: Boolean) {
+        val step = WorkStepUi("reading-tool", "fixture", "", WorkStepState.OK)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            density = LocalDensity.current.density
+            BoxWithConstraints(Modifier.size(320.dp, 420.dp)) {
+                ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { inset ->
+                    ChatMessageList(List(8) { ChatTurnUi.User("u$it", "history $it") } +
+                        ChatTurnUi.Assistant("tail", status = status, isStreaming = streaming),
+                        ChatScreenActions(), composerBottomInset = inset,
+                        scrollRequest = ChatScrollRequest(1, messageId = "tail", followBottom = false),
+                        turnExtras = { turn -> if (turn.id == "tail") {
+                            WorkProcessCard(work, "reading-fixture", content = {
+                                Column {
+                                    Box(Modifier.height(88.dp))
+                                    WorkStepRow(step, toolContent = {
+                                        Box(Modifier.fillMaxWidth().height(80.dp).testTag("reading-detail"))
+                                    })
+                                    Box(Modifier.fillMaxWidth().height(12.dp).background(Color.Magenta)
+                                        .testTag("reading-anchor"))
+                                    Box(Modifier.height(240.dp))
+                                }
+                            })
+                            Box(Modifier.fillMaxWidth().height(12.dp).testTag("reading-footer"))
+                            Box(Modifier.height(240.dp))
+                        } })
+                }, composer = { Box(Modifier.fillMaxWidth().height(96.dp).testTag("reading-composer")) })
+            }
+        } } }
+        ui.waitForIdle()
+        val parentHeader = ui.onNodeWithTag("work-process-header").fetchSemanticsNode().boundsInRoot
+        val parentListTop = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot.top
+        val parentSafeBottom = ui.onNodeWithTag("reading-composer").fetchSemanticsNode().boundsInRoot.top -
+            ChatTailClearance.value * density
+        assertTrue("The enclosing workflow must initially open downwards",
+            parentHeader.center.y < (parentListTop + parentSafeBottom) / 2f)
+        touchHeader(); ui.waitForIdle()
+        assertDirection(false)
+        val headerTag = "tool-step-header:reading-tool"
+        val header = ui.onNodeWithTag(headerTag).fetchSemanticsNode().boundsInRoot
+        val listTop = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot.top
+        val safeBottom = ui.onNodeWithTag("reading-composer").fetchSemanticsNode().boundsInRoot.top -
+            ChatTailClearance.value * density
+        assertTrue("Fixture tool must be in the lower safe half", header.center.y >= (listTop + safeBottom) / 2f)
+        assertTrue("Fixture tool must be visible above the composer", header.bottom < safeBottom)
+        assertTrue("Fixture must retain an existing workflow bottom beyond the safe viewport", bottom() > safeBottom + 80f * density)
+        fun position(tag: String): Float = ui.onNodeWithTag(tag).fetchSemanticsNode()
+            .layoutInfo.coordinates.positionInRoot().y
+        val readingAnchor = position("reading-anchor")
+        val footerAnchor = position("reading-footer")
+        assertTrue("The existing reading marker must be visible", readingAnchor >= listTop && readingAnchor < safeBottom)
+        fun assertReadingAnchor() {
+            assertEquals("Upward opening and downward collapse must not move the following text: ${geometry(headerTag)}",
+                readingAnchor, position("reading-anchor"), 1f)
+            assertEquals("The same operation must not move the remainder after the workflow: ${geometry(headerTag)}",
+                footerAnchor, position("reading-footer"), 1f)
+        }
+        ui.mainClock.autoAdvance = false
+        try {
+            for ((opening, frames) in listOf(true to 60, false to 60, true to 5, false to 60)) {
+                val initialHeight = ui.onNodeWithTag("work-process-surface")
+                    .fetchSemanticsNode().layoutInfo.coordinates.size.height
+                var changedHeight = false
+                ui.onNodeWithTag(headerTag).performTouchInput { click() }
+                repeat(frames) {
+                    ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                    assertDirection(true, headerTag)
+                    assertReadingAnchor()
+                    val height = ui.onNodeWithTag("work-process-surface")
+                        .fetchSemanticsNode().layoutInfo.coordinates.size.height
+                    if (height != initialHeight) changedHeight = true
+                }
+                assertTrue("The disclosure must really animate its height", changedHeight)
+                if (opening && frames == 60) {
+                    assertTrue("The detail must really finish expanding", ui.onNodeWithTag("reading-detail")
+                        .fetchSemanticsNode().boundsInRoot.height >= 79f * density)
+                } else if (!opening) ui.onNodeWithTag("reading-detail").assertDoesNotExist()
+            }
+            repeat(12) {
+                ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                assertReadingAnchor()
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testUpwardToolAndDownwardCollapseKeepTheLowerReadingBoundaryStill() =
+        assertLowerReadingBoundaryIsStationary(RunStatus.COMPLETED, streaming = false)
+
+    fun testBoundedUpwardToolAndDownwardCollapseKeepTheLowerReadingBoundaryStill() =
+        assertLowerReadingBoundaryIsStationary(RunStatus.RUNNING, streaming = true)
+
     fun testNestedWorkflowAndToolMoveTheirReadingWindowInsteadOfClippingTheIdentity() {
         val step = WorkStepUi("nested-tool", "fixture", "", WorkStepState.OK)
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {

@@ -3381,10 +3381,11 @@ class MainActivity : ComponentActivity() {
         val renderedInlineVisit = inlineMessageEditor?.visit
         val renderedActionVisit = messageActionVisit
         val renderedSpeechOwner = speechHost.owner
-        fun editorMatches() = activityUsable() && voiceForeground && messageActionVisit === renderedActionVisit &&
-            selectionReady && dataRevision == controller.dataRevision && pendingTextSend == null && controller.textSendState() == null &&
+        fun editorOwnerMatches() = activityUsable() && voiceForeground && messageActionVisit === renderedActionVisit &&
+            selectionReady && pendingTextSend == null && controller.textSendState() == null &&
             selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration &&
             inlineMessageEditor?.visit === renderedInlineVisit
+        fun editorMatches() = editorOwnerMatches() && dataRevision == controller.dataRevision
         fun gestureOwner() = currentControlOwner()?.takeIf {
             editorMatches() && currentChatControlAvailable() && renderedOwner != null && it.id == renderedOwner.id && it.runId == renderedOwner.runId && it.conversationId == renderedOwner.conversationId
         }
@@ -3392,11 +3393,13 @@ class MainActivity : ComponentActivity() {
         val actionSnapshot = messageActionSnapshot?.takeIf {
             it.conversationId.value == renderedConversation && messageActionRenderedRevision.matches(it, shown.map { row -> row.second })
         }
+        fun messageActionOwnerCurrent() = displayWindow == null && editorOwnerMatches() && draftRevision == renderedDraftRevision &&
+            voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+            terminalEditor == null && virtualDisplayEditor == null && !videoSending &&
+            !imageHost.sending && !shizukuWritesBlocked
         val messageCallbacks = messageActionHost.bind(actionSnapshot,
-            isCurrent = { displayWindow == null && editorMatches() && draftRevision == renderedDraftRevision &&
-                voiceForeground && retainedPage == "chat" && !sidebarVisible &&
-                terminalEditor == null && virtualDisplayEditor == null && !videoSending &&
-                !imageHost.sending && !shizukuWritesBlocked },
+            isCurrent = { messageActionOwnerCurrent() && dataRevision == controller.dataRevision },
+            isResultCurrent = ::messageActionOwnerCurrent,
             result = { outcome -> guard {
                 when (outcome) {
                     is MessageActionResult.EditDraft -> {

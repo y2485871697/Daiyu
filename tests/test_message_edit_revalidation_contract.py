@@ -32,6 +32,29 @@ class MessageEditRevalidationContract(unittest.TestCase):
                          'segment.role != Message.ASSISTANT_ROLE'):
             self.assertIn(required, baseline)
 
+    def test_admitted_receipt_keeps_owner_fences_without_requiring_the_pre_save_data_revision(self):
+        source = (SRC / 'MainActivity.kt').read_text()
+        owner = source.split('fun editorOwnerMatches() =', 1)[1].split('fun editorMatches()', 1)[0]
+        for required in ('activityUsable()', 'voiceForeground', 'messageActionVisit === renderedActionVisit',
+                         'selectionReady', 'selected?.id?.value == renderedConversation',
+                         'editorGeneration == renderedEditorGeneration', 'inlineMessageEditor?.visit === renderedInlineVisit'):
+            self.assertIn(required, owner)
+        self.assertNotIn('dataRevision', owner)
+        self.assertIn('fun editorMatches() = editorOwnerMatches() && dataRevision == controller.dataRevision', source)
+        self.assertIn('isCurrent = { messageActionOwnerCurrent() && dataRevision == controller.dataRevision }', source)
+        self.assertIn('isResultCurrent = ::messageActionOwnerCurrent', source)
+        receipt_owner = source.split('fun messageActionOwnerCurrent() =', 1)[1].split('val messageCallbacks', 1)[0]
+        for required in ('displayWindow == null', 'editorOwnerMatches()', 'draftRevision == renderedDraftRevision',
+                         'retainedPage == "chat"', '!sidebarVisible', 'terminalEditor == null',
+                         'virtualDisplayEditor == null', '!videoSending', '!imageHost.sending', '!shizukuWritesBlocked'):
+            self.assertIn(required, receipt_owner)
+        host = (SRC / 'ControllerMessageActions.kt').read_text()
+        self.assertIn('if (lease !== token || !isCurrent()) return', host)
+        self.assertIn('if (ownerEpoch === admittedOwner && isResultCurrent()) result(it)', host)
+        tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ControllerMessageActionsTest.kt').read_text()
+        self.assertIn('testAcceptedSaveReceiptSurvivesItsOwnRevisionButOldGestureCannotSendAgain', tests)
+        self.assertIn('testChangedResultOwnerSuppressesAcceptedSaveReceiptWithoutReplaying', tests)
+
     def test_final_storage_compare_and_swap_is_not_relaxed(self):
         source = (SRC / 'storage/MessageActionStore.kt').read_text()
         self.assertIn('ContextRevision.digest(history) == target.revision', source)

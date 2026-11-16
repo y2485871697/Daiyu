@@ -104,6 +104,12 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         await(done); return value.get()
     }
     private fun history(f: Fixture, id: ConversationId) = ContextService.read(f.db.readableDatabase, id)
+    private fun awaitRunFinished(f: Fixture) {
+        val done = CountDownLatch(1)
+        val listener: () -> Unit = { if (!f.controller.dataBusy && f.controller.active == null) done.countDown() }
+        main { f.controller.observe(listener); listener() }
+        try { await(done) } finally { main { f.controller.unobserve(listener) } }
+    }
 
     fun testEditReturnsOriginalTextWithoutSavingOrSending() {
         val f = fresh(); val owner = seed(f)
@@ -264,16 +270,24 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
     }
 
     fun testRetryUnknownToolRejectsButRegenerationStartsFreshWithoutOldToolDispatch() {
-        val f = fresh(); val owner = seed(f, tool = true)
+        val seen = AtomicReference<List<Message>>()
+        val f = fresh { history, sink -> seen.set(history); sink(ModelEvent.TextFinal("new", "regenerated")) }
+        val owner = seed(f, tool = true)
         val snapshot = snapshot(f, owner.id)
         val before = history(f, owner.id)
         val retry = action(f, MessageAction.RETRY_STEP, snapshot.steps.values.single()) as MessageActionResult.Rejected
-        assertTrue(retry.reason.contains("UNKNOWN"))
+        assertEquals("此步骤不支持重试，请核实结果后新建请求", retry.reason)
+        assertEquals(before, history(f, owner.id)); assertEquals(0, f.opens.get())
         val answer = snapshot.targets.values.single { it.role == Message.ASSISTANT_ROLE }
         val result = action(f, MessageAction.REGENERATE, answer) as MessageActionResult.Regenerated
         assertEquals(RegenerationSendOutcome.ACCEPTED, result.outcome)
         assertEquals(owner.id, result.conversation.id)
         assertEquals(1, f.db.conversations().size)
+        awaitRunFinished(f)
+        assertEquals(1, f.opens.get())
+        val request = checkNotNull(seen.get())
+        assertEquals(before.first().id, request.single().id)
+        assertTrue(request.none { row -> row.blocks.any { it is MessageBlock.Tool } })
     }
 
     fun testExplicitRegenerationMakesOneNewRequestInOriginalConversation() {
@@ -1230,7 +1244,8 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
             host.bind(snapshot, { true }) { fail("replacement must not steal admitted save receipt") }
         }
         await(done)
-        assertTrue(receipt.get() is MessageActionResult.Regenerated)
+        assertEquals(RegenerationSendOutcome.ACCEPTED, (receipt.get() as MessageActionResult.Regenerated).outcome)
+        awaitRunFinished(f)
         assertEquals("edited via attachment callback", history(f, owner.id).first().blocks
             .filterIsInstance<MessageBlock.Text>().single().text)
         assertEquals(1, f.opens.get())
@@ -1243,7 +1258,7 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
         val host = ControllerMessageActionHost(f.controller)
         val results = AtomicInteger()
         val done = CountDownLatch(1)
-        val observer: () -> Unit = { if (!f.controller.dataBusy) done.countDown() }
+        val observer: () -> Unit = { if (!f.controller.dataBusy && f.controller.active == null) done.countDown() }
         main {
             val old = host.bind(snapshot, { true }) { results.incrementAndGet() }
             val current = host.bind(snapshot, { true }) { results.incrementAndGet() }
@@ -1251,12 +1266,60 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
             assertFalse(f.controller.dataBusy)
             current.onSaveEditImages(target.messageId.value, "current", emptyList(), emptyList())
             host.invalidate()
-            f.controller.observe(observer)
+            f.controller.observe(observer); observer()
         }
         await(done); main { f.controller.unobserve(observer) }
         assertEquals(0, results.get())
         assertEquals(1, f.opens.get())
         assertEquals("current", history(f, owner.id).first().blocks.filterIsInstance<MessageBlock.Text>().single().text)
+    }
+
+    fun testAcceptedSaveReceiptSurvivesItsOwnRevisionButOldGestureCannotSendAgain() {
+        val f = fresh(); val owner = seed(f)
+        val snapshot = snapshot(f, owner.id)
+        val target = snapshot.targets.values.single { it.role == Message.USER_ROLE }
+        val host = ControllerMessageActionHost(f.controller)
+        val revision = f.controller.dataRevision
+        val done = CountDownLatch(1)
+        val results = AtomicInteger()
+        lateinit var callbacks: ControllerMessageActionHost.Callbacks
+        main {
+            callbacks = host.bind(snapshot, isCurrent = { f.controller.dataRevision == revision },
+                isResultCurrent = { true }) {
+                assertTrue(f.controller.dataRevision != revision)
+                assertEquals(RegenerationSendOutcome.ACCEPTED, (it as MessageActionResult.Regenerated).outcome)
+                results.incrementAndGet(); done.countDown()
+            }
+            callbacks.onSaveEditImages(target.messageId.value, "accepted edit", emptyList(), emptyList())
+        }
+        await(done); awaitRunFinished(f)
+        val saved = history(f, owner.id)
+        main {
+            callbacks.onSaveEditImages(target.messageId.value, "stale second edit", emptyList(), emptyList())
+            assertFalse(f.controller.dataBusy)
+        }
+        assertEquals(1, results.get()); assertEquals(1, f.opens.get())
+        assertEquals(saved, history(f, owner.id))
+        assertEquals("accepted edit", saved.first().blocks.filterIsInstance<MessageBlock.Text>().single().text)
+    }
+
+    fun testChangedResultOwnerSuppressesAcceptedSaveReceiptWithoutReplaying() {
+        val f = fresh(); val owner = seed(f)
+        val snapshot = snapshot(f, owner.id)
+        val target = snapshot.targets.values.single { it.role == Message.USER_ROLE }
+        val host = ControllerMessageActionHost(f.controller)
+        val results = AtomicInteger()
+        var currentOwner = true
+        main {
+            val callbacks = host.bind(snapshot, isCurrent = { true }, isResultCurrent = { currentOwner }) {
+                results.incrementAndGet()
+            }
+            callbacks.onSaveEditImages(target.messageId.value, "saved before owner changed", emptyList(), emptyList())
+            currentOwner = false
+        }
+        awaitRunFinished(f)
+        assertEquals(0, results.get()); assertEquals(1, f.opens.get())
+        assertEquals("saved before owner changed", history(f, owner.id).first().blocks.filterIsInstance<MessageBlock.Text>().single().text)
     }
 
     override fun tearDown() {

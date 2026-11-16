@@ -27,8 +27,9 @@ internal class ControllerMessageActionHost(private val controller: ChatControlle
     private var ownerEpoch: Any = Any()
     fun invalidate() { lease = null; ownerEpoch = Any() }
 
+    // An admitted mutation changes history revision, not the originating editor owner.
     fun bind(snapshot: MessageActionSnapshot?, isCurrent: () -> Boolean,
-        result: (MessageActionResult) -> Unit): Callbacks {
+        isResultCurrent: () -> Boolean = isCurrent, result: (MessageActionResult) -> Unit): Callbacks {
         val token = Any().also { lease = it }
         val admittedOwner = ownerEpoch
         fun invoke(action: MessageAction, id: String, text: String? = null,
@@ -47,7 +48,7 @@ internal class ControllerMessageActionHost(private val controller: ChatControlle
                 // work is in flight. Rebinding fences old gestures, not an admitted receipt.
                 // Branch UNKNOWN is already retained by the controller, outside this UI lease;
                 // do NOT relax the fence to deliver navigation/editor effects to an old host.
-                if (ownerEpoch === admittedOwner && isCurrent()) result(it)
+                if (ownerEpoch === admittedOwner && isResultCurrent()) result(it)
             }
             if (!admitted) result(MessageActionResult.Rejected("请等待运行、恢复或数据操作结束后再操作消息"))
         }

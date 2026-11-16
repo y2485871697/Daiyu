@@ -106,6 +106,7 @@ data class DoubaoCallUi(
     val errorTitle: String = "连接遇到问题",
     val replyTextComplete: Boolean = false,
     val transcriptTextComplete: Boolean = false,
+    val browsing: Boolean = false,
 )
 
 data class DoubaoCallActions(
@@ -227,7 +228,7 @@ private fun DoubaoCallSession(
     val compressionState = rememberVoiceCallCompressionState(state.compressing, state.compressionCompletion,
         state.presentation != DoubaoCallPresentation.CLOSING &&
             state.visualState !in setOf(DoubaoCallVisualState.ERROR, DoubaoCallVisualState.ENDED), searching = state.searching,
-        searchCompletion = state.searchCompletion, resetKey = state.captionEpoch)
+        searchCompletion = state.searchCompletion, resetKey = state.captionEpoch, browsing = state.browsing)
     val layer = rememberGraphicsLayer()
     val progress = motion.progress
     var snapshotReady by remember { mutableStateOf(false) }
@@ -461,7 +462,7 @@ private fun callClock(state: DoubaoCallUi): String {
     return "${(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}"
 }
 
-private fun DoubaoCallUi.statusDetail(): String = if (compressing) "压缩完成后自动恢复麦克风" else if (searching) "正在查询相关信息" else reason?.takeIf { it.isNotBlank() } ?: when (visualState) {
+private fun DoubaoCallUi.statusDetail(): String = if (compressing) "压缩完成后自动恢复麦克风" else if (searching) "正在查询相关信息" else if (browsing) "正在浏览网页" else reason?.takeIf { it.isNotBlank() } ?: when (visualState) {
     DoubaoCallVisualState.LISTENING -> if (muted) "麦克风已关闭" else "不用着急，我一直在这里"
     DoubaoCallVisualState.RESPONDING -> "正在回应你的话"
     DoubaoCallVisualState.MUTED -> "麦克风已关闭"
@@ -470,7 +471,7 @@ private fun DoubaoCallUi.statusDetail(): String = if (compressing) "压缩完成
 }
 
 private fun DoubaoCallUi.statusLabel(dots: Int): String = if (compressing) "正在压缩" + ".".repeat(dots)
-    else if (searching) "正在搜索" + ".".repeat(dots) else when (visualState) {
+    else if (searching) "正在搜索" + ".".repeat(dots) else if (browsing) "正在浏览" + ".".repeat(dots) else when (visualState) {
     DoubaoCallVisualState.LISTENING -> "我在听，你说"
     DoubaoCallVisualState.RESPONDING -> if (modelSelectable) "正在回应" else "豆包正在回应"
     DoubaoCallVisualState.MUTED -> "麦克风已静音"
@@ -529,7 +530,7 @@ private fun ExpandedCallContent(
                 Spacer(Modifier.width(5.dp))
                 Text(clock, Modifier.testTag("doubao-call-clock"), color = Color(0xFFAAA1B6), fontSize = 11.sp)
             }
-            if (state.modelSelectable || state.compressing || state.searching || compressionState.success) VoiceCallCompressionIndicator(state.compressing || state.searching, state.compressionCompletion, running, compressionState)
+            if (state.modelSelectable || state.compressing || state.searching || state.browsing || compressionState.success) VoiceCallCompressionIndicator(state.compressing || state.searching || state.browsing, state.compressionCompletion, running, compressionState)
             Box(
                 Modifier.size(40.dp).testTag("doubao-call-minimize")
                     .semantics { contentDescription = "收起通话" }
@@ -677,8 +678,8 @@ private fun MiniCallContent(
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
                     Box(Modifier.size(4.dp).background(Color(0xFFAE95CA), RoundedCornerShape(2.dp)))
                     Text(clock, Modifier.testTag("doubao-call-clock"), color = Color(0xFFB0A2BD), fontSize = 10.sp)
-                    if (state.compressing || state.searching || compressionState.success)
-                        VoiceCallCompressionIndicator(state.compressing || state.searching, state.compressionCompletion, running, compressionState)
+                    if (state.compressing || state.searching || state.browsing || compressionState.success)
+                        VoiceCallCompressionIndicator(state.compressing || state.searching || state.browsing, state.compressionCompletion, running, compressionState)
                     else Text(state.title, color = Color(0xFFB0A2BD), fontSize = 10.sp, maxLines = 1,
                         overflow = TextOverflow.Ellipsis)
                 }
@@ -865,8 +866,10 @@ internal fun FloatingVoiceCallContent(state: DoubaoCallUi, actions: DoubaoCallAc
         val initialCompression = remember { state.compressionCompletion }
         val initialSearch = remember { state.searchCompletion }
         val indicator = rememberVoiceCallCompressionState(state.compressing,
-            state.compressionCompletion?.takeUnless { it == initialCompression }, enabled,
-            state.searching, state.searchCompletion?.takeUnless { it == initialSearch }, state.captionEpoch)
+            state.compressionCompletion?.takeUnless { it == initialCompression },
+            enabled && state.presentation != DoubaoCallPresentation.CLOSING &&
+                state.visualState !in setOf(DoubaoCallVisualState.ERROR, DoubaoCallVisualState.ENDED),
+            state.searching, state.searchCompletion?.takeUnless { it == initialSearch }, state.captionEpoch, browsing = state.browsing)
         val captions = key(state.captionEpoch) {
             rememberCallCaptionReveal(state.transcript, state.transcriptTextComplete, enabled && !mini && state.captionsEnabled) to
                 rememberCallCaptionReveal(state.reply, state.replyTextComplete, enabled && !mini && state.captionsEnabled)

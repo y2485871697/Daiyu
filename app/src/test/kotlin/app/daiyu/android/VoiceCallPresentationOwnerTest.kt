@@ -92,4 +92,19 @@ class VoiceCallPresentationOwnerTest {
         assertNull(owner.state!!.reason); assertNull(owner.state!!.endedAtMillis)
     }
 
+
+    @Test fun failureCauseIsVisibleWithoutClosingTheCallOrMaskingReleaseFailure() {
+        val owner = VoiceCallPresentationOwner()
+        owner.begin("anchor", "permit", 100, null, "deepseek")
+        val failure = "浏览器执行结果未确认；本轮已停止，未自动重试"
+        owner.update(state().copy(responseFailed = true, responseFailure = failure), false, false, null, 200)
+        assertEquals(failure, owner.state!!.reason); assertEquals("回答", owner.state!!.reply)
+        assertNull(owner.state!!.endedAtMillis)
+        owner.update(state().copy(browsing = true), false, false, null, 300)
+        assertTrue(owner.state!!.browsing); assertNull(owner.state!!.reason)
+        owner.update(state(VoiceControlPhase.STOPPED).copy(reason = VoiceControlStopReason.RELEASE_FAILED,
+            responseFailed = true, responseFailure = failure), false, false, null, 400)
+        assertEquals("语音资源释放未确认", owner.state!!.reason)
+    }
+
 }

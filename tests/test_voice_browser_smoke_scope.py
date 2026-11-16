@@ -57,3 +57,32 @@ class VoiceBrowserSmokeScopeTest(unittest.TestCase):
         for mode, classes in (("build", CLASS), ("smoke", CLASS + "," + CLASS)):
             _, other = recorder.command_for("python", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=classes))
             self.assertNotEqual(scope, other)
+
+
+    def test_controller_and_dictation_pair_stays_targeted_in_both_orders(self):
+        other = "app.daiyu.android.DictationActivityTest"
+        for names in ((CLASS, other), (other, CLASS)):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                helper = self.fixture(root)
+                second = root / SOURCE.with_name("DictationActivityTest.kt")
+                second.write_text("package app.daiyu.android\nclass DictationActivityTest : TestCase() {\n fun testOne() {}\n}\n")
+                raw = ",".join(names)
+                self.assertEqual("voice-browser-targeted", recorder.command_for("python", dict(
+                    SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=raw))[1])
+                for shard in range(4):
+                    result = helper.select(root, shard, classes=raw)
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                    self.assertEqual("targeted", inventory["discovery_scope"])
+                    self.assertEqual(set(names), set(inventory["all_classes"]))
+                    self.assertEqual([True, True, False, False], [bool(s["classes"]) for s in inventory["shards"]])
+                for source in (second, root / SOURCE):
+                    saved = source.read_text(); source.unlink()
+                    self.assertNotEqual(0, helper.select(root, classes=raw).returncode)
+                    source.write_text(saved)
+        for mode, raw in (("build", CLASS + "," + other), ("smoke", other),
+                          ("smoke", CLASS + "," + other + "," + other),
+                          ("smoke", CLASS + "," + other + ",app.daiyu.android.UnknownTest")):
+            self.assertNotEqual("voice-browser-targeted", recorder.command_for("python", dict(
+                SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])

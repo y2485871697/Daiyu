@@ -996,6 +996,65 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         }
     }
 
+
+    fun testBrowserBusyIsVisibleAndDoesNotManufactureSearchSuccess() {
+        mount(initialState = session().copy(title = "DeepSeek", modelSelectable = true, browsing = true))
+        finishOpening()
+        ui.onNodeWithTag("voice-call-browsing").assertExists()
+        ui.onNodeWithTag("voice-call-searching").assertDoesNotExist()
+        ui.onNodeWithTag("voice-call-searched").assertDoesNotExist()
+        ui.onNodeWithTag("doubao-call-minimize").performClick().also { awaitVisualIdle() }
+        ui.onNodeWithTag("voice-call-browsing").assertExists()
+        ui.onNodeWithTag("doubao-call-expand").performClick().also { awaitVisualIdle() }
+        ui.onNodeWithTag("voice-call-browsing").assertExists()
+        mainThread { call = call!!.copy(browsing = false) }
+        ui.mainClock.advanceTimeBy(320L)
+        ui.onNodeWithTag("voice-call-browsing").assertDoesNotExist()
+        ui.onNodeWithTag("voice-call-searched").assertDoesNotExist()
+        mainThread { call = call!!.copy(searchCompletion = "native-complete") }
+        ui.mainClock.advanceTimeBy(320L)
+        ui.onNodeWithTag("voice-call-searched").assertExists()
+        mainThread { call = call!!.copy(browsing = true) }
+        ui.mainClock.advanceTimeBy(320L)
+        ui.onNodeWithTag("voice-call-browsing").assertExists()
+        ui.onNodeWithTag("voice-call-searched").assertDoesNotExist()
+        mainThread { call = call!!.copy(browsing = false) }
+        ui.mainClock.advanceTimeBy(320L)
+        ui.onNodeWithTag("voice-call-searched").assertDoesNotExist()
+    }
+
+
+    fun testFloatingBrowserActivityPriorityAndFailureInBothPresentations() {
+        activity = startMain()
+        ui.mainClock.autoAdvance = false
+        mainThread {
+            activity.setContent {
+                MaterialTheme {
+                    Box(Modifier.fillMaxSize()) {
+                        call?.let { FloatingVoiceCallContent(it, DoubaoCallActions(), true, {}) }
+                    }
+                }
+            }
+        }
+        for (presentation in listOf(DoubaoCallPresentation.EXPANDED, DoubaoCallPresentation.MINI)) {
+            mainThread { call = session().copy(presentation = presentation, modelSelectable = true, browsing = true) }
+            ui.mainClock.advanceTimeBy(400L); ui.waitForIdle()
+            ui.onNodeWithTag("voice-call-browsing").assertExists()
+            mainThread { call = call!!.copy(searching = true) }
+            ui.mainClock.advanceTimeBy(400L); ui.waitForIdle()
+            ui.onNodeWithTag("voice-call-searching").assertExists()
+            ui.onNodeWithTag("voice-call-browsing").assertDoesNotExist()
+            mainThread { call = call!!.copy(compressing = true) }
+            ui.mainClock.advanceTimeBy(400L); ui.waitForIdle()
+            ui.onNodeWithTag("voice-call-compressing").assertExists()
+            mainThread { call = call!!.copy(compressing = false, searching = false, browsing = false,
+                visualState = DoubaoCallVisualState.ERROR, searchCompletion = "late", compressionCompletion = "late") }
+            ui.mainClock.advanceTimeBy(400L); ui.waitForIdle()
+            ui.onNodeWithTag("voice-call-searched").assertDoesNotExist()
+            ui.onNodeWithTag("voice-call-compressed").assertDoesNotExist()
+        }
+    }
+
 }
 
 /** Deterministic native pixels: exact radii/colours, CSS phases, and a live mini clock. */

@@ -52,4 +52,50 @@ class AndroidUniversalOwnerObserverTest {
         }
     }
 
+
+    @Test fun responseFailuresKeepOnlyClosedModelDiagnostics() {
+        ModelFailure.entries.forEach { failure ->
+            val failed = message(RunStatus.FAILED).copy(error = failure.userMessage)
+            assertEquals(failure.userMessage, universalAssistantBody(owner, failed, false)?.responseFailure)
+            assertNull(universalAssistantBody(owner, failed.copy(status = RunStatus.RUNNING), false)?.responseFailure)
+        }
+        val detailed = ModelRequestException(ModelFailure.REQUEST, ModelRequestDiagnostic(
+            httpStatus = 400, rejection = RequestRejection.UNSUPPORTED_PARAMETER, field = RequestField.TOOLS)).userMessage
+        assertEquals(detailed, universalAssistantBody(owner, message(RunStatus.FAILED).copy(error = detailed), false)?.responseFailure)
+        for (privateError in listOf("https://private.invalid?token=secret", ModelFailure.NETWORK.userMessage + " token=secret",
+            ModelFailure.REQUEST.userMessage + "，涉及字段：private_key", ModelFailure.REQUEST.userMessage + "（HTTP 999）")) {
+            assertNull(universalAssistantBody(owner, message(RunStatus.FAILED).copy(error = privateError), false)?.responseFailure)
+        }
+    }
+
+    @Test fun unknownBrowserResultAndCancellationHaveDistinctSafeReasons() {
+        val source = message(RunStatus.FAILED).copy(error = "private error must not escape", blocks = listOf(
+            MessageBlock.Text("text", "已有字幕"), MessageBlock.Tool(ToolInvocation(ToolCallId("browser"),
+                "browser_write", "private arguments"), ModelHistory.UNKNOWN_TOOL_RESULT)))
+        val projected = checkNotNull(universalAssistantBody(owner, source, false))
+        assertEquals("已有字幕", projected.text)
+        assertEquals("浏览器执行结果未确认；本轮已停止，未自动重试", projected.responseFailure)
+        assertFalse(projected.browsing)
+        assertEquals("回答已中止，可以继续说",
+            universalAssistantBody(owner, source.copy(status = RunStatus.STOPPED), false)?.responseFailure)
+        assertNull(universalAssistantBody(owner, source.copy(id = MessageId("other")), false))
+    }
+
+    @Test fun browserAndNativeActivityMergeWithoutInventingBrowserSuccess() {
+        val invocation = ToolInvocation(ToolCallId("browser"), "browser_write", "{\"action\":\"new_tab\"}")
+        val pending = message().copy(blocks = listOf(MessageBlock.Tool(invocation)))
+        val body = checkNotNull(universalAssistantBody(owner, pending, false))
+        assertTrue(body.browsing); assertFalse(body.searching); assertNull(body.searchCompletion)
+        val native = body.withNativeSearch(VoiceNativeSearchState(true))
+        assertTrue(native.browsing); assertTrue(native.searching)
+        val completedNative = body.withNativeSearch(VoiceNativeSearchState(false, "native-receipt"))
+        assertTrue(completedNative.browsing); assertEquals("native-receipt", completedNative.searchCompletion)
+        val result = checkNotNull(universalAssistantBody(owner, pending.copy(blocks = listOf(
+            MessageBlock.Tool(invocation, "confirmed"))), false)).withNativeSearch(VoiceNativeSearchState())
+        assertFalse(result.browsing); assertNull(result.searchCompletion)
+        val failed = checkNotNull(universalAssistantBody(owner, pending.copy(status = RunStatus.FAILED), false))
+            .withNativeSearch(VoiceNativeSearchState(true, "late"))
+        assertFalse(failed.browsing); assertFalse(failed.searching); assertNull(failed.searchCompletion)
+    }
+
 }

@@ -37,10 +37,11 @@ internal class VoiceCallPresentationOwner {
             transcript = value.transcript, reply = value.reply, captionEpoch = value.captionEpoch,
             replyTextComplete = value.replyTextComplete, transcriptTextComplete = value.transcriptTextComplete, muted = value.muted, speaker = speaker,
             compressing = compressing,
-            searching = value.searching, searchCompletion = value.searchCompletion,
+            searching = value.searching, searchCompletion = value.searchCompletion, browsing = value.browsing,
             compressionCompletion = completedCompression?.takeUnless { it == initialCompression },
             endedAtMillis = if (value.active) null else previous.endedAtMillis ?: now,
-            reason = if (value.responseFailed) value.unsupportedReasoning?.unsupportedMessage ?: "回答未完成，可以继续说"
+            reason = if (value.active && value.responseFailed) value.responseFailure
+                ?: value.unsupportedReasoning?.unsupportedMessage ?: "回答未完成，可以继续说"
             else when (value.phase) {
                 VoiceControlPhase.PERMISSION_REQUIRED -> "等待麦克风授权"
                 VoiceControlPhase.MUTED -> if (value.muted) "麦克风已关闭" else "选择模型后继续通话"
@@ -56,7 +57,7 @@ internal class VoiceCallPresentationOwner {
                     }
                     VoiceControlStopReason.CONFIGURATION_CHANGED -> "请检查语音配置"
                     VoiceControlStopReason.EXPIRED -> "本次个人音色授权已到期，请重新拨打"
-                    VoiceControlStopReason.RESPONSE_FAILED -> value.unsupportedReasoning?.unsupportedMessage
+                    VoiceControlStopReason.RESPONSE_FAILED -> value.responseFailure ?: value.unsupportedReasoning?.unsupportedMessage
                         ?: "回答未完成，请重新拨打"
                     VoiceControlStopReason.REJECTED -> "回答未完成，请重新拨打"
                     else -> null

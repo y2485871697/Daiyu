@@ -785,8 +785,10 @@ PANE_QUESTION_MODULES = (
 
 
 def command_for(python, env):
+    voice = ["app.daiyu.android.ControllerModelPreparationTest"]
     if (env.get("SMOKE_MODE") == "smoke"
-            and env.get("SMOKE_TEST_CLASSES") == "app.daiyu.android.ControllerModelPreparationTest"):
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (
+                voice, voice + ["app.daiyu.android.DictationActivityTest"])):
         return [python, "-B", "-m", "unittest", "test_voice_call_contract", "test_voice_browser_smoke_scope",
                 "test_browser_navigation_defaults_contract", "test_windows_unit_skips", "-v"], "voice-browser-targeted"
     if (env.get("SMOKE_MODE") == "smoke"

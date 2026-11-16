@@ -180,7 +180,7 @@ class VoiceCallContractTest(unittest.TestCase):
         self.assertIn('controller.nativeSearchState(owner)', owner)
         indicator = (SRC / 'ui/screens/chat/conversation/VoiceCallCompressionIndicator.kt').read_text()
         self.assertIn('正在搜索', indicator)
-        self.assertIn('LaunchedEffect(compressing, completion, searching, searchCompletion, resetKey, running)', indicator)
+        self.assertIn('LaunchedEffect(compressing, completion, searching, searchCompletion, resetKey, running, browsing)', indicator)
         self.assertIn('if (running && !busy && (compressed || searched))', indicator)
         self.assertIn('delay(2_000)', indicator)
     def test_call_picker_and_initial_model_are_scoped_to_actual_call_binding(self):
@@ -212,7 +212,7 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertIn('target?.id?.value != turn.permit.conversationId', activity)
         self.assertIn('pending != null && !universalTickets.containsKey(pending.ticket)', activity)
         sidebar = activity.split('private var sidebarVisible: Boolean', 1)[1].split('private class ContextManagementVisit', 1)[0]
-        self.assertIn('pauseNonCallVoice()', sidebar)
+        self.assertIn('pauseNonCallVoice(keepDictation = true)', sidebar)
         self.assertNotIn('invalidateConfiguredVoice()', sidebar)
         self.assertIn('foreground = activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible', activity)
 

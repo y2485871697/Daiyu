@@ -26,23 +26,26 @@ internal class VoiceCallCompressionState {
     var dots by mutableIntStateOf(1)
     var success by mutableStateOf(false)
     var searching by mutableStateOf(false)
+    var browsing by mutableStateOf(false)
     val check = Animatable(0f)
 }
 
 @Composable
 internal fun rememberVoiceCallCompressionState(compressing: Boolean, completion: String?, running: Boolean,
-    searching: Boolean = false, searchCompletion: String? = null, resetKey: Long = 0): VoiceCallCompressionState {
+    searching: Boolean = false, searchCompletion: String? = null, resetKey: Long = 0, browsing: Boolean = false): VoiceCallCompressionState {
     val state = remember { VoiceCallCompressionState() }
     var consumed by remember { mutableStateOf<String?>(null) }
     var consumedSearch by remember { mutableStateOf<String?>(null) }
-    val busy = compressing || searching
+    val busy = compressing || searching || browsing
     LaunchedEffect(busy, running, resetKey) {
         state.dots = 1
         while (busy && running) { delay(350); state.dots = state.dots % 3 + 1 }
     }
-    LaunchedEffect(compressing, completion, searching, searchCompletion, resetKey, running) {
+    LaunchedEffect(compressing, completion, searching, searchCompletion, resetKey, running, browsing) {
         state.success = false
         state.check.snapTo(0f)
+        if (browsing) consumedSearch = searchCompletion
+        state.browsing = !compressing && !searching && browsing
         val compressed = completion != null && completion != consumed
         val searched = searchCompletion != null && searchCompletion != consumedSearch
         state.searching = !compressing && (searching || searched && !compressed)
@@ -62,8 +65,8 @@ internal fun rememberVoiceCallCompressionState(compressing: Boolean, completion:
 internal fun VoiceCallCompressionIndicator(compressing: Boolean, completion: String?, running: Boolean = true,
     state: VoiceCallCompressionState = rememberVoiceCallCompressionState(compressing, completion, running)) {
     Box(Modifier.width(82.dp).height(24.dp).testTag("voice-call-activity-slot"), contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
-        if (compressing) Row(Modifier.testTag(if (state.searching) "voice-call-searching" else "voice-call-compressing")) {
-            Text(if (state.searching) "正在搜索" else "正在压缩", color = Color(0xFF9483A8), fontSize = 10.sp)
+        if (compressing) Row(Modifier.testTag(if (state.browsing) "voice-call-browsing" else if (state.searching) "voice-call-searching" else "voice-call-compressing")) {
+            Text(if (state.browsing) "正在浏览" else if (state.searching) "正在搜索" else "正在压缩", color = Color(0xFF9483A8), fontSize = 10.sp)
             Text(".".repeat(state.dots), Modifier.width(15.dp), color = Color(0xFF9483A8), fontSize = 10.sp)
         }
         AnimatedVisibility(state.success && !compressing, enter = fadeIn(tween(150)) + scaleIn(tween(180)),

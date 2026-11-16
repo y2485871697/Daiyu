@@ -2,6 +2,10 @@ package app.daiyu.android.voice.control
 
 import android.os.Looper
 import app.daiyu.android.ChatController
+import app.daiyu.android.domain.ModelFailure
+import app.daiyu.android.domain.ModelHistory
+import app.daiyu.android.domain.RequestField
+import app.daiyu.android.domain.RequestRejection
 import app.daiyu.android.domain.ConversationId
 import app.daiyu.android.domain.Message
 import app.daiyu.android.domain.MessageBlock
@@ -25,8 +29,43 @@ internal fun universalAssistantBody(owner: VoiceAssistantOwner, message: Message
         app.daiyu.android.domain.RequestReasoningEffort.entries.firstOrNull { it.unsupportedMessage == message.error }
         else null
     return VoiceAssistantBody(owner, message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("") { it.text },
-        status, unsupportedReasoning = unsupportedReasoning)
+        status, unsupportedReasoning = unsupportedReasoning, responseFailure = voiceResponseFailure(message, status),
+        browsing = status == VoiceBodyStatus.STREAMING && message.blocks.filterIsInstance<MessageBlock.Tool>().any {
+            it.invocation.name in setOf("browser_read", "browser_write") && it.result == null
+        })
 }
+
+private val knownResponseFailures = ModelFailure.entries.map { it.userMessage } +
+    RequestRejection.entries.map { it.userMessage }.filter { it.isNotEmpty() }
+private val responseFailureSuffix = Regex("^(?:（HTTP ([3-5][0-9]{2})）)?(?:，涉及字段：([a-z_]+))?$")
+
+/** Reconstruct only closed diagnostics; never copy an arbitrary provider or tool error. */
+internal fun voiceResponseFailure(message: Message, status: VoiceBodyStatus): String? {
+    if (status == VoiceBodyStatus.CANCELLED) return "回答已中止，可以继续说"
+    if (status != VoiceBodyStatus.FAILED) return null
+    val unknownTool = message.blocks.filterIsInstance<MessageBlock.Tool>().firstOrNull {
+        it.result == ModelHistory.UNKNOWN_TOOL_RESULT
+    }
+    if (unknownTool != null) return if (unknownTool.invocation.name in setOf("browser_read", "browser_write"))
+        "浏览器执行结果未确认；本轮已停止，未自动重试" else "工具执行结果未确认；本轮已停止，未自动重试"
+    val error = message.error ?: return null
+    app.daiyu.android.domain.RequestReasoningEffort.entries.firstOrNull { it.unsupportedMessage == error }
+        ?.let { return it.unsupportedMessage }
+    for (base in knownResponseFailures) {
+        if (!error.startsWith(base)) continue
+        val suffix = responseFailureSuffix.matchEntire(error.removePrefix(base)) ?: continue
+        val statusCode = suffix.groupValues[1].takeIf { it.isNotEmpty() }
+        val field = suffix.groupValues[2].takeIf { it.isNotEmpty() }
+        if (field != null && RequestField.entries.none { it.wireName == field }) continue
+        return base + (statusCode?.let { "（HTTP $it）" } ?: "") +
+            (field?.let { "，涉及字段：$it" } ?: "")
+    }
+    return null
+}
+
+internal fun VoiceAssistantBody.withNativeSearch(search: VoiceNativeSearchState): VoiceAssistantBody = copy(
+    searching = status == VoiceBodyStatus.STREAMING && search.searching,
+    searchCompletion = search.completion.takeIf { status in setOf(VoiceBodyStatus.STREAMING, VoiceBodyStatus.COMPLETE) })
 
 /**
  * Optional ready-to-mount parent observer. Subscribes before replay; terminal persisted body is
@@ -56,8 +95,7 @@ internal class AndroidUniversalOwnerObserver(
             catch (_: Exception) { VoiceAssistantBody(owner, "", VoiceBodyStatus.UNKNOWN) }
             snapshot?.let { value ->
                 currentBody = value
-                body(value.copy(searching = value.status == VoiceBodyStatus.STREAMING && searchState.searching,
-                    searchCompletion = searchState.completion))
+                body(value.withNativeSearch(searchState))
             }
         }
         val listener: () -> Unit = listener@{
@@ -100,7 +138,7 @@ internal class AndroidUniversalOwnerObserver(
             if (!closed.get()) {
                 searchState = search
                 currentBody?.takeIf { it.status == VoiceBodyStatus.STREAMING }?.let {
-                    body(it.copy(searching = search.searching, searchCompletion = search.completion))
+                    body(it.withNativeSearch(search))
                 }
             }
         }

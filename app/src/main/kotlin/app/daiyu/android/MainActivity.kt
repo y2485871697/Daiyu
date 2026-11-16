@@ -316,8 +316,15 @@ class MainActivity : ComponentActivity() {
         (remoteVoice.duplexActive || (voiceCallConversation != null && universalVoiceDelegate.isInitialized() &&
             universalVoice.state.value.active))
 
-    private fun pauseNonCallVoice() {
+    private fun pauseNonCallVoice() = pauseNonCallVoice(keepDictation = false)
+
+    private fun pauseNonCallVoice(keepDictation: Boolean) {
         accountPreviewRevoke?.invoke()
+        if (keepDictation && dictationDraft?.first?.let(::voiceEditorCurrent) == true) {
+            voiceRequestEpoch++
+            voiceConsent?.dismiss(); voiceConsent = null; preparedSpeech = null
+            return
+        }
         invalidatePreparedSpeech()
         if (!continuingVoiceCall()) invalidateConfiguredVoice()
         else if (!remoteVoice.duplexActive) remoteVoice.invalidate()
@@ -602,7 +609,7 @@ class MainActivity : ComponentActivity() {
         }
     }
     private fun voiceEditorCurrent(target: DictationDraftTarget) =
-        activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+        activityUsable() && voiceForeground &&
             selectionReady && controller.ready && !controller.dataBusy &&
             !imageHost.sending && !shizukuWritesBlocked && terminalEditor == null &&
             virtualDisplayEditor == null && virtualDisplayPlanVisit == null && !videoSending && pendingTextSend == null &&
@@ -653,7 +660,7 @@ class MainActivity : ComponentActivity() {
         val next = projection.edit(body)
         // Only this owned recognition write may advance the draft without cancelling its recorder.
         applyingDictationDraft = true
-        try { updateDraft(next) } finally { applyingDictationDraft = false }
+        try { updateDraft(next, ownedRecognition = true) } finally { applyingDictationDraft = false }
         check(draft == next) { "dictation_draft_not_saved" }
         selectionStart = ComposerReferences(next).toSource(captured.cursor); selectionEnd = selectionStart
         publishChat(rowsChanged = false)
@@ -666,7 +673,7 @@ class MainActivity : ComponentActivity() {
         val next = projection.edit(body)
         dictationDraft = null
         dictationDraftRevision = null
-        updateDraft(next)
+        updateDraft(next, ownedRecognition = true)
         check(draft == next) { "dictation_draft_not_saved" }
         selectionStart = ComposerReferences(next).toSource(captured.cursor); selectionEnd = selectionStart
         publishChat()
@@ -799,7 +806,7 @@ class MainActivity : ComponentActivity() {
                 dictationDraft = null
                 dictationDraftRevision = null
                 val next = ComposerReferences(draft).edit(text)
-                updateDraft(next)
+                updateDraft(next, ownedRecognition = true)
                 check(draft == next) { "offline_dictation_draft_not_saved" }
                 selectionStart = ComposerReferences(next).toSource(cursor); selectionEnd = selectionStart
                 publishChat()
@@ -1249,7 +1256,7 @@ class MainActivity : ComponentActivity() {
             // Opening revokes even without a visit; closing cannot revive clicks rendered behind it.
             if (value != sidebarVisibleState) revokeContextManagementEntry()
             if (value && !sidebarVisibleState) revokeCommandApproval()
-            if (value && !sidebarVisibleState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); pauseNonCallVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
+            if (value && !sidebarVisibleState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); pauseNonCallVoice(keepDictation = true); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
             sidebarVisibleState = value
             refreshFloatingCall()
         }
@@ -1375,7 +1382,7 @@ class MainActivity : ComponentActivity() {
                 reconnectSettingsPageOwner?.revoke()
                 reconnectSettingsPageOwner = null
             }
-            if (value != retainedPageState) { stopCascadeVoice(); pauseNonCallVoice(); fenceVideoRoute(); cancelGenerationOutputs(); cancelVirtualDisplayEditor(); cancelGuiEditor() }
+            if (value != retainedPageState) { stopCascadeVoice(); pauseNonCallVoice(keepDictation = true); fenceVideoRoute(); cancelGenerationOutputs(); cancelVirtualDisplayEditor(); cancelGuiEditor() }
             if (value != "models") { modelSaveOwner?.revoke(); modelSaveOwner = null }
             if (value != "session-gateway") {
                 gatewayOwner?.revoke(); gatewayOwner = null
@@ -1415,7 +1422,7 @@ class MainActivity : ComponentActivity() {
                 browserSettingsPageOwner?.revoke()
                 browserSettingsPageOwner = null
             }
-            if (value != "chat") { cancelPaneConversationSelection(); dictationHost.invalidate(); offlineHost.invalidate(); cancelShizukuEditor(); cancelBrowserEditor() }
+            if (value != "chat") { cancelPaneConversationSelection(); cancelShizukuEditor(); cancelBrowserEditor() }
             speechHost.setVisible(value == "chat" && !sidebarVisible)
             imageHost.setVisible(value == "chat" && !sidebarVisible, selected?.id?.value,
                 keepThumbnails = value == "chat")
@@ -6638,8 +6645,6 @@ class MainActivity : ComponentActivity() {
     }
     private fun openSidebar() { guard {
         cancelPaneConversationSelection()
-        dictationHost.invalidate()
-        offlineHost.invalidate()
         cancelShizukuEditor()
         cancelBrowserEditor()
         updatePane(); speechHost.setVisible(false)
@@ -6971,8 +6976,10 @@ class MainActivity : ComponentActivity() {
         try { requireActivityUsable(); check(!controller.dataBusy); action() }
         catch (_: Exception) { toast("操作或保存失败") }
     }
-    private fun updateDraft(value: String) {
-        if (!activityUsable() || sidebarVisible || controller.dataBusy || !controller.ready || controller.textSendState() != null || pendingTextSend != null || imageHost.sending || shizukuWritesBlocked) return
+    private fun updateDraft(value: String) = updateDraft(value, ownedRecognition = false)
+
+    private fun updateDraft(value: String, ownedRecognition: Boolean) {
+        if (!activityUsable() || (sidebarVisible && !ownedRecognition) || controller.dataBusy || !controller.ready || controller.textSendState() != null || pendingTextSend != null || imageHost.sending || shizukuWritesBlocked) return
         if (value == draft) return
         controller.invalidateVideo(videoUi)
         videoDialog?.dismiss(); videoDialog = null

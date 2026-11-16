@@ -285,8 +285,9 @@ class DictationActivityTest : WiredActivityTestCase() {
         hidden.onReadyForSpeech(Bundle())
         instrumentation.waitForIdleSync()
         backToChat(activity)
-        ui.onNodeWithContentDescription("语音输入").assertExists()
-        assertFalse(host.state.value.listening)
+        ui.onNodeWithContentDescription("停止语音输入").assertExists()
+        assertTrue(host.state.value.listening)
+        voice(expectNewAttempt = false)
         voice()
         val background = platform.listeners.last()
         mainThread { call("onPause") }
@@ -616,4 +617,23 @@ class DictationActivityTest : WiredActivityTestCase() {
         assertTrue(players.isEmpty())
         assertEquals(0, fixture.opens.get())
     }
+
+    fun testSidebarAndSettingsKeepTheExactDictationAndSaveItsFinalDraft() {
+        setDraft("a"); setSelection(1, 1); voice()
+        val attempt = platform.listeners.last()
+        val target = host.state.value.target
+        attempt.onReadyForSpeech(Bundle())
+        mainThread { call("openSidebar") }
+        attempt.onPartialResults("b")
+        assertEquals(target, host.state.value.target)
+        assertEquals("ab", fixture.database.draft())
+        mainThread { call("dismissSidebarState"); call("setRetainedPage", "settings") }
+        assertEquals(target, host.state.value.target)
+        attempt.onResults("c")
+        assertEquals("ac", fixture.database.draft())
+        assertEquals(1, platform.creates)
+        assertNull(host.state.value.target)
+        assertEquals(0, fixture.opens.get())
+    }
+
 }

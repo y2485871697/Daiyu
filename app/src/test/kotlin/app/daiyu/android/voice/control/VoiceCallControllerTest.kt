@@ -567,4 +567,26 @@ class VoiceCallControllerTest {
         assertTrue(c.state.value.active); assertTrue(f.stopped.isEmpty())
     }
 
+
+    @Test fun responseCauseAndBrowserActivityStayTurnLocalAndNeverBecomeSpeech() {
+        val f = Fake(); val c = VoiceCallController(f)
+        val permit = c.start(profile)!!; f.finishRecognition(); f.accept(owner)
+        val old = f.observations.single().body
+        old(VoiceAssistantBody(owner, "", VoiceBodyStatus.STREAMING, browsing = true)); f.flush()
+        assertTrue(c.state.value.browsing); assertFalse(c.state.value.searching)
+        val failure = "浏览器执行结果未确认；本轮已停止，未自动重试"
+        old(VoiceAssistantBody(owner, "已有正文。", VoiceBodyStatus.FAILED,
+            responseFailure = failure, browsing = true, searchCompletion = "late")); f.flush()
+        assertTrue(c.state.value.active); assertTrue(c.state.value.responseFailed)
+        assertEquals(failure, c.state.value.responseFailure); assertEquals("已有正文。", c.state.value.reply)
+        assertFalse(c.state.value.browsing); assertNull(c.state.value.searchCompletion)
+        assertTrue(f.outputs.single().bodies.none { failure in it.first })
+        assertEquals(1, f.sends.size)
+        f.recognitions.last().speechStarted(); f.flush()
+        assertNull(c.state.value.responseFailure); assertFalse(c.state.value.responseFailed)
+        old(VoiceAssistantBody(owner, "late", VoiceBodyStatus.FAILED, responseFailure = failure)); f.flush()
+        assertNull(c.state.value.responseFailure); assertEquals(permit, c.state.value.permitId)
+        c.stop(permit)
+    }
+
 }

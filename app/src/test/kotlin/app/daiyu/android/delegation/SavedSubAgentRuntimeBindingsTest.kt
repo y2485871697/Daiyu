@@ -210,6 +210,36 @@ class SavedSubAgentRuntimeBindingsTest {
         }
     }
 
+    @Test fun orphanHandoffWithoutJournalOrLifetimeRevalidatesTheNewAgent() {
+        for (delete in listOf(false, true)) {
+            var latest = config.copy(profiles = listOf(profile.copy(id = "a"), profile.copy(id = "b")))
+            val bindings = SavedSubAgentRuntimeBindings { noNetwork }
+            val definition = bindings.freeze(owner, latest, listOf(provider), { _, _ -> saved }, latestConfig = { latest },
+                latestModel = { id -> bindings.freeze(owner, latest, listOf(provider), { _, _ -> saved }).getValue(id) },
+                profileCurrent = { id -> latest.profiles.any { it.id == id && it.role == "review" } }).getValue("a").forTask()
+            latest = latest.copy(profiles = if (delete) latest.profiles.filter { it.id != "a" }
+                else latest.profiles.map { if (it.id == "a") it.copy(role = "implementation") else it })
+            assertTrue(definition.isValid())
+            assertEquals("b", definition.current().profileId)
+            assertEquals(listOf("b"), definition.currentCandidates().map { it.profileId })
+        }
+    }
+
+    @Test fun renamingKeepsTheSameAgentAndDoesNotRequireAnotherModelRequest() {
+        var latest = config.copy(profiles = listOf(profile.copy(id = "a"), profile.copy(id = "b")))
+        val bindings = SavedSubAgentRuntimeBindings { noNetwork }
+        val definition = bindings.freeze(owner, latest, listOf(provider), { _, _ -> saved }, latestConfig = { latest },
+            latestModel = { id -> bindings.freeze(owner, latest, listOf(provider), { _, _ -> saved }).getValue(id) }).getValue("a").forTask()
+        val before = definition.current()
+        latest = latest.copy(profiles = latest.profiles.map { if (it.id == "a") it.copy(name = "renamed") else it })
+        val after = definition.current()
+        assertEquals("a", after.profileId)
+        assertEquals("renamed", after.display!!.agentName)
+        assertEquals(before.poolKey, after.poolKey)
+        assertTrue(before.sameRequest(after))
+        assertEquals(listOf("a"), definition.currentCandidates().map { it.profileId })
+    }
+
     @Test fun savedSelectionWorksWithoutShieldAndOldDefinitionsKeepTheirSnapshot() {
         var current = saved
         val captured = mutableListOf<ProviderSnapshot>()

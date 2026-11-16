@@ -206,7 +206,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
         synchronized(gate) {
             models.values.forEach { selected ->
                 localPools.getOrPut(selected.poolKey) { ChildModelPool(selected.parallelLimit) }
-                    .also { it.resize(selected.parallelLimit); limits[selected.poolKey] = it.semaphore }
+                    .also { it.resize(selected.parallelLimit) }
             }
         }
         val snapshot = tasks.toList()

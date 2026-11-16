@@ -66,17 +66,32 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
         self.assertIn("currentProfiles?.invoke() ?: profiles",tool)
     def test_hot_request_claim_rechecks_selection_and_shares_actual_pool(self):
         text = (DOMAIN / "ChildModelBatch.kt").read_text()
-        self.assertIn("selectedModel = awaitSelection()",text)
-        self.assertIn("val selected = definition.current()",text)
-        self.assertIn("sharedPool?.invoke(selected)",text)
-        self.assertIn("selectedModel.sameSelection(currentDefinition())",text)
-        selected = text.split("store?.selected(record, selectedModel.display)",1)[1]
+        self.assertIn("selectedModel = awaitSelection()", text)
+        self.assertIn("val selected = definition.current()", text)
+        selection = text.split("fun awaitSelection(): ChildModelDefinition {", 1)[1].split("fun requireCurrentRole()", 1)[0]
+        self.assertIn("sharedPool?.invoke(candidate)", selection)
+        self.assertIn("ChildPoolLease.acquireBalanced(waitingLeases.values.toList())", selection)
+        self.assertIn("current.sameSelection(currentDefinition())", selection)
+        self.assertIn("if (!selected.sameSelection(currentDefinition())) continue", selection)
+        self.assertIn("lease = null; poolSelection = null", selection)
+        recording = text.split("fun recordSelection(selected: ChildModelDefinition) {", 1)[1].split("fun selectionReady(", 1)[0]
+        self.assertIn("store?.selected(record, selected.display)", recording)
+        opening = text.split(
+            "override fun open(history: List<Message>, definitions: List<app.daiyu.android.domain.ToolDefinition>): ModelSession {", 1,
+        )[1].split("val cleanup = java.util.concurrent.CompletableFuture<Unit>()", 1)[0]
+        self.assertLess(opening.index("awaitTransportCleanup()"), opening.index("selectedModel = awaitSelection()"))
+        selected = opening.split("recordSelection(selectedModel)", 1)[1]
         self.assertLess(selected.index("selectedModel.sameSelection(currentDefinition())"), selected.index("port.open(history, definitions)"))
-        self.assertIn("else if (acquired) checkNotNull(permit).release()",text)
-        self.assertIn("acquired = false; lease = null; permit = null",text)
-        self.assertIn("if (!workerFinished || !cleanupFinished || !toolsDrained || itemReleased) false",text)
-        self.assertIn("if (!first && assembly != null) awaitRequestBoundary()",text)
-        self.assertIn("(transport as ResumableModelSession).resume(attemptSink)",text)
+        release = text.split("fun releaseItemIfReady() {", 1)[1].split("fun closeWaitingLeases()", 1)[0]
+        self.assertIn("if (!workerFinished || !cleanupFinished || !toolsDrained || itemReleased) false", release)
+        self.assertIn("if (!release) return", release)
+        self.assertIn("waitingLeases.values.forEach { it.second.close() }; waitingLeases.clear()", release)
+        self.assertIn("lease?.close()", release)
+        self.assertLess(release.index("if (!release) return"), release.index("lease?.close()"))
+        self.assertLess(release.index("lease?.close()"), release.index("outstanding--"))
+        self.assertIn("if (!first && assembly != null) awaitRequestBoundary()", text)
+        self.assertIn("(transport as ResumableModelSession).resume(attemptSink)", text)
+
     def test_non_destructive_edits_hot_apply_and_destructive_edits_revoke(self):
         text = (APP / "delegation/SubAgentHotUpdatePolicy.kt").read_text()
         self.assertIn("profiles.all",text); self.assertIn("it.id == previous.id",text)

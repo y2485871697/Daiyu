@@ -156,7 +156,7 @@ internal class SavedSubAgentRuntimeBindings(
                                 check(profile.role == binding.profile.role) { "child_profile_removed_or_role_changed" }
                                 val resolved = latestModel(profile.id)
                                 check(latestConfig() == next && (if (guard != null) guard.current()?.revision == guardBefore?.revision
-                                    else currentLifetime?.invoke(profile.id) == lifetime && (currentLifetime != null || profileCurrent(binding.profile.id)))) {
+                                    else currentLifetime?.invoke(profile.id) == lifetime && (currentLifetime != null || profileCurrent(profile.id)))) {
                                     "child_model_configuration_changed"
                                 }
                                 assigned = profile

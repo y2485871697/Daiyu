@@ -98,7 +98,7 @@ class ModelNativeSearchSupportTest {
         }
     }
     @Test fun confirmedGptSixModelsUseResponsesOnOfficialAndCompatibleEndpoints() {
-        val models = listOf("gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-6-cyber")
+        val models = listOf("gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-6-cyber")
         val options = ProviderRequestOptions(openAiWebSearchEnabled = true)
         for (host in listOf("https://api.openai.com/v1", "https://gateway.invalid/v1")) for (model in models) {
             assertTrue("$host/$model", ModelNativeSearchSupport.supports(ProviderProtocol.RESPONSES, model, host))

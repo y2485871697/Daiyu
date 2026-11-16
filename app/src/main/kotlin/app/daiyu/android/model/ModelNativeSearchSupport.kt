@@ -68,7 +68,7 @@ internal object ModelNativeSearchSupport {
     private fun arkResponses(id: String) = id != "doubao-seed-character-251128" &&
         (ark(id) || id in setOf("glm-5-3-flash-260828", "glm-5-2-260617", "kimi-k3-1-pro-261024"))
 
-    private val openAiResponsesModels = setOf("gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-6-cyber")
+    private val openAiResponsesModels = setOf("gpt-6-astra", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-6-cyber")
 
     private val qwenDeepSeekModels = setOf("deepseek-v4-pro", "deepseek-v4-pro-0813",
         "deepseek-v4-flash-0731", "deepseek-v4.1-flash-1017")

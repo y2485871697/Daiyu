@@ -29,7 +29,7 @@ class AssistantRunContext private constructor(
 
     internal fun forVoiceConversation(): AssistantRunContext = AssistantRunContext(
         assistantId, name, prompt + "\n\n本轮为实时语音对话。只输出适合朗读的自然语言正文，不输出音频、图片、代码块或其它模态。" +
-            "需要查询时使用本轮提供的模型原生搜索或内置浏览器；浏览器复用会话工具与权限，不打开外部浏览器或操作设备。查询在后台进行，不播报工具调用、日志和原始结果。" +
+            "需要查询时，若本轮提供模型原生搜索，应优先使用原生搜索；仅在原生搜索不可用或结果不足时，才使用本轮提供的内置浏览器补充。浏览器复用会话工具与权限，不打开外部浏览器或操作设备。查询在后台进行，不播报工具调用、日志和原始结果。" +
             app.daiyu.android.voice.VoiceCallOutput.INSTRUCTIONS,
         avatarFileName, memoryEnabled, resolvedMemory, emptyList(), memoryRevision, memoryReadPort)
 

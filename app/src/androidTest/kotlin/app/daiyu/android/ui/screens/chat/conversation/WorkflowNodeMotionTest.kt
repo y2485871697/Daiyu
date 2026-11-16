@@ -11,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PixelMap
 import androidx.compose.ui.graphics.toPixelMap
@@ -88,6 +89,15 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
     }
 
     private fun pixels() = ui.onNodeWithTag("motion-raster").captureToImage().toPixelMap()
+    private fun heldPixels(name: String): PixelMap {
+        val image = captureScreenNode(ui.onNodeWithTag("motion-raster"))
+        val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/workflow-arrival").apply { mkdirs() }
+        java.io.File(directory, "$name.png").outputStream().use {
+            image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }
+        return image.toPixelMap()
+    }
+
     private fun distance(a: Color, b: Color) = maxOf(abs(a.red - b.red), abs(a.green - b.green), abs(a.blue - b.blue))
     private fun green(p: PixelMap) = coverage(p, success)
     private fun coverage(p: PixelMap, color: Color, tag: String = "tool-step:motion-a"): Float {
@@ -290,13 +300,18 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         try {
             show(incoming = arrival, baseline = false)
             ui.mainClock.advanceTimeBy(1_000)
-            assertEquals("pending tool body cannot overtake its line", 0f, bodyInk(pixels(), "tool-step:motion-a"), .03f)
+            val pending = heldPixels("held-pending")
+            assertEquals(.99f, arrival.value, 0f)
+            assertEquals("pending tool body cannot overtake its line", 0f, bodyInk(pending, "tool-step:motion-a"), .03f)
+            val pendingGlyph = glyph(pending)
             assertFalse("pending spinner cannot overtake its line", changed(
-                glyph(pixels()), List(glyph(pixels()).size) { background }))
+                pendingGlyph, List(pendingGlyph.size) { background }))
             change(listOf(first.copy(state = WorkStepState.OK, activity = ToolActivityUi.from(WorkStepState.OK))))
             ui.mainClock.advanceTimeBy(1_000)
-            assertEquals("fast completion must remain behind actual incoming", 0f, green(pixels()), .03f)
-            assertEquals(0f, bodyInk(pixels(), "tool-step:motion-a"), .03f)
+            val completed = heldPixels("held-fast-completion")
+            assertEquals(.99f, arrival.value, 0f)
+            assertEquals("fast completion must remain behind actual incoming", 0f, green(completed), .03f)
+            assertEquals(0f, bodyInk(completed, "tool-step:motion-a"), .03f)
             instrumentation.runOnMainSync { arrival.value = 1f }
             repeat(2) { ui.mainClock.advanceTimeByFrame() }
             ui.mainClock.advanceTimeBy(48)

@@ -168,8 +168,10 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         val x = a.left - raster.left + with(density) { 5.dp.toPx() }
         val from = ceil(a.top - raster.top + with(density) { 28.dp.toPx() }).toInt()
         val to = floor(b.top - raster.top + with(density) { 16.dp.toPx() }).toInt()
+        val stroke = with(density) { 1.dp.toPx() }
         return (from..to).map { y ->
-            (floor(x - 1).toInt()..ceil(x + 1).toInt()).maxOf { i -> distance(p[i, y], background) }
+            (floor(x - stroke / 2f).toInt()..ceil(x + stroke / 2f).toInt())
+                .sumOf { i -> distance(p[i, y], background).toDouble() }.toFloat() / stroke
         }
     }
 

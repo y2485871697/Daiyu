@@ -192,7 +192,24 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertIn('val actualTop = list.localPositionOf(viewport, Offset.Zero).y', source)
         self.assertIn('!state.followCatchup', source)
         self.assertIn('(state.bounded || protect) && list != null', source)
-        self.assertIn('nestedTail.migrating || nestedTail.followCatchup', source)
+        correction = source.split('fun correctFollowClearance() {', 1)[1].split('val requestedIndex', 1)[0]
+        early_guard = correction.split('val remeasurement =', 1)[0]
+        self.assertNotIn('followCatchup', early_guard)
+        for token in ('if (nestedTail.migrating ||', '!canFollowBottom()',
+                      'val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey &&',
+                      'nestedTail.contentHeight > 0 && nestedTail.contentHeight <= layout.viewportSize.height -',
+                      'val boundedTerminalReveal = nestedTail.bounded && currentTailKey == assistantOwnerKey &&',
+                      'if (!protectMeasuredTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return',
+                      'val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal',
+                      'if (nestedTail.followCatchup && !protectMeasuredTail) return',
+                      'if (!protectMeasuredTail && resumeFollowPending',
+                      'activeTail.status != RunStatus.RUNNING && !activeTail.isStreaming',
+                      'readyTurns[activeTail.listKey] == activeTail',
+                      'revealedTurns[activeTail.listKey] != activeTail'):
+            self.assertIn(token, correction)
+        follow = source.split('fun canFollowBottom(): Boolean =', 1)[1].split('SideEffect {', 1)[0]
+        self.assertIn('followBottom && !currentDragging', follow)
+        self.assertIn('!currentNestedTail.migrating && disclosureViewport.active == null', follow)
         self.assertEqual(2, source.count('while (followBottom && (disclosureViewport.active != null ||'))
         self.assertIn('val protect = protectClearance()', source)
         self.assertIn('if (!protect) state.followCatchup = false', source)

@@ -26,7 +26,7 @@ data class ProviderRequestOptions(
     internal fun nativeSearchEnabled(protocol: ProviderProtocol, model: String, endpoint: String?,
         tools: List<app.daiyu.android.domain.ToolDefinition> = emptyList()): Boolean =
         nativeSearchRequested && ModelNativeSearchSupport.supports(protocol, model, endpoint) &&
-            ModelNativeSearchSupport.canMixTools(protocol, endpoint, tools)
+            ModelNativeSearchSupport.canMixTools(protocol, model, endpoint, tools)
 
     override fun toString(): String =
         "ProviderRequestOptions(customBody=<redacted>, speedMode=$speedMode, codex=$codex)"
@@ -149,7 +149,7 @@ data class ProviderRequestOptions(
         const val MAX_BODY_BYTES = 64 * 1024
         private const val MAX_BODY_DEPTH = 64
         // History, advertised tools, and continuation state must match the local runner.
-        private val NATIVE_SEARCH_FIELDS = setOf("enable_search", "enable_enhancement", "search_info", "citation", "web_search")
+        private val NATIVE_SEARCH_FIELDS = setOf("enable_search", "search_options", "enable_enhancement", "search_info", "citation", "web_search")
         private val OWNED_FIELDS = setOf("input", "messages", "tools", "stream", "store", "include", "web_search_options",
             "previous_response_id", "conversation", "background", "tool_choice", "parallel_tool_calls",
             "contents", "systemInstruction", "toolConfig", "stream_options", "candidateCount")

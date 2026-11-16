@@ -214,4 +214,99 @@ class NativeSearchAdaptersTest {
         assertTrue(events.none { it is ModelEvent.ToolReady || it is ModelEvent.NativeSearch })
     }
 
+    @Test fun newlyRecognizedOfficialHostsUseOnlyTheirOwnAdapters() {
+        val qwenHosts = listOf("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "cn-hongkong.dashscope.aliyuncs.com") +
+            listOf("cn-beijing", "ap-southeast-1", "us-east-1", "cn-hongkong", "eu-central-1", "ap-northeast-1").map { "workspace.$it.maas.aliyuncs.com" }
+        for (host in qwenHosts) {
+            val endpoint = "https://$host/compatible-mode/v1"
+            assertEquals(host, NativeSearchPolicy.Family.QWEN, NativeSearchPolicy.family(endpoint))
+            assertEquals(NativeSearchPolicy.Family.COMPATIBLE, NativeSearchPolicy.family("https://$host.attacker.invalid/v1"))
+            assertTrue(ModelNativeSearchSupport.supports(ProviderProtocol.RESPONSES, "qwen4-max", endpoint))
+            assertTrue(body(ProviderProtocol.CHAT_COMPLETIONS, endpoint, "qwen-plus").getBoolean("enable_search"))
+        }
+        for (host in listOf("api.minimax.io", "api.minimax.cn", "api.minimaxi.com")) {
+            val endpoint = "https://$host/v1"
+            assertEquals(NativeSearchPolicy.Family.MINIMAX, NativeSearchPolicy.family(endpoint))
+            for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES))
+                assertTrue(ModelNativeSearchSupport.supports(protocol, "MiniMax-M3.1-Flash", endpoint))
+            assertFalse(ModelNativeSearchSupport.supports(ProviderProtocol.CHAT_COMPLETIONS, "MiniMax-M3.1-Flash", endpoint))
+            assertEquals(NativeSearchPolicy.Family.COMPATIBLE, NativeSearchPolicy.family("https://$host.attacker.invalid/v1"))
+        }
+    }
+
+    @Test fun qwenAndArkHostedResponsesAppendStandardSearchWithoutLosingFunctions() {
+        for ((endpoint, model) in listOf("https://dashscope.aliyuncs.com/compatible-mode/v1/responses" to "qwen4-max",
+            "https://workspace.cn-hongkong.maas.aliyuncs.com/compatible-mode/v1/responses" to "deepseek-v4.1-flash-1017",
+            "https://ark.cn-beijing.volces.com/api/v3/responses" to "glm-5-3-flash-260828",
+            "https://ark.cn-beijing.volces.com/api/v3/responses" to "kimi-k3-1-pro-261024")) {
+            val settings = ModelSettings(endpoint, model, "synthetic", false,
+                requestOptions = ProviderRequestOptions(openAiWebSearchEnabled = true))
+            assertEquals(endpoint, settings.requestEndpoint())
+            val enabled = settings.requestOptions.nativeSearchEnabled(settings.protocol, model, endpoint, listOf(lookup))
+            assertTrue(enabled)
+            val result = ResponsesRequest.body(model, JSONArray(), listOf(lookup), enabled, endpoint)
+            assertEquals(listOf("function", "web_search"), types(result))
+            assertEquals("lookup", result.getJSONArray("tools").getJSONObject(0).getString("name"))
+            assertFalse(result.has("enable_search")); assertFalse(result.has("web_search_options"))
+            assertFalse(result.getJSONArray("tools").getJSONObject(1).has("sources"))
+        }
+        assertEquals(listOf("web_search_20250305"), types(body(ProviderProtocol.MESSAGES,
+            "https://ark.cn-beijing.volces.com/api/v3", "doubao-seed-2-1-pro-260915")))
+    }
+
+    @Test fun deepSeekVisionAliasAndProMessagesUseTheCorrectServerTools() {
+        for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.MESSAGES)) {
+            val result = body(protocol, "https://api.deepseek.com", "deepseek-v4-flash-vision-exp", tools = listOf(lookup))
+            assertEquals(listOf("function", "deepseek_web_search"), types(result))
+            assertFalse(result.has("web_search_options"))
+        }
+        val pro = body(ProviderProtocol.MESSAGES, "https://api.deepseek.com", "deepseek-v4-pro", tools = listOf(lookup))
+        assertEquals(listOf("function", "web_search_20250305"), types(pro))
+        assertEquals("web_search", pro.getJSONArray("tools").getJSONObject(1).getString("name"))
+        assertEquals(listOf("function", "web_search"), types(body(ProviderProtocol.RESPONSES,
+            "https://api.deepseek.com", "deepseek-v4-pro", tools = listOf(lookup))))
+    }
+
+    @Test fun qwenOmniAgentSearchCannotBeOverriddenOrRestoredAfterDisabling() {
+        val endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        for (model in listOf("qwen3.8-omni-flash", "qwen3.5-omni-plus")) {
+            val settings = ModelSettings(endpoint, model, "synthetic", false, protocol = ProviderProtocol.CHAT_COMPLETIONS,
+                requestOptions = ProviderRequestOptions(openAiWebSearchEnabled = true))
+            val result = NativeCompletionRequest.body(settings, JSONArray(), listOf(lookup), null)
+            assertTrue(result.getBoolean("enable_search"))
+            assertEquals("agent", result.getJSONObject("search_options").getString("search_strategy"))
+            assertEquals(listOf("function"), types(result))
+        }
+        assertFalse(body(ProviderProtocol.CHAT_COMPLETIONS, endpoint, "qwen-plus").has("search_options"))
+        val custom = """{"search_options":{"search_strategy":"agent"}}"""
+        rejected { ProviderRequestOptions(customBody = custom, openAiWebSearchEnabled = true).validate(ProviderProtocol.CHAT_COMPLETIONS) }
+        val options = ProviderRequestOptions(customBody = custom, openAiWebSearchEnabled = true, preferNativeSearch = false)
+        val settings = ModelSettings(endpoint, "qwen3.8-omni-flash", "synthetic", false,
+            protocol = ProviderProtocol.CHAT_COMPLETIONS, requestOptions = options)
+        val merged = options.apply(NativeCompletionRequest.body(settings, JSONArray(), listOf(lookup), null),
+            ProviderProtocol.CHAT_COMPLETIONS, false)
+        assertFalse(merged.has("enable_search")); assertFalse(merged.has("search_options"))
+        assertEquals(custom, options.customBody)
+    }
+
+    @Test fun deepSeekMessagesCompatibilityAliasesSelectTheMappedSearchTool() {
+        for ((model, type) in listOf("claude-opus-4-5" to "web_search_20250305", "claude-sonnet-4-5" to "deepseek_web_search")) {
+            val result = body(ProviderProtocol.MESSAGES, "https://api.deepseek.com/anthropic", model)
+            assertEquals(listOf(type), types(result))
+            assertEquals(if (type == "deepseek_web_search") type else "web_search",
+                result.getJSONArray("tools").getJSONObject(0).getString("name"))
+        }
+    }
+
+    @Test fun tokenHubIsNotMisidentifiedAsAGenericDeepSeekGateway() {
+        for (host in listOf("tokenhub.tencentmaas.com", "tokenhub-intl.tencentmaas.com")) {
+            val endpoint = "https://$host/v1"
+            assertEquals(NativeSearchPolicy.Family.TOKENHUB, NativeSearchPolicy.family(endpoint))
+            for (model in listOf("hy3", "hy4", "deepseek-v4.1-flash"))
+                assertFalse(ModelNativeSearchSupport.supports(ProviderProtocol.RESPONSES, model, endpoint))
+            rejected { body(ProviderProtocol.RESPONSES, endpoint, "deepseek-v4.1-flash") }
+            assertEquals(NativeSearchPolicy.Family.COMPATIBLE, NativeSearchPolicy.family("https://$host.attacker.invalid/v1"))
+        }
+    }
+
 }

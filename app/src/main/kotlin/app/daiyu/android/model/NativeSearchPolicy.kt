@@ -7,7 +7,7 @@ import java.util.Locale
 
 /** Select a wire adapter, not a promise about a model's remote entitlement. Opt-in stays per model. */
 internal object NativeSearchPolicy {
-    enum class Family { OPENAI, XAI, GOOGLE, ANTHROPIC, QWEN, GLM, ARK, DEEPSEEK, PERPLEXITY, MINIMAX, HUNYUAN, BAIDU, MISTRAL, MOONSHOT, STEPFUN, COMPATIBLE }
+    enum class Family { OPENAI, XAI, GOOGLE, ANTHROPIC, QWEN, GLM, ARK, DEEPSEEK, PERPLEXITY, MINIMAX, HUNYUAN, TOKENHUB, BAIDU, MISTRAL, MOONSHOT, STEPFUN, COMPATIBLE }
 
     fun family(endpoint: String?): Family {
         val host = endpoint?.let { URI(it).host }?.lowercase(Locale.ROOT) ?: return Family.COMPATIBLE
@@ -16,14 +16,15 @@ internal object NativeSearchPolicy {
             host == "api.x.ai" -> Family.XAI
             host == "generativelanguage.googleapis.com" -> Family.GOOGLE
             host == "api.anthropic.com" -> Family.ANTHROPIC
-            host in setOf("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com") ||
-                host.matches(Regex("[a-z0-9-]+\\.(cn-beijing|ap-southeast-1|us-east-1)\\.maas\\.aliyuncs\\.com")) -> Family.QWEN
+            host in setOf("dashscope.aliyuncs.com", "dashscope-intl.aliyuncs.com", "dashscope-us.aliyuncs.com", "cn-hongkong.dashscope.aliyuncs.com") ||
+                host.matches(Regex("[a-z0-9-]+\\.(cn-beijing|ap-southeast-1|us-east-1|cn-hongkong|eu-central-1|ap-northeast-1)\\.maas\\.aliyuncs\\.com")) -> Family.QWEN
             host in setOf("open.bigmodel.cn", "api.z.ai") -> Family.GLM
             host == "ark.cn-beijing.volces.com" -> Family.ARK
             host == "api.deepseek.com" -> Family.DEEPSEEK
             host == "api.perplexity.ai" -> Family.PERPLEXITY
-            host in setOf("api.minimax.io", "api.minimaxi.com") -> Family.MINIMAX
+            host in setOf("api.minimax.io", "api.minimax.cn", "api.minimaxi.com") -> Family.MINIMAX
             host == "api.hunyuan.cloud.tencent.com" -> Family.HUNYUAN
+            host in setOf("tokenhub.tencentmaas.com", "tokenhub-intl.tencentmaas.com") -> Family.TOKENHUB
             host == "qianfan.baidubce.com" -> Family.BAIDU
             host == "api.mistral.ai" -> Family.MISTRAL
             host in setOf("api.moonshot.cn", "api.moonshot.ai") -> Family.MOONSHOT
@@ -36,7 +37,7 @@ internal object NativeSearchPolicy {
               enabled: Boolean, localTools: List<app.daiyu.android.domain.ToolDefinition>): JSONObject {
         if (!enabled) return body
         val family = family(endpoint)
-        require(family !in setOf(Family.MISTRAL, Family.MOONSHOT)) {
+        require(family !in setOf(Family.MISTRAL, Family.MOONSHOT, Family.TOKENHUB)) {
             "当前接口的原生搜索协议尚未接入，请使用本轮提供的浏览器工具"
         }
         require(family !in setOf(Family.STEPFUN, Family.HUNYUAN, Family.BAIDU) || protocol == ProviderProtocol.CHAT_COMPLETIONS) {
@@ -46,7 +47,7 @@ internal object NativeSearchPolicy {
             val tools = body.optJSONArray("tools") ?: JSONArray().also { body.put("tools", it) }
             tools.put(tool)
         }
-        val flash = model.lowercase(Locale.ROOT) in setOf("deepseek-flash", "deepseek-v4-flash", "deepseek-v4.1-flash")
+        val flash = isDeepSeekFlash(model)
         when (protocol) {
             ProviderProtocol.RESPONSES -> {
                 val kind = if ((family == Family.DEEPSEEK || family == Family.COMPATIBLE) && flash)
@@ -57,7 +58,11 @@ internal object NativeSearchPolicy {
             ProviderProtocol.CHAT_COMPLETIONS -> when (family) {
                 Family.MINIMAX -> throw IllegalArgumentException("MiniMax 原生搜索请使用 Messages 或 Responses 格式")
                 Family.XAI -> throw IllegalArgumentException("Grok 原生搜索请使用 Responses 格式")
-                Family.QWEN -> body.put("enable_search", true)
+                Family.QWEN -> {
+                    body.put("enable_search", true)
+                    if (model.trim().lowercase(Locale.ROOT).let { it == "qwen3.8-omni-flash" || it.startsWith("qwen3.5-omni-") })
+                        body.put("search_options", JSONObject().put("search_strategy", "agent"))
+                }
                 Family.HUNYUAN -> body.put("enable_enhancement", true).put("search_info", true).put("citation", true)
                 Family.BAIDU -> body.put("web_search", JSONObject().put("enable", true).put("enable_trace", true)
                     .put("enable_status", true).put("enable_citation", true))
@@ -86,13 +91,22 @@ internal object NativeSearchPolicy {
                 append(JSONObject().put("googleSearch", JSONObject()))
             }
             ProviderProtocol.MESSAGES -> {
-                val name = if (family == Family.DEEPSEEK) "deepseek_web_search" else "web_search"
+                val name = messagesSearchName(model, endpoint)
                 require(localTools.none { it.name == name }) { "自定义工具名称与原生搜索冲突：$name" }
-                append(JSONObject().put("type", if (family == Family.DEEPSEEK) name else "web_search_20250305")
+                append(JSONObject().put("type", if (name == "deepseek_web_search") name else "web_search_20250305")
                     .put("name", name))
             }
             else -> throw IllegalArgumentException("当前协议未接入原生搜索")
         }
         return body
     }
+    internal fun isDeepSeekFlash(model: String) = model.trim().lowercase(Locale.ROOT) in setOf(
+        "deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4.1-flash")
+
+    internal fun messagesSearchName(model: String, endpoint: String?): String {
+        val id = model.trim().lowercase(Locale.ROOT)
+        val flash = isDeepSeekFlash(id) || id.startsWith("claude") && !id.startsWith("claude-opus")
+        return if (family(endpoint) == Family.DEEPSEEK && flash) "deepseek_web_search" else "web_search"
+    }
+
 }

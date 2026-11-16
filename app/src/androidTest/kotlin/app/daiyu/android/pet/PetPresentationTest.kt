@@ -438,7 +438,7 @@ class PetPresentationTest : WiredActivityTestCase() {
         assertTrue("Initial overlay sprite is missing from screenshot", painted > 32)
         val downX = before.centerX().toFloat()
         val downY = before.centerY().toFloat()
-        val dx = before.width() + 24
+        val dx = 24
         val dy = before.height() + 24
         instrumentation.runOnMainSync {
             overlayTouch(android.view.MotionEvent.ACTION_DOWN, downX, downY)

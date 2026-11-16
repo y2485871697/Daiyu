@@ -32,6 +32,8 @@ interface BrowserTabLifecycle {
     fun rebind(allocation: BrowserTabLease, lease: BrowserTabLease) {}
     /** Bounded state-only precheck. Rejection does not consume the takeover token. */
     fun beforeReleaseTakeover(allocation: BrowserTabLease, lease: BrowserTabLease) {}
+    /** State-only readiness read; never consumes a takeover token. */
+    fun takeoverIdle(allocation: BrowserTabLease, lease: BrowserTabLease): Boolean = true
 }
 
 /** Trusted-host capability. It is not a model argument and must not be serialized as one. */
@@ -88,6 +90,32 @@ class BrowserToolSession(
     private val slots = mutableMapOf<Int, Slot>()
     private var current: Slot? = null
     private var closed = false
+    private var controlRevision = 0L
+    private var requiresObservation = false
+
+    data class ControlState(val revision: Long = 0, val userControlled: Boolean = false,
+                            val requiresObservation: Boolean = false)
+    fun controlState(): ControlState = synchronized(lock) {
+        ControlState(controlRevision, slots.values.any { it.phase == Phase.TAKEN_OVER || it.phase == Phase.TRANSITION },
+            requiresObservation)
+    }
+    fun controlRejection(action: String, prepared: ControlState): String? = synchronized(lock) {
+        when {
+            action == "list_tabs" -> null
+            controlState().userControlled -> "BROWSER_TAKEN_OVER"
+            prepared.revision != controlRevision -> "BROWSER_REOBSERVATION_REQUIRED"
+            action !in BrowserSessionRegistry.readOnlyActions &&
+                (prepared.requiresObservation || requiresObservation) -> "BROWSER_REOBSERVATION_REQUIRED"
+            else -> null
+        }
+    }
+    fun acknowledgeObservation(prepared: ControlState) = synchronized(lock) {
+        if (!closed && controlRevision == prepared.revision && !controlState().userControlled)
+            requiresObservation = false
+    }
+    private fun checkControl(action: String, prepared: ControlState?) {
+        if (prepared != null) controlRejection(action, prepared)?.let { error(it) }
+    }
 
     init { sessions.open(grant) }
 
@@ -121,7 +149,8 @@ class BrowserToolSession(
         sessions.publishTakenOver(token.lease) { block(slot.allocation, token.lease) }
     }
 
-    fun execute(parameters: Map<String, Any?>, navigationDefaults: Boolean = false): BrowserOutcome {
+    fun execute(parameters: Map<String, Any?>, navigationDefaults: Boolean = false,
+                preparedControl: ControlState? = null): BrowserOutcome {
         var entered = false
         var allocationEntered = false
         var stage = "precheck"
@@ -131,7 +160,7 @@ class BrowserToolSession(
             val action = input["action"] as? String ?: error("BROWSER_ACTION_REQUIRED")
             val id = if ("tabId" in input) normalizeTabId(input["tabId"]) else null
             val arguments = input.filterKeys { it != "action" && it != "tabId" }
-            synchronized(lock) { checkOpen() }
+            synchronized(lock) { checkOpen(); checkControl(action, preparedControl) }
             val result = when (action) {
                 "new_tab" -> {
                     require(id == null && (arguments.isEmpty() || navigationDefaults && "url" in arguments)) {
@@ -140,9 +169,9 @@ class BrowserToolSession(
                     val navigation = if (arguments.isEmpty()) null else BrowserCommand("navigate", null, arguments).also {
                         validateNavigation(it)
                     }
-                    val lease = newTab { entered = true; allocationEntered = true; stage = "create" }
+                    val lease = createTab(synchronized(lock) { checkControl(action, preparedControl); allocateTab() }, preparedControl) { entered = true; allocationEntered = true; stage = "create" }
                     if (navigation != null) executeCommand(lease,
-                        BrowserCommand("navigate", lease.tabId, navigation.arguments)) { entered = true; stage = "execute" }
+                        BrowserCommand("navigate", lease.tabId, navigation.arguments), preparedControl) { entered = true; stage = "execute" }
                     tabResult(lease)
                 }
                 "list_tabs" -> {
@@ -159,7 +188,7 @@ class BrowserToolSession(
                 "close_tab" -> {
                     require(arguments.isEmpty()) { "BROWSER_TAB_ARGUMENTS" }
                     val lease = synchronized(lock) { resolve(id).lease }
-                    closeTabChecked(lease) { entered = true; stage = "close" }
+                    closeTabChecked(lease) { checkControl(action, preparedControl); entered = true; stage = "close" }
                     synchronized(lock) {
                         BrowserExecutionResult("{\"closedTabId\":${lease.tabId},\"currentTabId\":${current?.lease?.tabId}}")
                     }
@@ -173,14 +202,15 @@ class BrowserToolSession(
                             checkOpen()
                             if (current != null) resolve(id).lease to null else {
                                 check(slots.isEmpty()) { "BROWSER_TAB_BUSY" }
+                                checkControl(action, preparedControl)
                                 null to allocateTab()
                             }
                         }
-                        selected ?: createTab(checkNotNull(allocation)) { entered = true; allocationEntered = true; stage = "create" }
+                        selected ?: createTab(checkNotNull(allocation), preparedControl) { entered = true; allocationEntered = true; stage = "create" }
                     } else synchronized(lock) { resolve(id).lease }
                     val command = BrowserCommand(action, expected.tabId, arguments)
                     preflight(command)
-                    executeCommand(expected, command) { entered = true; stage = "execute" }
+                    executeCommand(expected, command, preparedControl) { entered = true; stage = "execute" }
                 }
             }
             BrowserOutcome.Confirmed(result)
@@ -208,11 +238,12 @@ class BrowserToolSession(
     }
 
     private fun executeCommand(expected: BrowserTabLease, command: BrowserCommand,
-                               entering: () -> Unit): BrowserExecutionResult {
+                               preparedControl: ControlState?, entering: () -> Unit): BrowserExecutionResult {
         val bridge = BrowserHostBridge(sessions, object : BrowserExecutionPort {
             override fun execute(command: BrowserCommand, lease: BrowserTabLease): BrowserExecutionResult {
                 check(lease == expected) { "BROWSER_STALE_TAB" }
                 val reservation = synchronized(lock) {
+                    checkControl(command.action, preparedControl)
                     current = requireReady(expected)
                     sessions.reserveOperation(expected)
                 }
@@ -220,7 +251,14 @@ class BrowserToolSession(
                 return try { port.execute(command, lease) } finally { reservation.close() }
             }
         })
-        return bridge.execute(grant.owner, command)
+        val result = bridge.execute(grant.owner, command)
+        if (preparedControl != null && command.action in setOf("get_readable", "get_text", "find_elements", "get_backbone")) {
+            synchronized(lock) {
+                if (controlRevision == preparedControl.revision && slots[expected.tabId]?.lease == expected &&
+                    slots[expected.tabId]?.phase == Phase.READY) requiresObservation = false
+            }
+        }
+        return result
     }
 
     private fun tabResult(lease: BrowserTabLease) = BrowserExecutionResult(
@@ -231,20 +269,19 @@ class BrowserToolSession(
         return Slot(sessions.newTab(grant.owner)).also { slots[it.lease.tabId] = it }
     }
 
-    private fun newTab(entering: () -> Unit): BrowserTabLease =
-        createTab(synchronized(lock) { allocateTab() }, entering)
-
-    private fun createTab(slot: Slot, entering: () -> Unit): BrowserTabLease {
+    private fun createTab(slot: Slot, preparedControl: ControlState?, entering: () -> Unit): BrowserTabLease {
         try {
             sessions.registerCleanup(slot.allocation) { requestCleanup(slot) }
             synchronized(lock) {
                 checkOpen()
+                checkControl("new_tab", preparedControl)
                 check(slots[slot.lease.tabId] === slot && !slot.cleanupRequested) { "BROWSER_STALE_TAB" }
             }
             entering()
             lifecycle.create(slot.allocation)
             synchronized(lock) {
                 checkOpen()
+                checkControl("new_tab", preparedControl)
                 check(slots[slot.lease.tabId] === slot && !slot.cleanupRequested) { "BROWSER_STALE_TAB" }
                 sessions.assertCurrent(slot.lease)
                 slot.phase = Phase.READY
@@ -314,11 +351,11 @@ class BrowserToolSession(
     private fun closeTabChecked(lease: BrowserTabLease, entering: () -> Unit) {
         synchronized(lock) {
             val slot = requireReady(lease)
+            entering()
             slot.phase = Phase.CLOSING
             if (current === slot) selectAfterClose()
         }
         // Registry removes the slot BEFORE callbacks. Failure is unknown, not retryable.
-        entering()
         sessions.closeTab(lease)
     }
 
@@ -332,6 +369,7 @@ class BrowserToolSession(
                 if (!closed && slots[lease.tabId] === slot) {
                     slot.lease = token.lease
                     slot.phase = Phase.TAKEN_OVER
+                    controlRevision++
                     if (selectOnSuccess) current = slot
                 }
             }
@@ -340,6 +378,10 @@ class BrowserToolSession(
             synchronized(lock) { if (slots[lease.tabId] === slot) slot.phase = Phase.READY }
             throw e
         }
+    }
+
+    fun takeoverIdle(token: BrowserToolTakeoverToken): Boolean = withTakenOverTab(token) { allocation, lease ->
+        lifecycle.takeoverIdle(allocation, lease)
     }
 
     /** Trusted host resume; old leases and consumed tokens remain stale. */
@@ -360,6 +402,8 @@ class BrowserToolSession(
                 sessions.assertCurrent(resumed)
                 slot.lease = resumed
                 slot.phase = Phase.READY
+                controlRevision++
+                requiresObservation = true
                 if (current == null) current = slot
             }
             return resumed

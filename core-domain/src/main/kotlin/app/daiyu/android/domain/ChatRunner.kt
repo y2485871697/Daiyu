@@ -180,9 +180,11 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         compactingRuntime?.cancel()
     }
     /** Nonblocking control call. A tool already executing is allowed to finish its batch. */
-    fun pause(): Boolean {
+    fun pause(): Boolean = requestPause(requireRunning = false) != null
+    fun pauseForBrowser(): Long? = requestPause(requireRunning = true)
+    private fun requestPause(requireRunning: Boolean): Long? {
         val captured = synchronized(terminalLock) {
-            if (terminal || terminalReserved || stopped.get() || contextLimited) return false
+            if (terminal || terminalReserved || stopped.get() || contextLimited || requireRunning && pauseRequested) return null
             pauseRequested = true
             if (reasoningInterruptedAtNanos == null) reasoningInterruptedAtNanos = System.nanoTime()
             pauseRevision++
@@ -192,15 +194,16 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             execution = execution.copy(pauseRequested = true)
             if (requestOpening || execution.phase == ExecutionPhase.STREAMING || execution.phase == ExecutionPhase.RECONNECTING) {
                 if (!retainsTransportOnPause()) { breakStream = true; generation++ }
-                Triple(session, boundaryWaiter, transportInterruption)
-            } else Triple(null, boundaryWaiter, null)
+                Triple(session, boundaryWaiter, transportInterruption) to pauseEpoch
+            } else Triple(null, boundaryWaiter, null) to pauseEpoch
         }
-        captured.second?.let { LockSupport.unpark(it) }
-        val retained = captured.first
+        val (control, epoch) = captured
+        control.second?.let { LockSupport.unpark(it) }
+        val retained = control.first
         if (options.reconnect.budgetFactory != null &&
             (retained is CheckpointedResumableModelSession || retained is RequestRetryModelSession)) {
             syncReconnectPause()
-            captured.third?.invoke() ?: when (retained) {
+            control.third?.invoke() ?: when (retained) {
                 is CheckpointedResumableModelSession -> retained.disconnectTransport()
                 is RequestRetryModelSession -> retained.disconnectTransport()
                 else -> Unit
@@ -208,12 +211,15 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         } else cancelSession(retained)
         options.contextRuntime?.cancel()
         compactingRuntime?.cancel()
-        return true
+        return epoch
     }
     /** Releases the user pause without changing the running owner. */
-    fun resume(): Boolean {
+    fun resume(): Boolean = resumePause(null)
+    fun resumeBrowserPause(epoch: Long): Boolean = resumePause(epoch)
+    private fun resumePause(expectedEpoch: Long?): Boolean {
         val waiter = synchronized(terminalLock) {
-            if (terminal || terminalReserved || stopped.get() || !pauseRequested || contextLimited) return false
+            if (terminal || terminalReserved || stopped.get() || !pauseRequested || contextLimited ||
+                expectedEpoch != null && expectedEpoch != pauseEpoch) return false
             pauseRequested = false
             pauseRevision++
             execution = execution.copy(pauseRequested = false)

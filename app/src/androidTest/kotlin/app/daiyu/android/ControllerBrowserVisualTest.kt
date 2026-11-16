@@ -42,6 +42,7 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
         var onBeforeRelease: () -> Unit = {}
         var pauseAccepted = true
         var paused = false
+        var pauseEpoch = 0L
         var pauses = 0
         var resumes = 0
         var live = true
@@ -52,6 +53,7 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
                 check(!failCreate) { "native creation uncertain" }
             }
             override fun close(lease: BrowserTabLease) { closes++ }
+            override fun takeoverIdle(allocation: BrowserTabLease, lease: BrowserTabLease) = !loading
             override fun beforeReleaseTakeover(allocation: BrowserTabLease, lease: BrowserTabLease) {
                 releaseChecks++
                 onBeforeRelease()
@@ -78,8 +80,8 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
         }
         val owner = Message(identity.assistantMessageId, identity.conversationId, identity.runId,
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
-        val controller = ControllerBrowserVisual(owner, binding, { live }, { pauses++; pauseAccepted },
-            { paused }, { resumes++; true }, { live = false; true }, attachVisible = { _, parent ->
+        val controller = ControllerBrowserVisual(owner, binding, { live }, { pauses++; if (pauseAccepted) ++pauseEpoch else null },
+            { paused }, { epoch -> if (epoch == pauseEpoch) { resumes++; true } else false }, { live = false; true }, attachVisible = { _, parent ->
                 mounts++
                 val child = android.view.View(parent.context)
                 parent.addView(child)
@@ -265,7 +267,7 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
             assertEquals(0, f.calls)
             assertEquals(0, f.resumes)
             visit.restore()
-            assertEquals(1, f.resumes)
+            assertEquals(0, f.resumes)
         } finally { f.close() }
     }
 
@@ -279,7 +281,7 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
             visit.newTab()
             assertFalse(visit.snapshot().live)
             assertEquals(1, f.allocations)
-            assertEquals(0, f.resumes)
+            assertEquals(1, f.resumes)
             val current = requireNotNull(f.controller.openVisit())
             f.paused = false
             current.newTab()
@@ -372,7 +374,7 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
             visit.restore()
             assertEquals(0, parent.childCount)
             assertEquals(2, f.detaches)
-            assertEquals(1, f.resumes)
+            assertEquals(0, f.resumes)
         } finally { f.close(); parent.removeAllViews() }
     }
 
@@ -435,7 +437,7 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
         } finally { f.close() }
     }
 
-    fun testLeavingPendingVisitCancelsOnlyItsTakeoverAndNeverResumes() = main {
+    fun testLeavingPendingVisitCancelsOnlyItsOwnPauseWithoutAcquiringTab() = main {
         val f = Fixture()
         try {
             val original = requireNotNull(f.session.currentTab)
@@ -446,7 +448,7 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
             assertFalse(visit.snapshot().live)
             assertFalse(f.controller.automationHeld)
             f.registry.assertCurrent(original)
-            assertEquals(0, f.resumes)
+            assertEquals(1, f.resumes)
             assertFalse(requireNotNull(f.controller.openVisit()).snapshot().takenOver)
         } finally { f.close() }
     }
@@ -473,7 +475,7 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
                 assertEquals(1, f.allocations)
                 visit.close()
                 assertFalse(f.controller.automationHeld)
-                assertEquals(0, f.resumes)
+                assertEquals(1, f.resumes)
                 assertEquals(0, f.calls)
             } finally { f.close() }
         }
@@ -556,4 +558,133 @@ class ControllerBrowserVisualTest : InstrumentationTestCase() {
             assertEquals(0, f.calls)
         } finally { f.close() }
     }
+
+    fun testBrowserPauseReturnsAutomaticallyButManualPauseAndStopNeverResume() = main {
+        for (kind in listOf("browser", "manual-before", "manual-after", "stop")) {
+            val f = Fixture()
+            try {
+                if (kind == "manual-before") f.paused = true
+                val visit = requireNotNull(f.controller.openVisit())
+                visit.takeover(requireNotNull(f.session.currentTab))
+                f.paused = true
+                assertTrue(visit.snapshot().takenOver)
+                if (kind == "manual-after") f.pauseEpoch++
+                if (kind == "stop") visit.stop()
+                visit.close()
+                assertEquals(if (kind == "browser") 1 else 0, f.resumes)
+                visit.close()
+                assertEquals(if (kind == "browser") 1 else 0, f.resumes)
+                assertEquals(0, f.calls)
+            } finally { f.close() }
+        }
+    }
+
+    fun testExplicitReturnPreservesPreexistingManualPauseAndUnmountDoesNotResume() = main {
+        for (manuallyPaused in listOf(false, true)) {
+            val f = Fixture()
+            val parent = android.widget.FrameLayout(instrumentation.targetContext)
+            try {
+                f.paused = manuallyPaused
+                val visit = requireNotNull(f.controller.openVisit())
+                visit.takeover(requireNotNull(f.session.currentTab))
+                f.paused = true
+                assertTrue(visit.snapshot().takenOver)
+                visit.mount(parent)
+                visit.unmount(parent)
+                assertEquals(0, f.resumes)
+                visit.restore()
+                assertEquals(if (manuallyPaused) 0 else 1, f.resumes)
+                assertTrue(f.session.controlState().requiresObservation)
+                visit.close()
+                assertEquals(if (manuallyPaused) 0 else 1, f.resumes)
+            } finally { f.close(); parent.removeAllViews() }
+        }
+    }
+
+
+    fun testDelayedReturnIsBoundToOriginalTokenAndNeverReturnsLaterTakeover() {
+        lateinit var f: Fixture
+        lateinit var visit: ControllerBrowserVisual.Visit
+        val parent = main { android.widget.FrameLayout(instrumentation.targetContext) }
+        try {
+            main {
+                f = Fixture()
+                visit = requireNotNull(f.controller.openVisit())
+                visit.takeover(requireNotNull(f.session.currentTab))
+                f.paused = true
+                assertTrue(visit.snapshot().takenOver)
+                visit.mount(parent)
+                f.loading = true
+                visit.restore()
+                assertEquals(0, f.resumes)
+                f.loading = false
+                visit.restore()
+                assertEquals(1, f.resumes)
+                f.paused = false
+                visit.takeover(requireNotNull(f.session.currentTab))
+                f.paused = true
+                assertTrue(visit.snapshot().takenOver)
+            }
+            Thread.sleep(200)
+            main {
+                assertTrue(visit.snapshot().takenOver)
+                assertEquals(1, f.releaseChecks)
+                assertEquals(1, f.resumes)
+            }
+        } finally { main { f.close(); parent.removeAllViews() } }
+    }
+
+    fun testClosingLoadingPageReturnsOnceAfterIdleWithoutAnotherUserAction() {
+        lateinit var f: Fixture
+        lateinit var visit: ControllerBrowserVisual.Visit
+        val parent = main { android.widget.FrameLayout(instrumentation.targetContext) }
+        try {
+            main {
+                f = Fixture()
+                visit = requireNotNull(f.controller.openVisit())
+                visit.takeover(requireNotNull(f.session.currentTab))
+                f.paused = true
+                assertTrue(visit.snapshot().takenOver)
+                visit.mount(parent)
+                f.loading = true
+                visit.close()
+                assertTrue(f.controller.automationHeld)
+                assertEquals(0, f.releaseChecks)
+                assertEquals(0, f.resumes)
+                f.loading = false
+            }
+            Thread.sleep(200)
+            main {
+                assertFalse(f.controller.automationHeld)
+                assertEquals(1, f.releaseChecks)
+                assertEquals(1, f.resumes)
+                visit.close()
+                assertEquals(1, f.resumes)
+            }
+        } finally { main { f.close(); parent.removeAllViews() } }
+    }
+
+    fun testBrowserOwnedPauseNeverResumesAfterUncertainDetachOrRelease() = main {
+        for (detachFailure in listOf(false, true)) {
+            val f = Fixture()
+            val parent = android.widget.FrameLayout(instrumentation.targetContext)
+            try {
+                val visit = requireNotNull(f.controller.openVisit())
+                visit.takeover(requireNotNull(f.session.currentTab))
+                f.paused = true
+                assertTrue(visit.snapshot().takenOver)
+                visit.mount(parent)
+                f.failDetach = detachFailure
+                f.failBeforeRelease = !detachFailure
+                visit.close()
+                assertTrue(f.controller.automationHeld)
+                assertEquals(0, f.resumes)
+                val releases = f.releaseChecks
+                repeat(3) { visit.close(); visit.restore() }
+                assertEquals(releases, f.releaseChecks)
+                assertEquals(0, f.resumes)
+            } finally { f.close(); parent.removeAllViews() }
+        }
+    }
+
 }

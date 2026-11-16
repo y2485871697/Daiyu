@@ -85,15 +85,28 @@ internal class RunOrdinaryBrowserTools private constructor(
                 require(arguments.text("action") in permission.actions) { "browser_action_not_authorized" }
                 require(arguments.text("action") != "new_tab" || !arguments.contains("url") ||
                     "navigate" in permission.actions) { "browser_action_not_authorized" }
+                val control = binding?.session?.controlState() ?: app.daiyu.android.browser.host.BrowserToolSession.ControlState()
                 val execute: (ToolExecutionContext) -> ExecutionReceipt = { invocation ->
                     val host = ensureOpen()
                     if (host == null || !live() || invocation.cancelled()) ExecutionReceipt.NotExecuted("browser_run_unavailable")
                     else {
                         confirmed.checkInvocation(owner, assistant.id, host.session, definition.name, invocation.invocation.arguments)
-                        RunBrowserTools.executeBound(host.session, invocation, host.screenshotStore, write, navigationDefaults = true)
+                        RunBrowserTools.executeBound(host.session, invocation, host.screenshotStore, write, navigationDefaults = true, control = control)
                     }
                 }
-                return if (write) this@RunOrdinaryBrowserTools.write(RunBrowserTools.writeEffect(grant, arguments.canonicalJson(), navigationDefaults = true), execute) else read(execute)
+                val admit: (ToolExecutionContext) -> ExecutionReceipt.NotExecuted? = { invocation ->
+                    denial(invocation) ?: binding?.session?.controlRejection(arguments.text("action"), control)
+                        ?.let { ExecutionReceipt.NotExecuted(it) }
+                }
+                if (!write) return PreparedTool.contextual(admit = admit, execute = execute)
+                val effect = RunBrowserTools.writeEffect(grant, arguments.canonicalJson(), navigationDefaults = true)
+                return PreparedTool.approvedWrite(effect, approve = { invocation ->
+                    if (admit(invocation) != null) null else TaskAuthorization(authorization.sessionId, authorization.taskId, setOf(effect))
+                }, admit = admit) { invocation ->
+                    denial(invocation, original = false) ?: if (invocation.authorization.sessionId != authorization.sessionId ||
+                        invocation.authorization.taskId != authorization.taskId || invocation.authorization.allowedWrites != setOf(effect))
+                        ExecutionReceipt.NotExecuted("task_write_not_authorized") else execute(invocation)
+                }
             }
         }
     }

@@ -381,4 +381,27 @@ class RunBrowserToolsTest {
             assertTrue(f.port.calls.isEmpty())
         }
     }
+
+    @Test fun handbackStatusIsModelVisibleAndSameBatchOldWriteCannotFollowFreshRead() {
+        val click = """{"action":"click","tab_id":0,"selector":"#button"}"""
+        Fixture(approved = listOf(click)).use { f ->
+            f.hostTab()
+            val takeover = f.session.takeover(requireNotNull(f.session.currentTab))
+            val controlled = f.dispatch("""{"action":"list_tabs"}""", id = "human") as DispatchOutcome.Confirmed
+            assertTrue(JSONObject(controlled.payload).getJSONObject("browser_control").getBoolean("user_controlled"))
+            f.session.releaseTakeover(takeover)
+            val returned = f.dispatch("""{"action":"list_tabs"}""", id = "returned") as DispatchOutcome.Confirmed
+            assertTrue(JSONObject(returned.payload).getJSONObject("browser_control").getBoolean("requires_observation"))
+            val read = """{"action":"get_readable","tab_id":0}"""
+            val results = f.dispatcher.dispatchOwned(f.task, listOf(f.call(read, id = "batch-read"),
+                f.call(click, write = true, id = "batch-old-click")), f.token)
+            assertTrue(results.all { it.outcome == DispatchOutcome.NotExecuted("BROWSER_REOBSERVATION_REQUIRED") })
+            assertTrue(f.port.calls.isEmpty())
+            val observed = f.dispatch(read, id = "new-observation") as DispatchOutcome.Confirmed
+            assertFalse(JSONObject(observed.payload).getJSONObject("browser_control").getBoolean("requires_observation"))
+            assertTrue(f.dispatch(click, write = true, id = "fresh-click") is DispatchOutcome.Confirmed)
+            assertEquals(listOf("get_readable", "click"), f.port.calls.map { it.first.action })
+        }
+    }
+
 }

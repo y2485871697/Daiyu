@@ -285,8 +285,8 @@ class CatalogBrowserBindingAndroidTest : InstrumentationTestCase() {
             val visual = main {
                 app.daiyu.android.ControllerBrowserVisual(Message(MessageId("visual-old"),
                     ConversationId("ordinary-conversation"), RunId(binding.runId), Message.ASSISTANT_ROLE,
-                    emptyList(), RunStatus.RUNNING), binding, { true }, { pauses++; true }, { false },
-                    { error("opening must not resume") }, { error("opening must not stop") })
+                    emptyList(), RunStatus.RUNNING), binding, { true }, { pauses++; 1L }, { false },
+                    { _ -> error("opening must not resume") }, { error("opening must not stop") })
             }
             main {
                 val visit = requireNotNull(visual.openVisit())
@@ -313,6 +313,18 @@ class CatalogBrowserBindingAndroidTest : InstrumentationTestCase() {
             assertTrue(body is app.daiyu.android.domain.tools.DispatchOutcome.Confirmed)
             assertTrue((body as app.daiyu.android.domain.tools.DispatchOutcome.Confirmed).payload.contains("Fresh ordinary browser"))
             assertEquals(1, requests.get())
+            val freshSession = bindings.last().session
+            val takeover = main { freshSession.takeover(requireNotNull(freshSession.currentTab)) }
+            main { freshSession.releaseTakeover(takeover) }
+            assertTrue(freshSession.controlState().requiresObservation)
+            val afterUrl = """{"action":"navigate","url":"https://ordinary-fixture.invalid/after-return"}"""
+            val denied = execute("browser_write", afterUrl)
+            assertEquals(app.daiyu.android.domain.tools.DispatchOutcome.NotExecuted("BROWSER_REOBSERVATION_REQUIRED"), denied)
+            assertEquals(1, requests.get())
+            assertTrue(execute("browser_read", """{"action":"get_readable"}""") is app.daiyu.android.domain.tools.DispatchOutcome.Confirmed)
+            assertFalse(freshSession.controlState().requiresObservation)
+            assertTrue(execute("browser_write", afterUrl) is app.daiyu.android.domain.tools.DispatchOutcome.Confirmed)
+            assertEquals(2, requests.get())
             closeLeaf(fresh)
         } finally {
             leaves.forEach(::closeLeaf)

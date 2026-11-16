@@ -337,6 +337,9 @@ internal class LeaseBrowserHost(
         }
     }
 
+    override fun takeoverIdle(allocation: BrowserTabLease, lease: BrowserTabLease): Boolean =
+        withTakenOverResource(allocation, lease, requireIdle = false) { it.isIdle }
+
     override fun beforeReleaseTakeover(allocation: BrowserTabLease, lease: BrowserTabLease) {
         sessions.publishTakenOver(lease) {
             val resource = synchronized(lock) {

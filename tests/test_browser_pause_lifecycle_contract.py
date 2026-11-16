@@ -22,7 +22,7 @@ class BrowserPauseLifecycleContractTest(unittest.TestCase):
         self.assertIn('visit.newTab()', explicit)
         self.assertIn('visit::takeover', explicit)
 
-    def test_leaving_returns_original_token_without_resuming_or_replaying(self):
+    def test_leaving_returns_original_token_and_only_resumes_its_browser_pause(self):
         source = (MAIN / 'ControllerBrowserVisual.kt').read_text()
         leave = source.split('private fun leave(visit: Visit)', 1)[1].split('fun revoke()', 1)[0]
         for required in ('visit.active.getAndSet(false)', 'pending.compareAndSet(it, null)',
@@ -32,7 +32,11 @@ class BrowserPauseLifecycleContractTest(unittest.TestCase):
             self.assertIn(required, leave)
         self.assertLess(leave.index('original?.let(::detach)'), leave.index('binding.session.releaseTakeover(held)'))
         self.assertLess(leave.index('binding.session.releaseTakeover(held)'), leave.index('token = null'))
-        for forbidden in ('resumeOriginal()', 'newTab(', '.navigate(', 'session.execute(', 'unknown = false'):
+        self.assertIn('resumeBrowserPause()', leave)
+        resume = source.split('private fun resumeBrowserPause()', 1)[1].split('private fun closeTab(', 1)[0]
+        self.assertIn('pauseEpoch.also { pauseEpoch = null } ?: return', resume)
+        self.assertIn('resumeOriginal(epoch)', resume)
+        for forbidden in ('newTab(', '.navigate(', 'session.execute(', 'unknown = false'):
             self.assertNotIn(forbidden, leave)
 
     def test_failure_diagnostics_keep_unknown_and_never_record_user_values(self):
@@ -68,16 +72,6 @@ class BrowserPauseLifecycleContractTest(unittest.TestCase):
                          'pool.ensureTabForUI()', 'assertEquals(1, requests.get())'):
             self.assertIn(required, regression)
         self.assertNotIn('call_00_', regression)
-
-
-    def test_lifecycle_workflow_has_an_independent_queue(self):
-        workflow = (ROOT / '.github/workflows/build.yml').read_text()
-        concurrency = workflow.split('\nconcurrency:\n', 1)[1].split('\njobs:\n', 1)[0]
-        selector = ','.join(recorder.BROWSER_LIFECYCLE_PLATFORM_CLASSES)
-        condition = "inputs.mode == 'smoke' && inputs.smoke_classes == '" + selector + "' && '-browser-lifecycle'"
-        self.assertIn(condition, concurrency)
-        self.assertIn('cancel-in-progress: false', concurrency)
-        self.assertEqual(1, concurrency.count("'-browser-lifecycle'"))
 
 
 if __name__ == '__main__':

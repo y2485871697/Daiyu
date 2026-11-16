@@ -959,4 +959,41 @@ class RunnerControlTest {
         assertTrue(owners.all { it.owns(initial()) })
     }
 
+
+    @Test fun browserPauseCanOnlyResumeItsOwnUnchangedPauseOnce() {
+        fun runner() = ChatRunner(ModelPort { session { _, _ -> } }, store(), BatteryTool { error("unused") }, {})
+        val browser = runner()
+        val epoch = requireNotNull(browser.pauseForBrowser())
+        assertTrue(browser.state().pauseRequested)
+        assertNull(browser.pauseForBrowser())
+        assertTrue(browser.resumeBrowserPause(epoch))
+        assertFalse(browser.resumeBrowserPause(epoch))
+        assertFalse(browser.state().pauseRequested)
+        assertTrue(browser.pause())
+        assertFalse(browser.resumeBrowserPause(epoch))
+        assertTrue(browser.state().pauseRequested)
+        assertTrue(browser.resume())
+        val newer = requireNotNull(browser.pauseForBrowser())
+        assertNotEquals(epoch, newer)
+        assertFalse(browser.resumeBrowserPause(epoch))
+        assertTrue(browser.state().pauseRequested)
+        assertTrue(browser.resumeBrowserPause(newer))
+
+        val manualFirst = runner()
+        assertTrue(manualFirst.pause())
+        assertNull(manualFirst.pauseForBrowser())
+        assertTrue(manualFirst.state().pauseRequested)
+
+        val manualAfter = runner()
+        val beforeManual = requireNotNull(manualAfter.pauseForBrowser())
+        assertTrue(manualAfter.pause())
+        assertFalse(manualAfter.resumeBrowserPause(beforeManual))
+        assertTrue(manualAfter.state().pauseRequested)
+
+        val stopped = runner()
+        val beforeStop = requireNotNull(stopped.pauseForBrowser())
+        stopped.stop()
+        assertFalse(stopped.resumeBrowserPause(beforeStop))
+    }
+
 }

@@ -117,6 +117,8 @@ class AndroidOpenMinisBrowserHost(
     override val supportsTakeover: Boolean get() = delegate.supportsTakeover
     override fun create(lease: BrowserTabLease) = delegate.create(lease)
     override fun rebind(allocation: BrowserTabLease, lease: BrowserTabLease) = delegate.rebind(allocation, lease)
+    override fun takeoverIdle(allocation: BrowserTabLease, lease: BrowserTabLease) = delegate.takeoverIdle(allocation, lease)
+
     override fun beforeReleaseTakeover(allocation: BrowserTabLease, lease: BrowserTabLease) =
         delegate.beforeReleaseTakeover(allocation, lease)
 

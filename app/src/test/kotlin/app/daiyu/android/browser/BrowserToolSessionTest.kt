@@ -625,4 +625,65 @@ class BrowserToolSessionTest {
         }
     }
 
+
+    @Test fun modelDetectsTakeoverAndMustObserveAfterHandbackBeforeNewWrites() {
+        val f = Fixture(main)
+        confirmed(call(f.session, "new_tab"))
+        val before = f.session.controlState()
+        val token = f.session.takeover(requireNotNull(f.session.currentTab))
+        assertTrue(f.session.controlState().userControlled)
+        assertTrue(confirmed(call(f.session, "list_tabs")).contains("\"takenOver\":true"))
+        f.session.releaseTakeover(token)
+        val returned = f.session.controlState()
+        assertTrue(returned.revision > before.revision)
+        assertTrue(returned.requiresObservation)
+        fun model(action: String, control: BrowserToolSession.ControlState = f.session.controlState(), vararg args: Pair<String, Any?>) =
+            f.session.execute(mapOf("action" to action, *args), preparedControl = control)
+        rejected(model("click", before, "selector" to "#old"), "BROWSER_REOBSERVATION_REQUIRED")
+        rejected(model("click", returned, "selector" to "#old"), "BROWSER_REOBSERVATION_REQUIRED")
+        confirmed(model("list_tabs"))
+        assertTrue(f.session.controlState().requiresObservation)
+        confirmed(model("get_page_info"))
+        assertTrue(f.session.controlState().requiresObservation)
+        confirmed(model("screenshot"))
+        assertTrue("unpersisted screenshot must not count as an observation", f.session.controlState().requiresObservation)
+        confirmed(model("get_readable"))
+        assertFalse(f.session.controlState().requiresObservation)
+        // A write prepared alongside the read stays rejected; only a newly planned call may run.
+        rejected(model("click", returned, "selector" to "#old"), "BROWSER_REOBSERVATION_REQUIRED")
+        val beforeFresh = f.port.calls.size
+        confirmed(model("click", f.session.controlState(), "selector" to "#fresh"))
+        assertEquals(beforeFresh + 1, f.port.calls.size)
+    }
+
+    @Test fun failedObservationNeverUnlocksPostHandbackWritesAndOtherOwnerStaysIndependent() {
+        val f = Fixture(main)
+        val independent = Fixture(child)
+        confirmed(call(f.session, "new_tab")); confirmed(call(independent.session, "new_tab"))
+        val token = f.session.takeover(requireNotNull(f.session.currentTab))
+        f.session.releaseTakeover(token)
+        f.port.perform = { _, _ -> error("read uncertain") }
+        assertTrue(f.session.execute(mapOf("action" to "get_readable"), preparedControl = f.session.controlState()) is BrowserOutcome.Unknown)
+        assertTrue(f.session.controlState().requiresObservation)
+        assertFalse(independent.session.controlState().requiresObservation)
+        confirmed(independent.session.execute(mapOf("action" to "navigate", "url" to "https://example.org"),
+            preparedControl = independent.session.controlState()))
+    }
+
+
+    @Test fun takeoverDuringNewAllocationPreventsPublishingOrSelectingTheNewResource() {
+        val f = Fixture(main)
+        confirmed(call(f.session, "new_tab"))
+        val original = requireNotNull(f.session.currentTab)
+        val prepared = f.session.controlState()
+        f.resources.onCreate = { f.session.takeover(original) }
+        val result = f.session.execute(mapOf("action" to "new_tab"), preparedControl = prepared)
+        assertTrue(result is BrowserOutcome.Unknown)
+        assertEquals(2, f.resources.created.size)
+        assertEquals(listOf(f.resources.created.last()), f.resources.closed)
+        assertEquals(1, f.session.visibleTabs.size)
+        assertEquals(original.tabId, f.session.currentTab!!.tabId)
+        assertTrue(f.session.controlState().userControlled)
+    }
+
 }

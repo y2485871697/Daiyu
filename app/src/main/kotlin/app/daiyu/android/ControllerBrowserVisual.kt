@@ -16,9 +16,9 @@ internal class ControllerBrowserVisual(
     val owner: Message,
     private val binding: CatalogBrowserBinding,
     private val ownerCurrent: () -> Boolean,
-    private val pauseOriginal: () -> Boolean,
+    private val pauseOriginal: () -> Long?,
     private val originalPaused: () -> Boolean,
-    private val resumeOriginal: () -> Boolean,
+    private val resumeOriginal: (Long) -> Boolean,
     private val stopOriginal: () -> Boolean,
     private val attachVisible: (BrowserToolTakeoverToken, ViewGroup) -> CatalogBrowserBinding.VisibleAttachment =
         binding::attachVisible,
@@ -69,6 +69,8 @@ internal class ControllerBrowserVisual(
     private val mounted = AtomicReference<Mount?>()
     @Volatile private var token: BrowserToolTakeoverToken? = null
     @Volatile private var unknown = false
+    private var pauseEpoch: Long? = null
+    private var restoreWaiting: BrowserToolTakeoverToken? = null
     @Volatile private var notice = "打开页面不会发送消息。接管只使用本会话原浏览器；网站登录状态可能共享。"
     private var configuration: app.daiyu.android.browser.openminis.BrowserVisibleConfiguration? = null
     private var downloadListener: app.daiyu.android.browser.openminis.BrowserVisibleDownload? = null
@@ -103,7 +105,7 @@ internal class ControllerBrowserVisual(
         if (lease !in binding.session.visibleTabs) { notice = "原标签已变化；未接管。"; return }
         val request = Pending(visit, lease, expectedCurrent = binding.session.currentTab)
         pending.set(request)
-        val accepted = try { originalPaused() || pauseOriginal() } catch (_: Exception) { false }
+        val accepted = try { originalPaused() || pauseOriginal()?.also { pauseEpoch = it } != null } catch (_: Exception) { false }
         if (!accepted) {
             pending.compareAndSet(request, null)
             notice = "原任务暂停未受理；未接管。"
@@ -118,13 +120,13 @@ internal class ControllerBrowserVisual(
         if (binding.session.visibleTabs.size >= 3) { notice = "最多打开三个标签；未新建。"; return }
         val request = Pending(visit, binding.session.currentTab, create = true)
         pending.set(request)
-        val accepted = try { originalPaused() || pauseOriginal() } catch (_: Exception) { false }
+        val accepted = try { originalPaused() || pauseOriginal()?.also { pauseEpoch = it } != null } catch (_: Exception) { false }
         if (!accepted) {
             pending.compareAndSet(request, null)
             notice = "原任务暂停未受理；未新建标签。"
             return
         }
-        notice = "等待原任务暂停后新建空白标签；不会自动继续任务。"
+        notice = "等待原任务暂停后新建空白标签；归还后自动继续本次浏览器暂停的任务。"
         advanceTakeover(visit)
     }
 
@@ -200,7 +202,7 @@ internal class ControllerBrowserVisual(
             val acquired = binding.session.takeover(requireNotNull(request.lease), selectOnSuccess = true)
             token = acquired
             if (acquired.cleanupFailure != null) markUnknown("接管失效处理 UNKNOWN；保留原资源，请停止原任务核实。")
-            else notice = "已接管原标签。返回或后台只卸载页面，不自动恢复任务。"
+            else notice = "已接管原标签。归还后自动继续；主代理将先重新观察页面。"
         } catch (failure: Exception) {
             if (!request.create && failure is IllegalStateException && failure.message in setOf(
                     "BROWSER_TAB_ACTIVE", "BROWSER_OPENMINIS_NATIVE_ACTIVE", "BROWSER_STALE_TAB",
@@ -279,8 +281,15 @@ internal class ControllerBrowserVisual(
         if (!current(visit) || unknown || pending.get() != null) return
         val held = token ?: return
         try {
-            if (mounted.get()?.attachment?.isLoading == true) {
-                notice = "原标签仍在加载；尚未卸载或归还，请等加载结束后明确归还。"
+            if (!binding.session.takeoverIdle(held)) {
+                notice = "原标签仍在加载；加载结束后自动归还。"
+                if (restoreWaiting !== held) {
+                    restoreWaiting = held
+                    main.postDelayed({
+                        if (restoreWaiting === held) restoreWaiting = null
+                        if (token === held) restore(visit)
+                    }, 100)
+                }
                 return
             }
         } catch (_: Exception) { markUnknown("原标签状态未确认；未归还，请停止原任务核实。"); return }
@@ -289,8 +298,14 @@ internal class ControllerBrowserVisual(
         try { binding.session.releaseTakeover(held); if (token === held) token = null }
         catch (_: Exception) { markUnknown("浏览器归还未确认；未继续原任务，不重试旧工具。可停止原任务核实。"); return }
         if (!current(visit)) return
-        val resumed = try { resumeOriginal() } catch (_: Exception) { false }
-        notice = if (resumed) "原浏览器已归还，已请求继续同一任务。" else "原浏览器已归还，原任务未确认继续；请返回聊天核实。"
+        resumeBrowserPause()
+    }
+    private fun resumeBrowserPause() {
+        val epoch = pauseEpoch.also { pauseEpoch = null } ?: return
+        if (unknown || revoked.get() || !ownerCurrent()) return
+        val resumed = try { resumeOriginal(epoch) } catch (_: Exception) { false }
+        notice = if (resumed) "原浏览器已归还，已继续同一任务；主代理先重新观察页面。"
+            else "原浏览器已归还；任务的手动暂停、停止或运行变化保持不变。"
     }
     private fun closeTab(visit: Visit) {
         requireMain()
@@ -307,6 +322,7 @@ internal class ControllerBrowserVisual(
     private fun stop(visit: Visit) {
         requireMain()
         if (!current(visit)) return
+        pauseEpoch = null
         val accepted = try { stopOriginal() } catch (_: Exception) { false }
         if (!accepted) notice = "原任务停止未确认；原资源仍由原清理链持有。"
     }
@@ -324,19 +340,30 @@ internal class ControllerBrowserVisual(
         val held = token
         onMain {
             original?.let(::detach)
+            if (held == null && leaving && currentVisit.get() == null) { resumeBrowserPause(); return@onMain }
             if (held == null || token !== held || currentVisit.get() != null ||
                 unknown || revoked.get() || !ownerCurrent()) return@onMain
-            try {
-                binding.session.releaseTakeover(held)
-                if (token === held) token = null
-                notice = "原浏览器已归还，任务保持暂停。"
-            } catch (_: Exception) {
-                markUnknown("浏览器归还未确认；请停止原任务核实。")
-            }
+            returnClosedVisit(held, android.os.SystemClock.uptimeMillis() + 60_000)
         }
+    }
+    private fun returnClosedVisit(held: BrowserToolTakeoverToken, deadline: Long) {
+        if (token !== held || currentVisit.get() != null || unknown || revoked.get() || !ownerCurrent()) return
+        try {
+            if (!binding.session.takeoverIdle(held)) {
+                if (android.os.SystemClock.uptimeMillis() >= deadline) {
+                    markUnknown("页面加载尚未结束；未归还或继续任务，请停止原任务核实。")
+                } else main.postDelayed({ returnClosedVisit(held, deadline) }, 100)
+                return
+            }
+            binding.session.releaseTakeover(held)
+            if (token === held) token = null
+            notice = "原浏览器已归还，原有手动暂停保持不变。"
+            resumeBrowserPause()
+        } catch (_: Exception) { markUnknown("浏览器归还未确认；请停止原任务核实。") }
     }
     fun revoke() {
         revoked.set(true)
+        pauseEpoch = null
         pending.set(null)
         currentVisit.getAndSet(null)?.active?.set(false)
         val original = mounted.get() ?: return

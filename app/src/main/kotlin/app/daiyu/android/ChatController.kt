@@ -414,10 +414,10 @@ class ChatController internal constructor(private val application:Application,
                     it.initial.conversationId == assistant.conversationId && !it.fenced && !closed } ?: return@synchronized
                 if (lifetime.browserVisual == null && binding.visibleSupported) {
                     lifetime.browserVisual = ControllerBrowserVisual(assistant, binding,
-                        ownerCurrent = { isRunUnfenced(assistant) }, pauseOriginal = { pause(assistant) },
+                        ownerCurrent = { isRunUnfenced(assistant) }, pauseOriginal = { pauseForBrowser(assistant) },
                         originalPaused = { lifetime.runner.state().let {
                             it.phase == app.daiyu.android.domain.runtime.ExecutionPhase.PAUSED && it.pauseRequested
-                        } }, resumeOriginal = { resume(assistant) }, stopOriginal = { stop(assistant) })
+                        } }, resumeOriginal = { epoch -> resume(assistant, epoch) }, stopOriginal = { stop(assistant) })
                     notifyChanged()
                 }
             }
@@ -4865,10 +4865,10 @@ class ChatController internal constructor(private val application:Application,
         if (browserBinding?.visibleSupported == true) {
             lifetime.browserVisual = ControllerBrowserVisual(assistant, browserBinding,
                 ownerCurrent = { isRunUnfenced(assistant) },
-                pauseOriginal = { pause(assistant) },
+                pauseOriginal = { pauseForBrowser(assistant) },
                 originalPaused = { owned.state().let {
                     it.phase == app.daiyu.android.domain.runtime.ExecutionPhase.PAUSED && it.pauseRequested
-                } }, resumeOriginal = { resume(assistant) },
+                } }, resumeOriginal = { epoch -> resume(assistant, epoch) },
                 stopOriginal = { stop(assistant) })
         }
         val installed=synchronized(this) {
@@ -6079,7 +6079,17 @@ class ChatController internal constructor(private val application:Application,
         }}
         return accepted
     }
-    internal fun resume(owner:Message):Boolean {
+    private fun pauseForBrowser(owner: Message): Long? {
+        val owned = synchronized(this) { ownedRunner(owner) } ?: return null
+        val epoch = owned.pauseForBrowser() ?: return null
+        synchronized(this) { if (ownedRunner(owner) === owned) {
+            resources?.let(::capturePausedChildren)
+            notifyChanged()
+        } }
+        return epoch
+    }
+    internal fun resume(owner:Message):Boolean = resume(owner, null)
+    private fun resume(owner: Message, browserPauseEpoch: Long?): Boolean {
         val (lifetime, pauseEpoch) = synchronized(this) {
             val current = resources?.takeIf { it.runner === ownedRunner(owner) &&
                 it.browserVisual?.automationHeld != true } ?: return false
@@ -6090,7 +6100,8 @@ class ChatController internal constructor(private val application:Application,
             synchronized(this) { problem = "上下文超限，请先压缩后继续"; notifyChanged() }
             return false
         }
-        val accepted = lifetime.runner.resume()
+        val accepted = if (browserPauseEpoch == null) lifetime.runner.resume()
+            else lifetime.runner.resumeBrowserPause(browserPauseEpoch)
         if (accepted) synchronized(this) {
             if (resources === lifetime && ownedRunner(owner) === lifetime.runner) {
                 resumePausedChildren(lifetime, pauseEpoch)

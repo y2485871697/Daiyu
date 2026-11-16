@@ -636,4 +636,65 @@ class DictationActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testSidebarFinalCommitsWithoutReopeningChat() {
+        setDraft("a"); setSelection(1, 1); voice()
+        val attempt = platform.listeners.last()
+        attempt.onReadyForSpeech(Bundle())
+        mainThread { call("openSidebar") }
+        attempt.onPartialResults("b")
+        assertEquals("ab", fixture.database.draft())
+        attempt.onResults("c")
+        assertEquals("ac", fixture.database.draft())
+        assertNull(host.state.value.target)
+        mainThread { call("dismissSidebarState") }
+        assertDraft("ac"); assertSelection(2, 2)
+        assertEquals(1, platform.creates)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testHiddenChatStillReleasesOnPauseAndStopWithoutAcceptingLateFinal() {
+        setDraft("a"); setSelection(1, 1); voice()
+        val attempt = platform.listeners.last()
+        attempt.onReadyForSpeech(Bundle())
+        mainThread { call("setRetainedPage", "settings") }
+        attempt.onPartialResults("b")
+        assertEquals("ab", fixture.database.draft())
+        mainThread { call("onPause"); call("onStop") }
+        assertNull(host.state.value.target)
+        attempt.onReadyForSpeech(Bundle())
+        attempt.onResults("late final")
+        mainThread { call("onResume"); call("setRetainedPage", "chat") }
+        assertDraft("ab")
+        assertEquals("ab", fixture.database.draft())
+        assertEquals(1, platform.creates)
+        assertEquals(1, platform.cancels)
+        assertEquals(1, platform.destroys)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    fun testRemoteCallbacksKeepTheirCapturedDraftWhileSidebarStaysOpen() {
+        setDraft("a"); setSelection(1, 1)
+        mainThread {
+            fun value(name: String): Any? = MainActivity::class.java.getDeclaredField(name)
+                .apply { isAccessible = true }.get(activity)
+            val target = DictationDraftTarget(null, value("editorGeneration") as Long,
+                value("draftRevision") as Long)
+            call("captureDictationDraft", target)
+            val remote = (value("remoteVoice\$delegate") as Lazy<*>).value!!
+            val apply = remote.javaClass.getDeclaredField("applyDraft").apply { isAccessible = true }
+                .get(remote) as (DictationDraftTarget, String) -> Unit
+            call("openSidebar")
+            call("applyRecognizedPartial", target, "b")
+            assertEquals("ab", fixture.database.draft())
+            apply(target, "c")
+            assertEquals("ac", fixture.database.draft())
+            assertNull(value("dictationDraft"))
+            call("dismissSidebarState")
+        }
+        assertDraft("ac"); assertSelection(2, 2)
+        assertEquals(0, platform.creates)
+        assertEquals(0, fixture.opens.get())
+    }
+
 }

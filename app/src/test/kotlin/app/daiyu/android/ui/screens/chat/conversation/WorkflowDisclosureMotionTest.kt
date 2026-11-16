@@ -211,4 +211,35 @@ class WorkflowDisclosureMotionTest {
         assertEquals(closingOffset, extent.contentOffset)
     }
 
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun expandedCardFollowsNestedMeasurementsWithoutASecondAnimation() = runTest {
+        val clock = BroadcastFrameClock()
+        val extent = WorkflowCardExtent(initiallyExpanded = true)
+        extent.fullHeight = 480
+        extent.measure(true, null)
+        backgroundScope.launch(clock) { extent.animate(true) }
+        runCurrent()
+        clock.sendFrame(1_000_000_000L); runCurrent()
+        clock.sendFrame(2_000_000_000L); runCurrent()
+        extent.measure(true, null); extent.placed()
+        assertTrue(extent.idle(true))
+
+        for (height in listOf(483, 600, 436)) {
+            extent.fullHeight = height
+            assertEquals("A settled parent must place the child's current height", height, extent.measure(true, null))
+            extent.placed()
+            assertEquals(0, extent.contentOffset)
+            assertTrue(extent.idle(true))
+            val update = backgroundScope.launch(clock) { extent.animate(true) }
+            runCurrent()
+            assertTrue("Nested height changes must not start a parent spring", update.isCompleted)
+            assertTrue(extent.idle(true))
+        }
+        extent.fullHeight = 620
+        assertEquals(620, extent.measure(true, null))
+        extent.placed()
+        assertEquals("Closing before the effect uses the last placed pixels", 580, extent.measure(false, 580))
+    }
+
 }

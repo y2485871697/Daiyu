@@ -28,10 +28,14 @@ internal class WorkflowCardExtent(private val initiallyExpanded: Boolean) {
         placedGeometry == if (expanded) Offset(fullHeight.toFloat(), 0f) else Offset.Zero
 
     fun measure(expanded: Boolean, closingLimit: Int?): Int {
-        val pixels = if (!initialized && initiallyExpanded) fullHeight
-            else geometry.value.x.roundToInt().coerceAtLeast(0)
+        val settledExpanded = finished == true && !geometry.isRunning
+        val pixels = when {
+            settledExpanded && expanded || !initialized && initiallyExpanded -> fullHeight
+            settledExpanded -> placedGeometry?.x?.roundToInt() ?: measuredHeight
+            else -> geometry.value.x.roundToInt().coerceAtLeast(0)
+        }
         measuredHeight = if (expanded) pixels else minOf(pixels, closingLimit ?: pixels)
-        contentOffset = if (!initialized) 0 else geometry.value.y.roundToInt()
+        contentOffset = if (settledExpanded || !initialized) 0 else geometry.value.y.roundToInt()
         return measuredHeight
     }
 
@@ -41,6 +45,10 @@ internal class WorkflowCardExtent(private val initiallyExpanded: Boolean) {
 
     suspend fun animate(expanded: Boolean, closingLimit: Int? = null, upwards: Boolean = false) {
         if (expanded && fullHeight == 0 || !expanded && finished == false) return
+        if (expanded && finished == true && !geometry.isRunning) {
+            geometry.snapTo(Offset(fullHeight.toFloat(), 0f))
+            return
+        }
         if (!initialized) {
             geometry.snapTo(Offset(measuredHeight.toFloat(), contentOffset.toFloat()))
             initialized = true

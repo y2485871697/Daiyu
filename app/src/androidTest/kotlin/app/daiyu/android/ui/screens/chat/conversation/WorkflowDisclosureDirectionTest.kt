@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
@@ -615,21 +616,21 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                         WorkflowDisclosureContext(viewport, "long-collapse:$closing") { running }
                     }) {
                         WorkProcessCard(WorkProcessUi(emptyList(), "13步长流程", running = running), "long-collapse:$closing", stopped = stopped,
-                            content = { Column { repeat(13) { Box(Modifier.fillMaxWidth().height(48.dp)) } } })
+                            content = { Column(Modifier.testTag("long-collapse-body")) { repeat(13) { Box(Modifier.fillMaxWidth().height(48.dp)) } } })
                     }
                 }
             } } }
             ui.waitForIdle()
             val fixedTop = top()
             val header = ui.onNodeWithTag("work-process-header").fetchSemanticsNode().layoutInfo.coordinates
-            val headerBottom = header.boundsInWindow().bottom
+            val headerBottom = header.positionInWindow().y + header.size.height
             val fullDetail = bottom() - fixedTop - header.size.height
             val start = safeBottom - headerBottom
             assertTrue("Fixture must contain more than twice its visible height", fullDetail > start * 2f)
             ui.onNodeWithTag("work-process-header").assertIsDisplayed()
             fun visibleDetail(): Float {
                 val surface = ui.onNodeWithTag("work-process-surface").fetchSemanticsNode().layoutInfo.coordinates
-                return (minOf(surface.boundsInWindow().top + surface.size.height, safeBottom) - headerBottom).coerceAtLeast(0f)
+                return (minOf(surface.positionInWindow().y + surface.size.height, safeBottom) - headerBottom).coerceAtLeast(0f)
             }
             val samples = mutableListOf(start)
             ui.mainClock.autoAdvance = false
@@ -653,7 +654,8 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                     }
                 }
                 assertTrue("Retain intermediate visible frames: $samples", samples.take(5).drop(1).any { it > 1f && it < start - 1f })
-                assertEquals(0f, samples.last(), 1f)
+                assertEquals("Closed detail during $closing: $samples ${geometry()}", 0f, samples.last(), 1f)
+                ui.onNodeWithTag("long-collapse-body").assertDoesNotExist()
                 val settledBottom = bottom()
                 repeat(12) {
                     ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()

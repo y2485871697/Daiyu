@@ -26,6 +26,11 @@ class DoubaoMotionScopeTest(unittest.TestCase):
             package, _, short = name.rpartition(".")
             path = root / "app/src/androidTest/kotlin" / (name.replace(".", "/") + ".kt")
             path.parent.mkdir(parents=True, exist_ok=True)
+            if name == "app.daiyu.android.VoiceCallFloatingWindowTest":
+                path.write_text("package " + package + "\nimport org.junit.Test\nclass " + short + " {\n" +
+                                "".join(" @Test fun case" + str(n) + "() {}\n" for n in range(i + 1)) +
+                                " private fun helper() {}\n}\n")
+                continue
             path.write_text("package " + package + "\nclass " + short + " : TestCase() {\n" +
                             "".join(" fun testCase" + str(n) + "() {}\n" for n in range(i + 1)) + "}\n")
         return helper
@@ -128,3 +133,37 @@ class DoubaoMotionScopeTest(unittest.TestCase):
         self.assertIn("sorted(doubao_motion_floating_target)", script)
         setup = script.split('  if test "$api" = 26 && test "${SMOKE_MODE:-}" = smoke &&', 1)[1].split('  instrumentation_options=()', 1)[0]
         self.assertIn('test "${SMOKE_TEST_CLASSES:-}" = "' + full + '"', setup)
+
+    def test_real_floating_junit4_source_is_discovered_in_one_and_four_shards(self):
+        classes = recorder.DOUBAO_MOTION_FLOATING_PLATFORM_CLASSES
+        source_root = Path(__file__).resolve().parents[1]
+        floating = "app.daiyu.android.VoiceCallFloatingWindowTest"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root, classes)
+            for name in classes:
+                relative = Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
+                (root / relative).write_text((source_root / relative).read_text())
+            for count in (1, 4):
+                selected = []
+                expected = 0
+                for shard in range(count):
+                    result = helper.select(root, shard, classes=",".join(classes), count=count)
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+                    selection = json.loads((root / "smoke/selection.json").read_text())
+                    self.assertEqual("targeted", inventory["discovery_scope"])
+                    self.assertEqual(set(classes), set(inventory["all_classes"]))
+                    self.assertEqual(6, inventory["all_classes"][floating])
+                    self.assertEqual(sum(inventory["all_classes"][name] for name in selection["selected_classes"]), selection["expected_tests"])
+                    selected.extend(selection["selected_classes"])
+                    expected += selection["expected_tests"]
+                self.assertCountEqual(classes, selected)
+                self.assertEqual(inventory["total_tests"], expected)
+            source = root / "app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt"
+            source.write_text(source.read_text() + "\nclass UnexpectedTest {}\n")
+            result = helper.select(root, classes=",".join(classes), count=1)
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn("Ambiguous instrumentation test declaration", result.stderr)
+            source.unlink()
+            self.assertNotEqual(0, helper.select(root, classes=",".join(classes), count=1).returncode)

@@ -488,6 +488,9 @@ for path in sorted(child_hot_configuration_sources if child_hot_configuration_on
         count = len(re.findall(r"^\s*public\s+void\s+test\w+\s*\(\s*\)", source, re.M))
         packages = re.findall(r"^package\s+([\w.]+)\s*;\s*$", source, re.M)
         names = re.findall(r"^public\s+(?:final\s+)?class\s+(\w+Test)\s+extends\b", source, re.M)
+    if (doubao_motion_only and path == Path("app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt")):
+        count = len(re.findall(r"^\s*@Test\s+fun\s+\w+\s*\(\s*\)", source, re.M))
+        names = re.findall(r"^class\s+(\w+Test)(?:\s*:\s*[^\n{]+)?\s*\{", source, re.M)
     if not count:
         continue
     if len(packages) != 1 or len(names) != 1:

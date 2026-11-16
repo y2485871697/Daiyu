@@ -164,7 +164,7 @@ internal class PetOverlayHost(
         current.getLocationOnScreen(screen)
         current.getLocationInWindow(local)
         // LayoutParams are requested coordinates; WindowManager applies them on a later traversal.
-        // Subtract in-window translation so an active drag does not block the draw gate.
+        // Compare the applied window origin, independent of the content's in-window offset.
         return screen[0] - local[0] == target.x && screen[1] - local[1] == target.y
     }
     private fun placement(current: View): PetPlacement {
@@ -219,6 +219,7 @@ internal class PetOverlayHost(
             super.onAttachedToWindow()
         }
         fun releaseContent() {
+            dragging = false; spriteGesture = false
             removeAllViews()
             if (lifecycle.currentState != Lifecycle.State.DESTROYED)
                 ownerLifecycle.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
@@ -252,19 +253,22 @@ internal class PetOverlayHost(
         override fun onTouchEvent(event: MotionEvent): Boolean {
             if (closed || owner.cleanupPending || view !== this) return false
             if (!dragging) return super.onTouchEvent(event)
-            if (event.actionMasked == MotionEvent.ACTION_MOVE) {
-                translationX = event.rawX - downX; translationY = event.rawY - downY
-            }
-            if (event.actionMasked == MotionEvent.ACTION_UP) {
-                val metrics = context.resources.displayMetrics
-                val side = (128f * controller.snapshot().state.settings.scale * metrics.density).roundToInt()
-                anchorX = (originX + (event.rawX - downX).roundToInt()).coerceIn(0, (metrics.widthPixels - side).coerceAtLeast(0))
-                anchorY = (originY + (event.rawY - downY).roundToInt()).coerceIn(0, (metrics.heightPixels - side).coerceAtLeast(0))
-                dragging = false
-                translationX = 0f; translationY = 0f
-                if (update()) controller.setPosition(anchorX, anchorY)
-            } else if (event.actionMasked == MotionEvent.ACTION_CANCEL) {
-                dragging = false; translationX = 0f; translationY = 0f
+            when (event.actionMasked) {
+                MotionEvent.ACTION_MOVE, MotionEvent.ACTION_UP -> {
+                    val metrics = context.resources.displayMetrics
+                    val side = (128f * controller.snapshot().state.settings.scale * metrics.density).roundToInt()
+                    anchorX = (originX + (event.rawX - downX).roundToInt()).coerceIn(0, (metrics.widthPixels - side).coerceAtLeast(0))
+                    anchorY = (originY + (event.rawY - downY).roundToInt()).coerceIn(0, (metrics.heightPixels - side).coerceAtLeast(0))
+                    val released = event.actionMasked == MotionEvent.ACTION_UP
+                    if (released) dragging = false
+                    // Move the actual overlay surface; translating its wrap-content root clips the sprite.
+                    if (update() && released) controller.setPosition(anchorX, anchorY)
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    anchorX = originX; anchorY = originY
+                    dragging = false
+                    update()
+                }
             }
             return true
         }

@@ -313,11 +313,13 @@ class PetPresentationTest : WiredActivityTestCase() {
         }
     }
 
+    private var overlayDownTime = 0L
     private fun overlayTouch(action: Int, screenX: Float, screenY: Float) {
         val frame = checkNotNull(root)
         val origin = IntArray(2); frame.getLocationOnScreen(origin)
         val time = android.os.SystemClock.uptimeMillis()
-        val event = android.view.MotionEvent.obtain(time, time, action, screenX, screenY, 0)
+        if (action == android.view.MotionEvent.ACTION_DOWN) overlayDownTime = time
+        val event = android.view.MotionEvent.obtain(overlayDownTime, time, action, screenX, screenY, 0)
         event.offsetLocation(-origin[0].toFloat(), -origin[1].toFloat())
         try { assertTrue(frame.dispatchTouchEvent(event)) } finally { event.recycle() }
     }
@@ -331,8 +333,11 @@ class PetPresentationTest : WiredActivityTestCase() {
             overlayTouch(android.view.MotionEvent.ACTION_DOWN, downX, downY)
             overlayTouch(android.view.MotionEvent.ACTION_MOVE, downX - 14f, downY - 16f)
             overlayTouch(android.view.MotionEvent.ACTION_MOVE, downX - 28f, downY - 34f)
-            assertEquals(-28f, checkNotNull(root).translationX)
-            assertEquals(-34f, checkNotNull(root).translationY)
+            val params = checkNotNull(root).layoutParams as android.view.WindowManager.LayoutParams
+            assertEquals(42, params.x)
+            assertEquals(86, params.y)
+            assertEquals(0f, checkNotNull(root).translationX)
+            assertEquals(0f, checkNotNull(root).translationY)
             overlayTouch(android.view.MotionEvent.ACTION_UP, downX - 28f, downY - 34f)
             val settings = checkNotNull(controller).snapshot().state.settings
             assertEquals(42, settings.x)
@@ -376,6 +381,106 @@ class PetPresentationTest : WiredActivityTestCase() {
             assertEquals(1, clicks)
         }
         assertEquals(before, stable())
+    }
+
+
+    private fun overlayBluePixels(rect: Rect): Int {
+        val frame = checkNotNull(root)
+        val committed = java.util.concurrent.CountDownLatch(1)
+        val callback = Runnable { committed.countDown() }
+        var listener: android.view.ViewTreeObserver.OnDrawListener? = null
+        try {
+            instrumentation.runOnMainSync {
+                if (android.os.Build.VERSION.SDK_INT >= 29 && frame.isHardwareAccelerated) {
+                    frame.viewTreeObserver.registerFrameCommitCallback(callback)
+                } else {
+                    listener = android.view.ViewTreeObserver.OnDrawListener { frame.post(callback) }
+                    frame.viewTreeObserver.addOnDrawListener(listener)
+                }
+                frame.invalidate()
+            }
+            assertTrue("Overlay frame was not committed", committed.await(2, java.util.concurrent.TimeUnit.SECONDS))
+        } finally {
+            instrumentation.runOnMainSync {
+                listener?.let { frame.viewTreeObserver.removeOnDrawListener(it) }
+                if (android.os.Build.VERSION.SDK_INT >= 29)
+                    frame.viewTreeObserver.unregisterFrameCommitCallback(callback)
+            }
+        }
+        instrumentation.waitForIdleSync()
+        val image = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+        try {
+            assertTrue(rect.left >= 0 && rect.top >= 0 && rect.right <= image.width && rect.bottom <= image.height)
+            var blue = 0
+            for (y in rect.top until rect.bottom) for (x in rect.left until rect.right) {
+                val color = image.getPixel(x, y)
+                val red = android.graphics.Color.red(color)
+                val green = android.graphics.Color.green(color)
+                val value = android.graphics.Color.blue(color)
+                if (value > red + 20 && value > green + 10) blue++
+            }
+            return blue
+        } finally { image.recycle() }
+    }
+
+    fun testRealOverlayStaysPaintedAcrossDragFramesBeforeReleaseAndCancel() {
+        mainThread {
+            activity.setContent {
+                AndroidView(modifier = Modifier.fillMaxSize(), factory = { context ->
+                    View(context).apply { setBackgroundColor(android.graphics.Color.WHITE) }
+                })
+            }
+        }
+        mountOverlay()
+        val before = stable()
+        instrumentation.runOnMainSync { (sprite() as PetSpriteView).setRunning(false) }
+        val painted = overlayBluePixels(before)
+        assertTrue("Initial overlay sprite is missing from screenshot", painted > 32)
+        val downX = before.centerX().toFloat()
+        val downY = before.centerY().toFloat()
+        val dx = before.width() + 24
+        val dy = before.height() + 24
+        instrumentation.runOnMainSync {
+            overlayTouch(android.view.MotionEvent.ACTION_DOWN, downX, downY)
+            overlayTouch(android.view.MotionEvent.ACTION_MOVE, downX + 14f, downY + 16f)
+            overlayTouch(android.view.MotionEvent.ACTION_MOVE, downX + dx, downY + dy)
+        }
+        val moved = Rect(before).apply { offset(dx, dy) }
+        assertEquals(moved, stable())
+        assertEquals("Sprite disappeared while pointer is still held", painted, overlayBluePixels(moved))
+        instrumentation.runOnMainSync {
+            assertEquals(70, checkNotNull(controller).snapshot().state.settings.x)
+            assertEquals(120, checkNotNull(controller).snapshot().state.settings.y)
+            checkNotNull(overlay).sync(checkNotNull(controller).snapshot())
+        }
+        assertEquals(moved, stable())
+        assertEquals("State sync hid the active drag", painted, overlayBluePixels(moved))
+        instrumentation.runOnMainSync {
+            overlayTouch(android.view.MotionEvent.ACTION_MOVE, downX + dx + 12, downY + dy + 14)
+        }
+        val movedAgain = Rect(moved).apply { offset(12, 14) }
+        assertEquals(movedAgain, stable())
+        assertEquals("Second drag frame lost the sprite", painted, overlayBluePixels(movedAgain))
+        instrumentation.runOnMainSync {
+            overlayTouch(android.view.MotionEvent.ACTION_CANCEL, downX + dx + 12, downY + dy + 14)
+        }
+        assertEquals(before, stable())
+        assertEquals(painted, overlayBluePixels(before))
+        instrumentation.runOnMainSync {
+            overlayTouch(android.view.MotionEvent.ACTION_DOWN, downX, downY)
+            overlayTouch(android.view.MotionEvent.ACTION_MOVE, downX + 14f, downY + 16f)
+            overlayTouch(android.view.MotionEvent.ACTION_MOVE, downX + dx, downY + dy)
+        }
+        assertEquals(moved, stable())
+        assertEquals(painted, overlayBluePixels(moved))
+        instrumentation.runOnMainSync {
+            overlayTouch(android.view.MotionEvent.ACTION_UP, downX + dx, downY + dy)
+            assertEquals(70 + dx, checkNotNull(controller).snapshot().state.settings.x)
+            assertEquals(120 + dy, checkNotNull(controller).snapshot().state.settings.y)
+            (sprite() as PetSpriteView).setRunning(false)
+        }
+        assertEquals(moved, stable())
+        assertEquals(painted, overlayBluePixels(moved))
     }
 
 }

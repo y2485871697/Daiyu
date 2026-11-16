@@ -11,6 +11,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -18,6 +20,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.flow.first
 
 internal data class WorkflowEdge(val from: String, val to: String)
 
@@ -102,13 +105,17 @@ internal fun WorkflowLineScope(motion: WorkflowLineMotion?, spacingAfter: Dp, co
 internal fun Modifier.workflowCompletion(key: String, complete: Boolean, failed: Boolean = false): Modifier {
     val owner = LocalWorkflowNodeMotions.current ?: return this
     val enabled = LocalWorkflowNodeMotionEnabled.current
+    val incoming = rememberUpdatedState(LocalWorkflowLineMotion.current.incoming)
     val animate = remember(owner, key, complete, failed, enabled) {
         val fresh = if (failed) owner.fail(key) else complete && owner.complete(key)
         fresh && enabled
     }
     val progress = remember(owner, key, complete, failed, enabled) { Animatable(if (animate) 0f else 1f) }
     LaunchedEffect(progress) {
-        if (animate) progress.animateTo(1f, spring(dampingRatio = .7f, stiffness = 600f))
+        if (animate) {
+            snapshotFlow { incoming.value?.fraction() ?: 1f }.first { it >= 1f }
+            progress.animateTo(1f, spring(dampingRatio = .7f, stiffness = 600f))
+        }
     }
     return graphicsLayer {
         alpha = progress.value.coerceIn(0f, 1f)

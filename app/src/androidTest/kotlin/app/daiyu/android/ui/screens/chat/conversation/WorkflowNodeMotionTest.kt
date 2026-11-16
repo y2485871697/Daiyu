@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -45,7 +46,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
     private var mounted by mutableStateOf(true)
     private var motionEnabled by mutableStateOf(true)
 
-    private fun show(thought: Boolean = false) {
+    private fun show(thought: Boolean = false, incoming: State<Float>? = null) {
         val initial = if (thought) listOf(MessageContentUi.Reasoning(reasoning)) else rows.map { MessageContentUi.Tool(it) }
         val motions = WorkflowNodeMotions(initial)
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -56,9 +57,10 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             Box(Modifier.width(300.dp).background(background).testTag("motion-raster")) {
                 CompositionLocalProvider(LocalWorkflowNodeMotions provides motions, LocalWorkflowNodeMotionEnabled provides motionEnabled) {
                     if (mounted) {
-                        if (thought) ReasoningStepRow("motion", reasoning, allowLiveTiming = flowRunning,
-                            generationComplete = !flowRunning, stopped = !flowRunning)
-                        else MessageContent(rows.map { MessageContentUi.Tool(it) }, ChatScreenActions(), null,
+                        if (thought) WorkflowLineScope(incoming?.let { WorkflowLineMotion(incoming = WorkflowLinePart(it, 1, 2)) }, 0.dp) {
+                            ReasoningStepRow("motion", reasoning, allowLiveTiming = flowRunning,
+                                generationComplete = !flowRunning, stopped = !flowRunning)
+                        } else MessageContent(rows.map { MessageContentUi.Tool(it) }, ChatScreenActions(), null,
                             markdown = false, flowRunning = flowRunning, workflowTimeline = true)
                     }
                 }
@@ -76,9 +78,9 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
     private fun pixels() = ui.onNodeWithTag("motion-raster").captureToImage().toPixelMap()
     private fun distance(a: Color, b: Color) = maxOf(abs(a.red - b.red), abs(a.green - b.green), abs(a.blue - b.blue))
     private fun green(p: PixelMap) = coverage(p, success)
-    private fun coverage(p: PixelMap, color: Color): Float {
+    private fun coverage(p: PixelMap, color: Color, tag: String = "tool-step:motion-a"): Float {
         val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().boundsInRoot
-        val row = ui.onNodeWithTag("tool-step:motion-a").fetchSemanticsNode().boundsInRoot
+        val row = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
         val x = row.left - raster.left
         val y = row.top - raster.top + with(density) { 17.dp.toPx() }
         val size = with(density) { 10.dp.toPx() }
@@ -149,6 +151,87 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         } finally { ui.mainClock.autoAdvance = true }
     }
 
+    fun testAppendedSuccessWaitsForIncomingConnector() = verifyAppendedTerminalWaitsForConnector(false)
+
+    fun testAppendedFailureWaitsForIncomingConnector() = verifyAppendedTerminalWaitsForConnector(true)
+
+    private data class ArrivalSample(val connector: List<Float>, val ink: Float)
+
+    private fun terminalInk(p: PixelMap, color: Color): Float {
+        val red = (color.red - color.green) - (background.red - background.green)
+        val blue = (color.blue - color.green) - (background.blue - background.green)
+        val norm = red * red + blue * blue
+        assertTrue("terminal color must differ from neutral connector ink", norm > .001f)
+        return glyph(p, "tool-step:motion-b").sumOf { pixel ->
+            val r = (pixel.red - pixel.green) - (background.red - background.green)
+            val b = (pixel.blue - pixel.green) - (background.blue - background.green)
+            val amount = (r * red + b * blue) / norm
+            val residual = maxOf(abs(r - amount * red), abs(b - amount * blue))
+            if (amount > .02f && residual < .04f) amount.coerceIn(0f, 1f).toDouble() else 0.0
+        }.toFloat()
+    }
+
+    private fun verifyAppendedTerminalWaitsForConnector(failed: Boolean) {
+        rows = listOf(first.copy(state = WorkStepState.OK))
+        val terminal = if (failed) second.copy(state = WorkStepState.FAILED, activity = ToolActivityUi.FAILED) else second
+        ui.mainClock.autoAdvance = false
+        try {
+            show()
+            instrumentation.runOnMainSync { rows = rows + terminal }
+            val color = if (failed) error else success
+            val samples = mutableListOf<ArrivalSample>()
+            repeat(64) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                val frame = pixels()
+                samples += ArrivalSample(line(frame), terminalInk(frame, color))
+            }
+            ui.mainClock.advanceTimeBy(1_000)
+            val complete = pixels()
+            val end = line(complete)
+            val finalInk = terminalInk(complete, color)
+            assertTrue("final connector must reach the target", end.isNotEmpty() && end.all { it > .005f })
+            assertTrue("terminal glyph must appear after connector arrival", finalInk > 1f)
+            fun arrived(sample: ArrivalSample) = sample.connector.zip(end).all { (now, full) -> now >= full * .9f }
+            val epsilon = maxOf(.03f, finalInk * .01f)
+            val arrivalFrame = samples.indexOfFirst(::arrived)
+            val glyphFrame = samples.indexOfFirst { it.ink > epsilon }
+            assertTrue("must observe connector arrival", arrivalFrame >= 0)
+            assertTrue("glyph must enter no earlier than connector arrival", glyphFrame >= arrivalFrame)
+            assertTrue("line must visibly grow before the target appears", samples.any { sample ->
+                !arrived(sample) && sample.connector.zip(end).any { (now, full) -> now > full * .35f }
+            })
+            samples.forEachIndexed { frame, sample ->
+                if (!arrived(sample)) assertTrue("target glyph overtook incoming connector at frame $frame", sample.ink <= epsilon)
+            }
+            assertTrue("connector arrival must start a visible glyph entrance", samples.drop(arrivalFrame).any {
+                it.ink > epsilon && it.ink < finalInk * .98f
+            })
+            ui.mainClock.advanceTimeBy(64)
+            assertEquals(finalInk, terminalInk(pixels(), color), .03f)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testReasoningCompletionWaitsForActualArrivalThenPopsIn() {
+        val arrival = mutableStateOf(.99f)
+        ui.mainClock.autoAdvance = false
+        try {
+            show(thought = true, incoming = arrival)
+            instrumentation.runOnMainSync { reasoning = reasoning.copy(activeSinceNanos = null) }
+            repeat(2) { ui.mainClock.advanceTimeByFrame() }
+            ui.mainClock.advanceTimeBy(1_000)
+            assertEquals("elapsed time cannot release a glyph before its actual connector arrives", 0f,
+                coverage(pixels(), success, "work-reasoning:motion-r"), .01f)
+            instrumentation.runOnMainSync { arrival.value = 1f }
+            repeat(2) { ui.mainClock.advanceTimeByFrame() }
+            ui.mainClock.advanceTimeBy(48)
+            val middle = coverage(pixels(), success, "work-reasoning:motion-r")
+            ui.mainClock.advanceTimeBy(1_000)
+            val complete = coverage(pixels(), success, "work-reasoning:motion-r")
+            assertTrue("arrival must start the glyph animation, not jump to its end", middle > 0f && middle < complete)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     fun testInitialHistoryIsAlreadyComplete() {
         rows = listOf(first.copy(state = WorkStepState.OK), second)
         ui.mainClock.autoAdvance = false
@@ -158,6 +241,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             val completed = green(pixels())
             assertTrue(before.isNotEmpty() && before.all { it > .005f })
             assertTrue(completed > 0)
+            assertTrue("historical target glyph is not delayed", coverage(pixels(), success, "tool-step:motion-b") > 0f)
             ui.mainClock.advanceTimeBy(64)
             assertEquals(completed, green(pixels()), .01f)
             assertEquals(before, line(pixels()))
@@ -174,6 +258,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             val completed = green(pixels())
             val connected = line(pixels())
             assertTrue(completed > 0)
+            assertTrue("zero scale must settle the gated target too", coverage(pixels(), success, "tool-step:motion-b") > 0f)
             assertTrue(connected.isNotEmpty() && connected.all { it > .005f })
             ui.mainClock.advanceTimeBy(1_000)
             assertEquals(completed, green(pixels()), .01f)
@@ -268,18 +353,19 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
     }
 
     fun testFailureArrivingDuringDisclosureExitIsConsumedWithoutReplay() {
+        rows = listOf(first.copy(state = WorkStepState.OK))
         ui.mainClock.autoAdvance = false
         try {
             show()
             instrumentation.runOnMainSync { motionEnabled = false }
-            change(listOf(first.copy(state = WorkStepState.FAILED, activity = ToolActivityUi.FAILED)))
-            val immediate = coverage(pixels(), error)
+            change(rows + second.copy(state = WorkStepState.FAILED, activity = ToolActivityUi.FAILED))
+            val immediate = coverage(pixels(), error, "tool-step:motion-b")
             assertTrue(immediate > 0f)
             instrumentation.runOnMainSync { motionEnabled = true }
             repeat(2) { ui.mainClock.advanceTimeByFrame() }
-            assertEquals(immediate, coverage(pixels(), error), .01f)
+            assertEquals(immediate, coverage(pixels(), error, "tool-step:motion-b"), .01f)
             ui.mainClock.advanceTimeBy(160)
-            assertEquals(immediate, coverage(pixels(), error), .01f)
+            assertEquals(immediate, coverage(pixels(), error, "tool-step:motion-b"), .01f)
         } finally { ui.mainClock.autoAdvance = true }
     }
 

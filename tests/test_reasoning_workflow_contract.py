@@ -26,6 +26,20 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('fun fail(key: String) = failed.add(key)', motion)
         self.assertIn('failed.add(item.workflowKey(index))', motion)
 
+    def test_terminal_glyph_waits_for_real_incoming_connector_before_its_spring(self):
+        motion = (CHAT / 'WorkflowNodeMotion.kt').read_text()
+        completion = motion[motion.index('internal fun Modifier.workflowCompletion'):motion.index('internal fun WorkflowWaitingIndicator')]
+        self.assertIn('rememberUpdatedState(LocalWorkflowLineMotion.current.incoming)', completion)
+        wait = 'snapshotFlow { incoming.value?.fraction() ?: 1f }.first { it >= 1f }'
+        self.assertIn(wait, completion)
+        self.assertLess(completion.index(wait), completion.index('progress.animateTo(1f, spring('))
+        self.assertNotIn('delay(', completion)
+        self.assertIn('if (animate) {', completion)
+        regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNodeMotionTest.kt').read_text()
+        for name in ('testAppendedSuccessWaitsForIncomingConnector', 'testAppendedFailureWaitsForIncomingConnector',
+                     'testReasoningCompletionWaitsForActualArrivalThenPopsIn'):
+            self.assertIn('fun ' + name, regression)
+
     def test_captured_position_is_display_metadata_not_protocol(self):
         source = (DOMAIN / 'Conversation.kt').read_text()
         self.assertIn('val blockOffset: Int? = null', source)

@@ -239,33 +239,45 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     }
 
     private fun verifyTerminalPacedToolAnswer(resumeAtFrame: Int? = null) {
-        val seed = "**1. 第一项**\n" + "当前说明已经显示，后续内容仍应持续绘制。".repeat(3)
-        val full = seed + "\n\n**2. 第二项**\n" + "第二段正文逐字增加，不能预占后续段落高度。".repeat(6) +
-            "\n\n**3. 第三项**\n" + "第三段之后还有总述，正文与真实滚动范围应同步。".repeat(6) +
-            "\n\n**总体来看**：" + "总述应连续显示而不是等输出结束才恢复。".repeat(6) +
-            "\n\n需要展开其中的某一项吗？"
-        verifyTerminalPacedText(seed, full, withTools = true, resumeAtFrame = resumeAtFrame)
+        val full = """
+            搜到的内容主要集中在几起最知名的“外星人事件”：
+
+            **1. 罗斯威尔事件（1947，美国新墨西哥州）**
+            最著名的 UFO 事件。当年 7 月，美国陆军宣布回收了一个“飞碟”，一天内又改口说是气象气球。1978 年退休军官杰西·马塞尔称那是掩盖说法，并推测残骸来自外星文明。1994 年官方报告解释为绝密“莫古尔计划”的高空气球（用于侦测苏联核试验）。维基百科把它定性为阴谋论，相关“小灰人”“解剖外星人”等说法均无事实依据。
+
+            **2. 希尔夫妇绑架事件（1961，美国）**
+            巴尼·希尔与贝蒂·希尔夫妇声称在 1961 年 9 月 19–20 日夜间被外星人绑架，是“第三类接触”中最常被引用的案例之一。
+
+            **3. 墨西哥议会“外星人遗骸”听证会（2023 年 9 月）**
+            墨西哥议会首次就“不明异常现象”召开公开听证会，展示两具据称 2017 年在秘鲁发现的疑似“外星生物”遗骸，引发热议，但科学界普遍质疑其真实性。
+
+            **总体来看**：这些都是知名度高、但缺乏可验证科学证据的案例，主流解释多指向军事机密项目、误认或人为炒作。
+
+            需要我展开讲某一个，或者换成英文/其他语言的资料吗？
+        """.trimIndent()
+        verifyTerminalPacedText("", full, withTools = true, resumeAtFrame = resumeAtFrame)
     }
 
     private fun verifyTerminalPacedText(seed: String, full: String, withTools: Boolean = false, resumeAtFrame: Int? = null) {
+        val preface = "我用浏览器帮你搜一下。"
         val expectedSeed = if (withTools) "" else markdownBlocksDisplayText(defaultMarkdownParser(seed))
         val expectedFull = markdownBlocksDisplayText(defaultMarkdownParser(full))
         for (parser in listOf(defaultMarkdownParser, streamingMarkdownParser)) {
-            for (text in listOf(seed, full)) {
+            for (text in if (withTools) listOf(preface, seed, full) else listOf(seed, full)) {
                 markdownProjectionCache.put(MarkdownProjection(listOf(text), mapOf(text to parser(text)), parser))
             }
         }
-        fun turnFor(text: String, complete: Boolean): ChatTurnUi.Assistant {
+        fun turnFor(text: String, complete: Boolean, toolCount: Int = 2): ChatTurnUi.Assistant {
             if (!withTools) return ChatTurnUi.Assistant("paced-tail", finalText = text,
                 status = if (complete) RunStatus.COMPLETED else RunStatus.RUNNING, isStreaming = !complete)
-            val blocks = List(2) { index ->
+            val blocks = listOf(MessageBlock.Text("paced-preface", preface)) + List(toolCount) { index ->
                 MessageBlock.Tool(ToolInvocation(ToolCallId("paced-tool-$index"), "lookup", "{}"), "done")
-            } + MessageBlock.Text("paced-answer", text)
+            } + if (text.isEmpty()) emptyList() else listOf(MessageBlock.Text("paced-answer", text))
             val message = Message(MessageId("paced-tail"), ConversationId("paced-conversation"), RunId("paced-run"),
                 "assistant", blocks, if (complete) RunStatus.COMPLETED else RunStatus.RUNNING)
             return (ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant).copy(isStreaming = !complete)
         }
-        var turn by mutableStateOf(turnFor(if (withTools) "" else seed, complete = false))
+        var turn by mutableStateOf(turnFor(if (withTools) "" else seed, complete = false, toolCount = 0))
         val fixedRequest = ChatScrollRequest(1)
         val ready = java.util.concurrent.atomic.AtomicBoolean(false)
         val reports = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
@@ -305,6 +317,12 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         }
         ui.waitForIdle()
         ui.waitUntil(5_000) { ready.get() }
+        if (withTools) {
+            for (count in 1..2) {
+                mainThread { turn = turnFor("", complete = false, toolCount = count) }
+                ui.waitForIdle()
+            }
+        }
         val textMatcher = SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult) and
             (hasTestTag("message-content-text:0") or hasAnyAncestor(hasTestTag("message-content-text:0")))
         fun textLayouts(): List<Pair<SemanticsNode, androidx.compose.ui.text.TextLayoutResult>> {
@@ -313,13 +331,34 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 val results = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
                 ui.runOnUiThread { node.config[SemanticsActions.GetTextLayoutResult].action!!(results) }
                 node to results.single()
+            }.filterNot { (_, result) ->
+                withTools && result.layoutInput.text.text.let { it.isNotEmpty() && preface.startsWith(it) }
             }
         }
         fun displayed(layouts: List<Pair<SemanticsNode, androidx.compose.ui.text.TextLayoutResult>>) =
             layouts.joinToString("") { it.second.layoutInput.text.text }
         assertEquals(expectedSeed, displayed(textLayouts()))
-        fun pixels(): IntArray {
-            val image = ui.onNodeWithTag("paced-host").captureToImage().toPixelMap()
+        fun pixels(layouts: List<Pair<SemanticsNode, androidx.compose.ui.text.TextLayoutResult>> = emptyList()): IntArray {
+            val host = ui.onNodeWithTag("paced-host")
+            val bounds = host.fetchSemanticsNode().boundsInRoot
+            val image = host.captureToImage().toPixelMap()
+            val lastLine = layouts.mapNotNull { (node, result) ->
+                (0 until result.lineCount).lastOrNull { line ->
+                    result.layoutInput.text.text.substring(result.getLineStart(line), result.getLineEnd(line)).isNotBlank()
+                }?.let { line -> Triple(node, result, line) }
+            }.maxByOrNull { (node, result, line) -> node.positionInRoot.y + result.getLineBottom(line) }
+            lastLine?.let { (node, result, line) ->
+                val left = (node.positionInRoot.x + result.getLineLeft(line) - bounds.left).toInt().coerceIn(0, image.width)
+                val right = (node.positionInRoot.x + result.getLineRight(line) - bounds.left).toInt().coerceIn(0, image.width)
+                val top = (node.positionInRoot.y + result.getLineTop(line) - bounds.top).toInt().coerceIn(0, image.height)
+                val bottom = (node.positionInRoot.y + result.getLineBottom(line) - bounds.top).toInt().coerceIn(0, image.height)
+                var ink = 0
+                for (y in top until bottom) for (x in left until right) {
+                    val color = image[x, y]
+                    if (color.red < .8f && color.green < .8f && color.blue < .8f) ink++
+                }
+                assertTrue("The latest revealed line must actually paint in its own bounds: ${geometry()}", ink > 2)
+            }
             return IntArray(image.width * image.height) { index ->
                 image[index % image.width, index / image.width].hashCode()
             }
@@ -375,7 +414,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 assertTrue("Large blank after actual text: frame=$index gap=$gap ready=${ready.get()} ${geometry()}",
                     gap <= ChatTailClearance.value + if (settled) 64f else 26f)
                 if (displayed.length >= capturedLength + 30) {
-                    val nextPixels = pixels()
+                    val nextPixels = pixels(layouts)
                     assertFalse("Text grew but the displayed page froze at frame=$index", previousPixels.contentEquals(nextPixels))
                     previousPixels = nextPixels
                     capturedLength = displayed.length

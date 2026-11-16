@@ -281,14 +281,16 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         speaker = false,
     )
 
-    private fun mount(height: Dp? = null, initialState: DoubaoCallUi? = null, onSelectModel: () -> Unit = {}, onModelLongPress: (() -> Unit)? = null, onPresentationReady: ((Long) -> Unit)? = null) {
+    private fun mount(height: Dp? = null, initialState: DoubaoCallUi? = null, onSelectModel: () -> Unit = {}, onModelLongPress: (() -> Unit)? = null, onPresentationReady: ((Long) -> Unit)? = null, safeDrawingFixture: Boolean = false) {
         activity = startMain()
         ui.mainClock.autoAdvance = false
         mainThread {
             call = initialState ?: session()
             activity.setContent {
                 MaterialTheme {
-                    BoxWithConstraints((if (height == null) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(height)).background(backdrop)) {
+                    BoxWithConstraints((if (height == null) Modifier.fillMaxSize() else Modifier.fillMaxWidth().height(height))
+                        .then(if (safeDrawingFixture) Modifier.safeDrawingPadding() else Modifier)) {
+                        Box(Modifier.fillMaxSize().background(backdrop).testTag("test-call-screenshot-container"))
                         val density = LocalDensity.current
                         val w = constraints.maxWidth.toFloat()
                         val h = constraints.maxHeight.toFloat()
@@ -799,14 +801,30 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         }
     }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testFrozenEntranceAndLiveSurfaceHaveTheSameUnclippedShadowAtFullSize() {
-        mount()
+        mount(safeDrawingFixture = true)
         ui.mainClock.advanceTimeBy(96L)
         mainThread { fixtureScope.launch { motion.progress.stop(); motion.progress.snapTo(1f) } }
         ui.waitForIdle()
         ui.runOnIdle { assertTrue(motion.transforming) }
-        val panel = ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot
-        val frozenImage = captureScreenNode(ui.onRoot())
+        val container = ui.onNodeWithTag("test-call-screenshot-container")
+        val containerNode = container.fetchSemanticsNode()
+        val containerBounds = containerNode.boundsInRoot
+        val rootToScreen = containerNode.positionOnScreen - containerNode.positionInRoot
+        val screenBounds = containerBounds.translate(rootToScreen)
+        val cropOrigin = Offset(kotlin.math.floor(screenBounds.left), kotlin.math.floor(screenBounds.top)) - rootToScreen
+        val panelInRoot = ui.onNodeWithTag("doubao-call-expanded").fetchSemanticsNode().boundsInRoot
+        val panel = panelInRoot.translate(-cropOrigin)
+        val diagnostics = java.io.File(instrumentation.targetContext.getExternalFilesDir(null),
+            "visual-diagnostics/doubao-shadow").apply { mkdirs() }
+        fun save(image: ImageBitmap, name: String) {
+            java.io.File(diagnostics, "$name.png").outputStream().use {
+                check(image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+            }
+        }
+        val frozenImage = captureScreenNode(container)
+        save(frozenImage, "frozen")
         mainThread { backdrop = Color.Black }
         ui.mainClock.advanceTimeByFrame()
         ui.waitForIdle()
@@ -815,10 +833,24 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
             assertFalse(motion.progress.isRunning)
             assertEquals(1f, motion.progress.value, 0f)
         }
-        val darkBackdrop = captureScreenNode(ui.onRoot()).toPixelMap()
+        val darkImage = captureScreenNode(container)
+        save(darkImage, "dark")
+        val darkBackdrop = darkImage.toPixelMap()
         val lightBackdrop = frozenImage.toPixelMap()
         val outsideX = lightBackdrop.width / 2
         val outsideY = 1
+        val insets = ui.runOnIdle {
+            androidx.core.view.ViewCompat.getRootWindowInsets(activity.window.decorView)
+                ?.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars())
+        }
+        java.io.File(diagnostics, "backdrop.txt").writeText(
+            "api=${android.os.Build.VERSION.SDK_INT}, insets=$insets, container=$containerBounds, " +
+                "screen=$screenBounds, cropOrigin=$cropOrigin, panelInRoot=$panelInRoot, panel=$panel, " +
+                "light=${lightBackdrop.width}x${lightBackdrop.height}, dark=${darkBackdrop.width}x${darkBackdrop.height}, " +
+                "sample=$outsideX,$outsideY light=${lightBackdrop[outsideX, outsideY]} dark=${darkBackdrop[outsideX, outsideY]}")
+        assertEquals(containerBounds, container.fetchSemanticsNode().boundsInRoot)
+        assertEquals(lightBackdrop.width, darkBackdrop.width)
+        assertEquals(lightBackdrop.height, darkBackdrop.height)
         assertTrue(outsideY < panel.top - 28 * ui.density.density)
         val lightOutside = lightBackdrop[outsideX, outsideY]
         val darkOutside = darkBackdrop[outsideX, outsideY]
@@ -841,16 +873,9 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         mainThread { backdrop = Color.White; motion.transforming = false }
         ui.mainClock.advanceTimeByFrame()
         ui.waitForIdle()
-        val liveImage = captureScreenNode(ui.onRoot())
-        val diagnostics = java.io.File(instrumentation.targetContext.getExternalFilesDir(null),
-            "visual-diagnostics/doubao-shadow").apply { mkdirs() }
-        fun save(image: ImageBitmap, name: String) {
-            java.io.File(diagnostics, "$name.png").outputStream().use {
-                check(image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
-            }
-        }
-        save(frozenImage, "frozen")
+        val liveImage = captureScreenNode(container)
         save(liveImage, "live")
+        assertEquals(containerBounds, container.fetchSemanticsNode().boundsInRoot)
         val frozen = frozenImage.toPixelMap()
         val live = liveImage.toPixelMap()
         val samples = mutableListOf<String>("panel=$panel, frozen=${frozen.width}x${frozen.height}, live=${live.width}x${live.height}")

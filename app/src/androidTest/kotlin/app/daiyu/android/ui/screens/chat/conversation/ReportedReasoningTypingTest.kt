@@ -143,6 +143,130 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         }
     }
 
+
+    fun testColdFirstSummaryAppendWhileParsingKeepsFirstSilentBaseline() {
+        val first = "cold pending first " + "甲".repeat(120)
+        val appended = first + " appended " + "乙".repeat(180)
+        val firstEntered = CountDownLatch(1)
+        val firstRelease = CountDownLatch(1)
+        val appendedEntered = CountDownLatch(1)
+        val appendedRelease = CountDownLatch(1)
+        val parser: (String) -> List<app.daiyu.android.MarkdownBlock> = { source ->
+            if (source == first) { firstEntered.countDown(); firstRelease.await() }
+            if (source == appended) { appendedEntered.countDown(); appendedRelease.await() }
+            MarkdownParser.parse(source)
+        }
+        var text by mutableStateOf("")
+        var advances = 0
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                        ReportedReasoningCard("pending-cold", listOf(ReportedReasoning("r", text, 0L, 0L)),
+                            onVisibleAdvance = { advances++ })
+                    }
+                }
+            } }
+            ui.mainClock.advanceTimeBy(32)
+            assertEquals(0, advances)
+            mainThread { text = first }
+            ui.waitUntil(5_000) { firstEntered.count == 0L }
+            mainThread { text = appended }
+            ui.mainClock.advanceTimeBy(64)
+            assertEquals(0, advances)
+            assertFalse(visibleText().contains(first))
+            firstRelease.countDown()
+            await { assertEquals(0, advances); appendedEntered.count == 0L }
+            await { assertEquals(0, advances); visibleText().contains(first) }
+            ui.mainClock.advanceTimeBy(64)
+            assertEquals(0, advances)
+            appendedRelease.countDown()
+            await { advances > 0 }
+            assertFalse(visibleText().contains(appended))
+            await { visibleText().contains(appended) }
+        } finally {
+            firstRelease.countDown(); appendedRelease.countDown()
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
+    fun testQueuedEmptyBaselineTypesAfterArrivalButReopenIsSilent() {
+        val first = "queued first " + "甲".repeat(120)
+        val hidden = first + " hidden " + "乙".repeat(180)
+        val next = hidden + " visible " + "丙".repeat(180)
+        prepare("", first, hidden, next)
+        val appearance = WorkflowToolAppearance(animate = false).apply { arrived = false; settled = false }
+        var text by mutableStateOf("")
+        var advances = 0
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    ReportedReasoningCard("queued-cold", listOf(ReportedReasoning("r", text, 0L, 0L)),
+                        appearance = appearance, onVisibleAdvance = { advances++ })
+                }
+            } }
+            ui.mainClock.advanceTimeBy(32)
+            assertEquals(0, advances)
+            mainThread { appearance.arrived = true; appearance.settled = true }
+            ui.mainClock.advanceTimeBy(32)
+            assertEquals(0, advances)
+            mainThread { text = first }
+            await { advances > 0 }
+            assertFalse(visibleText().contains(first))
+            await { visibleText().contains(first) }
+            ui.onNodeWithTag("reported-reasoning-header:queued-cold").performClick()
+            await { ui.onAllNodesWithTag("reported-reasoning-content:queued-cold").fetchSemanticsNodes().isEmpty() }
+            val paused = advances
+            mainThread { text = hidden }
+            ui.mainClock.advanceTimeBy(320)
+            assertEquals(paused, advances)
+            ui.onNodeWithTag("reported-reasoning-header:queued-cold").performClick()
+            await { assertEquals(paused, advances); visibleText().contains(hidden) }
+            ui.mainClock.advanceTimeBy(320)
+            assertEquals(paused, advances)
+            mainThread { text = next }
+            await { advances > paused }
+            assertFalse(visibleText().contains(next))
+            await { visibleText().contains(next) }
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testClearedSummaryReappearsSilentlyAndLaterAppendTypes() {
+        val first = "first baseline " + "甲".repeat(120)
+        val cleared = " \n.… "
+        val second = "replacement baseline " + "乙".repeat(120)
+        val next = second + " appended " + "丙".repeat(180)
+        prepare("", first, cleared, second, next)
+        var text by mutableStateOf("")
+        var advances = 0
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    ReportedReasoningCard("clear-cold", listOf(ReportedReasoning("r", text, 0L, 0L)),
+                        onVisibleAdvance = { advances++ })
+                }
+            } }
+            mainThread { text = first }
+            await { assertEquals(0, advances); visibleText().contains(first) }
+            mainThread { text = cleared }
+            ui.mainClock.advanceTimeBy(320)
+            ui.onNodeWithTag("reported-reasoning-content:clear-cold").assertDoesNotExist()
+            assertFalse(visibleText().contains(first))
+            assertEquals(0, advances)
+            mainThread { text = second }
+            await { assertEquals(0, advances); visibleText().contains(second) }
+            ui.mainClock.advanceTimeBy(160)
+            assertEquals(0, advances)
+            mainThread { text = next }
+            await { advances > 0 }
+            assertFalse(visibleText().contains(next))
+            await { visibleText().contains(next) }
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     private fun assertInnerCollapse(path: Path) {
         val first = "已显示思考" + "甲".repeat(80)
         val inFlight = first + "乙".repeat(180)

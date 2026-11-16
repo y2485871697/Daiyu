@@ -99,17 +99,20 @@ internal fun ReportedReasoningCard(
             val revealEnabled = arrived && revealGate && hasReportedReasoningText(text)
             val reveal = key(revealGate) {
                 val queuedForArrival = remember(revealResetEpoch) { !arrived && !stopped }
-                rememberMarkdownReveal(
-                    listOf(MarkdownTypingSource(summary.itemId, text, sourceWindow)), projection,
-                    streaming = isThinking && revealEnabled, terminal = !isThinking,
-                    resetEpoch = revealResetEpoch,
-                    onVisibleAdvance = onVisibleAdvance,
-                    enabled = revealEnabled,
-                    allowBaselinePrefix = false,
-                    live = isThinking,
-                    paceTerminal = queuedForArrival,
-                    initialBaseline = if (queuedForArrival) emptyList() else null,
-                )
+                // First visible summaries are silent; arrival-queued output keeps its explicit empty baseline.
+                key(queuedForArrival || hasReportedReasoningText(text)) {
+                    rememberMarkdownReveal(
+                        listOf(MarkdownTypingSource(summary.itemId, text, sourceWindow)), projection,
+                        streaming = isThinking && revealEnabled, terminal = !isThinking,
+                        resetEpoch = revealResetEpoch,
+                        onVisibleAdvance = onVisibleAdvance,
+                        enabled = revealEnabled,
+                        allowBaselinePrefix = false,
+                        live = isThinking,
+                        paceTerminal = queuedForArrival,
+                        initialBaseline = if (queuedForArrival) emptyList() else null,
+                    )
+                }
             }
             ReasoningSummaryDisplay(summary, projection, reveal)
         }

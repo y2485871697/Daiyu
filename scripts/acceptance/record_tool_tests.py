@@ -554,6 +554,8 @@ PROVIDER_SAVE_PLATFORM_CLASSES = (
     "app.daiyu.android.ui.screens.settings.ProviderSaveValidationTest",
     "app.daiyu.android.RequestBodyFieldsActivityTest",
 )
+PROVIDER_SAVE_BINDING_PLATFORM_CLASSES = (*PROVIDER_SAVE_PLATFORM_CLASSES,
+    "app.daiyu.android.storage.ModelSettingsCatalogBindingTest")
 PROVIDER_SAVE_MODULES = (
     "test_provider_save_position_contract", "test_provider_save_validation_contract",
     "test_provider_search_save_contract", "test_provider_directory_selection_contract",
@@ -841,7 +843,8 @@ def command_for(python, env):
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(BATCH_DELETE_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *BATCH_DELETE_MODULES, "-v"], "conversation-batch-delete-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
-            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PROVIDER_SAVE_PLATFORM_CLASSES)):
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (
+                sorted(PROVIDER_SAVE_PLATFORM_CLASSES), sorted(PROVIDER_SAVE_BINDING_PLATFORM_CLASSES))):
         return [python, "-B", "-m", "unittest", *PROVIDER_SAVE_MODULES, "-v"], "provider-save-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(IME_PLATFORM_CLASSES)):

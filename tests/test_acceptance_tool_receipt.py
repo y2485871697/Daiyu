@@ -233,8 +233,10 @@ class ToolReceiptTests(unittest.TestCase):
     def test_exact_provider_save_scope_preserves_all_four_business_contracts(self):
         self.assertEqual(producer.PROVIDER_SAVE_PLATFORM_CLASSES, PROVIDER_SAVE_CLASSES)
         self.assertEqual(producer.PROVIDER_SAVE_MODULES, PROVIDER_SAVE_CHECKS)
+        binding = (*PROVIDER_SAVE_CLASSES, "app.daiyu.android.storage.ModelSettingsCatalogBindingTest")
+        self.assertEqual(producer.PROVIDER_SAVE_BINDING_PLATFORM_CLASSES, binding)
         for python in ("python", "python3"):
-            for names in (PROVIDER_SAVE_CLASSES, tuple(reversed(PROVIDER_SAVE_CLASSES))):
+            for names in (PROVIDER_SAVE_CLASSES, tuple(reversed(PROVIDER_SAVE_CLASSES)), binding, tuple(reversed(binding))):
                 command, scope = producer.command_for(python, dict(SMOKE_MODE="smoke",
                     SMOKE_TEST_CLASSES=",".join(names)))
                 self.assertEqual(scope, "provider-save-targeted")
@@ -257,12 +259,35 @@ class ToolReceiptTests(unittest.TestCase):
                 self.assertEqual(producer.command_for("python3", env),
                     (["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"))
 
+    def test_provider_binding_scope_rejects_partial_duplicate_and_unrelated_selectors(self):
+        names = (*PROVIDER_SAVE_CLASSES, "app.daiyu.android.storage.ModelSettingsCatalogBindingTest")
+        raw = ",".join(names)
+        invalid = [raw + ",", " " + raw, raw + " ", raw + ",app.daiyu.android.OtherTest"]
+        invalid += [",".join(names[:i] + names[i + 1:]) for i in range(len(PROVIDER_SAVE_CLASSES))]
+        invalid += [raw + "," + name for name in names]
+        invalid += [",".join(group[:-1] + (group[0],)) for group in (PROVIDER_SAVE_CLASSES, names)]
+        invalid += [raw.replace(name, name + "Extra") for name in names]
+        environments = [dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=value) for value in invalid]
+        environments += [dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw)
+                         for mode in ("", "build", "compile", "candidate", "daily", "release", "checks")]
+        for env in environments:
+            with self.subTest(env=env):
+                self.assertEqual(producer.command_for("python3", env),
+                    (["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"))
+
     def test_provider_save_receipt_keeps_frozen_source_tool_identity_and_real_exit(self):
+        self._assert_provider_save_receipt(PROVIDER_SAVE_CLASSES)
+
+    def test_provider_binding_receipt_keeps_frozen_source_tool_identity_and_real_exit(self):
+        self._assert_provider_save_receipt((*PROVIDER_SAVE_CLASSES,
+            "app.daiyu.android.storage.ModelSettingsCatalogBindingTest"))
+
+    def _assert_provider_save_receipt(self, names):
         raw = b"provider fixture FAIL\r\nraw stderr\x00\n"
         for python in ("python", "python3"):
             for code in (0, 1, 7):
                 env = dict(self.env, SMOKE_MODE="smoke", EXPECTED_SHA="a" * 40,
-                           SMOKE_TEST_CLASSES=",".join(PROVIDER_SAVE_CLASSES))
+                           SMOKE_TEST_CLASSES=",".join(names))
                 expected = [python, "-B", "-m", "unittest", *PROVIDER_SAVE_CHECKS, "-v"]
                 def child(command, stdout, stderr, env=None):
                     self.assertEqual(command, expected)

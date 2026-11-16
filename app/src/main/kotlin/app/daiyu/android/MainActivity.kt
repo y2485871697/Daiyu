@@ -312,10 +312,14 @@ class MainActivity : ComponentActivity() {
         voiceCallServiceReady = false
         app.daiyu.android.voice.control.VoiceCallService.release(applicationContext)
     }
+    private fun continuingVoiceCall(): Boolean = voiceCallServiceReady &&
+        (remoteVoice.duplexActive || (voiceCallConversation != null && universalVoiceDelegate.isInitialized() &&
+            universalVoice.state.value.active))
+
     private fun pauseNonCallVoice() {
         accountPreviewRevoke?.invoke()
         invalidatePreparedSpeech()
-        if (!voiceCallServiceReady) invalidateConfiguredVoice()
+        if (!continuingVoiceCall()) invalidateConfiguredVoice()
         else if (!remoteVoice.duplexActive) remoteVoice.invalidate()
     }
     private val universalVoiceDelegate: Lazy<ActivityUniversalVoiceHost> = lazy {
@@ -455,18 +459,22 @@ class MainActivity : ComponentActivity() {
         // publication to its durable receipt; no arbitrary active/latest message is ever bound.
         val pending = pendingTextSend
         val controllerTicket = controller.textSendState()?.ticket
-        val excluded = !activityUsable() || (!voiceForeground && !voiceCallServiceReady) || retainedPage != "chat" || sidebarVisible ||
-            !selectionReady || !controller.ready || (controller.dataBusy && !voiceCallModelPicker) || !exactActive ||
-            expected != ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) ||
-            imageHost.hasAttachments || imageHost.sending || videoSending || videoHost.state.items.isNotEmpty() ||
+        val continuing = voiceCallServiceReady && voiceCallConversation != null &&
+            universalVoiceDelegate.isInitialized() && universalVoice.state.value.active
+        // The temporary call owns its original tickets, not whichever editor is now visible.
+        val navigationExcluded = retainedPage != "chat" || sidebarVisible || !selectionReady ||
+            expected != ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision)
+        val callBlocked = (controller.dataBusy && !voiceCallModelPicker) || imageHost.hasAttachments || imageHost.sending || videoSending || videoHost.state.items.isNotEmpty() ||
             shizukuWritesBlocked || terminalEditor != null || (virtualDisplayEditor != null || virtualDisplayPlanVisit != null) ||
-            mcpApproval != null || mcpPreparing || browserApproval != null || browserPreparing || generationApproval != null ||
+            mcpApproval != null || mcpPreparing || browserApproval != null || browserPreparing || generationApproval != null
+        val excluded = !activityUsable() || (!voiceForeground && !voiceCallServiceReady) || !controller.ready ||
+            !exactActive || callBlocked || (!continuing && navigationExcluded) ||
             (pending != null && !universalTickets.containsKey(pending.ticket)) ||
             (controllerTicket != null && !universalTickets.containsKey(controllerTicket))
         universalAdmissionSnapshot = when {
             excluded -> VoiceAdmission.REVOKED
             active?.let(::universalQuestionWaiting) == true -> VoiceAdmission.QUESTION_WAITING
-            !microphoneGranted() -> VoiceAdmission.PERMISSION_REQUIRED
+            !microphoneGranted() -> if (continuing) VoiceAdmission.REVOKED else VoiceAdmission.PERMISSION_REQUIRED
             else -> VoiceAdmission.READY
         }
         if (universalVoiceDelegate.isInitialized()) {
@@ -672,6 +680,7 @@ class MainActivity : ComponentActivity() {
                     host.duplexSnapshot.collect { snapshot ->
                         doubaoCallPresentation.update(snapshot)
                         if (snapshot?.endedAtMillis != null) refreshVoiceCallService()
+                        refreshFloatingCall()
                     }
                 }
             }
@@ -1240,8 +1249,9 @@ class MainActivity : ComponentActivity() {
             // Opening revokes even without a visit; closing cannot revive clicks rendered behind it.
             if (value != sidebarVisibleState) revokeContextManagementEntry()
             if (value && !sidebarVisibleState) revokeCommandApproval()
-            if (value && !sidebarVisibleState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
+            if (value && !sidebarVisibleState) { revokeChatReferencePick(); voiceConversationDialogOwner = null; revokePlatformActionVisit(); cancelBrowserDownloadVisit(); revokeTerminalJobsVisit(); stopCascadeVoice(); pauseNonCallVoice(); fenceVideoRoute(); cancelGenerationEditor(); cancelGenerationOutputs(); cancelTerminalEditor(); cancelVirtualDisplayEditor(); cancelGuiEditor(); cancelMcpEditor() }
             sidebarVisibleState = value
+            refreshFloatingCall()
         }
     private class ContextManagementVisit(val owner: ContextManagementOwner,
         val adapter: ContextManagementControllerAdapter)
@@ -1365,7 +1375,7 @@ class MainActivity : ComponentActivity() {
                 reconnectSettingsPageOwner?.revoke()
                 reconnectSettingsPageOwner = null
             }
-            if (value != retainedPageState) { stopCascadeVoice(); invalidateConfiguredVoice(); fenceVideoRoute(); cancelGenerationOutputs(); cancelVirtualDisplayEditor(); cancelGuiEditor() }
+            if (value != retainedPageState) { stopCascadeVoice(); pauseNonCallVoice(); fenceVideoRoute(); cancelGenerationOutputs(); cancelVirtualDisplayEditor(); cancelGuiEditor() }
             if (value != "models") { modelSaveOwner?.revoke(); modelSaveOwner = null }
             if (value != "session-gateway") {
                 gatewayOwner?.revoke(); gatewayOwner = null
@@ -1410,6 +1420,7 @@ class MainActivity : ComponentActivity() {
             imageHost.setVisible(value == "chat" && !sidebarVisible, selected?.id?.value,
                 keepThumbnails = value == "chat")
             retainedPageState = value
+            refreshFloatingCall()
             syncHaptics()
             }
         }
@@ -1564,7 +1575,7 @@ class MainActivity : ComponentActivity() {
     @Volatile private var editorGeneration = 0L
         set(value) {
             if (field != value) { chatReturnRefresh = null; closeBrowserVisualVisit() }
-            if (field != value) { revokeChatReferencePick(); revokePlatformActionVisit(); cancelBrowserDownloadVisit(); cancelStaticGenerationVisit(); revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
+            if (field != value) { revokeChatReferencePick(); revokePlatformActionVisit(); cancelBrowserDownloadVisit(); cancelStaticGenerationVisit(); revokeTerminalJobsVisit(); revokeContextManagementEntry(); cancelGenerationEditor(); invalidateMessageActionEditor(); pauseNonCallVoice(); dictationHost.invalidate(); offlineHost.invalidate() }
             field = value
         }
     private var draftRevision = 0L
@@ -1572,7 +1583,7 @@ class MainActivity : ComponentActivity() {
             if (field != value) {
                 revokeChatReferencePick(); revokePlatformActionVisit(); cancelGenerationEditor(); messageActionHost.invalidate()
                 if (!applyingDictationDraft && !doubaoCallPresentation.onDraftChanged(selected?.id?.value, remoteVoice.duplexActive)) {
-                    invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
+                    pauseNonCallVoice(); dictationHost.invalidate(); offlineHost.invalidate()
                 }
             }
             field = value
@@ -2303,6 +2314,9 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
+        lifecycleScope.launch {
+            androidx.compose.runtime.snapshotFlow { shownVoiceCall() }.collect { refreshFloatingCall() }
+        }
         restoredSupplementEditor = state?.getString("supplement-editor-conversation")?.let { conversation ->
             SupplementEditor(conversation, state.getLong("supplement-editor-generation"),
                 state.getLong("supplement-editor-revision"), state.getString("supplement-editor-text") ?: "")
@@ -3510,12 +3524,12 @@ class MainActivity : ComponentActivity() {
             // A retained call picture wins over mode/settings/preflight, even after remote termination.
             if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
                 selected?.id?.value != renderedConversation) return@voice
-            val ordinaryCall = voiceCallPresentation.state?.takeIf { it.conversationKey == selected?.id?.value }
+            val ordinaryCall = voiceCallPresentation.state
             if (ordinaryCall != null) {
                 if (ordinaryCall.presentation != DoubaoCallPresentation.CLOSING) closeVoiceCall(ordinaryCall.sessionKey)
                 return@voice
             }
-            val shownCall = doubaoCallPresentation.state?.takeIf { it.conversationKey == selected?.id?.value }
+            val shownCall = doubaoCallPresentation.state
             when (callEntryAction(shownCall != null, shownCall?.presentation == DoubaoCallPresentation.CLOSING)) {
                 CallEntryAction.HANG_UP -> { closeDoubaoCall(shownCall!!.sessionKey); return@voice }
                 CallEntryAction.IGNORE_CLOSING -> return@voice
@@ -3535,10 +3549,9 @@ class MainActivity : ComponentActivity() {
                     stopCascadeVoice(); invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate()
                     speechHost.stop(speechHost.owner)
                     ensureVoiceCallService { ready ->
-                        if (ready && selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration) {
+                        if (ready && currentChat() && selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration) {
                             remoteVoice.startDuplex(conversationId = renderedConversation) {
-                                activityUsable() && (voiceForeground || voiceCallServiceReady) && retainedPage == "chat" && !sidebarVisible &&
-                                    selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration
+                                activityUsable() && (voiceForeground || voiceCallServiceReady) && microphoneGranted()
                             }
                             refreshVoiceCallService()
                         } else { refreshVoiceCallService(); voiceConfigurationToast("后台通话服务未启动") }
@@ -3809,8 +3822,41 @@ class MainActivity : ComponentActivity() {
         return admitted
     }
 
-    private fun shownVoiceCall(): DoubaoCallUi? = (voiceCallPresentation.state ?: doubaoCallPresentation.state)
-        ?.takeIf { it.conversationKey == selected?.id?.value }
+    private val floatingCallDelegate = lazy { VoiceCallFloatingWindow(applicationContext) }
+    private val floatingCall get() = floatingCallDelegate.value
+    private var floatingCallClosed = false
+    private var pendingFloatingCallAction: Pair<Long, () -> Unit>? = null
+
+    private fun refreshFloatingCall() {
+        if (floatingCallClosed) return
+        val shown = shownVoiceCall()
+        if (voiceForeground && retainedPage == "chat" && !sidebarVisible) {
+            if (floatingCallDelegate.isInitialized()) floatingCall.hide()
+        } else if (shown != null && activityUsable()) {
+            floatingCall.update(shown, if (voiceCallPresentation.state != null) voiceCallActions(external = true)
+                else doubaoCallActions(external = true))
+        } else if (floatingCallDelegate.isInitialized()) floatingCall.dismiss()
+    }
+
+    private fun returnToVoiceCall(key: Long, action: () -> Unit) {
+        if (!floatingCall.isShowing(key)) return
+        if (voiceForeground) {
+            sidebarVisible = false
+            retainedPage = "chat"
+            action()
+        } else {
+            pendingFloatingCallAction = key to action
+            try {
+                startActivity(android.content.Intent(this, MainActivity::class.java)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP))
+            } catch (_: RuntimeException) {
+                pendingFloatingCallAction = null
+                voiceConfigurationToast("请返回代鱼调整通话设置")
+            }
+        }
+    }
+
+    private fun shownVoiceCall(): DoubaoCallUi? = voiceCallPresentation.state ?: doubaoCallPresentation.state
 
     private fun closeVoiceCall(key: Long) {
         if (voiceCallPresentation.beginClose(key, SystemClock.elapsedRealtime())) {
@@ -3822,11 +3868,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun voiceCallActions(): DoubaoCallActions {
+    private fun voiceCallActions(external: Boolean = false): DoubaoCallActions {
         val shown = voiceCallPresentation.state ?: return DoubaoCallActions()
         val key = shown.sessionKey
-        fun current() = activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
-            selected?.id?.value == shown.conversationKey && voiceCallPresentation.state?.let {
+        fun current() = activityUsable() &&
+            (if (external) (voiceCallServiceReady || shown.endedAtMillis != null) && floatingCall.isShowing(key)
+             else voiceForeground && retainedPage == "chat" && !sidebarVisible) && voiceCallPresentation.state?.let {
                 it.sessionKey == key && it.presentation != DoubaoCallPresentation.CLOSING
             } == true
         return DoubaoCallActions(
@@ -3834,7 +3881,8 @@ class MainActivity : ComponentActivity() {
             onMinimize = { if (current()) voiceCallPresentation.present(key, DoubaoCallPresentation.MINI) },
             onHangUp = { if (current()) closeVoiceCall(key) },
             onSelectModel = {
-                if (current() && voiceCallHasDialogue) voiceConfigurationToast("仅对话前可更改")
+                if (current() && external && !voiceCallHasDialogue) returnToVoiceCall(key) { voiceCallActions().onSelectModel() }
+                else if (current() && voiceCallHasDialogue) voiceConfigurationToast("仅对话前可更改")
                 else if (current() && universalVoice.state.value.active &&
                     universalVoice.state.value.phase != VoiceControlPhase.SUBMITTING &&
                     !controller.isMainContextCompressing(voiceCallConversation?.id)) {
@@ -3842,7 +3890,9 @@ class MainActivity : ComponentActivity() {
                     openChatModels(forVoiceCall = true)
                 }
             },
-            onModelLongPress = { if (current()) openVoiceThinking(key) },
+            onModelLongPress = { if (current()) {
+                if (external) returnToVoiceCall(key) { openVoiceThinking(key) } else openVoiceThinking(key)
+            } },
             onToggleMute = { if (current()) universalVoice.setMuted(!universalVoice.state.value.muted) },
             onToggleSpeaker = {
                 if (current()) {
@@ -3862,11 +3912,12 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun doubaoCallActions(): DoubaoCallActions {
+    private fun doubaoCallActions(external: Boolean = false): DoubaoCallActions {
         val shown = doubaoCallPresentation.state ?: return DoubaoCallActions()
         val key = shown.sessionKey
-        fun current() = activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
-            selected?.id?.value == shown.conversationKey && doubaoCallPresentation.state?.let {
+        fun current() = activityUsable() &&
+            (if (external) (voiceCallServiceReady || shown.endedAtMillis != null) && floatingCall.isShowing(key)
+             else voiceForeground && retainedPage == "chat" && !sidebarVisible) && doubaoCallPresentation.state?.let {
                 it.sessionKey == key && it.presentation != DoubaoCallPresentation.CLOSING
             } == true
         return DoubaoCallActions(
@@ -6085,6 +6136,17 @@ class MainActivity : ComponentActivity() {
     }
     override fun onResume() {
         super.onResume(); chatReturnRefresh = null; suspendMessageActionEditor(); voiceForeground = true; speechHost.setForeground(true)
+        if (continuingVoiceCall() && !microphoneGranted()) invalidateConfiguredVoice()
+        val pendingCall = pendingFloatingCallAction
+        pendingFloatingCallAction = null
+        val returnToCall = pendingCall != null && voiceCallServiceReady && floatingCall.isShowing(pendingCall.first) &&
+            shownVoiceCall()?.let { it.sessionKey == pendingCall.first && it.presentation != DoubaoCallPresentation.CLOSING } == true
+        refreshFloatingCall()
+        if (returnToCall && pendingCall != null) {
+            sidebarVisible = false
+            retainedPage = "chat"
+            pendingCall.second()
+        }
         resumeOrdinaryDialogActions()
         if (retainedPage == "session-gateway" && gatewayReloadPending) loadSessionGateway(restore = true)
         chatReferencePick?.pickerAway = false
@@ -6211,6 +6273,7 @@ class MainActivity : ComponentActivity() {
             if (app.petSettingsNavigator === openPetSettings) app.petSettingsNavigator = null
         }
         voiceForeground = false
+        refreshFloatingCall()
         voiceConversationDialogOwner = null
         unknownBranchOutcome = null // unmount only; the controller receipt is not consumed
         stopCascadeVoice()
@@ -6262,6 +6325,7 @@ class MainActivity : ComponentActivity() {
         controller.invalidateVideo(videoUi)
         // Idempotent fallback as well as the earlier onPause cancellation.
         voiceForeground = false
+        refreshFloatingCall()
         voiceConversationDialogOwner = null
         stopCascadeVoice()
         pauseNonCallVoice()
@@ -6271,6 +6335,8 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        floatingCallClosed = true
+        pendingFloatingCallAction = null
         chatReturnRefresh = null
         toolPresentations.clear()
         suspendOrdinaryDialogActions()
@@ -6316,6 +6382,7 @@ class MainActivity : ComponentActivity() {
         browserSettingsPageOwner = null
         hapticsHost?.close(); hapticsHost = null
         voiceForeground = false
+        refreshFloatingCall()
         voiceConversationDialogOwner = null
         revokeUniversalVoice()
         if (universalVoiceDelegate.isInitialized()) universalVoice.close()
@@ -6323,6 +6390,7 @@ class MainActivity : ComponentActivity() {
         voiceCompressionObservation?.close(); voiceCompressionObservation = null
         try { cascadeVoice.dispose() } catch (_: Exception) { toast("级联音频释放未确认") }
         invalidateConfiguredVoice()
+        if (floatingCallDelegate.isInitialized()) floatingCall.close()
         dictationHost.close()
         offlineHost.close()
         interactiveModeObservation?.close()

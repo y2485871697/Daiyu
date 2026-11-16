@@ -94,7 +94,11 @@ internal object ResponsesRequest {
             schemas.put(JSONObject().put("type", "function").put("name", definition.name).put("description", definition.description)
                 .put("parameters", JSONObject(definition.parameters)).put("strict", false))
         }
-        if (webSearchEnabled) schemas.put(JSONObject().put("type", "web_search"))
+        if (webSearchEnabled) {
+            val searchType = if (model.lowercase(java.util.Locale.ROOT) in
+                setOf("deepseek-flash", "deepseek-v4-flash", "deepseek-v4.1-flash")) "deepseek_web_search" else "web_search"
+            schemas.put(JSONObject().put("type", searchType))
+        }
         return JSONObject().put("model", model).put("input", input).put("stream", true).put("store", false)
             .put("include", JSONArray().put("reasoning.encrypted_content"))
             .also { if (schemas.length() > 0) it.put("tools", schemas) }

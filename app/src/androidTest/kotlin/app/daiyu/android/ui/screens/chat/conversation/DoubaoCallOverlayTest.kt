@@ -864,13 +864,34 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         assertTrue(moved.top >= 0f)
         assertTrue(moved.bottom <= composerTopPx - gutter + 2f)
     }
+    private fun assertSmallSuccessGlyph(tag: String) {
+        val node = ui.onNodeWithTag(tag).assertExists()
+        val bounds = node.fetchSemanticsNode().boundsInRoot
+        val pixels = captureScreenNode(node).toPixelMap()
+        val limit = kotlin.math.ceil(12f * ui.density.density).toInt()
+        assertTrue("success glyph stays at most 12dp", pixels.width <= limit && pixels.height <= limit)
+        var minX = pixels.width; var minY = pixels.height; var maxX = -1; var maxY = -1
+        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+            val color = pixels[x, y]
+            if (color.alpha > .5f && color.green > .45f && color.green > color.red * 1.2f && color.green > color.blue * 1.1f) {
+                minX = minOf(minX, x); minY = minOf(minY, y)
+                maxX = maxOf(maxX, x); maxY = maxOf(maxY, y)
+            }
+        }
+        assertTrue("green success ink remains visible", maxX >= minX && maxY >= minY)
+        assertTrue("green ink retains horizontal center", kotlin.math.abs((minX + maxX + 1f) / 2f - bounds.width / 2f) <= 1f)
+        assertTrue("green ink retains vertical center", kotlin.math.abs((minY + maxY + 1f) / 2f - bounds.height / 2f) <= 1f)
+    }
+
     fun testCompressionCompletionDoesNotReplayAfterMinimizeAndRestore() {
         mount(initialState = session().copy(title = "GPT", modelSelectable = true, compressing = true))
         finishOpening()
         ui.onNodeWithTag("voice-call-compressing").assertExists()
+        val slot = ui.onNodeWithTag("voice-call-activity-slot").fetchSemanticsNode().boundsInRoot
         mainThread { call = call!!.copy(compressing = false, compressionCompletion = "one") }
         ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
-        ui.onNodeWithTag("voice-call-compressed").assertExists()
+        assertSmallSuccessGlyph("voice-call-compressed")
+        assertEquals(slot, ui.onNodeWithTag("voice-call-activity-slot").fetchSemanticsNode().boundsInRoot)
         ui.mainClock.advanceTimeBy(2_700); ui.waitForIdle()
         ui.onNodeWithTag("voice-call-compressed").assertDoesNotExist()
         ui.onNodeWithTag("doubao-call-minimize").performClick().also { awaitVisualIdle() }
@@ -890,9 +911,11 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         finishOpening()
         ui.onNodeWithTag("voice-call-searching").assertExists()
         ui.onNodeWithText("正在搜索").assertExists()
+        val slot = ui.onNodeWithTag("voice-call-activity-slot").fetchSemanticsNode().boundsInRoot
         mainThread { call = call!!.copy(searching = false, searchCompletion = "one") }
         ui.mainClock.advanceTimeBy(500); ui.waitForIdle()
-        ui.onNodeWithTag("voice-call-searched").assertExists()
+        assertSmallSuccessGlyph("voice-call-searched")
+        assertEquals(slot, ui.onNodeWithTag("voice-call-activity-slot").fetchSemanticsNode().boundsInRoot)
         mainThread { call = call!!.copy(searching = true, searchCompletion = null) }
         ui.mainClock.advanceTimeBy(300); ui.waitForIdle()
         ui.onNodeWithTag("voice-call-searching").assertExists()

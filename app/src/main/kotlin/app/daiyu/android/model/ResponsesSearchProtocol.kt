@@ -14,7 +14,26 @@ internal object ResponsesSearchProtocol {
     fun validateItem(item: JSONObject) {
         when (item.opt("type")) {
             "web_search_call" -> {
-                fields(item, setOf("type", "id", "status", "action"))
+                val deepseek = item.has("kind")
+                fields(item, setOf("type", "id", "status", "action"),
+                    if (deepseek) setOf("kind", "page", "signature", "error") else emptySet())
+                if (deepseek) {
+                    require(item.opt("kind") in setOf("search", "deep_search", "image_search", "deep_image_search", "read_link"))
+                    if (item.has("page") && !item.isNull("page")) {
+                        val page = item.opt("page") as? JSONObject ?: invalid()
+                        fields(page, setOf("url"), setOf("title", "published_at"))
+                        url(text(page, "url", MAX_URL))
+                        optionalText(page, "title", MAX_TITLE)
+                        optionalText(page, "published_at", 128)
+                    }
+                    optionalText(item, "signature", 1_048_576)
+                    if (item.has("error") && !item.isNull("error")) {
+                        require(item.opt("status") in setOf("failed", "incomplete"))
+                        val error = item.opt("error") as? JSONObject ?: invalid()
+                        fields(error, setOf("code"))
+                        require(text(error, "code", 200).isNotBlank())
+                    }
+                }
                 require(text(item, "id", 200).isNotBlank())
                 require(item.opt("status") in setOf("completed", "failed", "incomplete")) { "不支持此原生搜索状态" }
                 val action = item.opt("action") as? JSONObject ?: invalid()
@@ -32,8 +51,17 @@ internal object ResponsesSearchProtocol {
                             require(sources.length() <= 1024)
                             repeat(sources.length()) { index ->
                                 val source = sources.opt(index) as? JSONObject ?: invalid()
-                                fields(source, setOf("type", "url")); require(source.opt("type") == "url")
+                                fields(source, setOf("type", "url"), if (deepseek)
+                                    setOf("title", "snippet", "site_name", "site_icon", "published_at") else emptySet())
+                                require(source.opt("type") == "url")
                                 url(text(source, "url", MAX_URL))
+                                if (deepseek) {
+                                    optionalText(source, "title", MAX_TITLE)
+                                    optionalText(source, "snippet", 16384)
+                                    optionalText(source, "site_name", MAX_TITLE)
+                                    optionalText(source, "published_at", 128)
+                                    optionalText(source, "site_icon", MAX_URL)?.takeIf { it.isNotBlank() }?.let(::url)
+                                }
                             }
                         }
                     }
@@ -223,6 +251,9 @@ internal object ResponsesSearchProtocol {
         require(text.length <= limit && text.none { it.code < 32 && it !in "\n\r\t" || it.code == 127 }) { "原生搜索字段无效" }
         return text
     }
+
+    private fun optionalText(value: JSONObject, key: String, limit: Int): String? =
+        if (!value.has(key) || value.isNull(key)) null else text(value, key, limit)
 
     private fun fields(value: JSONObject, required: Set<String>, optional: Set<String> = emptySet()) {
         val actual = value.keys().asSequence().toSet()

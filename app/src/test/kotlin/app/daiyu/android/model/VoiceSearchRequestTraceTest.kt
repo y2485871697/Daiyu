@@ -266,4 +266,56 @@ class VoiceSearchRequestTraceTest {
             }
         } finally { RuntimeDiagnostics.enabled = false; RuntimeDiagnostics.clear() }
     }
+    @Test fun categoricalReceiptsSurviveTimingSpanSaturationWithoutDuplicateClose() {
+        RuntimeDiagnostics.install(Files.createTempDirectory("voice-wire-saturated").toFile())
+        RuntimeDiagnostics.enabled = true
+        val holding = mutableListOf<RuntimeDiagnostics.Span>()
+        try {
+            RuntimeDiagnostics.clear()
+            repeat(512) {
+                if (holding.size < 128) {
+                    RuntimeDiagnostics.awaitWrites()
+                    RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.RUN).takeIf { it.id != 0L }?.let(holding::add)
+                }
+            }
+            assertEquals(128, holding.size)
+            for (protocol in listOf(ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS)) {
+                val before = codes().count { it == "SEARCH_SEND_ATTEMPTED" }
+                val trace = VoiceSearchRequestTrace(protocol, JSONObject())
+                trace.sent()
+                trace.close(cancelled = true)
+                trace.close(cancelled = true)
+                trace.sent()
+                trace.completed()
+                trace.received(ModelEvent.NativeSearch("late", NativeSearchPhase.COMPLETED))
+                assertFalse(codes().contains("SEARCH_COMPLETED"))
+                assertEquals(before + 1, codes().count { it == "SEARCH_SEND_ATTEMPTED" })
+                assertEquals(before + 1, codes().count { it == "SEARCH_SEND_COMPLETED" })
+                assertEquals(before + 1, codes().count { it == "SEARCH_RESPONSE_INTERRUPTED" })
+            }
+            val positive = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, JSONObject())
+            positive.received(ModelEvent.NativeSearch("active", NativeSearchPhase.RUNNING))
+            positive.received(ModelEvent.NativeSearch("active", NativeSearchPhase.COMPLETED))
+            positive.completed()
+            positive.close(cancelled = false)
+            RuntimeDiagnostics.awaitWrites()
+            val positiveRows = RuntimeDiagnostics.export()
+            val receipts = (0 until positiveRows.length()).map(positiveRows::getJSONObject)
+                .filter { it.optString("code") in setOf("SEARCH_RUNNING", "SEARCH_COMPLETED") }
+            assertEquals(listOf("SEARCH_RUNNING", "SEARCH_COMPLETED"), receipts.map { it.getString("code") })
+            assertEquals(listOf(1L, 2L), receipts.map { it.getLong("revision_or_count") })
+            assertEquals(2, codes().count { it == "CANCEL_REQUESTED" })
+            assertEquals(2, codes().count { it == "SEARCH_NO_RECEIPT" })
+            val stale = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, JSONObject())
+            RuntimeDiagnostics.clear()
+            stale.sent()
+            stale.close(cancelled = true)
+            assertTrue(codes().isEmpty())
+        } finally {
+            holding.forEach { it.end() }
+            RuntimeDiagnostics.enabled = false
+            RuntimeDiagnostics.clear()
+        }
+    }
+
 }

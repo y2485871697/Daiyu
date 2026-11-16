@@ -47,6 +47,7 @@ internal object ResponsesStream {
         private val parts=mutableMapOf<String,java.util.SortedMap<Int,String>>()
         private val summaries=mutableMapOf<String,java.util.SortedMap<Int,String>>()
         private val reasoningIds = linkedMapOf<Int, String>()
+        private val searchIds = linkedMapOf<Int, String>()
         private val reasoningAliases = linkedMapOf<String, String>()
         private val pendingReasoning = linkedMapOf<String, String>()
         private var chars=0
@@ -58,6 +59,7 @@ internal object ResponsesStream {
                 source.forEach { (id, values) -> put(id, JSONObject().apply { values.forEach { (k,v) -> put(k.toString(),v) } }) }
             }
             put("parts", map(parts)); put("summaries", map(summaries))
+            put("search_ids", JSONObject().apply { searchIds.forEach { (index, id) -> put(index.toString(), id) } })
             put("reasoning_ids", JSONObject().apply { reasoningIds.forEach { (index, id) -> put(index.toString(), id) } })
             put("reasoning_aliases", JSONObject().apply { reasoningAliases.forEach { (raw, id) -> put(raw, id) } })
             put("pending_reasoning", JSONObject().apply { pendingReasoning.forEach { (id, item) -> put(id, item) } })
@@ -69,18 +71,19 @@ internal object ResponsesStream {
             val usage: ModelEvent.Usage?, val calls: Map<String, ToolInvocation>,
             val parts: Map<String, java.util.SortedMap<Int, String>>,
             val summaries: Map<String, java.util.SortedMap<Int, String>>,
-            val reasoningIds: Map<Int, String>, val aliases: Map<String, String>,
+            val searchIds: Map<Int, String>, val reasoningIds: Map<Int, String>, val aliases: Map<String, String>,
             val pendingReasoning: Map<String, String>, val chars: Int)
         private fun capture(): Memory {
             fun copy(values: Map<String, java.util.SortedMap<Int, String>>) = values.mapValues { java.util.TreeMap(it.value) }
             return Memory(responseId, acknowledgedSequence, output, usage, LinkedHashMap(calls), copy(parts), copy(summaries),
-                LinkedHashMap(reasoningIds), LinkedHashMap(reasoningAliases), LinkedHashMap(pendingReasoning), chars)
+                LinkedHashMap(searchIds), LinkedHashMap(reasoningIds), LinkedHashMap(reasoningAliases), LinkedHashMap(pendingReasoning), chars)
         }
         private fun restore(saved: Memory) {
             responseId = saved.id; acknowledgedSequence = saved.sequence; output = saved.output; usage = saved.usage
             calls.clear(); calls.putAll(saved.calls)
             parts.clear(); parts.putAll(saved.parts)
             summaries.clear(); summaries.putAll(saved.summaries)
+            searchIds.clear(); searchIds.putAll(saved.searchIds)
             reasoningIds.clear(); reasoningIds.putAll(saved.reasoningIds)
             reasoningAliases.clear(); reasoningAliases.putAll(saved.aliases)
             pendingReasoning.clear(); pendingReasoning.putAll(saved.pendingReasoning)
@@ -155,6 +158,20 @@ internal object ResponsesStream {
             val arguments = item.getString("arguments")
             MessagesRequest.jsonObject(arguments)
             return ToolInvocation(ToolCallId(id), name, arguments)
+        }
+        fun bindSearch(index: Int?, id: String): String {
+            checkProtocol(id.isNotBlank() && id.length <= 200)
+            if (index != null) {
+                checkProtocol(searchIds[index]?.let { it == id } != false)
+                checkProtocol(searchIds.none { (other, value) -> other != index && value == id })
+                searchIds[index] = id
+            }
+            return id
+        }
+        fun searchEventId(event: JSONObject): String {
+            val output = if (event.has("output_index") && !event.isNull("output_index")) index(event, "output_index") else null
+            val supplied = if (event.has("item_id")) event.getString("item_id") else null
+            return bindSearch(output, supplied ?: output?.let(searchIds::get) ?: throw ModelRequestException(ModelFailure.PROTOCOL))
         }
         fun search(id: String, phase: NativeSearchPhase) {
             checkProtocol(id.isNotBlank() && id.length <= 200)
@@ -264,16 +281,17 @@ internal object ResponsesStream {
             when(event.getString("type")) {
                 "response.output_item.added" -> {
                     val item = event.getJSONObject("item")
+                    if (item.optString("type") == "web_search_call") bindSearch(outputIndex(event), item.getString("id"))
                     searchItem(item)
                     if (item.optString("type") == "reasoning") outputIndex(event)?.let {
                         reasoningId(item.getString("id"), it)
                     }
                 }
                 "response.web_search_call.in_progress", "response.web_search_call.searching" ->
-                    search(event.getString("item_id"), NativeSearchPhase.RUNNING)
-                "response.web_search_call.completed" -> search(event.getString("item_id"), NativeSearchPhase.COMPLETED)
-                "response.web_search_call.failed" -> search(event.getString("item_id"), NativeSearchPhase.FAILED)
-                "response.web_search_call.incomplete" -> search(event.getString("item_id"), NativeSearchPhase.INCOMPLETE)
+                    search(searchEventId(event), NativeSearchPhase.RUNNING)
+                "response.web_search_call.completed" -> search(searchEventId(event), NativeSearchPhase.COMPLETED)
+                "response.web_search_call.failed" -> search(searchEventId(event), NativeSearchPhase.FAILED)
+                "response.web_search_call.incomplete" -> search(searchEventId(event), NativeSearchPhase.INCOMPLETE)
                 "response.reasoning_summary_text.delta" -> {
                     val delta=event.getString("delta");chars+=delta.length
                     checkProtocol(chars<=2_000_000)
@@ -301,6 +319,7 @@ internal object ResponsesStream {
                         try { ResponsesSearchProtocol.validateItem(item) } catch (_: IllegalArgumentException) {
                             throw ModelRequestException(ModelFailure.PROTOCOL)
                         }
+                        bindSearch(outputIndex(event), item.getString("id"))
                         searchItem(item)
                     }
                     // Unindexed, renamed summaries need the complete output to prove identity.

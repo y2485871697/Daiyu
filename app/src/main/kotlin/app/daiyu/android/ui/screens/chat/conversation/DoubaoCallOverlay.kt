@@ -851,3 +851,39 @@ private fun CallGlyph(control: CallControl, color: Color, modifier: Modifier, ac
         }
     }
 }
+
+/** Bounded system-window content: no composer anchor, full-screen scrim or in-app Genie. */
+@Composable
+internal fun FloatingVoiceCallContent(state: DoubaoCallUi, actions: DoubaoCallActions,
+    enabled: Boolean, onDrag: (Offset) -> Unit) {
+    key(state.sessionKey) {
+        val mini = state.presentation == DoubaoCallPresentation.MINI
+        val scroll = rememberScrollState()
+        val follow = remember { CallCaptionFollow() }
+        LaunchedEffect(state.captionEpoch, state.captionsEnabled) { follow.followTail = true }
+        // Do not replay a success receipt that predates moving to this presentation surface.
+        val initialCompression = remember { state.compressionCompletion }
+        val initialSearch = remember { state.searchCompletion }
+        val indicator = rememberVoiceCallCompressionState(state.compressing,
+            state.compressionCompletion?.takeUnless { it == initialCompression }, enabled,
+            state.searching, state.searchCompletion?.takeUnless { it == initialSearch }, state.captionEpoch)
+        val captions = key(state.captionEpoch) {
+            rememberCallCaptionReveal(state.transcript, state.transcriptTextComplete, enabled && !mini && state.captionsEnabled) to
+                rememberCallCaptionReveal(state.reply, state.replyTextComplete, enabled && !mini && state.captionsEnabled)
+        }
+        val drag by rememberUpdatedState(onDrag)
+        val handle = Modifier.pointerInput(enabled) {
+            if (enabled) detectDragGestures { change, delta -> change.consume(); drag(delta) }
+        }
+        val shape = RoundedCornerShape(if (mini) 23.dp else 29.dp)
+        Box(Modifier.fillMaxSize().testTag("voice-call-floating-content")
+            .clip(shape).background(if (mini) Color(0xFFFCFAFF) else Color(0xFFFDFBFF))
+            .border(1.dp, Color.White, shape)) {
+            if (mini) MiniCallContent(state, callClock(state), enabled, handle, actions.onExpand,
+                running = enabled, compressionState = indicator)
+            else ExpandedCallContent(state, callClock(state), enabled, handle, actions,
+                running = enabled, compressionState = indicator, captionScroll = scroll,
+                captionFollow = follow, captions = captions)
+        }
+    }
+}

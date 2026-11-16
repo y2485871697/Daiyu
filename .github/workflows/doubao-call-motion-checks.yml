@@ -36,7 +36,7 @@ env:
   SOURCE_RUN_ID: ${{ inputs.source_run_id }}
   SOURCE_VARIANT: compile
   SMOKE_MODE: smoke
-  SMOKE_TEST_CLASSES: app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest,app.daiyu.android.ControllerReasoningFreezeTest,app.daiyu.android.storage.ConversationModelBindingDatabaseTest
+  SMOKE_TEST_CLASSES: app.daiyu.android.VoiceCallFloatingWindowTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOrbPixelsTest,app.daiyu.android.ui.screens.chat.conversation.DoubaoCallOverlayZeroDurationTest,app.daiyu.android.ControllerReasoningFreezeTest,app.daiyu.android.storage.ConversationModelBindingDatabaseTest
   SMOKE_API: all
   SMOKE_SHARD_COUNT: '1'
   SMOKE_SHARD_INDEX: '0'

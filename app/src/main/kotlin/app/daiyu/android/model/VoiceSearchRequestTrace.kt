@@ -7,9 +7,11 @@ import org.json.JSONObject
 
 /** Wire metadata and explicit server receipts only; never drives call activity. */
 internal class VoiceSearchRequestTrace(protocol: ProviderProtocol, request: JSONObject?) {
+    private val requestEpoch = RuntimeDiagnostics.currentEpoch()
     private val span = RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.VOICE_SEARCH)
     private var receipts = 0L
     private var responseComplete = false
+    private var closed = false
 
     init {
         val code = when {
@@ -17,18 +19,18 @@ internal class VoiceSearchRequestTrace(protocol: ProviderProtocol, request: JSON
             protocol == ProviderProtocol.CHAT_COMPLETIONS && request.optJSONObject("web_search_options") != null ->
                 RuntimeDiagnostics.Code.SEARCH_WIRE_CHAT
             protocol == ProviderProtocol.RESPONSES && request.optJSONArray("tools")?.let { tools ->
-                (0 until tools.length()).any { tools.optJSONObject(it)?.optString("type") in setOf("web_search", "web_search_preview") }
+                (0 until tools.length()).any { tools.optJSONObject(it)?.optString("type") in setOf("web_search", "web_search_preview", "deepseek_web_search") }
             } == true -> RuntimeDiagnostics.Code.SEARCH_WIRE_RESPONSES
             else -> RuntimeDiagnostics.Code.SEARCH_WIRE_NONE
         }
-        RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.VOICE_SEARCH, code)
-        span.mark(RuntimeDiagnostics.Code.SEARCH_SEND_ATTEMPTED)
+        RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.VOICE_SEARCH, code, sourceEpoch = requestEpoch)
+        mark(RuntimeDiagnostics.Code.SEARCH_SEND_ATTEMPTED)
     }
 
-    fun sent() = span.mark(RuntimeDiagnostics.Code.SEARCH_SEND_COMPLETED)
+    @Synchronized fun sent() = mark(RuntimeDiagnostics.Code.SEARCH_SEND_COMPLETED)
 
-    fun received(event: ModelEvent) {
-        if (event !is ModelEvent.NativeSearch) return
+    @Synchronized fun received(event: ModelEvent) {
+        if (closed || event !is ModelEvent.NativeSearch) return
         receipts++
         val code = when (event.phase) {
             NativeSearchPhase.RUNNING -> RuntimeDiagnostics.Code.SEARCH_RUNNING
@@ -36,18 +38,30 @@ internal class VoiceSearchRequestTrace(protocol: ProviderProtocol, request: JSON
             NativeSearchPhase.FAILED -> RuntimeDiagnostics.Code.SEARCH_FAILED
             NativeSearchPhase.INCOMPLETE -> RuntimeDiagnostics.Code.SEARCH_INCOMPLETE
         }
-        span.mark(code, count = receipts)
+        mark(code, count = receipts)
     }
 
-    fun completed() { responseComplete = true }
+    @Synchronized fun completed() { if (!closed) responseComplete = true }
 
-    fun close(cancelled: Boolean) {
-        if (cancelled) span.mark(RuntimeDiagnostics.Code.CANCEL_REQUESTED)
-        span.mark(if (responseComplete) RuntimeDiagnostics.Code.SEARCH_RESPONSE_ENDED
+    @Synchronized fun close(cancelled: Boolean) {
+        if (closed) return
+        if (cancelled) mark(RuntimeDiagnostics.Code.CANCEL_REQUESTED)
+        mark(if (responseComplete) RuntimeDiagnostics.Code.SEARCH_RESPONSE_ENDED
             else RuntimeDiagnostics.Code.SEARCH_RESPONSE_INTERRUPTED)
-        if (receipts == 0L) span.mark(RuntimeDiagnostics.Code.SEARCH_NO_RECEIPT)
+        if (receipts == 0L) mark(RuntimeDiagnostics.Code.SEARCH_NO_RECEIPT)
+        closed = true
         span.end()
     }
+
+    private fun mark(code: RuntimeDiagnostics.Code, count: Long = -1) {
+        if (closed) return
+        // Timing spans are intentionally best-effort (tryLock / bounded active spans).
+        // Preserve categorical transport receipts even when no timing span was admitted.
+        if (span.id == 0L) RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.VOICE_SEARCH, code,
+            count = count, sourceEpoch = requestEpoch)
+        else span.mark(code, count = count)
+    }
+
     companion object {
         // Numeric policy only: bit 0 voice, bit 1 native-search enabled, remaining bits protocol.
         fun policy(protocol: ProviderProtocol, options: ProviderRequestOptions, wire: JSONObject? = null) {

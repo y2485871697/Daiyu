@@ -389,8 +389,12 @@ internal object RuntimeDiagnostics {
         finally { try { span.end(failure) } catch (_: Throwable) { } }
     }
 
-    fun event(stage: Stage, code: Code, size: Long = -1, count: Long = -1) =
-        emit(stage, code, 0, 0, count, size, critical = code == Code.REJECTED || code == Code.UNKNOWN)
+    internal fun currentEpoch(): Long = generation.get()
+
+    fun event(stage: Stage, code: Code, size: Long = -1, count: Long = -1,
+        sourceEpoch: Long = generation.get()) =
+        emit(stage, code, 0, 0, count, size, critical = code == Code.REJECTED || code == Code.UNKNOWN,
+            sourceEpoch = sourceEpoch)
 
     fun guiResult(code: String, stage: Stage = Stage.GUI_ACTION) {
         try {

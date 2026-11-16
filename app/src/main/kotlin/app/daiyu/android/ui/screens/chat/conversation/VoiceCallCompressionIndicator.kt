@@ -61,23 +61,23 @@ internal fun rememberVoiceCallCompressionState(compressing: Boolean, completion:
 @Composable
 internal fun VoiceCallCompressionIndicator(compressing: Boolean, completion: String?, running: Boolean = true,
     state: VoiceCallCompressionState = rememberVoiceCallCompressionState(compressing, completion, running)) {
-    Box(Modifier.width(82.dp).height(24.dp), contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
+    Box(Modifier.width(82.dp).height(24.dp).testTag("voice-call-activity-slot"), contentAlignment = androidx.compose.ui.Alignment.CenterEnd) {
         if (compressing) Row(Modifier.testTag(if (state.searching) "voice-call-searching" else "voice-call-compressing")) {
             Text(if (state.searching) "正在搜索" else "正在压缩", color = Color(0xFF9483A8), fontSize = 10.sp)
             Text(".".repeat(state.dots), Modifier.width(15.dp), color = Color(0xFF9483A8), fontSize = 10.sp)
         }
         AnimatedVisibility(state.success && !compressing, enter = fadeIn(tween(150)) + scaleIn(tween(180)),
             exit = fadeOut(tween(200)) + scaleOut(tween(200), targetScale = 0.65f)) {
-            Canvas(Modifier.size(19.dp).testTag(if (state.searching) "voice-call-searched" else "voice-call-compressed")
+            Canvas(Modifier.size(12.dp).testTag(if (state.searching) "voice-call-searched" else "voice-call-compressed")
                 .semantics { contentDescription = if (state.searching) "搜索完成" else "压缩完成" }) {
                 val start = Offset(size.width * .16f, size.height * .51f)
                 val corner = Offset(size.width * .41f, size.height * .76f)
                 val end = Offset(size.width * .86f, size.height * .25f)
                 val progress = state.check.value
                 if (progress > 0f) drawLine(Color(0xFF54AF78), start,
-                    start + (corner - start) * (progress / .35f).coerceAtMost(1f), 2.2.dp.toPx(), StrokeCap.Round)
+                    start + (corner - start) * (progress / .35f).coerceAtMost(1f), 1.5.dp.toPx(), StrokeCap.Round)
                 if (progress > .35f) drawLine(Color(0xFF54AF78), corner,
-                    corner + (end - corner) * ((progress - .35f) / .65f), 2.2.dp.toPx(), StrokeCap.Round)
+                    corner + (end - corner) * ((progress - .35f) / .65f), 1.5.dp.toPx(), StrokeCap.Round)
             }
         }
     }

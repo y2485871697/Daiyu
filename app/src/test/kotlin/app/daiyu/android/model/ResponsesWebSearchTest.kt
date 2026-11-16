@@ -287,4 +287,75 @@ class ResponsesWebSearchTest {
         assertFalse(gatewayConnection.instanceFollowRedirects)
         assertTrue(gatewayConnection.closed)
     }
+    @Test fun deepseekFlashUsesItsServerNativeToolWithoutChangingGptOrTheModelsSwitch() {
+        for (model in listOf("deepseek-flash", "deepseek-v4-flash", "deepseek-v4.1-flash", "gpt-6-astra", "gpt-6.1-sol", "deepseek-v4-pro")) {
+            for (enabled in listOf(false, true)) {
+                val request = ResponsesRequest.body(model, JSONArray(), emptyList(), enabled)
+                assertEquals(enabled, request.has("tools"))
+                assertEquals(model, request.getString("model"))
+                if (enabled) {
+                    val tools = request.getJSONArray("tools")
+                    assertEquals(1, tools.length())
+                    assertEquals(if (model.endsWith("flash")) "deepseek_web_search" else "web_search",
+                        tools.getJSONObject(0).getString("type"))
+                }
+            }
+        }
+    }
+
+    @Test fun deepseekSourcesAndOutputIndexOnlyReceiptsStayNativeAndReplayUnchanged() {
+        fun item(id: String, kind: String = "search", status: String = "completed") = search(status).put("id", id).put("kind", kind).apply {
+            getJSONObject("action").put("sources", JSONArray().put(JSONObject().put("type", "url")
+                .put("url", "https://example.org/news").put("title", "fixture").put("snippet", "search summary")
+                .put("site_name", "Example").put("site_icon", "https://example.org/icon").put("published_at", "2026-01-02T03:04:05+00:00")))
+        }
+        fun frame(event: JSONObject) = "data: $event\n\n"
+        val first = item("ds-a"); val second = item("ds-b", "deep_search")
+        val frames = frame(JSONObject().put("type", "response.output_item.added").put("output_index", 0)
+            .put("item", JSONObject(first.toString()).put("status", "in_progress"))) +
+            frame(JSONObject().put("type", "response.output_item.added").put("output_index", 1)
+                .put("item", JSONObject(second.toString()).put("status", "in_progress"))) +
+            frame(JSONObject().put("type", "response.web_search_call.searching").put("output_index", 1)) +
+            frame(JSONObject().put("type", "response.web_search_call.completed").put("output_index", 0)) +
+            frame(JSONObject().put("type", "response.output_item.done").put("output_index", 0).put("item", first)) +
+            frame(JSONObject().put("type", "response.output_item.done").put("output_index", 1).put("item", second))
+        val events = mutableListOf<ModelEvent>()
+        val raw = ResponsesStream.read((frames + wire(first, second, message())).reader().buffered(), { false }, events::add)
+        assertTrue(events.none { it is ModelEvent.ToolReady })
+        val searches = events.filterIsInstance<ModelEvent.NativeSearch>()
+        assertTrue(searches.any { it.itemId == "ds-b" && it.phase == NativeSearchPhase.RUNNING })
+        assertTrue(searches.any { it.itemId == "ds-a" && it.phase == NativeSearchPhase.COMPLETED })
+        val assistant = Message(MessageId("a"), ConversationId("c"), RunId("r"), "assistant",
+            listOf(MessageBlock.Text("msg", "fixture")), RunStatus.COMPLETED, protocolItems = raw)
+        val replay = ResponsesRequest.history(listOf(assistant))
+        assertEquals(raw, (0 until replay.length()).map { replay.getJSONObject(it).toString() })
+        ResponsesSearchProtocol.validateItem(item("read", "read_link").put("action", JSONObject().put("type", "open_page"))
+            .put("page", JSONObject().put("url", "https://example.org/page").put("title", "fixture").put("published_at", JSONObject.NULL))
+            .put("signature", "opaque-replay-signature"))
+        val failed = item("failed", status = "failed").put("error", JSONObject().put("code", "unavailable"))
+        val failureEvents = mutableListOf<ModelEvent>()
+        ResponsesStream.read(wire(failed, message()).reader().buffered(), { false }, failureEvents::add)
+        assertEquals(listOf(NativeSearchPhase.FAILED), failureEvents.filterIsInstance<ModelEvent.NativeSearch>().map { it.phase })
+        reject { ResponsesSearchProtocol.validateItem(item("bad").put("kind", "shell")) }
+        reject { ResponsesSearchProtocol.validateItem(item("bad").apply { getJSONObject("action").getJSONArray("sources").getJSONObject(0).put("url", "file:///private") }) }
+        reject { ResponsesSearchProtocol.validateItem(item("bad").apply { getJSONObject("action").getJSONArray("sources").getJSONObject(0).put("snippet", JSONObject()) }) }
+        val confused = frame(JSONObject().put("type", "response.output_item.added").put("output_index", 0)
+            .put("item", JSONObject(first.toString()).put("status", "in_progress"))) +
+            frame(JSONObject().put("type", "response.web_search_call.completed").put("output_index", 0).put("item_id", "different-id"))
+        val failure = runCatching { ResponsesStream.read(confused.reader().buffered(), { false }) {} }.exceptionOrNull()
+        assertTrue(failure is ModelRequestException && failure.failure == ModelFailure.PROTOCOL)
+        val state = ResponsesStream.State()
+        val resumedEvents = mutableListOf<ModelEvent>()
+        val interruption = runCatching {
+            state.read(frame(JSONObject().put("type", "response.output_item.added").put("output_index", 0)
+                .put("item", JSONObject(first.toString()).put("status", "in_progress"))).reader().buffered(), { false }, resumedEvents::add)
+        }.exceptionOrNull()
+        assertTrue(interruption is ModelRequestException && interruption.failure == ModelFailure.INCOMPLETE)
+        state.read((frame(JSONObject().put("type", "response.web_search_call.completed").put("output_index", 0)) +
+            wire(first, message())).reader().buffered(), { false }, resumedEvents::add)
+        assertTrue(resumedEvents.filterIsInstance<ModelEvent.NativeSearch>().any {
+            it.itemId == "ds-a" && it.phase == NativeSearchPhase.COMPLETED
+        })
+    }
+
 }

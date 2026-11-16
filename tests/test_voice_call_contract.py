@@ -177,5 +177,33 @@ class VoiceCallContractTest(unittest.TestCase):
         self.assertIn('val captionScroll = rememberScrollState()', session)
         self.assertIn('val compressionState = rememberVoiceCallCompressionState', session)
         self.assertIn('captionScroll = captionScroll', session)
+
+
+class FloatingVoiceCallContract(unittest.TestCase):
+    def test_navigation_keeps_only_service_backed_calls_and_the_original_send_owner(self):
+        activity = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
+        self.assertIn('if (!continuingVoiceCall()) invalidateConfiguredVoice()', activity)
+        self.assertIn('!exactActive || callBlocked || (!continuing && navigationExcluded)', activity)
+        self.assertIn('target?.id?.value != turn.permit.conversationId', activity)
+        self.assertIn('pending != null && !universalTickets.containsKey(pending.ticket)', activity)
+        sidebar = activity.split('private var sidebarVisible: Boolean', 1)[1].split('private class ContextManagementVisit', 1)[0]
+        self.assertIn('pauseNonCallVoice()', sidebar)
+        self.assertNotIn('invalidateConfiguredVoice()', sidebar)
+        self.assertIn('foreground = activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible', activity)
+
+    def test_external_close_is_visual_only_and_detaches_after_its_own_animation(self):
+        floating = (ROOT / 'app/src/main/kotlin/app/daiyu/android/VoiceCallFloatingWindow.kt').read_text()
+        self.assertIn('TYPE_APPLICATION_OVERLAY', floating)
+        self.assertIn('FLAG_NOT_FOCUSABLE', floating)
+        self.assertIn('FLAG_NOT_TOUCH_MODAL', floating)
+        self.assertIn('FLAG_NOT_TOUCHABLE', floating)
+        self.assertIn('alpha(0f).scaleX(.88f).scaleY(.88f)', floating)
+        self.assertIn('window === current', floating)
+        self.assertIn('withEndAction', floating)
+        self.assertNotIn('startUniversalVoice', floating)
+        self.assertNotIn('startDuplex', floating)
+        self.assertNotIn('RECORD_AUDIO', floating)
+        self.assertIn('VoiceCallFloatingWindowTest', (ROOT / '.github/workflows/doubao-call-motion-checks.yml').read_text())
+
 if __name__ == '__main__':
     unittest.main()

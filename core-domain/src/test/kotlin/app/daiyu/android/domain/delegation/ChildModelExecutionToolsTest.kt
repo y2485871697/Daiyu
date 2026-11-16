@@ -182,7 +182,7 @@ class ChildModelExecutionToolsTest {
         }
         val supervisor = RetainedChildTasks(journal, diagnostics = ChildTaskDiagnostics { events += it })
         fun definition(selection: String, modelId: String, port: ModelPort) =
-            ChildModelDefinition("pool", 1, null, selection = selection, role = ChildModelRole.IMPLEMENTATION) { port }
+            ChildModelDefinition("pool", 1, null, latest = null, selection = selection, role = ChildModelRole.IMPLEMENTATION) { port }
                 .routed("fixture-provider", modelId)
         val chosen = AtomicReference(definition("old", "old-model", old))
         val dynamic = ChildModelDefinition("pool", 1, null, latest = { chosen.get() }, selection = "old",

@@ -24,16 +24,16 @@ class ReportedReasoningTextTest {
         }
     }
 
-    @Test fun activeReasoningNeedsBothAnAnchorAndLivePermission() {
+    @Test fun activeReasoningFollowsItsAnchorRatherThanTimingPermission() {
         val active = listOf(ReportedReasoning("r", "...", 0L, 0L))
-        assertTrue(isReportedReasoningActive(active, true))
-        assertFalse(isReportedReasoningActive(active, false))
-        assertFalse(isReportedReasoningActive(emptyList(), true))
+        assertTrue(isReportedReasoningActive(active))
+        assertFalse(isReportedReasoningActive(active.map { it.frozen(1_000_000L) }))
+        assertFalse(isReportedReasoningActive(emptyList()))
     }
 
     @Test fun finishedAndUnknownTimeSummariesDoNotReplaceTheLiveFallback() {
-        assertFalse(isReportedReasoningActive(listOf(ReportedReasoning("r", "summary", 200L)), true))
-        assertFalse(isReportedReasoningActive(listOf(ReportedReasoning("r", "summary")), true))
+        assertFalse(isReportedReasoningActive(listOf(ReportedReasoning("r", "summary", 200L))))
+        assertFalse(isReportedReasoningActive(listOf(ReportedReasoning("r", "summary"))))
         assertTrue(hasReportedReasoningText("**Planning concise warm Chinese story answer**"))
     }
 }

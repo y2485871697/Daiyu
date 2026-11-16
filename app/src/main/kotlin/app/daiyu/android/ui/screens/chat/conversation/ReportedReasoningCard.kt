@@ -63,7 +63,7 @@ internal fun ReportedReasoningCard(
     ownerKey: String,
     reported: List<ReportedReasoning>,
     allowLiveTiming: Boolean = false,
-    generationComplete: Boolean = !allowLiveTiming,
+    generationComplete: Boolean = !isReportedReasoningActive(reported),
     stopped: Boolean = false,
     embedded: Boolean = false,
     nanoTime: () -> Long = System::nanoTime,
@@ -73,7 +73,7 @@ internal fun ReportedReasoningCard(
     onHandoffReady: (Boolean) -> Unit = {},
 ) {
     val summaries = reported.filter { hasReportedReasoningText(it.text) }
-    val isThinking = !stopped && isReportedReasoningActive(reported, allowLiveTiming)
+    val isThinking = !stopped && !generationComplete && isReportedReasoningActive(reported)
     if (summaries.isEmpty() && !isThinking) { SideEffect { onHandoffReady(true) }; return }
     val hasSummary = summaries.isNotEmpty()
     val colors = conversationColors()
@@ -136,7 +136,7 @@ internal fun ReportedReasoningCard(
             Icon(ChatPreviewIcons.Thought, null, Modifier.size(if (embedded) 18.dp else 14.dp), tint = colors.accent)
             Text(if (isThinking) "正在思考…" else "已思考", Modifier.weight(1f), color = if (embedded) colors.text else colors.accent,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium))
-            ReasoningElapsedTime(ownerKey, rememberReasoningTiming(reported), isThinking, nanoTime, embedded)
+            ReasoningElapsedTime(ownerKey, rememberReasoningTiming(reported), isThinking && allowLiveTiming, nanoTime, embedded)
             if (hasSummary) {
                 Icon(ChatPreviewIcons.Chevron,
                     if (expanded) "收起模型已报告的思考 / 摘要" else "展开模型已报告的思考 / 摘要",
@@ -235,8 +235,8 @@ private fun ReasoningElapsedTime(
 internal fun hasReportedReasoningText(text: String): Boolean =
     text.any { !it.isWhitespace() && it != '.' && it != '…' }
 
-internal fun isReportedReasoningActive(reported: List<ReportedReasoning>, allowLiveTiming: Boolean): Boolean =
-    allowLiveTiming && reported.any { it.activeSinceNanos != null }
+internal fun isReportedReasoningActive(reported: List<ReportedReasoning>): Boolean =
+    reported.any { it.activeSinceNanos != null }
 
 @Composable
 internal fun ReasoningStepRow(
@@ -244,7 +244,7 @@ internal fun ReasoningStepRow(
     reported: ReportedReasoning,
     showConnector: Boolean = false,
     allowLiveTiming: Boolean = false,
-    generationComplete: Boolean = !allowLiveTiming,
+    generationComplete: Boolean = reported.activeSinceNanos == null,
     stopped: Boolean = false,
     revealResetEpoch: Long = 0L,
     parentExpanded: Boolean = true,
@@ -259,7 +259,7 @@ internal fun ReasoningStepRow(
                 27.dp.toPx() + (size.height + lineMotion.spacingAfter.toPx() - 27.dp.toPx()) * (lineMotion.outgoing?.fraction() ?: 1f))), 1.dp.toPx())
     }, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.padding(top = 17.dp).width(12.dp)) {
-            val complete = reported.activeSinceNanos == null
+            val complete = generationComplete || reported.activeSinceNanos == null
             val spinning = !complete && allowLiveTiming && !generationComplete && !stopped && LocalWorkflowNodeMotionEnabled.current
             Box(Modifier.size(10.dp).testTag("reasoning-step-state:${reported.itemId}")
                 .semantics { stateDescription = if (complete) "已思考" else "正在思考" }

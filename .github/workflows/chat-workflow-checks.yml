@@ -200,7 +200,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          classes=(AssistantWorkflowContentTest ToolHeaderTextTest)
+          classes=(AssistantWorkflowContentTest ToolHeaderTextTest ReportedReasoningTextTest)
           if [[ "$WORKFLOW_CHECK_SCOPE" == workflow ]]; then
             classes+=(ReconnectPartsTest WorkflowDisclosureMotionTest)
           fi
@@ -312,7 +312,7 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          expected = {'AssistantWorkflowContentTest', 'ToolHeaderTextTest'}
+          expected = {'AssistantWorkflowContentTest', 'ToolHeaderTextTest', 'ReportedReasoningTextTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow':
               expected |= {'ReconnectPartsTest', 'WorkflowDisclosureMotionTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] != 'environment-dots':

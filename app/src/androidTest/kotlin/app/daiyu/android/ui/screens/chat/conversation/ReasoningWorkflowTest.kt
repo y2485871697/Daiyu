@@ -1108,4 +1108,124 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         } finally { ui.mainClock.autoAdvance = true }
     }
 
+    fun testTimingPermissionDoesNotCompleteOrReactivateAThought() {
+        prepare()
+        var handoffReady = true
+        var timing by mutableStateOf(true)
+        var reported by mutableStateOf(ReportedReasoning("phase", "first summary", 0L, System.nanoTime()))
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                ReasoningStepRow("phase-owner", reported, allowLiveTiming = timing, onHandoffReady = { handoffReady = it })
+            } } }
+            for (sample in listOf(true, false, true, false)) {
+                mainThread { timing = sample }
+                ui.mainClock.advanceTimeBy(32)
+                ui.onNodeWithText("正在思考…").assertExists()
+                assertFalse("Timing permission must not release an active thought", handoffReady)
+                ui.onNodeWithText("已思考").assertDoesNotExist()
+                ui.onNodeWithTag("reasoning-step-state:phase", useUnmergedTree = true).assert(
+                    SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "正在思考"))
+            }
+            mainThread { reported = reported.copy(activeSinceNanos = null, elapsedMillis = 100L) }
+            for (sample in listOf(false, true, false, true)) {
+                mainThread { timing = sample }
+                ui.mainClock.advanceTimeBy(32)
+                ui.onNodeWithText("已思考").assertExists()
+                ui.onNodeWithText("正在思考…").assertDoesNotExist()
+                ui.onNodeWithTag("reasoning-step-state:phase", useUnmergedTree = true).assert(
+                    SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testTerminalThoughtDoesNotUseAStaleTimingAnchor() {
+        prepare()
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            ReasoningStepRow("terminal-owner", ReportedReasoning("terminal", "first summary", 100L, System.nanoTime()),
+                allowLiveTiming = true, generationComplete = true)
+        } } }
+        ui.onNodeWithText("已思考").assertExists()
+        ui.onNodeWithText("正在思考…").assertDoesNotExist()
+        ui.onNodeWithTag("reasoning-step-state:terminal", useUnmergedTree = true).assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))
+        ui.onNodeWithTag("workflow-waiting:reasoning:terminal", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    fun testLegacyAutomaticCollapseNeverReactivatesCompletedThought() = verifyCompletedThoughtExit(mixed = false)
+    fun testMixedAutomaticCollapseNeverReactivatesCompletedThought() = verifyCompletedThoughtExit(mixed = true)
+
+    private fun verifyCompletedThoughtExit(mixed: Boolean) {
+        prepare()
+        var reported by mutableStateOf(ReportedReasoning("exit", "first summary", 0L, System.nanoTime(), blockOffset = 1))
+        var running by mutableStateOf(true)
+        var timing by mutableStateOf(true)
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val source = message(listOf(tool("exit-tool")) +
+                    if (running) emptyList() else listOf(MessageBlock.Text("answer", "answer")), listOf(reported))
+                    .copy(status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED)
+                val turn = mapped(source).copy(isStreaming = timing && running)
+                AssistantTurn(if (mixed) turn else turn.copy(content = emptyList()), ChatScreenActions())
+            } } }
+            ui.mainClock.advanceTimeBy(600)
+            assertDisclosure("work-process-header", expanded = true)
+            mainThread { reported = reported.copy(activeSinceNanos = null, elapsedMillis = 100L) }
+            ui.mainClock.advanceTimeBy(400)
+            for (sample in listOf(false, true)) {
+                mainThread { timing = sample }
+                ui.mainClock.advanceTimeByFrame()
+                ui.onNodeWithText("已思考").assertExists()
+                ui.onNodeWithText("正在思考…").assertDoesNotExist()
+            }
+            val openHeight = ui.onNodeWithTag("work-process-surface").fetchSemanticsNode().boundsInRoot.height
+            mainThread { running = false }
+            var intermediate = false
+            var closed = false
+            repeat(180) {
+                if (!closed) {
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.onNodeWithText("正在思考…").assertDoesNotExist()
+                    val states = ui.onAllNodesWithTag("reasoning-step-state:exit", useUnmergedTree = true).fetchSemanticsNodes()
+                    states.forEach { assertEquals("已思考", it.config[SemanticsProperties.StateDescription]) }
+                    val height = ui.onNodeWithTag("work-process-surface").fetchSemanticsNode().boundsInRoot.height
+                    val header = ui.onNodeWithTag("work-process-header").fetchSemanticsNode().boundsInRoot.height
+                    if (height > header + 2f && height < openHeight - 2f) intermediate = true
+                    closed = ui.onAllNodesWithTag("work-reasoning:exit").fetchSemanticsNodes().isEmpty()
+                }
+            }
+            assertTrue("Observed the real automatic exit's intermediate height", intermediate)
+            assertTrue("Automatic exit disposes the completed thought", closed)
+            assertDisclosure("work-process-header", expanded = false)
+            ui.onNodeWithTag("work-process-header").performClick()
+            ui.mainClock.advanceTimeBy(600)
+            ui.onNodeWithText("已思考").assertExists()
+            ui.onNodeWithText("正在思考…").assertDoesNotExist()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testANewThoughtCanRunAfterThePreviousThoughtCompleted() {
+        prepare()
+        var appended by mutableStateOf(false)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            androidx.compose.foundation.layout.Column {
+                ReasoningStepRow("successive", ReportedReasoning("old", "first summary", 100L),
+                    allowLiveTiming = true, generationComplete = false)
+                if (appended) ReasoningStepRow("successive", ReportedReasoning("new", "second summary", 0L, System.nanoTime()),
+                    allowLiveTiming = true, generationComplete = false)
+            }
+        } } }
+        ui.onNodeWithTag("reasoning-step-state:old", useUnmergedTree = true).assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))
+        ui.onNodeWithTag("reasoning-step-state:new", useUnmergedTree = true).assertDoesNotExist()
+        mainThread { appended = true }
+        ui.onNodeWithTag("reasoning-step-state:old", useUnmergedTree = true).assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))
+        ui.onNodeWithTag("reasoning-step-state:new", useUnmergedTree = true).assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "正在思考"))
+        ui.onNodeWithText("已思考").assertExists()
+        ui.onNodeWithText("正在思考…").assertExists()
+    }
+
 }

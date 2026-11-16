@@ -8,13 +8,13 @@ CHAT = ROOT / "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 class ReportedReasoningMarkdownContractTest(unittest.TestCase):
     def test_summary_uses_background_projection_and_shared_renderer(self):
         source = (CHAT / "ReportedReasoningCard.kt").read_text()
-        self.assertIn("rememberMarkdownProjection(listOf(text), streaming = streamingProjection)", source)
+        self.assertIn("rememberMarkdownProjection(listOf(text), streaming = streamingProjection, windows = listOf(sourceWindow))", source)
         self.assertIn("summary.text.takeIf(::hasReportedReasoningText).orEmpty()", source)
         self.assertIn("RevealedMessageMarkdown(", source)
         self.assertIn("deferBlockReveal = true", source)
         leaf = (CHAT / "MessageMarkdown.kt").read_text().split("internal fun RevealedMessageMarkdown(", 1)[1].split("@Composable", 1)[0]
-        self.assertIn("ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete)", leaf)
-        self.assertIn("projection?.blocks?.get(displayed)", source)
+        self.assertIn("ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)", leaf)
+        self.assertIn("projection?.blocksAt(0)", source)
         self.assertNotRegex(source, r"\bText\(it\.text")
         self.assertNotIn("MarkdownParser.parse", source)
 
@@ -59,8 +59,8 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
     def test_reply_identity_waits_for_content_without_blocking_readiness(self):
         source = (CHAT / "ChatMessageList.kt").read_text()
         assistant = source.split("internal fun AssistantTurn(", 1)[1].split("private fun AssistantTextContent", 1)[0]
-        self.assertIn("if (turn.hasVisibleResponse())", assistant)
-        gate = assistant.index("if (turn.hasVisibleResponse())")
+        self.assertIn("if (turn.hasVisibleResponse() || showActions && actionTurn !== turn || holdActionSlot)", assistant)
+        gate = assistant.index("if (turn.hasVisibleResponse() || showActions && actionTurn !== turn || holdActionSlot)")
         self.assertLess(assistant.index("SideEffect { onContentReady(contentReady) }"), gate)
         self.assertLess(assistant.index("SideEffect { onContentDisplayed(hasDisplayBody || contentReady) }"), gate)
         self.assertLess(gate, assistant.index('Modifier.testTag("reply-identity:'))
@@ -69,7 +69,8 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
         source = (CHAT / "RestoredMarkdown.kt").read_text()
         self.assertIn("message.reportedReasoning", source)
         self.assertIn("hasReportedReasoningText", source)
-        self.assertIn("cache.preparationSources(restoredMarkdownSources(messages))", source)
+        self.assertIn("prepareRestoredMarkdownSources(restoredMarkdownSources(messages), cache, parser, checkActive)", source)
+        self.assertIn("val prepared = cache.preparationSources(sources).map { source ->", source)
 
     def test_new_component_regressions_cover_rich_stream_and_identity(self):
         tests = ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ReportedReasoningMarkdownTest.kt"

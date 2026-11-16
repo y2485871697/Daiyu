@@ -198,6 +198,15 @@ class CatalogModelEditorLayoutTest : WiredActivityTestCase() {
                 assertTrue("$tag above footer", bounds.bottom <= footer.top + 1f)
                 assertEquals(footer, node("catalog-model-actions").fetchSemanticsNode().boundsInRoot)
             }
+            revealEditor("catalog-model-capabilities")
+            val idField = node("settings-field:Model ID").getUnclippedBoundsInRoot()
+            val contextField = node("settings-field:上下文窗口").getUnclippedBoundsInRoot()
+            val capabilities = node("catalog-model-capabilities").getUnclippedBoundsInRoot()
+            val fieldGap = contextField.top - idField.bottom
+            val capabilityGap = capabilities.top - contextField.bottom
+            assertTrue("context field must be separated from capabilities", capabilityGap.value > 0f)
+            assertEquals("context-to-capabilities gap matches other fields",
+                fieldGap.value, capabilityGap.value, 1f)
             capture("catalog-model-${if (dark) "dark" else "light"}-$scale")
             node("dialog-cancel").performClick()
         }

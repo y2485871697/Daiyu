@@ -83,6 +83,7 @@ internal fun CatalogModelEditorDialog(initial: CatalogModelEdit, isNew: Boolean,
                                         }.wrapContentSize(Alignment.Center))
                             },
                             onValueChange = { contextInput = contextInput.copy(text = it) })
+                        Spacer(Modifier.height(12.dp))
                         Column(Modifier.fillMaxWidth().testTag("catalog-model-capabilities")
                             .clip(RoundedCornerShape(16.dp)).background(colors.surfaceContainerHigh)) {
                             SettingsSwitchRow("支持视觉", value.vision, interactive) { value = value.copy(vision = it) }

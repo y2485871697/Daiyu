@@ -377,22 +377,46 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             }
             instrumentation.runOnMainSync { nextAdmitted = true }
             val samples = mutableListOf<ArrivalSample>()
+            val frames = mutableListOf<androidx.compose.ui.graphics.ImageBitmap>()
             repeat(64) {
                 ui.mainClock.advanceTimeByFrame()
                 ui.waitForIdle()
-                val frame = pixels()
+                val image = ui.onNodeWithTag("motion-raster").captureToImage()
+                frames += image
+                val frame = image.toPixelMap()
                 samples += ArrivalSample(line(frame), terminalInk(frame, success), bodyInk(frame), operationY(frame))
                 assertEquals("tool entrance must not move already displayed narration", textBefore,
                     ui.onNodeWithTag("message-content-text:1").fetchSemanticsNode().boundsInRoot)
             }
             ui.mainClock.advanceTimeBy(1_000)
-            val end = pixels()
+            val endImage = ui.onNodeWithTag("motion-raster").captureToImage()
+            val end = endImage.toPixelMap()
             val fullLine = line(end)
             val fullBody = bodyInk(end)
             assertTrue(fullLine.isNotEmpty() && fullLine.all { it > .005f })
             val waiting = samples.filter { sample -> sample.connector.size == fullLine.size &&
                 sample.connector.zip(fullLine).any { (now, full) -> now < full * .9f } }
             assertTrue("must observe a line crossing completed narration", waiting.isNotEmpty())
+            val failureIndex = samples.indexOfFirst { sample -> sample in waiting &&
+                (sample.body > fullBody * .01f || sample.ink > .03f) }
+            if (failureIndex >= 0) {
+                val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/workflow-arrival").apply { mkdirs() }
+                for ((name, image) in listOf("narration-frame$failureIndex" to frames[failureIndex], "narration-final" to endImage)) {
+                    java.io.File(directory, "$name.png").outputStream().use {
+                        image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                }
+                java.io.File(directory, "narration-frame$failureIndex.txt").writeText(buildString {
+                    appendLine("density=${density.density} background=$background raster=$raster first=$a narration=$textBefore")
+                    appendLine("target=${ui.onNodeWithTag("tool-step:motion-b").fetchSemanticsNode().boundsInRoot} fullBody=$fullBody")
+                    samples.forEachIndexed { index, sample ->
+                        val missing = sample.connector.zip(fullLine).mapIndexedNotNull { row, (now, full) ->
+                            if (now < full * .9f) "$row:$now/$full" else null
+                        }
+                        appendLine("frame=$index body=${sample.body} ink=${sample.ink} lineSize=${sample.connector.size} missing=${missing.joinToString()}")
+                    }
+                })
+            }
             waiting.forEach { sample ->
                 assertTrue("body must wait until the line crosses narration", sample.body <= fullBody * .01f)
                 assertTrue("glyph must wait until the line crosses narration", sample.ink <= .03f)

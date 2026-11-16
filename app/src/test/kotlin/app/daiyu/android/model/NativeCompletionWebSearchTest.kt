@@ -96,9 +96,11 @@ class NativeCompletionWebSearchTest {
             assertEquals(enabled, snapshot.asModelSettings().requestOptions.openAiWebSearchEnabled)
             assertFalse(snapshot.withoutNativeSearch().requestOptions.openAiWebSearchEnabled)
             assertEquals(enabled, snapshot.requestOptions.openAiWebSearchEnabled)
-            val gemini = NativeCompletionRequest.body(value.copy(protocol = ProviderProtocol.GEMINI), JSONArray(), listOf(tool), null)
+            val gemini = NativeCompletionRequest.body(value.copy(protocol = ProviderProtocol.GEMINI), JSONArray(),
+                if (enabled) emptyList() else listOf(tool), null)
             assertFalse(gemini.has("web_search_options"))
             assertFalse(gemini.toString().contains("web_search"))
+            assertEquals(enabled, gemini.getJSONArray("tools").getJSONObject(0).has("googleSearch"))
         }
     }
 

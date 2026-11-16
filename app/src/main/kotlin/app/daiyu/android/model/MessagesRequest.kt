@@ -299,7 +299,10 @@ internal object MessagesRequest {
         for (i in 0 until content.length()) {
             val block = content.getJSONObject(i)
             when (block.strictString("type")) {
-                "text" -> block.strictString("text")
+                "text" -> {
+                    block.strictString("text")
+                    block.optJSONArray("citations")?.let { NativeSearchSources().claude(it) }
+                }
                 "tool_use" -> {
                     require(role == "assistant")
                     block.strictString("id"); block.strictString("name"); block.getJSONObject("input")
@@ -350,7 +353,8 @@ internal object MessagesRequest {
         return validateObject(body, MAX_JSON_CONTAINER_DEPTH)
     }
 
-    fun body(model: String, messages: JSONArray, tools: List<ToolDefinition>, maxTokens: Int): JSONObject {
+    fun body(model: String, messages: JSONArray, tools: List<ToolDefinition>, maxTokens: Int,
+             webSearchEnabled: Boolean = false, endpoint: String? = null): JSONObject {
         require(maxTokens > 0) { "Messages maxTokens must be positive" }
         require(tools.map { it.name }.toSet().size == tools.size) { "Duplicate tool definition" }
         val schemas = JSONArray()
@@ -360,7 +364,9 @@ internal object MessagesRequest {
             require(schema.optString("type") == "object") { "Tool input schema must be an object" }
             schemas.put(JSONObject().put("name", tool.name).put("description", tool.description).put("input_schema", schema))
         }
-        return validateObject(JSONObject().put("model", model).put("messages", messages).put("stream", true).put("max_tokens", maxTokens)
+        val body = validateObject(JSONObject().put("model", model).put("messages", messages).put("stream", true).put("max_tokens", maxTokens)
             .also { if (schemas.length() > 0) it.put("tools", schemas) }, MAX_JSON_CONTAINER_DEPTH)
+        return validateObject(NativeSearchPolicy.apply(body, ProviderProtocol.MESSAGES, model, endpoint,
+            webSearchEnabled, tools), MAX_JSON_CONTAINER_DEPTH)
     }
 }

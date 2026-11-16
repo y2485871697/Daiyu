@@ -36,6 +36,7 @@ data class ProviderRequestOptions(
         if (customBody.isNotEmpty()) {
             val body = parseBody()
             require(body.keys().asSequence().none { it in OWNED_FIELDS }) { "自定义请求体不能覆盖会话协议字段" }
+            require(!openAiWebSearchEnabled || !body.has("enable_search")) { "自定义请求体不能覆盖已开启的原生搜索" }
             if (protocol == ProviderProtocol.GEMINI) require(body.keys().asSequence().all { it in setOf("generationConfig", "safetySettings") }) {
                 "Gemini 自定义请求体仅支持 generationConfig 与 safetySettings"
             }

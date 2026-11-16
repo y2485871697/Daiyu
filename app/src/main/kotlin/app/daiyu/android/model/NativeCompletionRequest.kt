@@ -81,6 +81,9 @@ internal object NativeCompletionRequest {
             } }
         } else {
             require(item.optString("role") in setOf("model", "user") && item.optJSONArray("parts") != null && !item.has("content")) { "历史不是 Gemini 原生数据" }
+            item.optJSONObject("groundingMetadata")?.let { metadata ->
+                NativeSearchSources().also { it.gemini(metadata); it.geminiWire() }
+            }
             val parts = item.getJSONArray("parts")
             for (i in 0 until parts.length()) {
                 val part = parts.getJSONObject(i)
@@ -202,15 +205,18 @@ internal object NativeCompletionRequest {
     fun body(settings: ModelSettings, history: JSONArray, tools: List<ToolDefinition>, instructions: String?): JSONObject {
         requireNative(settings.protocol)
         val gemini = settings.protocol == ProviderProtocol.GEMINI
-        val request = if (gemini) JSONObject().put("contents", history) else JSONObject().put("model", settings.model)
-            .put("messages", history).put("stream", true).put("stream_options", JSONObject().put("include_usage", true))
-        if (!gemini && settings.requestOptions.openAiWebSearchEnabled) request.put("web_search_options", JSONObject())
+        val contents = JSONArray().also { projected ->
+            for (index in 0 until history.length()) projected.put(JSONObject(history.getJSONObject(index).toString())
+                .also { it.remove("groundingMetadata"); it.remove("search_sources") })
+        }
+        val request = if (gemini) JSONObject().put("contents", contents) else JSONObject().put("model", settings.model)
+            .put("messages", contents).put("stream", true).put("stream_options", JSONObject().put("include_usage", true))
         if (!gemini && URI(settings.endpoint).host.equals("api.mistral.ai", true)) request.remove("stream_options")
         if (!instructions.isNullOrBlank()) {
             if (gemini) request.put("systemInstruction", JSONObject().put("parts", JSONArray().put(JSONObject().put("text", instructions))))
             else {
                 val messages = JSONArray().put(JSONObject().put("role", "system").put("content", instructions))
-                for (i in 0 until history.length()) messages.put(history.get(i))
+                for (i in 0 until contents.length()) messages.put(contents.get(i))
                 request.put("messages", messages)
             }
         }
@@ -228,6 +234,7 @@ internal object NativeCompletionRequest {
             }
             request.put("tools", if (gemini) JSONArray().put(JSONObject().put("functionDeclarations", declarations)) else declarations)
         }
-        return request
+        return NativeSearchPolicy.apply(request, settings.protocol, settings.model, settings.endpoint,
+            settings.requestOptions.openAiWebSearchEnabled, tools)
     }
 }

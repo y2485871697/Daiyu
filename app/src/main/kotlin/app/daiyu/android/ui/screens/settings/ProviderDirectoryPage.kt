@@ -55,6 +55,7 @@ internal data class ProviderCardSummary(val endpoint: String, val protocol: Prov
         listOfNotNull(if (app.daiyu.android.voice.providers.DoubaoSpeech.isOpenspeech(endpoint)) "豆包语音" else when (protocol) {
             ProviderProtocol.RESPONSES, ProviderProtocol.CHAT_COMPLETIONS -> "OpenAi"
             ProviderProtocol.MESSAGES -> "Anthropic"
+            ProviderProtocol.GEMINI -> "Gemini"
             else -> null
         }, modelCount?.let { "$it 个模型" }, "禁用".takeUnless { enabled }).joinToString(" · ").takeIf { it.isNotEmpty() },
     ).joinToString("\n")

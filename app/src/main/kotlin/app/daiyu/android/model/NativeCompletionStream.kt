@@ -44,6 +44,7 @@ internal object NativeCompletionStream {
         val details = sortedMapOf<Int, JSONObject>()
         val calls = sortedMapOf<Int, Call>()
         val annotations = linkedMapOf<String, JSONObject>()
+        val searchSources = NativeSearchSources()
         val eventId = "chat-${java.util.UUID.randomUUID()}"
         var sourceId: String? = null
         var reason: String? = null
@@ -66,6 +67,8 @@ internal object NativeCompletionStream {
             if (data.trim() == "null") return@frame true
             val chunk = MessagesRequest.jsonObject(data)
             if (chunk.has("error")) throw ProviderHttpFailure.event(chunk.optJSONObject("error"))
+            val searchMetadata = searchSources.chat(chunk)
+            if (searchMetadata) account(data.length)
             val searchPhase = when (chunk.optString("type")) {
                 "response.web_search_call.in_progress", "response.web_search_call.searching" -> NativeSearchPhase.RUNNING
                 "response.web_search_call.completed" -> NativeSearchPhase.COMPLETED
@@ -93,7 +96,7 @@ internal object NativeCompletionStream {
                 usage = if (input == null && output == null && cached == null) null else ModelEvent.Usage(input, output, cached)
             }
             val choices = chunk.optJSONArray("choices")
-            if (choices == null) { protocol(chunk.has("usage")); return@frame true }
+            if (choices == null) { protocol(chunk.has("usage") || searchMetadata); return@frame true }
             protocol(choices.length() <= 1)
             if (choices.length() == 0) return@frame true
             protocol(reason == null)
@@ -182,6 +185,7 @@ internal object NativeCompletionStream {
         protocol(text.isNotEmpty() || reasoning.isNotEmpty() || details.isNotEmpty() || calls.isNotEmpty())
         val row = NativeCompletionRequest.textMessage(ProviderProtocol.CHAT_COMPLETIONS, "assistant", text.toString())
         if (annotations.isNotEmpty()) row.put("annotations", JSONArray(annotations.values.toList()))
+        if (searchSources.wire().length() > 0) row.put("search_sources", searchSources.wire())
         ChatSearchProtocol.validate(row)
         if (reasoning.isNotEmpty()) row.put("reasoning_content", reasoning.toString())
         if (details.isNotEmpty()) row.put("reasoning_details", JSONArray(details.values.toList()))
@@ -214,6 +218,8 @@ internal object NativeCompletionStream {
             val value = StringBuilder()
         }
         val sequence = mutableListOf<Any>()
+        val grounding = NativeSearchSources()
+        var hasGrounding = false
         var reason: String? = null
         var chars = 0L
         var usage: ModelEvent.Usage? = null
@@ -240,7 +246,14 @@ internal object NativeCompletionStream {
             val candidates = chunk.optJSONArray("candidates")
             if (reason != null) {
                 tailChars += data.length
-                protocol(++tailFrames <= 16 && tailChars <= 65536 && (candidates == null || candidates.length() == 0))
+                protocol(++tailFrames <= 16 && tailChars <= 262144 && (candidates == null || candidates.length() <= 1))
+                if (candidates != null && candidates.length() == 1) {
+                    val candidate = candidates.getJSONObject(0)
+                    protocol(candidate.keys().asSequence().all { it in setOf("index", "groundingMetadata", "finishReason", "safetyRatings", "citationMetadata") })
+                    if (candidate.has("index")) protocol(candidate.index("index") == 0)
+                    if (candidate.has("finishReason")) protocol(candidate.string("finishReason") == reason)
+                    candidate.optJSONObject("groundingMetadata")?.let { grounding.gemini(it); hasGrounding = true }
+                }
                 return@frame true
             }
             if (candidates != null && candidates.length() > 0) {
@@ -280,6 +293,9 @@ internal object NativeCompletionStream {
                         parts.put(part)
                     }
                 }
+                candidate.optJSONObject("groundingMetadata")?.let { metadata ->
+                    grounding.gemini(metadata); hasGrounding = true
+                }
                 if (candidate.has("finishReason")) {
                     reason = candidate.string("finishReason")
                     if (reason != "STOP") throw ModelRequestException(ModelFailure.INCOMPLETE)
@@ -292,13 +308,16 @@ internal object NativeCompletionStream {
         if (reason == null) throw ModelRequestException(ModelFailure.INCOMPLETE, transportInterrupted = true)
         protocol(parts.length() > 0)
         val row = JSONObject().put("role", "model").put("parts", parts)
+        if (hasGrounding) row.put("groundingMetadata", grounding.geminiWire())
+        val lastAnswer = sequence.filterIsInstance<VisibleText>().lastOrNull { !it.reasoning }
         MessagesRequest.validateObject(row, MessagesRequest.MAX_MESSAGE_CONTAINER_DEPTH)
         protocol(row.toString().length <= 1_000_000)
         sequence.forEach { item ->
             when (item) {
                 is VisibleText -> if (item.value.isNotEmpty()) {
                     if (!item.streamed) sink(if (item.reasoning) ModelEvent.ReasoningDelta(item.id, item.value.toString()) else ModelEvent.TextDelta(item.id, item.value.toString()))
-                    sink(if (item.reasoning) ModelEvent.ReasoningFinal(item.id, item.value.toString()) else ModelEvent.TextFinal(item.id, item.value.toString()))
+                    sink(if (item.reasoning) ModelEvent.ReasoningFinal(item.id, item.value.toString()) else ModelEvent.TextFinal(item.id,
+                        if (item === lastAnswer) grounding.display(item.value.toString()) else item.value.toString()))
                 }
                 is ToolInvocation -> sink(ModelEvent.ToolReady(item))
             }

@@ -61,9 +61,9 @@ internal fun ProviderSettingsTabs(modelTab: Boolean, enabled: Boolean, onSelect:
 internal fun ProviderProtocolFields(draft: ModelSettingsDraftUi, enabled: Boolean,
     onChange: (ModelSettingsDraftUi) -> Unit) {
     if (draft.protocol == ProviderProtocol.MESSAGES || draft.savedProtocol == ProviderProtocol.MESSAGES) return
-    val protocols = listOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.RESPONSES)
-    val modes = listOf("Chat Completions API", "Responses API")
-    val tags = listOf("settings-radio:OpenAI Chat Completions", "settings-radio:OpenAI Responses")
+    val protocols = listOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.RESPONSES, ProviderProtocol.GEMINI)
+    val modes = listOf("Chat Completions API", "Responses API", "Gemini API")
+    val tags = listOf("settings-radio:OpenAI Chat Completions", "settings-radio:OpenAI Responses", "settings-radio:Gemini")
     val index = protocols.indexOf(draft.protocol)
     ProviderChoiceRow("上游格式", modes.getOrNull(index) ?: "请选择", "provider-endpoint-select", enabled, modes,
         tags, index) { choice -> onChange(draft.selectProtocol(protocols[choice])) }

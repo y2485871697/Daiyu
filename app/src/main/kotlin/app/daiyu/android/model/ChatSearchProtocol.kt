@@ -22,6 +22,10 @@ internal object ChatSearchProtocol {
     }
 
     fun validate(row: JSONObject) {
+        if (row.has("search_sources")) {
+            require(row.optString("role") == "assistant")
+            NativeSearchSources().restore(row.getJSONArray("search_sources"))
+        }
         if (row.has("annotations")) {
             require(row.optString("role") == "assistant") { "网页引用必须属于模型回复" }
             textPart(row)
@@ -30,8 +34,10 @@ internal object ChatSearchProtocol {
 
     fun displayText(row: JSONObject): String {
         val plain = row.getString("content")
-        if (!row.has("annotations")) return plain
-        return ResponsesSearchProtocol.displayText(JSONObject().put("type", "message")
-            .put("content", JSONArray().put(textPart(row))), plain)
+        val cited = if (!row.has("annotations")) plain else ResponsesSearchProtocol.displayText(
+            JSONObject().put("type", "message").put("content", JSONArray().put(textPart(row))), plain)
+        return row.optJSONArray("search_sources")?.let { list ->
+            NativeSearchSources().also { it.restore(list) }.display(cited)
+        } ?: cited
     }
 }

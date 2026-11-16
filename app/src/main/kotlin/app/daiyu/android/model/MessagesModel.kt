@@ -62,8 +62,11 @@ class MessagesModel internal constructor(
         private var usable = true
         private var started = false
         private var pending = emptySet<String>()
+        private var serverContinuation = false
+        private var lastServerPause: String? = null
 
-        init { MessagesRequest.body(settings.model, messages, tools, maxTokens) }
+        init { MessagesRequest.body(settings.model, messages, tools, maxTokens,
+            settings.requestOptions.openAiWebSearchEnabled, settings.endpoint) }
         private fun checkCancelled() { if (cancelled.get()) throw InterruptedException() }
 
         @Synchronized
@@ -73,7 +76,10 @@ class MessagesModel internal constructor(
         override val canResume: Boolean get() = !cancelled.get() && retry.available
         override fun prepareContinuation(continuation: RequestContinuation) = retry.prepare(continuation)
         @Synchronized
-        override fun resume(sink: (ModelEvent) -> Unit) = retry.replay { next(it, sink) }
+        override fun resume(sink: (ModelEvent) -> Unit) {
+            retry.replay { nextRequest(it, sink) }
+            while (serverContinuation) nextRequest(emptyList(), sink)
+        }
         override fun disconnectTransport() {
             val current = connection
             connectionTrace?.takeIf { it.first === current }?.second?.localDisconnectRequested()
@@ -82,24 +88,34 @@ class MessagesModel internal constructor(
 
         @Synchronized
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+            var supplied = outputs
+            do {
+                nextRequest(supplied, sink)
+                supplied = emptyList()
+            } while (serverContinuation)
+        }
+
+        private fun nextRequest(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
             checkCancelled()
-            check(usable && (!started || pending.isNotEmpty())) { "Messages session cannot be replayed" }
+            check(usable && (!started || pending.isNotEmpty() || serverContinuation)) { "Messages session cannot be replayed" }
             require(outputs.map { it.callId.value }.toSet() == pending && outputs.size == pending.size) {
                 "Tool outputs must match all pending tool calls exactly once"
             }
             val savedMessages = messages.toString()
             val savedItems = ownItems.toList()
             val savedPending = pending
+            val savedPause = lastServerPause
+            val savedContinuation = serverContinuation
             val savedStarted = started
             val savedTools = tools
             retry.capture(outputs) {
                 messages = JSONArray(savedMessages)
                 ownItems.clear(); ownItems.addAll(savedItems)
-                pending = savedPending; started = savedStarted; usable = true; tools = savedTools
+                pending = savedPending; lastServerPause = savedPause; serverContinuation = savedContinuation; started = savedStarted; usable = true; tools = savedTools
             }
             started = true
             // Retain the exact request boundary; only an explicitly enabled Runner may replay it.
-            usable = false
+            usable = false; serverContinuation = false
             if (outputs.isNotEmpty()) {
                 val content = JSONArray()
                 outputs.forEach { content.put(MessagesRequest.result(it.callId.value, it.output)) }
@@ -117,7 +133,8 @@ class MessagesModel internal constructor(
                 }
             }
             var request = MessagesRequest.withAssistantInstructions(
-                settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens), ProviderProtocol.MESSAGES),
+                settings.requestOptions.apply(MessagesRequest.body(settings.model, messages, tools, maxTokens,
+                    settings.requestOptions.openAiWebSearchEnabled, settings.endpoint), ProviderProtocol.MESSAGES),
                 assistantInstructions,
             )
             val screenInput = ScreenToolImageInput.prepare(request, messages, settings, capability,
@@ -166,9 +183,15 @@ class MessagesModel internal constructor(
                     throw ModelRequestException(ModelFailure.PROTOCOL)
                 trace.phase = ModelTransportPhase.READING_STREAM
                 trace.reader(conn.inputStream).useProviderResponse { reader ->
-                    val raw = MessagesStream.read(reader, cancelled::get, deliver)
+                    val raw = MessagesStream.readWithStopReason(reader, cancelled::get, deliver,
+                        if (settings.requestOptions.openAiWebSearchEnabled)
+                            { reason: String -> serverContinuation = reason == "pause_turn" } else null)
                     trace.completionReceived()
                     checkCancelled()
+                    if (serverContinuation) {
+                        if (raw == lastServerPause) throw ModelRequestException(ModelFailure.INCOMPLETE)
+                        lastServerPause = raw
+                    } else lastServerPause = null
                     val item = JSONObject(raw)
                     app.daiyu.android.model.images.FrozenMessageImagePlan.rejectRawImageNode(item)
                     val content = item.getJSONArray("content")

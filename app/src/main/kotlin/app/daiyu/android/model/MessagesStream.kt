@@ -18,7 +18,11 @@ internal object MessagesStream {
         var stopped = false
     }
 
-    fun read(reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit): String {
+    fun read(reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit): String =
+        readWithStopReason(reader, cancelled, sink, null)
+
+    fun readWithStopReason(reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit,
+                           stopReason: ((String) -> Unit)?): String {
         var deliveryFailure: Exception? = null
         fun deliver(event: ModelEvent) {
             if (cancelled()) throw InterruptedException()
@@ -109,7 +113,12 @@ internal object MessagesStream {
                                 protocol(chars <= 2_000_000)
                             }
                             else -> {
+                                if (MessagesRequest.isServerToolUse(wire.optString("type")) && !wire.has("input"))
+                                    wire.put("input", JSONObject())
                                 MessagesRequest.validateServerBlock(wire, "assistant")
+                                if (MessagesRequest.isServerToolUse(wire.optString("type")) &&
+                                    wire.optString("name") in setOf("web_search", "deepseek_web_search"))
+                                    deliver(ModelEvent.NativeSearch(wire.getString("id"), NativeSearchPhase.RUNNING))
                                 chars += wire.toString().length
                                 protocol(chars <= 2_000_000)
                             }
@@ -130,6 +139,15 @@ internal object MessagesStream {
                                 protocol(chars <= 2_000_000)
                                 block.text.append(text)
                                 deliver(ModelEvent.TextDelta("$id:$index", text))
+                            }
+                            "citations_delta" -> {
+                                protocol(block.wire.getString("type") == "text")
+                                val citation = delta.getJSONObject("citation")
+                                chars += citation.toString().length
+                                protocol(chars <= 2_000_000)
+                                val list = block.wire.optJSONArray("citations") ?: JSONArray().also { block.wire.put("citations", it) }
+                                list.put(citation)
+                                NativeSearchSources().claude(list)
                             }
                             "thinking_delta" -> {
                                 protocol(block.wire.getString("type") == "thinking")
@@ -186,7 +204,7 @@ internal object MessagesStream {
                     }
                     "message_stop" -> {
                         protocol(id != null && reason != null && blocks.isNotEmpty() && blocks.values.all { it.stopped })
-                        if (reason !in setOf("end_turn", "tool_use", "stop_sequence"))
+                        if (reason !in setOf("end_turn", "tool_use", "stop_sequence") && !(reason == "pause_turn" && stopReason != null))
                             throw ModelRequestException(ModelFailure.INCOMPLETE)
                         protocol((reason == "tool_use") == blocks.values.any { it.wire.getString("type") == "tool_use" })
                         terminal = true
@@ -204,13 +222,35 @@ internal object MessagesStream {
             // before confirming any tool; it must fit both history replay and the next POST.
             val saved = MessagesRequest.message("assistant", content).toString()
             val confirmedUsage = ProviderUsage.messages(input, output, cached, creation)
+            val sourceBlocks = blocks.values.filter { it.wire.optString("type") == "text" }
+            val sources = NativeSearchSources()
+            sourceBlocks.forEach { block -> block.wire.optJSONArray("citations")?.let(sources::claude) }
+            blocks.values.filter { it.wire.optString("type") == "web_search_tool_result" }.forEach { block ->
+                block.wire.optJSONArray("content")?.let { results ->
+                    protocol(results.length() <= 128)
+                    repeat(results.length()) {
+                        val result = results.getJSONObject(it)
+                        if (result.optString("type") == "web_search_result") sources.add(result.getString("url"), result.optString("title"))
+                    }
+                }
+            }
+            stopReason?.invoke(requireNotNull(reason))
             blocks.forEach { (index, block) ->
                 when (block.wire.getString("type")) {
-                    "text" -> deliver(ModelEvent.TextFinal("$id:$index", block.text.toString()))
+                    "text" -> {
+                        deliver(ModelEvent.TextFinal("$id:$index", if (block === sourceBlocks.lastOrNull())
+                            sources.display(block.text.toString()) else block.text.toString()))
+                    }
                     "thinking" -> deliver(ModelEvent.ReasoningFinal("$id:$index", block.text.toString()))
                     "tool_use" -> deliver(ModelEvent.ToolReady(ToolInvocation(ToolCallId(block.wire.getString("id")),
                         block.wire.getString("name"), block.wire.getJSONObject("input").toString())))
                 }
+            }
+            blocks.values.filter { it.wire.optString("type") == "web_search_tool_result" }.forEach { block ->
+                val result = block.wire.opt("content")
+                val failed = result is JSONObject && result.optString("type") == "web_search_tool_result_error"
+                deliver(ModelEvent.NativeSearch(block.wire.getString("tool_use_id"),
+                    if (failed) NativeSearchPhase.FAILED else NativeSearchPhase.COMPLETED))
             }
             // Anthropic input_tokens excludes both cache categories; expose total input and cache reads.
             confirmedUsage?.let(::deliver)

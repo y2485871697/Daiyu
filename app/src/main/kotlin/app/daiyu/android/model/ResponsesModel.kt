@@ -324,7 +324,7 @@ class ResponsesModel internal constructor(
                 }
             }
             var request = ResponsesRequest.withAssistantInstructions(
-                settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools, settings.requestOptions.openAiWebSearchEnabled), ProviderProtocol.RESPONSES),
+                settings.requestOptions.apply(ResponsesRequest.body(settings.model, input, tools, settings.requestOptions.openAiWebSearchEnabled, settings.endpoint), ProviderProtocol.RESPONSES),
                 assistantInstructions,
             )
             val screenInput = ScreenToolImageInput.prepare(request, input, settings, capability,

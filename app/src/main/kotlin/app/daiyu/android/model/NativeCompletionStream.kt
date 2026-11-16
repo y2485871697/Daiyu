@@ -15,8 +15,11 @@ internal object NativeCompletionStream {
         val id = StringBuilder(); val name = StringBuilder(); val arguments = StringBuilder()
     }
 
+    fun read(protocol: ProviderProtocol, reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit): JSONObject =
+        read(protocol, reader, cancelled, sink, null)
+
     fun read(protocol: ProviderProtocol, reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit,
-             nativeSearchFamily: NativeSearchPolicy.Family? = null): JSONObject {
+             nativeSearchFamily: NativeSearchPolicy.Family?): JSONObject {
         var deliveryFailure: Exception? = null
         fun deliver(event: ModelEvent) {
             if (cancelled()) throw InterruptedException()

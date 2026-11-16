@@ -31,8 +31,8 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
 
     def test_hangup_freezes_before_immediate_backend_stop_and_completion_only_unmounts(self):
         main = (SRC / 'MainActivity.kt').read_text()
-        actions = main.split('private fun doubaoCallActions()', 1)[1].split('@Composable private fun projectedVoiceComposer()', 1)[0]
-        close = main.split('private fun closeDoubaoCall(key: Long)', 1)[1].split('private fun doubaoCallActions()', 1)[0]
+        actions = main.split('private fun doubaoCallActions(external: Boolean = false)', 1)[1].split('@Composable private fun projectedVoiceComposer()', 1)[0]
+        close = main.split('private fun closeDoubaoCall(key: Long)', 1)[1].split('private fun doubaoCallActions(external: Boolean = false)', 1)[0]
         self.assertLess(close.index('beginClose(key, SystemClock.elapsedRealtime())'), close.index('remoteVoice.stopDuplex(key)'))
         self.assertIn('onHangUp = { if (current()) closeDoubaoCall(key) }', actions)
         completion = actions.split('onCloseAnimationFinished =', 1)[1]

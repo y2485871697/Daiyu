@@ -161,7 +161,7 @@ class VoiceCallContractTest(unittest.TestCase):
     def test_call_picker_and_initial_model_are_scoped_to_actual_call_binding(self):
         main = (SRC / 'MainActivity.kt').read_text()
         self.assertIn('voiceCallModelName = checkNotNull(created).modelName', main)
-        close = main.split('private fun closeVoiceCall(key: Long)', 1)[1].split('private fun voiceCallActions()', 1)[0]
+        close = main.split('private fun closeVoiceCall(key: Long)', 1)[1].split('private fun voiceCallActions(external: Boolean = false)', 1)[0]
         self.assertLess(close.index('universalVoice::stop'), close.index('dismissChatModels()'))
         self.assertIn('chatModelConversation = if (forVoiceCall) voiceCallConversation?.id else selected?.id', main)
     def test_compaction_success_only_after_durable_application(self):

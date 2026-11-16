@@ -805,9 +805,8 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             ui.onAllNodesWithTag("question-card").assertCountEquals(1)
             ui.onNodeWithTag("tool-step-header:question").assertDoesNotExist()
             val safeBottom = ui.onNodeWithTag("question-arrival-composer").fetchSemanticsNode().boundsInRoot.top - 8f * density
-            val tail = ui.onNodeWithTag("chat-turn:tail").fetchSemanticsNode().layoutInfo.coordinates
-            var tailBottom = 0f
-            ui.runOnUiThread { tailBottom = tail.positionInRoot().y + tail.size.height }
+            val tail = ui.onNodeWithTag("chat-turn:tail").fetchSemanticsNode()
+            val tailBottom = tail.positionInRoot.y + tail.size.height
             assertEquals("Physical follow must still finish at the original safe edge", safeBottom, tailBottom, 2f)
             assertTrue("Arrival hands back to normal follow rather than leaving catchup armed", !geometry().contains("catchup=true"))
         } finally { ui.mainClock.autoAdvance = true }

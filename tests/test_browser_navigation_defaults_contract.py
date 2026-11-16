@@ -23,7 +23,7 @@ class BrowserNavigationDefaultsContractTest(unittest.TestCase):
             'RunBrowserTools.definition(write, permission.actions, navigationDefaults = true)',
             'RunBrowserTools.validate(arguments.canonicalJson(), write, navigationDefaults = true)',
             'RunBrowserTools.writeEffect(grant, arguments.canonicalJson(), navigationDefaults = true)',
-            'RunBrowserTools.executeBound(host.session, invocation, host.screenshotStore, write, navigationDefaults = true)',
+            'RunBrowserTools.executeBound(host.session, invocation, host.screenshotStore, write, navigationDefaults = true, control = control)',
         ):
             self.assertIn(expression, source)
         self.assertIn('"navigate" in permission.actions', source)
@@ -36,11 +36,11 @@ class BrowserNavigationDefaultsContractTest(unittest.TestCase):
         self.assertIn('navigationDefaults: Boolean = false', facade)
         self.assertIn('check(slots.isEmpty()) { "BROWSER_TAB_BUSY" }', facade)
         self.assertLess(facade.index('validateNavigation(initial)'), facade.index('val (selected, allocation)'))
-        self.assertIn('selected ?: createTab(checkNotNull(allocation))', facade)
+        self.assertIn('selected ?: createTab(checkNotNull(allocation), preparedControl)', facade)
         catalog = (MAIN / 'integration/tools/RunBrowserTools.kt').read_text()
         self.assertIn('confirmation?.token?.preview?.defaultPermission != null', catalog)
         self.assertIn('!(navigationDefaults && action == "navigate")', catalog)
-        self.assertIn('session.execute(command.parameters, command.navigationDefaults)', catalog)
+        self.assertIn('session.execute(command.parameters, command.navigationDefaults, control)', catalog)
         self.assertIn("package app.daiyu.android.integration.tools", catalog)
         self.assertIn("package app.daiyu.android.browser.host", facade)
 

@@ -40,6 +40,13 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
                      'testReasoningCompletionWaitsForActualArrivalThenPopsIn'):
             self.assertIn('fun ' + name, regression)
 
+    def test_motion_check_keeps_an_exact_contract_and_jvm_scope(self):
+        workflow = (ROOT / '.github/workflows/chat-workflow-checks.yml').read_text()
+        self.assertIn('options: [workflow-node-motion,', workflow)
+        self.assertIn("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-node-motion':\n              patterns = ('test_reasoning_workflow_contract.py', 'test_work_timeline_connector_contract.py',", workflow)
+        self.assertIn('if [[ "$WORKFLOW_CHECK_SCOPE" == workflow-node-motion ]]; then\n            classes=(WorkflowConnectorsTest)\n            filters=()', workflow)
+        self.assertIn("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow-node-motion':\n              expected = {'WorkflowConnectorsTest'}", workflow)
+
     def test_captured_position_is_display_metadata_not_protocol(self):
         source = (DOMAIN / 'Conversation.kt').read_text()
         self.assertIn('val blockOffset: Int? = null', source)

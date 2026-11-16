@@ -224,24 +224,36 @@ class DictationActivityTest : WiredActivityTestCase() {
     }
     private fun permissionResult(granted: Boolean) {
         mainThread {
-            // Resolve the offline dictation launcher's actual
-            // randomized request code from the real registry; exercise RequestPermission parsing.
-            val registry = activity.activityResultRegistry
-            val map = registry.javaClass.superclass?.declaredFields.orEmpty().asSequence()
-                .plus(registry.javaClass.declaredFields.asSequence())
+            fun fields(value: Any): List<java.lang.reflect.Field> =
+                generateSequence<Class<*>>(value.javaClass) { it.superclass }
+                    .flatMap { it.declaredFields.asSequence() }.toList()
+
+            // Resolve the real offline launcher, independently of registration order.
+            val launcher = MainActivity::class.java.getDeclaredField("offlineMicrophonePermission")
+                .apply { isAccessible = true }.get(activity)
+            val candidateKeys = fields(launcher).asSequence()
+                .filter { it.type == String::class.java }
                 .mapNotNull { f ->
                     f.isAccessible = true
-                    (f.get(registry) as? Map<*, *>)?.takeIf { it["activity_rq#4"] is Int }
-                }.first()
-            val code = map["activity_rq#4"] as Int
-            // Substitute only the platform permission request, marking that same registered
-            // launcher as in-flight just as ActivityResultRegistry.launch normally does.
-            val launchedField = registry.javaClass.superclass!!.declaredFields.single {
+                    f.get(launcher) as? String
+                }.toSet()
+            val registry = activity.activityResultRegistry
+            val registryFields = fields(registry)
+            val map = registryFields.asSequence().mapNotNull { f ->
+                f.isAccessible = true
+                (f.get(registry) as? Map<*, *>)?.takeIf { values ->
+                    candidateKeys.any { values[it] is Int }
+                }
+            }.single()
+            val key = candidateKeys.single { map[it] is Int }
+            val code = map[key] as Int
+            // Substitute only the platform request; keep registry dispatch and permission parsing real.
+            val launchedField = registryFields.single {
                 it.name.contains("launchedKeys", ignoreCase = true)
             }.apply { isAccessible = true }
             @Suppress("UNCHECKED_CAST")
             val launched = launchedField.get(registry) as MutableCollection<String>
-            launched.add("activity_rq#4")
+            launched.add(key)
             activity.onRequestPermissionsResult(code, arrayOf(Manifest.permission.RECORD_AUDIO),
                 intArrayOf(if (granted) PackageManager.PERMISSION_GRANTED else PackageManager.PERMISSION_DENIED))
         }
@@ -619,7 +631,7 @@ class DictationActivityTest : WiredActivityTestCase() {
     }
 
     fun testSidebarAndSettingsKeepTheExactDictationAndSaveItsFinalDraft() {
-        setDraft("a"); setSelection(1, 1); voice()
+        setDraft("a"); voice()
         val attempt = platform.listeners.last()
         val target = host.state.value.target
         attempt.onReadyForSpeech(Bundle())
@@ -637,7 +649,7 @@ class DictationActivityTest : WiredActivityTestCase() {
     }
 
     fun testSidebarFinalCommitsWithoutReopeningChat() {
-        setDraft("a"); setSelection(1, 1); voice()
+        setDraft("a"); voice()
         val attempt = platform.listeners.last()
         attempt.onReadyForSpeech(Bundle())
         mainThread { call("openSidebar") }
@@ -653,7 +665,7 @@ class DictationActivityTest : WiredActivityTestCase() {
     }
 
     fun testHiddenChatStillReleasesOnPauseAndStopWithoutAcceptingLateFinal() {
-        setDraft("a"); setSelection(1, 1); voice()
+        setDraft("a"); voice()
         val attempt = platform.listeners.last()
         attempt.onReadyForSpeech(Bundle())
         mainThread { call("setRetainedPage", "settings") }
@@ -674,7 +686,7 @@ class DictationActivityTest : WiredActivityTestCase() {
 
     @Suppress("UNCHECKED_CAST")
     fun testRemoteCallbacksKeepTheirCapturedDraftWhileSidebarStaysOpen() {
-        setDraft("a"); setSelection(1, 1)
+        setDraft("a")
         mainThread {
             fun value(name: String): Any? = MainActivity::class.java.getDeclaredField(name)
                 .apply { isAccessible = true }.get(activity)

@@ -187,7 +187,7 @@ class DoubaoCallSheetContractTest(unittest.TestCase):
 
     def test_motion_captures_one_padded_raster_and_reads_progress_only_in_draw(self):
         overlay = (CHAT / 'DoubaoCallOverlay.kt').read_text()
-        entrance = overlay.split('if (firstPresentation) {', 1)[1].split('} else {', 1)[0]
+        entrance = overlay.split('if (firstPresentation && !state.skipEntryAnimation) {', 1)[1].split('} else {', 1)[0]
         self.assertLess(entrance.index('layer.toImageBitmap()'), entrance.index('progress.animateTo(1f'))
         self.assertIn('CallShadowOutset = 28.dp', overlay)
         self.assertEqual(2, overlay.count('val content = layer.toImageBitmap()'))

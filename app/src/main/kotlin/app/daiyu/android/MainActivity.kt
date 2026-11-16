@@ -3940,14 +3940,9 @@ class MainActivity : ComponentActivity() {
             onMinimize = { if (current()) voiceCallPresentation.present(key, DoubaoCallPresentation.MINI) },
             onHangUp = { if (current()) closeVoiceCall(key) },
             onSelectModel = {
-                if (current() && external && !voiceCallHasDialogue) returnToVoiceCall(key) { voiceCallActions().onSelectModel() }
+                if (current() && external && !voiceCallHasDialogue) returnToVoiceCall(key) { openVoiceCallModelPicker(key) }
                 else if (current() && voiceCallHasDialogue) voiceConfigurationToast("仅对话前可更改")
-                else if (current() && universalVoice.state.value.active &&
-                    universalVoice.state.value.phase != VoiceControlPhase.SUBMITTING &&
-                    !controller.isMainContextCompressing(voiceCallConversation?.id)) {
-                    universalVoice.setModelPicker(true)
-                    openChatModels(forVoiceCall = true)
-                }
+                else if (current()) openVoiceCallModelPicker(key)
             },
             onModelLongPress = { if (current()) {
                 if (external) returnToVoiceCall(key) { openVoiceThinking(key) } else openVoiceThinking(key)
@@ -3962,6 +3957,15 @@ class MainActivity : ComponentActivity() {
             onToggleCaptions = { if (current()) voiceCallPresentation.toggleCaptions(key) },
             onCloseAnimationFinished = { voiceCallPresentation.finishClose(it) },
         )
+    }
+
+    private fun openVoiceCallModelPicker(key: Long) {
+        if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible || voiceCallHasDialogue ||
+            voiceCallPresentation.state?.let { it.sessionKey == key && it.presentation != DoubaoCallPresentation.CLOSING } != true ||
+            !universalVoice.state.value.active || universalVoice.state.value.phase == VoiceControlPhase.SUBMITTING ||
+            controller.isMainContextCompressing(voiceCallConversation?.id)) return
+        universalVoice.setModelPicker(true)
+        openChatModels(forVoiceCall = true)
     }
 
     private fun closeDoubaoCall(key: Long) {

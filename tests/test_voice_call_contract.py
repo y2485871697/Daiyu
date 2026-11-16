@@ -235,6 +235,21 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertIn('presentationView.post { ready(state.sessionKey) }', overlay)
         self.assertIn('!closing && !morphing && progress.value == 1f', overlay)
 
+    def test_call_model_picker_uses_one_admission_for_inline_and_external_return(self):
+        activity = (SRC / 'MainActivity.kt').read_text()
+        actions = activity.split('private fun voiceCallActions(', 1)[1].split('private fun openVoiceCallModelPicker(', 1)[0]
+        self.assertIn('returnToVoiceCall(key) { openVoiceCallModelPicker(key) }', actions)
+        self.assertIn('else if (current()) openVoiceCallModelPicker(key)', actions)
+        self.assertNotIn('voiceCallActions().onSelectModel()', actions)
+        admission = activity.split('private fun openVoiceCallModelPicker(key: Long) {', 1)[1].split('private fun closeDoubaoCall(', 1)[0]
+        for guard in ('!activityUsable()', '!voiceForeground', 'retainedPage != "chat"',
+                      'sidebarVisible', 'voiceCallHasDialogue', 'it.sessionKey == key',
+                      'DoubaoCallPresentation.CLOSING', '!universalVoice.state.value.active',
+                      'VoiceControlPhase.SUBMITTING', 'isMainContextCompressing'):
+            self.assertIn(guard, admission)
+        self.assertLess(admission.index('return'), admission.index('universalVoice.setModelPicker(true)'))
+        self.assertIn('openChatModels(forVoiceCall = true)', admission)
+
     def test_external_close_is_visual_only_and_detaches_after_its_own_animation(self):
         floating = (ROOT / 'app/src/main/kotlin/app/daiyu/android/VoiceCallFloatingWindow.kt').read_text()
         self.assertIn('TYPE_APPLICATION_OVERLAY', floating)

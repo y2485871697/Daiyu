@@ -396,6 +396,10 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
                 if (index == 1) ui.runOnUiThread { count = 19 }
                 ui.mainClock.advanceTimeByFrame()
                 ui.waitForIdle()
+                val beforeCapture = geometry()
+                if (!beforeCapture.contains("follow=true canFollow=false") || !beforeCapture.contains("catchup=true") ||
+                    number(beforeCapture, "a") <= 1f || number(beforeCapture, "q") <= 1f) return@repeat
+                val image = captureScreenNode(ui.onNodeWithTag("gate-real-host"))
                 val diagnostic = geometry()
                 if (!diagnostic.contains("follow=true canFollow=false") || !diagnostic.contains("catchup=true") ||
                     number(diagnostic, "a") <= 1f || number(diagnostic, "q") <= 1f) return@repeat
@@ -408,7 +412,6 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
                 if (end.bottom > safeBottom + 1f || sampleY <= viewport.bottom + 1f) return@repeat
                 eligibleFrames++
                 val root = physical("gate-real-host")
-                val image = captureScreenNode(ui.onNodeWithTag("gate-real-host"))
                 val pixels = image.toPixelMap()
                 val color = pixels[(end.center.x - root.left).toInt(), (sampleY - root.top).toInt()]
                 if (!(color.red > .9f && color.blue > .9f && color.green < .1f)) {

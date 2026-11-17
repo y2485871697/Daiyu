@@ -195,6 +195,23 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             instrumentation.runOnMainSync { view.viewTreeObserver.addOnDrawListener(listener) }
+            for (arguments in listOf("{\"command\":", call.arguments)) {
+                val pendingOwner = live.copy(blocks = listOf(MessageBlock.Tool(call.copy(arguments = arguments))))
+                val pending = ChatTurnMapper.withStreamingOwner(ChatTurnMapper.map(listOf(pendingOwner), reconnects = reconnects,
+                    dedicatedTool = { _, _ -> if (mixed) "runtime-test" else null }), pendingOwner)
+                drawSnapshot(pending, "待派发 ·")
+                val sample = frames.last()
+                assertTrue("A real streaming pending draw must explicitly show unresolved environment: $sample",
+                    sample.texts.any { it.endsWith(" · 环境待确认") })
+                assertFalse(sample.texts.any { it.contains("Debian") || it.contains("root") })
+            }
+            val pendingBase = ChatTurnMapper.map(listOf(live), reconnects = reconnects,
+                dedicatedTool = { _, _ -> if (mixed) "runtime-test" else null })
+            val resolvedPending = ChatTurnMapper.withStreamingOwner(pendingBase, live,
+                terminalTargets = mapOf(call to app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)))
+            drawSnapshot(resolvedPending, "待派发 ·")
+            assertTrue("A resolved pending target must replace, not append to, the placeholder: ${frames.last()}",
+                frames.last().texts.any { it.endsWith(" · Debian • root") && !it.contains("环境待确认") })
             val base = ChatTurnMapper.map(listOf(live), reconnects = reconnects,
                 dedicatedTool = { _, _ -> if (mixed) "runtime-test" else null },
                 toolReceipt = { _, _ -> ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING) })

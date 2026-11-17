@@ -439,6 +439,121 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testActiveShortCardKeepsItsBottomCornersAndLastLineAboveGrowingComposer() {
+        var composerHeight by mutableStateOf(96.dp)
+        var negativeClip by mutableStateOf<Float?>(null)
+        var pixelsPerDp = 1f
+        var diagnostics: () -> String = { "" }
+        var anchorActive: () -> Boolean = { false }
+        val tail = ChatTurnUi.Assistant("short-active-tail", finalText = "当前终端任务",
+            status = app.daiyu.android.domain.RunStatus.RUNNING, isStreaming = true)
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                pixelsPerDp = androidx.compose.ui.platform.LocalDensity.current.density
+                Box(Modifier.size(320.dp, 420.dp).background(androidx.compose.ui.graphics.Color.White)
+                    .drawWithContent {
+                        clipRect(bottom = negativeClip ?: size.height) { this@drawWithContent.drawContent() }
+                    }.testTag("short-active-host")) {
+                    ChatConversationLayers(Modifier.fillMaxSize(), messages = { inset ->
+                        ChatMessageList(List(6) { ChatTurnUi.User("short-active-history-$it", "history $it") } + tail,
+                            ChatScreenActions(), scrollRequest = ChatScrollRequest(1), composerBottomInset = inset,
+                            turnExtras = {
+                                LocalWorkflowDisclosureContext.current?.viewport?.let { viewport ->
+                                    diagnostics = { viewport.diagnostics() }
+                                    anchorActive = { viewport.active != null }
+                                }
+                                WorkProcessCard(WorkProcessUi(emptyList(), "进行中", running = true), "short-active-card",
+                                    content = {
+                                        WorkStepRow(WorkStepUi("short-active-tool", "执行命令", "", category = "terminal"),
+                                            toolContent = { Box(Modifier.fillMaxWidth().height(1.dp)) })
+                                        Text("最后一行必须完整显示", Modifier.testTag("short-active-last-line"),
+                                            color = androidx.compose.ui.graphics.Color.Black)
+                                    })
+                            })
+                    }, composer = {
+                        Box(Modifier.fillMaxWidth().height(composerHeight).testTag("short-active-composer"))
+                    })
+                }
+            }
+        } }
+        ui.waitForIdle()
+        fun physical(tag: String): androidx.compose.ui.geometry.Rect {
+            val c = ui.onNodeWithTag(tag).fetchSemanticsNode().layoutInfo.coordinates
+            val p = c.positionInRoot()
+            return androidx.compose.ui.geometry.Rect(p.x, p.y, p.x + c.size.width, p.y + c.size.height)
+        }
+        fun save(name: String, image: androidx.compose.ui.graphics.ImageBitmap) {
+            val dir = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/short-active-card").apply { mkdirs() }
+            java.io.File(dir, "$name.png").outputStream().use {
+                image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+            }
+        }
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.onNodeWithTag("tool-step-header:short-active-tool")
+                .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { it() }
+            ui.mainClock.advanceTimeBy(64); ui.waitForIdle()
+            assertTrue("The actual disclosure must own scrolling: ${diagnostics()}", anchorActive())
+            assertTrue("The normal follower must really be gated: ${diagnostics()}",
+                diagnostics().contains("follow=true canFollow=false"))
+            val referenceCard = physical("work-process-surface")
+            val referenceText = physical("short-active-last-line")
+            val host = physical("short-active-host")
+            val reference = captureScreenNode(ui.onNodeWithTag("short-active-host"))
+            save("reference-before-inset", reference)
+            mainThread { composerHeight = 136.dp }
+            ui.waitForIdle()
+            val card = physical("work-process-surface")
+            val text = physical("short-active-last-line")
+            val safe = physical("short-active-composer").top - ChatTailClearance.value * pixelsPerDp
+            assertTrue("This must remain a short bounded tail: ${diagnostics()}",
+                physical("chat-turn:${tail.id}").height < safe - physical("chat-messages").top - 11f * pixelsPerDp)
+            assertTrue("The fix must work before the disclosure gate releases: ${diagnostics()}", anchorActive())
+            assertEquals("Inset correction must not change the frozen card height", referenceCard.height, card.height, 1f)
+            assertTrue("The whole card, not merely its indicator, must clear the composer: card=$card safe=$safe ${diagnostics()}",
+                card.bottom <= safe + 1f)
+            for (tag in listOf("reply-identity:${tail.listKey}", "work-process-header", "short-active-last-line")) {
+                val node = ui.onNodeWithTag(tag).fetchSemanticsNode()
+                assertEquals("No header or last line may be cropped: $tag", node.size.height.toFloat(), node.boundsInRoot.height, 1f)
+            }
+            val observed = captureScreenNode(ui.onNodeWithTag("short-active-host"))
+            save("protected-after-inset", observed)
+            val expected = reference.toPixelMap()
+            fun mismatches(image: androidx.compose.ui.graphics.ImageBitmap, region: androidx.compose.ui.geometry.Rect,
+                referenceRegion: androidx.compose.ui.geometry.Rect): Int {
+                val actual = image.toPixelMap()
+                var count = 0
+                val dx = (referenceRegion.left - region.left).toInt()
+                val dy = (referenceRegion.top - region.top).toInt()
+                for (y in kotlin.math.ceil(region.top - host.top).toInt() until kotlin.math.floor(region.bottom - host.top).toInt()) {
+                    for (x in kotlin.math.ceil(region.left - host.left).toInt() until kotlin.math.floor(region.right - host.left).toInt()) {
+                        val a = actual[x, y]; val b = expected[x + dx, y + dy]
+                        if (maxOf(kotlin.math.abs(a.red - b.red), kotlin.math.abs(a.green - b.green), kotlin.math.abs(a.blue - b.blue)) > .025f) count++
+                    }
+                }
+                return count
+            }
+            val border = card.copy(top = card.bottom - 3f * pixelsPerDp)
+            val referenceBorder = referenceCard.copy(top = referenceCard.bottom - 3f * pixelsPerDp)
+            assertEquals("The full bottom strip, including both rounded corners, must match its unclipped reference", 0,
+                mismatches(observed, border, referenceBorder))
+            assertEquals("Every last-line ink pixel must survive the ancestor clips", 0, mismatches(observed, text, referenceText))
+            mainThread { negativeClip = card.bottom - host.top - 2f }
+            ui.waitForIdle()
+            val clipped = captureScreenNode(ui.onNodeWithTag("short-active-host"))
+            save("negative-bottom-two-pixels", clipped)
+            assertTrue("The same pixel probe must reject an actual 2px bottom clip",
+                mismatches(clipped, border, referenceBorder) > 0)
+            mainThread { negativeClip = null }
+            repeat(32) {
+                ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                assertTrue("Rebased anchor must not pull the card back below the safe edge: ${diagnostics()}",
+                    physical("work-process-surface").bottom <= safe + 1f)
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testCurrentPlacementOriginDefinesTheFirstDrawnTailSlice() {
         val state = StreamingTailViewport(initiallyBounded = true)
         val origins = java.util.Collections.synchronizedList(mutableListOf<Pair<Float, Float>>())

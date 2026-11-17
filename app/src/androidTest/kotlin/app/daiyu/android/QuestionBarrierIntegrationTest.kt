@@ -391,6 +391,27 @@ class QuestionBarrierIntegrationTest : ComposeActivityTestCase() {
             else -> fail("unexpected workflow disclosure state")
         }
         header.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
+        if (savedAnswer != null) {
+            ui.waitUntil(timeoutMillis=8_000) {
+                ui.onAllNodesWithTag("question-toggle").fetchSemanticsNodes().size==1
+            }
+            val toggle = node("question-toggle").assertTextContains("已回答 · Route choice")
+            when (toggle.fetchSemanticsNode().config[SemanticsProperties.StateDescription]) {
+                "已折叠" -> {
+                    if (coveredByDrawer) {
+                        toggle.performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+                    } else toggle.performClick()
+                }
+                "已展开" -> Unit
+                else -> fail("unexpected question disclosure state")
+            }
+            toggle.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
+            ui.waitUntil(timeoutMillis=8_000) {
+                (0..1).all { index ->
+                    ui.onAllNodesWithTag("question-option:$index").fetchSemanticsNodes().size==1
+                }
+            }
+        }
         waitForCard(readOnly=true, savedAnswer=savedAnswer)
     }
     private fun assertRecoveredQuestionSurvivesDrawerHandoff(f:Fixture, target:ConversationId) {

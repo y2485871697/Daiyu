@@ -4,6 +4,9 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.SideEffect
@@ -14,6 +17,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -44,6 +48,7 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 background = conversationColors().surface.copy(alpha = 1f)
                 density = LocalDensity.current.density
+                Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
                 Box(Modifier.width(320.dp).height(180.dp).background(background).testTag("entrance-raster")) {
                     if (mounted) {
                         val current = rememberUserMessageEntrance(request, active)
@@ -52,6 +57,7 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
                             key(turn.listKey) { UserTurn(turn, ChatScreenActions(), entrance = current) }
                         }
                     }
+                }
                 }
             }
         } }
@@ -89,8 +95,13 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
         val raster = ui.onNodeWithTag("entrance-raster")
         val bounds = raster.fetchSemanticsNode().boundsInRoot
         val before = ui.mainClock.currentTime
-        val pixels = captureScreenNode(raster, advanceAnimationClock = false).toPixelMap()
+        val image = captureScreenNode(raster, advanceAnimationClock = false)
+        val pixels = image.toPixelMap()
         assertEquals(before, ui.mainClock.currentTime)
+        val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/user-message-entrance").apply { mkdirs() }
+        java.io.File(directory, "frame-$before.png").outputStream().use {
+            check(image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+        }
         // This top-padding patch stays inside every scale, away from text and corners.
         val x = (bubble.right - 24f * density - bounds.left).toInt()
         val y = (bubble.top + 4f * density - bounds.top).toInt()
@@ -103,6 +114,7 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
             contrast += abs(color.red - backdrop.red) + abs(color.green - backdrop.green) + abs(color.blue - backdrop.blue)
         }
         android.util.Log.i("UserEntrancePixels", "clock=$before progress=${progress()} bubble=$bubble " +
+            "rasterOnScreen=${raster.fetchSemanticsNode().positionOnScreen} " +
             "patch=$x,$y backdrop=$backdrop sample=${pixels[x, y]} contrast=${contrast / 9f}")
         return contrast / 9f
     }

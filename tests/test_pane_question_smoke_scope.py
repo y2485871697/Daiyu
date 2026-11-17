@@ -25,7 +25,8 @@ class PaneQuestionSmokeScopeTest(unittest.TestCase):
         route = (' if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "' + literal +
                  '"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi;')
         self.assertEqual(1, smoke.count(route))
-        self.assertIn(route + ' test -s smoke/prelaunch-ready.txt && bash "$smoke_script";', smoke)
+        script = next(line for line in smoke.splitlines() if line.strip().startswith("script: bash -c "))
+        self.assertIn(' test -s smoke/prelaunch-ready.txt && bash "$smoke_script";', script.split(route, 1)[1])
         self.assertNotIn("assemble", smoke)
 
     def test_core_scope_is_exact_and_reuses_only_existing_contracts(self):

@@ -1176,6 +1176,40 @@ class VoiceCallFloatingWindowTest {
                 assertEquals(0f, progressGetter.invoke(root) as Float, .01f)
             }
         } finally { main { if (root.viewTreeObserver.isAlive) root.viewTreeObserver.removeOnPreDrawListener(listener) } }
+
+        // A composer-constrained panel without an IME must not inherit compact content on drag.
+        val safeTop = root.javaClass.getDeclaredMethod("getSafeTop").apply { isAccessible = true }.invoke(root) as Int
+        for (heightDp in listOf(280, 200)) {
+            val top = maxOf(8f * density, safeTop.toFloat())
+            val squeezed = closed.copy(composerTop = top + (heightDp + 10) * density)
+            main { assertTrue(host.update(state.copy(sessionKey = -heightDp.toLong()), actions, squeezed, inApp = true)) }
+            val shortRoot = windows.added.last()
+            await("non-IME squeezed window laid out") { shortRoot.isLaidOut }
+            awaitCommittedDraw(shortRoot)
+            val compactGetter = shortRoot.javaClass.getDeclaredMethod("getImeCompact").apply { isAccessible = true }
+            val observed = mutableListOf<Pair<Boolean, Float>>()
+            val shortListener = android.view.ViewTreeObserver.OnPreDrawListener {
+                observed += (compactGetter.invoke(shortRoot) as Boolean) to (progressGetter.invoke(shortRoot) as Float)
+                true
+            }
+            main {
+                assertEquals(heightDp * density, panel(shortRoot).height, 1f)
+                shortRoot.viewTreeObserver.addOnPreDrawListener(shortListener)
+                move(shortRoot, density * 2f, 0f)
+            }
+            try {
+                await("non-IME drag restores full height") { kotlin.math.abs(panel(shortRoot).height - fullHeight) < .5f }
+                awaitCommittedDraw(shortRoot)
+                main {
+                    assertTrue("non-IME restoration produced actual draw frames", observed.size >= 2)
+                    observed.forEach { (compact, progress) ->
+                        assertFalse("ordinary height restore is not IME compact: $heightDp", compact)
+                        assertEquals("ordinary restore never hides status with IME progress", 0f, progress, .001f)
+                    }
+                    assertTrue("normal status remains after restoring a short panel", "doubao-call-status" in tagBounds(shortRoot))
+                }
+            } finally { main { if (shortRoot.viewTreeObserver.isAlive) shortRoot.viewTreeObserver.removeOnPreDrawListener(shortListener) } }
+        }
     }
 
     @Test fun continuousDiagonalDragKeepsFullShadowViewportAndLocalContentFixed() {

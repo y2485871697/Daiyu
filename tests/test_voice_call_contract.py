@@ -488,7 +488,7 @@ class FloatingVoiceCallContract(unittest.TestCase):
         overlay = (SRC / 'ui/screens/chat/conversation/DoubaoCallOverlay.kt').read_text()
         frame = floating.split('private fun syncFrame(', 1)[1].split('private fun remove(', 1)[0]
         self.assertIn('(current.expandedContentHeight - panel.height) / contentTravel', frame)
-        self.assertIn('current.imePlacement != null || current.heightRestore != null', frame)
+        self.assertIn('current.imePlacement != null || current.heightRestore != null && current.imeCompact', frame)
         self.assertIn('dragDuringSettledImeTailKeepsContentProgressUntilHeightRestoreCompletes', (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt').read_text())
         self.assertIn('val left = frame.left.roundToInt()', frame)
         self.assertIn('val top = frame.top.roundToInt()', frame)
@@ -500,6 +500,7 @@ class FloatingVoiceCallContract(unittest.TestCase):
         fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt').read_text()
         self.assertIn('imeContentFadesAndMovesWithDisplayedPanelHeightThroughReversal', fixture)
         self.assertIn('genuinely partially transparent pixels', fixture)
+        self.assertIn('ordinary height restore is not IME compact', fixture)
         self.assertIn('continuousDiagonalDragKeepsFullShadowViewportAndLocalContentFixed', fixture)
         self.assertIn('diagonal edge dragging never resizes the native surface', fixture)
 

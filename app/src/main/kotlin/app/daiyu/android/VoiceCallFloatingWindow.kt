@@ -407,7 +407,7 @@ internal class VoiceCallFloatingWindow(context: Context,
         val morphing = current.genieClosing || current.inApp && current.entryGenie && current.motion.transforming
         val panel = current.panelBounds
         current.imeCompact = current.picture.presentation == DoubaoCallPresentation.EXPANDED &&
-            current.inApp && (imeVisible(current) || current.imePlacement != null || current.heightRestore != null)
+            current.inApp && (imeVisible(current) || current.imePlacement != null || current.heightRestore != null && current.imeCompact)
         if (!current.imeCompact && current.picture.presentation == DoubaoCallPresentation.EXPANDED)
             current.expandedContentHeight = panel.height
         val contentTravel = current.expandedContentHeight - compactHeight(current)

@@ -72,7 +72,7 @@ private class ChatCallAnchorCoordinates {
             return Rect(topLeft.x, topLeft.y, topLeft.x + coordinates.size.width,
                 topLeft.y + coordinates.size.height)
         }
-        return DoubaoCallAnchor(bounds(voice), composer.positionOnScreen().y, bounds(host))
+        return DoubaoCallAnchor(bounds(voice), composer.positionOnScreen().y, bounds(host), composerBounds = bounds(composer))
     }
 }
 

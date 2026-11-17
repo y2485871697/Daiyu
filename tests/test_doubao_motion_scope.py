@@ -180,7 +180,7 @@ class DoubaoMotionScopeTest(unittest.TestCase):
                     selection = json.loads((root / "smoke/selection.json").read_text())
                     self.assertEqual("targeted", inventory["discovery_scope"])
                     self.assertEqual(set(classes), set(inventory["all_classes"]))
-                    self.assertEqual(18, inventory["all_classes"][floating])
+                    self.assertEqual(20, inventory["all_classes"][floating])
                     self.assertEqual(sum(inventory["all_classes"][name] for name in selection["selected_classes"]), selection["expected_tests"])
                     selected.extend(selection["selected_classes"])
                     expected += selection["expected_tests"]
@@ -191,10 +191,10 @@ class DoubaoMotionScopeTest(unittest.TestCase):
             inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
             selection = json.loads((root / "smoke/selection.json").read_text())
             self.assertEqual("targeted", inventory["discovery_scope"])
-            self.assertEqual({floating: 18}, inventory["all_classes"])
+            self.assertEqual({floating: 20}, inventory["all_classes"])
             self.assertEqual([floating], selection["selected_classes"])
-            self.assertEqual(18, selection["expected_tests"])
-            self.assertEqual(18, inventory["total_tests"])
+            self.assertEqual(20, selection["expected_tests"])
+            self.assertEqual(20, inventory["total_tests"])
             source = root / "app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt"
             source.write_text(source.read_text() + "\nclass UnexpectedTest {}\n")
             result = helper.select(root, classes=",".join(classes), count=1)

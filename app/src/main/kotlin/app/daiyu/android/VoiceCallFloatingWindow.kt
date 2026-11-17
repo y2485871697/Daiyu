@@ -22,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.lifecycle.Lifecycle
@@ -109,6 +110,7 @@ internal class VoiceCallFloatingWindow(context: Context,
         if (current.picture.presentation != state.presentation) {
             cancelHeightRestore(current)
             current.imePlacement = null
+            current.manualImePlacement = null
         }
         current.actions = actions
         current.anchor = anchor ?: current.anchor
@@ -117,7 +119,7 @@ internal class VoiceCallFloatingWindow(context: Context,
         if (inApp && current.anchor != null && !current.manuallyDragged) {
             placeInitial(current, previousAnchor)
             syncFrame(current)
-        } else resize(current)
+        } else if (!inApp || !current.manuallyDragged || !placeManualIme(current, previousAnchor)) resize(current)
         return !current.removed
     }
 
@@ -139,6 +141,7 @@ internal class VoiceCallFloatingWindow(context: Context,
         current.departing = true
         cancelHeightRestore(current)
         current.imePlacement = null
+        current.manualImePlacement = null
         current.removeCallbacks(current.moveFrame)
         current.movePending = false
         current.pendingMove = Offset.Zero
@@ -185,39 +188,97 @@ internal class VoiceCallFloatingWindow(context: Context,
         current.expandedHeight = fullHeight(current)
         val fittedHeight = bottom?.let { (it - topLimit).coerceAtLeast(1f) } ?: current.expandedHeight
         var height = minOf(if (mini) dp(67).toFloat() else current.expandedHeight, fittedHeight)
-        val anchor = current.anchor
-        val ime = anchor?.imeInsets
         if (mini) current.imePlacement = null
-        else if (anchor != null && ime != null && previousAnchor != null && current.isLaidOut) {
-            if (previousAnchor.hostBounds != anchor.hostBounds) {
-                current.imePlacement = null
-                current.imeComposerBaseline = null
-            }
-            val placement = current.imePlacement
-            if (previousAnchor.hostBounds == anchor.hostBounds && ime.source != ime.target &&
-                (placement == null || placement.targetInset != ime.target)) {
-                val start = previousAnchor.composerTop
-                val baseline = current.imeComposerBaseline ?: (start + (previousAnchor.imeInsets?.bottom ?: ime.source))
-                current.imeComposerBaseline = baseline
-                val end = baseline - ime.target
-                if (kotlin.math.abs(end - start) > .5f) {
-                    current.imePlacement = ImePlacement(ime.target, start, end, current.panelBounds.height,
-                        minOf(current.expandedHeight, (end - dp(10) - topLimit).coerceAtLeast(1f)))
-                }
-            }
-            current.imePlacement?.let { transition ->
-                // Insets may already report their endpoint before the composer draws its last frame.
-                val progress = ((anchor.composerTop - transition.startComposerTop) /
-                    (transition.endComposerTop - transition.startComposerTop)).coerceIn(0f, 1f)
-                height = minOf(fittedHeight, transition.startHeight +
-                    (transition.endHeight - transition.startHeight) * progress)
-                if (progress >= 1f) current.imePlacement = null
-            }
+        else height = imeHeight(current, previousAnchor, height) { end ->
+            minOf(current.expandedHeight, (end - dp(10) - topLimit).coerceAtLeast(1f))
         }
         val left = (host?.center?.x ?: (metrics.widthPixels / 2f)) - width / 2f
         val top = bottom?.minus(height) ?: (metrics.heightPixels * .18f)
         current.panelBounds = Rect(left, top, left + width, top + height)
         clamp(current)
+    }
+
+    private fun imeHeight(current: CallWindow, previousAnchor: DoubaoCallAnchor?, fittedHeight: Float,
+        endHeight: (Float) -> Float): Float {
+        val anchor = current.anchor ?: return fittedHeight
+        val ime = anchor.imeInsets ?: return fittedHeight
+        if (previousAnchor == null || !current.isLaidOut) return fittedHeight
+        if (previousAnchor.hostBounds != anchor.hostBounds) {
+            current.imePlacement = null
+            current.imeComposerBaseline = null
+        }
+        val placement = current.imePlacement
+        if (previousAnchor.hostBounds == anchor.hostBounds && ime.source != ime.target &&
+            (placement == null || placement.targetInset != ime.target)) {
+            val start = previousAnchor.composerTop
+            val baseline = current.imeComposerBaseline ?: (start + (previousAnchor.imeInsets?.bottom ?: ime.source))
+            current.imeComposerBaseline = baseline
+            val end = baseline - ime.target
+            if (kotlin.math.abs(end - start) > .5f)
+                current.imePlacement = ImePlacement(ime.target, start, end, current.panelBounds.height, endHeight(end))
+        }
+        val transition = current.imePlacement ?: return fittedHeight
+        // Read the displayed composer, including trailing frames after inset metadata settles.
+        val progress = ((anchor.composerTop - transition.startComposerTop) /
+            (transition.endComposerTop - transition.startComposerTop)).coerceIn(0f, 1f)
+        val height = minOf(fittedHeight, transition.startHeight +
+            (transition.endHeight - transition.startHeight) * progress)
+        if (progress >= 1f) current.imePlacement = null
+        return height
+    }
+
+    private data class ManualImePlacement(val bounds: Rect, val composerTop: Float)
+
+    private fun placeManualIme(current: CallWindow, previousAnchor: DoubaoCallAnchor?): Boolean {
+        val anchor = current.anchor ?: return false
+        val ime = anchor.imeInsets ?: return false
+        val previousIme = previousAnchor?.imeInsets
+        val closed = ime.bottom == 0 && ime.target == 0
+        if (closed && current.manualImePlacement == null) current.manualImeSuppressed = false
+        if (current.picture.presentation != DoubaoCallPresentation.EXPANDED) return false
+        if (previousAnchor != null && previousAnchor.hostBounds != anchor.hostBounds) {
+            current.manualImePlacement = null
+            current.imePlacement = null
+            current.imeComposerBaseline = null
+            return false
+        }
+        if (current.manualImePlacement == null) {
+            if (previousAnchor == null) return false
+            val opening = previousIme != null && previousIme.bottom == 0 && previousIme.target == 0 &&
+                (ime.target > 0 || ime.bottom > 0)
+            if (!opening || current.manualImeSuppressed) return false
+            current.manualImeSuppressed = true
+            val resting = current.panelBounds
+            val composer = previousAnchor.composerBounds ?: Rect(previousAnchor.hostBounds.left,
+                previousAnchor.composerTop, previousAnchor.hostBounds.right, previousAnchor.hostBounds.bottom)
+            if (resting.overlaps(composer)) {
+                current.actions.onMinimize()
+                return true
+            }
+            cancelHeightRestore(current)
+            current.imePlacement = null
+            current.imeComposerBaseline = previousAnchor.composerTop
+            current.manualImePlacement = ManualImePlacement(resting, previousAnchor.composerTop)
+        }
+        val saved = checkNotNull(current.manualImePlacement)
+        val topLimit = maxOf(anchor.hostBounds.top + dp(8), current.safeTop.toFloat())
+        val bottom = (saved.bounds.bottom + anchor.composerTop - saved.composerTop).coerceAtLeast(topLimit + 1f)
+        val fittedHeight = minOf(saved.bounds.height, (bottom - topLimit).coerceAtLeast(1f))
+        val height = imeHeight(current, previousAnchor, fittedHeight) { end ->
+            minOf(saved.bounds.height, (saved.bounds.bottom + end - saved.composerTop - topLimit).coerceAtLeast(1f))
+        }
+        current.panelBounds = Rect(saved.bounds.left, bottom - height, saved.bounds.right, bottom)
+        clamp(current)
+        syncFrame(current)
+        if (closed && kotlin.math.abs(current.panelBounds.top - saved.bounds.top) < .5f &&
+            kotlin.math.abs(current.panelBounds.height - saved.bounds.height) < .5f) {
+            current.panelBounds = saved.bounds
+            current.manualImePlacement = null
+            current.manualImeSuppressed = false
+            current.imePlacement = null
+            current.imeComposerBaseline = null
+        }
+        return true
     }
 
     private fun fullHeight(current: CallWindow): Float = minOf(dp(374).toFloat(),
@@ -284,8 +345,11 @@ internal class VoiceCallFloatingWindow(context: Context,
     private fun move(current: CallWindow, delta: Offset) {
         if (window !== current || current.departing || current.inApp && current.entryGenie && current.motion.transforming) return
         if (delta == Offset.Zero) return
-        if (!current.manuallyDragged) {
+        if (!current.manuallyDragged || current.manualImePlacement != null) {
             current.manuallyDragged = true
+            current.manualImePlacement = null
+            current.manualImeSuppressed = current.anchor?.imeInsets?.let { it.bottom > 0 || it.target > 0 } == true
+            current.imeComposerBaseline = null
             current.imePlacement = null
             restoreFullHeight(current)
             if (current.removed) return
@@ -327,6 +391,7 @@ internal class VoiceCallFloatingWindow(context: Context,
         if (current.removed || current.fading) return
         val morphing = current.genieClosing || current.inApp && current.entryGenie && current.motion.transforming
         val panel = current.panelBounds
+        current.panelSize = Size(panel.width.roundToInt().toFloat(), panel.height.roundToInt().toFloat())
         val anchor = current.anchor?.bounds
         val frame = if (morphing && anchor != null) Rect(
             minOf(panel.left, anchor.left) - dp(28), minOf(panel.top, anchor.top) - dp(28),
@@ -348,6 +413,7 @@ internal class VoiceCallFloatingWindow(context: Context,
         current.removed = true
         cancelHeightRestore(current)
         current.imePlacement = null
+        current.manualImePlacement = null
         current.animate().withEndAction(null).cancel()
         mainHandler.removeCallbacks(current.settleFrame)
         current.removeCallbacks(current.moveFrame)
@@ -390,6 +456,8 @@ internal class VoiceCallFloatingWindow(context: Context,
         var inApp by mutableStateOf(initialInApp)
         var anchor by mutableStateOf(initialAnchor)
         var manuallyDragged = false
+        var manualImePlacement: ManualImePlacement? = null
+        var manualImeSuppressed = false
         var imePlacement: ImePlacement? = null
         var imeComposerBaseline: Float? = null
         var heightRestore: ValueAnimator? = null
@@ -404,6 +472,7 @@ internal class VoiceCallFloatingWindow(context: Context,
             listOf(it.widthPixels, it.heightPixels, it.densityDpi, safeTop)
         }
         var panelBounds by mutableStateOf(Rect.Zero)
+        var panelSize by mutableStateOf(Size.Zero)
         var expandedWidth = dp(380).toFloat()
         var expandedHeight = dp(374).toFloat()
         val entryGenie = initialInApp && initialAnchor != null && !initial.skipEntryAnimation
@@ -453,7 +522,8 @@ internal class VoiceCallFloatingWindow(context: Context,
                                 remove(this@CallWindow, completed = true)
                         })
                         FloatingVoiceCallSurface(picture.copy(skipEntryAnimation = !entryGenie || picture.skipEntryAnimation),
-                            completion, panelBounds, anchor?.bounds ?: panelBounds, motion,
+                            completion, Rect(Offset.Zero, panelSize), anchor?.bounds ?: Rect.Zero, motion,
+                            panelPosition = { panelBounds.topLeft },
                             animationAllowed = inApp, enabled = !departing,
                             onDrag = { move(this@CallWindow, it) })
                         LaunchedEffect(inApp, genieClosing, motion.transforming) {
@@ -480,10 +550,11 @@ internal class VoiceCallFloatingWindow(context: Context,
                 configurationGeometry = geometry
                 imePlacement = null
                 imeComposerBaseline = null
+                manualImePlacement = null
             }
             safeTop = safeTopInset()
             if (!departing && !removed) {
-                if (manuallyDragged) resize(this) else clamp(this)
+                if (manuallyDragged && manualImePlacement == null) resize(this) else clamp(this)
                 mainHandler.removeCallbacks(settleFrame)
                 mainHandler.post(settleFrame)
             }
@@ -518,6 +589,7 @@ internal class VoiceCallFloatingWindow(context: Context,
             released = true
             cancelHeightRestore(this)
             imePlacement = null
+            manualImePlacement = null
             mainHandler.removeCallbacks(releaseAfterDetach)
             removeCallbacks(moveFrame)
             movePending = false

@@ -126,7 +126,7 @@ data class DoubaoCallActions(
 internal data class DoubaoCallImeInsets(val bottom: Int, val source: Int = bottom, val target: Int = bottom)
 
 internal data class DoubaoCallAnchor(val bounds: Rect, val composerTop: Float, val hostBounds: Rect,
-    val imeInsets: DoubaoCallImeInsets? = null)
+    val imeInsets: DoubaoCallImeInsets? = null, val composerBounds: Rect? = null)
 
 internal class DoubaoCallMotionState {
     val progress = Animatable(0f)
@@ -337,6 +337,7 @@ private fun CallGeniePanel(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     animationAllowed: Boolean = true,
+    panelPosition: (() -> Offset)? = null,
     content: @Composable (Boolean) -> Unit,
 ) {
     val density = LocalDensity.current
@@ -425,7 +426,10 @@ private fun CallGeniePanel(
     }
     Box(
         Modifier
-            .offset { IntOffset(panelBounds.left.roundToInt(), panelBounds.top.roundToInt()) }
+            .offset {
+                val position = panelPosition?.invoke() ?: panelBounds.topLeft
+                IntOffset(position.x.roundToInt(), position.y.roundToInt())
+            }
             .size(with(density) { panelWidth.toDp() }, with(density) { panelHeight.toDp() })
             .then(modifier)
             .testTag(if (mini) "doubao-call-mini" else "doubao-call-expanded")
@@ -462,9 +466,10 @@ private fun CallGeniePanel(
                     val sourceWidth = bitmap.width.toFloat()
                     val sourceHeight = bitmap.height.toFloat()
                     val endpointSize = with(density) { 20.dp.toPx() }
+                    val position = panelPosition?.invoke() ?: panelBounds.topLeft
                     val anchor = DoubaoGenieGeometry.Bounds(
-                        anchorBounds.center.x - endpointSize / 2f - panelBounds.left,
-                        anchorBounds.center.y - endpointSize / 2f - panelBounds.top,
+                        anchorBounds.center.x - endpointSize / 2f - position.x,
+                        anchorBounds.center.y - endpointSize / 2f - position.y,
                         endpointSize, endpointSize,
                     ).outset(padding * endpointSize / size.width, padding * endpointSize / size.height)
                     val panel = DoubaoGenieGeometry.Bounds(0f, 0f, size.width, size.height).outset(padding)
@@ -934,7 +939,7 @@ internal fun FloatingVoiceCallContent(state: DoubaoCallUi, actions: DoubaoCallAc
 @Composable
 internal fun FloatingVoiceCallSurface(state: DoubaoCallUi, actions: DoubaoCallActions,
     panelBounds: Rect, anchorBounds: Rect, motion: DoubaoCallMotionState,
-    animationAllowed: Boolean, enabled: Boolean, onDrag: (Offset) -> Unit) {
+    animationAllowed: Boolean, enabled: Boolean, panelPosition: (() -> Offset)? = null, onDrag: (Offset) -> Unit) {
     key(state.sessionKey) {
         var lastLivePicture by remember { mutableStateOf(state) }
         var closingPicture by remember { mutableStateOf<DoubaoCallUi?>(null) }
@@ -946,7 +951,7 @@ internal fun FloatingVoiceCallSurface(state: DoubaoCallUi, actions: DoubaoCallAc
         Box(Modifier.fillMaxSize()) {
             CallGeniePanel(state, actions, panelBounds, anchorBounds, motion,
                 mini = picture.presentation == DoubaoCallPresentation.MINI, enabled = enabled,
-                animationAllowed = animationAllowed) { interactive ->
+                animationAllowed = animationAllowed, panelPosition = panelPosition) { interactive ->
                 FloatingVoiceCallContent(picture, actions, interactive, onDrag, decorated = false)
             }
         }

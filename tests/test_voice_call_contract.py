@@ -409,6 +409,42 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertIn('if (progress >= 1f) current.imePlacement = null', placement)
         self.assertNotIn('ValueAnimator', placement)
 
+    def test_manual_ime_reuses_displayed_composer_geometry_and_owner_minimize(self):
+        floating = (SRC / 'VoiceCallFloatingWindow.kt').read_text()
+        manual = floating.split('private fun placeManualIme(', 1)[1].split('private fun fullHeight(', 1)[0]
+        self.assertIn('previousIme.bottom == 0 && previousIme.target == 0', manual)
+        self.assertIn('previousAnchor.composerBounds', manual)
+        self.assertIn('resting.overlaps(composer)', manual)
+        self.assertIn('current.actions.onMinimize()', manual)
+        self.assertNotIn('picture.copy(', manual)
+        self.assertIn('ManualImePlacement(resting, previousAnchor.composerTop)', manual)
+        self.assertIn('saved.bounds.bottom + anchor.composerTop - saved.composerTop', manual)
+        self.assertIn('imeHeight(current, previousAnchor, fittedHeight)', manual)
+        self.assertIn('Rect(saved.bounds.left, bottom - height, saved.bounds.right, bottom)', manual)
+        self.assertIn('current.panelBounds = saved.bounds', manual)
+        self.assertNotIn('ValueAnimator', manual)
+        screen = (SRC / 'ui/screens/chat/conversation/ChatScreen.kt').read_text()
+        self.assertIn('composerBounds = bounds(composer)', screen)
+        fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt').read_text()
+        for assertion in ('keyboard dismissal restores the complete saved manual rect',
+                          'manual height shares the existing IME animation progress',
+                          'manual horizontal placement is never re-centered',
+                          'ordinary call updates cannot resize an IME-adjusted window',
+                          'only positive-area overlap uses the real minimize action'):
+            self.assertIn(assertion, fixture)
+
+    def test_native_drag_reads_absolute_position_in_placement_not_composition(self):
+        floating = (SRC / 'VoiceCallFloatingWindow.kt').read_text()
+        composition = floating.split('setContent {', 1)[1].split('val metrics = app.resources.displayMetrics', 1)[0]
+        self.assertIn('completion, Rect(Offset.Zero, panelSize)', composition)
+        self.assertIn('panelPosition = { panelBounds.topLeft }', composition)
+        self.assertNotIn('completion, panelBounds,', composition)
+        overlay = (SRC / 'ui/screens/chat/conversation/DoubaoCallOverlay.kt').read_text()
+        self.assertIn('panelPosition: (() -> Offset)? = null', overlay)
+        self.assertIn('.offset {\n                val position = panelPosition?.invoke()', overlay)
+        self.assertIn('current.postOnAnimation(current.moveFrame)', floating)
+        self.assertIn('Size(panel.width.roundToInt().toFloat(), panel.height.roundToInt().toFloat())', floating)
+
     def test_external_close_is_visual_only_and_detaches_after_its_own_animation(self):
         floating = (ROOT / 'app/src/main/kotlin/app/daiyu/android/VoiceCallFloatingWindow.kt').read_text()
         self.assertIn('TYPE_APPLICATION_OVERLAY', floating)

@@ -805,6 +805,120 @@ class VoiceCallFloatingWindowTest {
         }
     }
 
+    @Test fun manuallyMovedWindowUsesComposerAnimationWithoutLosingItsRestingPosition() {
+        val state = picture(-40L).copy(skipEntryAnimation = true)
+        val full = callAnchor().copy(imeInsets = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(0))
+        val density = context.resources.displayMetrics.density
+        main { assertTrue(host.update(state, actions, full, inApp = true)) }
+        await("manual IME fixture attached") { windows.added.last().isLaidOut }
+        val root = windows.added.last()
+        var resting = androidx.compose.ui.geometry.Rect.Zero
+        var topLimit = 0f
+        main {
+            val safe = root.javaClass.getDeclaredMethod("getSafeTop").apply { isAccessible = true }.invoke(root) as Int
+            topLimit = maxOf(8f * density, safe.toFloat())
+            val shift = minOf(40f * density, (panel(root).top - topLimit).coerceAtLeast(0f) / 3f)
+            move(root, 3f * density, -shift)
+        }
+        await("manual position applied") { panel(root).left > 10f * density + 1f }
+        await("manual full-height restoration settled before saving the resting rect") {
+            root.javaClass.getDeclaredMethod("getHeightRestore").apply { isAccessible = true }.invoke(root) == null
+        }
+        awaitCommittedDraw(root)
+        main { resting = panel(root) }
+        val inset = (resting.bottom - topLimit - 140f * density).roundToInt()
+        assertTrue("fixture must squeeze the dragged window", inset > 0)
+        var currentInset = 0
+        fun anchor(bottom: Int, source: Int, target: Int, settledMetadata: Boolean = false) = full.copy(
+            composerTop = full.composerTop - bottom,
+            bounds = full.bounds.translate(androidx.compose.ui.geometry.Offset(0f, -bottom.toFloat())),
+            imeInsets = if (settledMetadata) app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(target)
+                else app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(bottom, source, target),
+            composerBounds = androidx.compose.ui.geometry.Rect(full.hostBounds.left, full.composerTop - bottom,
+                full.hostBounds.right, full.hostBounds.bottom - bottom))
+        fun stage(target: Int, fractions: List<Float>, settleTail: Boolean = false) {
+            val source = currentInset
+            var start = androidx.compose.ui.geometry.Rect.Zero
+            val endHeight = minOf(resting.height, (resting.bottom - target - topLimit).coerceAtLeast(1f))
+            main {
+                start = panel(root)
+                assertTrue(host.update(state, actions, anchor(source, source, target), inApp = true))
+                assertEquals("manual IME reversal starts at the displayed rect", start, panel(root))
+            }
+            for ((index, fraction) in fractions.withIndex()) {
+                currentInset = (source + (target - source) * fraction).roundToInt()
+                val frame = anchor(currentInset, source, target, settleTail && index >= fractions.lastIndex - 1)
+                val progress = (currentInset - source).toFloat() / (target - source)
+                val height = start.height + (endHeight - start.height) * progress
+                main {
+                    assertTrue(host.update(state, actions, frame, inApp = true))
+                    val bounds = panel(root)
+                    assertEquals("manual horizontal placement is never re-centered", resting.left, bounds.left, .01f)
+                    assertEquals(resting.right, bounds.right, .01f)
+                    assertEquals("manual bottom follows the same displayed composer frame", resting.bottom - currentInset,
+                        bounds.bottom, 1f)
+                    assertEquals("manual height shares the existing IME animation progress", height, bounds.height, 1.5f)
+                    assertTrue(host.update(state.copy(transcript = "same-frame update"), actions, frame, inApp = true))
+                    assertEquals("ordinary call updates cannot resize an IME-adjusted window", bounds, panel(root))
+                    android.util.Log.i("ManualCallIme", "source=$source target=$target progress=$progress bounds=$bounds")
+                }
+                awaitCommittedDraw(root)
+                main { assertEquals(height, panel(root).height, 1.5f) }
+            }
+        }
+        stage(inset, listOf(.13f, .42f, .79f, 1f))
+        stage(0, listOf(.23f, .58f))
+        stage(inset, listOf(.30f, .75f))
+        stage(0, listOf(.14f, .55f, .91f, 1f), settleTail = true)
+        main {
+            assertEquals("keyboard dismissal restores the complete saved manual rect", resting, panel(root))
+            assertEquals(0, hangups)
+            assertTrue(windows.removals.isEmpty())
+        }
+    }
+
+    @Test fun openingImeMinimizesOnceOnlyForStrictTwoDimensionalComposerOverlap() {
+        val density = context.resources.displayMetrics.density
+        var minimizes = 0
+        val callbacks = actions.copy(onMinimize = { minimizes++ })
+        for (kind in listOf("overlap", "touching", "horizontal-gap")) {
+            val state = picture(-50L - windows.added.size).copy(skipEntryAnimation = true)
+            var closed = callAnchor().copy(imeInsets = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(0))
+            main { assertTrue(host.update(state, callbacks, closed, inApp = true)) }
+            await("overlap fixture attached") { windows.added.last().isLaidOut }
+            val root = windows.added.last()
+            var before = androidx.compose.ui.geometry.Rect.Zero
+            main { before = panel(root); move(root, 0f, 30f * density) }
+            await("overlap fixture dragged") { panel(root).top > before.top }
+            main {
+                before = panel(root)
+                val composer = when (kind) {
+                    "touching" -> androidx.compose.ui.geometry.Rect(0f, before.bottom,
+                        closed.hostBounds.right, before.bottom + 40f * density)
+                    "horizontal-gap" -> androidx.compose.ui.geometry.Rect(before.right + 1f, before.top,
+                        closed.hostBounds.right, before.bottom + 40f * density)
+                    else -> androidx.compose.ui.geometry.Rect(0f, before.bottom - 1f,
+                        closed.hostBounds.right, before.bottom + 40f * density)
+                }
+                closed = closed.copy(composerBounds = composer)
+                assertTrue(host.update(state, callbacks, closed, inApp = true))
+                val oldCount = minimizes
+                val opening = closed.copy(imeInsets = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(0, 0, 100))
+                repeat(3) { assertTrue(host.update(state, callbacks, opening, inApp = true)) }
+                assertEquals("only positive-area overlap uses the real minimize action: $kind",
+                    oldCount + if (kind == "overlap") 1 else 0, minimizes)
+                if (kind == "overlap") {
+                    assertTrue(host.update(state.copy(presentation = DoubaoCallPresentation.MINI), callbacks, opening, inApp = true))
+                    assertEquals(67f * density, panel(root).height, 1f)
+                    assertTrue(host.isShowing(state.sessionKey))
+                }
+                assertEquals(0, hangups)
+                assertSame(root, windows.added.last())
+            }
+        }
+        assertEquals(1, minimizes)
+    }
+
     @Test fun stableDragIsCoalescedAndKeepsTheHandleOutsideTheStatusBar() {
         val state = picture(-32L).copy(skipEntryAnimation = true)
         main { assertTrue(host.update(state, actions, callAnchor(), inApp = true)) }
@@ -822,6 +936,35 @@ class VoiceCallFloatingWindowTest {
         main {
             assertEquals(updates + 1, windows.updates)
             assertEquals(before.top - 12f, panel(root).top, .01f)
+        }
+        val sizeGetter = root.javaClass.declaredMethods.single { it.name.startsWith("getPanelSize") }
+            .apply { isAccessible = true }
+        var stableSize: Any? = null
+        main { stableSize = sizeGetter.invoke(root) }
+        repeat(12) {
+            main { move(root, .13f, -.37f) }
+            awaitCommittedDraw(root)
+            main { assertEquals("fractional translation cannot invalidate composition size", stableSize, sizeGetter.invoke(root)) }
+        }
+        var gestureStart = androidx.compose.ui.geometry.Rect.Zero
+        main { gestureStart = panel(root) }
+        val now = SystemClock.uptimeMillis()
+        val density = context.resources.displayMetrics.density
+        val x = gestureStart.center.x
+        val y = gestureStart.top + 8f * density
+        for (index in 0..7) {
+            val action = when (index) { 0 -> MotionEvent.ACTION_DOWN; 7 -> MotionEvent.ACTION_UP; else -> MotionEvent.ACTION_MOVE }
+            val event = MotionEvent.obtain(now, now + index * 16L, action, x, y - minOf(index, 6) * 6f * density, 0)
+            try { instrumentation.sendPointerSync(event) } finally { event.recycle() }
+        }
+        await("real pointer stream moves the same native window without losing displacement") {
+            panel(root).top < gestureStart.top - 10f * density
+        }
+        main {
+            assertSame(root, windows.added.single())
+            assertTrue(windows.removals.isEmpty())
+            assertEquals("real vertical dragging preserves horizontal position", gestureStart.left, panel(root).left, 1f)
+            assertEquals(stableSize, sizeGetter.invoke(root))
             move(root, 0f, -100_000f)
         }
         await("upward drag reaches safe top") {

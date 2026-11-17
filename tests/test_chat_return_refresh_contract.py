@@ -58,7 +58,8 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         self.assertIn('retainedRootActive = retainedPage == "chat"', self.main)
         self.assertIn('onTransitionIdle = { finishChatReturn(returnRefreshRequest) }', self.main)
         self.assertIn('idleRequestKey = returnRefreshRequest', self.main)
-        self.assertIn('it.enabled && routeActive', self.main)
+        self.assertIn('composer = projectedVoiceComposer().copy(', self.main)
+        self.assertNotIn('it.enabled && routeActive', self.main)
         for signature in ('private fun composerShortcutAvailable()', 'private fun currentChatControlAvailable()'):
             self.assertNotIn('chatReturnRefresh', self.main.split(signature, 1)[1].split('\n', 1)[0])
         self.assertIn('voiceForeground && messageActionVisit', self.main)

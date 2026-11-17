@@ -123,14 +123,12 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                 flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
             }
             var readyWindowId = -1
-            try { ui.waitUntil(5_000) {
-                instrumentation.runOnMainSync {
-                    readyWindowId = if (view.isAttachedToWindow && view.hasWindowFocus() &&
-                        view.windowToken == token) {
-                        val node = view.createAccessibilityNodeInfo()
-                        if (node == null) -1 else try { node.windowId } finally { node.recycle() }
-                    } else -1
-                }
+            try { awaitControl("accessibility target window attached and focused") {
+                readyWindowId = if (view.isAttachedToWindow && view.hasWindowFocus() &&
+                    view.windowToken == token) {
+                    val node = view.createAccessibilityNodeInfo()
+                    if (node == null) -1 else try { node.windowId } finally { node.recycle() }
+                } else -1
                 val windows = automation.windows
                 try {
                     windows.any { other ->
@@ -139,7 +137,7 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
                         other.id == readyWindowId && other.isFocused && !bounds.isEmpty
                     }
                 } finally { windows.forEach { it.recycle() } }
-            } } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+            } } catch (timeout: junit.framework.AssertionFailedError) {
                 throw AssertionError("Accessibility target window not ready: id=$readyWindowId flags=${automation.serviceInfo.flags}", timeout)
             }
             var lastSample = "not sampled"

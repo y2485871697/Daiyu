@@ -270,6 +270,11 @@ class ManagedInputContractTest(unittest.TestCase):
         self.assertEqual(2, stable.count('automation.windows'))
         self.assertIn('other.id == readyWindowId && other.isFocused && !bounds.isEmpty', stable)
         self.assertLess(stable.index('var readyWindowId = -1'), stable.index('fun sample(): TouchFrame?'))
+        ready = stable.split('var readyWindowId = -1', 1)[1].split('fun sample(): TouchFrame?', 1)[0]
+        self.assertIn('awaitControl("accessibility target window attached and focused")', ready)
+        self.assertIn('catch (timeout: junit.framework.AssertionFailedError)', ready)
+        self.assertNotIn('ui.waitUntil', ready)
+        self.assertNotIn('runOnMainSync', ready)
         self.assertNotIn('requestFocus', stable)
         self.assertNotIn('injectInputEvent', stable)
 

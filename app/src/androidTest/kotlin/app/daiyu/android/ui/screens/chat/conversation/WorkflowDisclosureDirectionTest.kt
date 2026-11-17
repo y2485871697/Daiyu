@@ -542,7 +542,10 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
 
     fun testBoundedLegacyChildSummaryDuringOutputAndFastReversal() = verifyBoundedChildSummary(false)
 
-    private fun verifyBoundedChildSummary(mixed: Boolean) {
+    fun testBoundedMixedChildSummaryWhileInterToolTextGrows() =
+        verifyBoundedChildSummary(mixed = true, growInterToolText = true)
+
+    private fun verifyBoundedChildSummary(mixed: Boolean, growInterToolText: Boolean = false) {
         fun step(id: String, tool: String, result: String): WorkStepUi {
             val p = ToolCardPresentations.present(tool, "{}", result)
             return WorkStepUi(id, p.title, p.summary, WorkStepState.OK, toolName = tool,
@@ -558,20 +561,29 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         val others = List(7) { step("surrounding-$it", "search_apps", """{"count":1}""") }
         var version by mutableStateOf(0)
         var appended by mutableStateOf(false)
+        val bodyPrefixes = listOf("正在核对。", "正在核对。  \n继续整理。", "正在核对。  \n继续整理。  \n即将完成。")
+        var bodyVersion by mutableStateOf(0)
+        val before = step("terminal-before", "terminal", "{}")
         val header = "tool-step-header:inspect-live"
-        val nextHeader = "tool-step-header:surrounding-4"
+        val nextHeader = if (growInterToolText) "tool-step-header:surrounding-0" else "tool-step-header:surrounding-4"
         val category = "tool-category:child_control"
         val trace = mutableListOf<String>()
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             Box(Modifier.safeDrawingPadding()) {
                 BoxWithConstraints(Modifier.size(320.dp, 420.dp).testTag("clip-summary-host")) {
-                    val steps = others.take(3) + versions[version] + others.subList(4, if (appended) 7 else 6)
+                    val steps = if (growInterToolText) listOf(before, versions[version]) + others.take(5)
+                        else others.take(3) + versions[version] + others.subList(4, if (appended) 7 else 6)
+                    val content = if (growInterToolText) buildList<MessageContentUi> {
+                        add(MessageContentUi.Tool(steps.first()))
+                        add(MessageContentUi.Text("inter-tool-body", bodyPrefixes[bodyVersion]))
+                        addAll(steps.drop(1).map { MessageContentUi.Tool(it) })
+                    } else steps.map { MessageContentUi.Tool(it) }
                     val work = WorkProcessUi(listOf(WorkSegmentUi(steps = steps)), "进行中", running = true)
                     ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { inset ->
                         ChatMessageList(List(8) { ChatTurnUi.User("clip-history-$it", "history $it") } +
                             ChatTurnUi.Assistant("clip-tail", workProcess = if (mixed) null else work,
-                                content = if (mixed) steps.map { MessageContentUi.Tool(it) } else emptyList(),
+                                content = if (mixed) content else emptyList(),
                                 status = RunStatus.RUNNING, isStreaming = true), ChatScreenActions(),
                             composerBottomInset = inset, scrollRequest = ChatScrollRequest(1))
                     }, composer = { Box(Modifier.fillMaxWidth().height(96.dp).testTag("clip-summary-composer")) })
@@ -592,7 +604,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         fun sampleFrame(index: Int, phase: String = "reversal") {
             val body = ui.onAllNodesWithTag(category, useUnmergedTree = true).fetchSemanticsNodes().singleOrNull()
             val next = ui.onNodeWithTag(nextHeader).fetchSemanticsNode()
-            val line = "mixed=$mixed frame=$index version=$version append=$appended phase=$phase " +
+            val line = "mixed=$mixed frame=$index version=$version append=$appended phase=$phase textGrowth=$growInterToolText bodyVersion=$bodyVersion " +
                 "bodyRaw=${body?.let(::raw)} bodyBounds=${body?.boundsInRoot} next=${raw(next)} ${geometry(header)}"
             trace += line
             android.util.Log.i("WorkflowClipFrame", line)
@@ -630,7 +642,8 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             val image = hostNode.captureToImage()
             val directory = java.io.File(requireNotNull(activity.getExternalFilesDir(null)), "visual-diagnostics")
             directory.mkdirs()
-            java.io.File(directory, "child-summary-$mixed-$version.png").outputStream().use {
+            val imageName = if (growInterToolText) "child-summary-inter-tool-$bodyVersion.png" else "child-summary-$mixed-$version.png"
+            java.io.File(directory, imageName).outputStream().use {
                 assertTrue("Record the actual final rendered body", image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
             }
             val pixels = image.toPixelMap()
@@ -693,6 +706,48 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         }
         ui.mainClock.autoAdvance = false
         try {
+            if (growInterToolText) {
+                ui.onNodeWithTag(header).performTouchInput { click() }
+                repeat(48) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+                verifyFinalInk()
+                fun awaitBody(target: Int): androidx.compose.ui.text.TextLayoutResult {
+                    val expected = bodyPrefixes[target].replace("  \n", "\n")
+                    var last: androidx.compose.ui.text.TextLayoutResult? = null
+                    repeat(120) { frame ->
+                        ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                        ui.onNodeWithTag(header).assert(SemanticsMatcher.expectValue(
+                            androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
+                        sampleFrame(target * 100 + frame, "open-inter-tool-text-$target")
+                        verifyFinalInk()
+                        val tag = "message-content-text:1"
+                        val nodes = ui.onAllNodes((hasTestTag(tag) or hasAnyAncestor(hasTestTag(tag))) and
+                            SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult),
+                            useUnmergedTree = true).fetchSemanticsNodes()
+                        val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                        ui.runOnIdle { nodes.forEach { node ->
+                            node.config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action?.invoke(layouts)
+                        } }
+                        last = layouts.singleOrNull()
+                        val actual = last
+                        if (frame >= 17 && actual != null && actual.layoutInput.text.text == expected && actual.lineCount == target + 1) {
+                            assertFalse("Body must retain its full height", actual.didOverflowHeight)
+                            assertTrue("Body layout must contain its last line", actual.size.height + 1f >= actual.getLineBottom(actual.lineCount - 1))
+                            android.util.Log.i("WorkflowClipBody", "bodyVersion=$target height=${actual.size.height} lines=${actual.lineCount} text=${expected.replace("\n", "/")}")
+                            return actual
+                        }
+                    }
+                    throw AssertionError("Body did not finish real text layout: target=$target text=${last?.layoutInput?.text} lines=${last?.lineCount}")
+                }
+                var previousHeight = awaitBody(0).size.height
+                for (target in 1 until bodyPrefixes.size) {
+                    ui.runOnUiThread { bodyVersion = target }
+                    val currentHeight = awaitBody(target).size.height
+                    assertTrue("Real inter-tool text must grow: $previousHeight -> $currentHeight", currentHeight > previousHeight)
+                    previousHeight = currentHeight
+                }
+                android.util.Log.i("WorkflowClipComplete", "mixed=$mixed textGrowth=true bodyVersion=$bodyVersion")
+                return
+            }
             repeat(3) { round ->
                 ui.onNodeWithTag(header).performTouchInput { click() }
                 repeat(48) { frame ->

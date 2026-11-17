@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -451,14 +452,16 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
             val bodyPx = with(density) { 1000.dp.roundToPx() }
             expected = 100f - (bodyPx - viewportPx)
             Box(Modifier.onPlaced { host = it; state.itemOrigin = -100f }) {
-                StreamingTailContainer(state, { null }, "current-origin", true,
-                    follows = { true }, clearance = { 0 }, viewportHeight = { viewportPx }) {
-                    Box(Modifier.size(100.dp, 1000.dp).onPlaced { body = it }.drawWithContent {
-                        drawContent()
-                        val actual = checkNotNull(host).localPositionOf(checkNotNull(body),
-                            androidx.compose.ui.geometry.Offset.Zero).y
-                        origins.add(actual to (state.viewportOffset - state.scrollOffset))
-                    })
+                Box(Modifier.wrapContentHeight(align = androidx.compose.ui.Alignment.Top, unbounded = true)) {
+                    StreamingTailContainer(state, { null }, "current-origin", true,
+                        follows = { true }, clearance = { 0 }, viewportHeight = { viewportPx }) {
+                        Box(Modifier.size(100.dp, 1000.dp).onPlaced { body = it }.drawWithContent {
+                            drawContent()
+                            val actual = checkNotNull(host).localPositionOf(checkNotNull(body),
+                                androidx.compose.ui.geometry.Offset.Zero).y
+                            origins.add(actual to (state.viewportOffset - state.scrollOffset))
+                        })
+                    }
                 }
             }
         }

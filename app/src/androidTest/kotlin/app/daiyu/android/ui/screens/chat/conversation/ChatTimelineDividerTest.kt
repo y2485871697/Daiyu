@@ -347,8 +347,8 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testReconnectDetailsShowAndCopyCompleteChineseProviderAndTransportDetails() {
-        val stored = app.daiyu.android.model.reconnect.reconnectErrorDetails(
+    fun testReconnectDetailsShowAndCopyCompleteProviderErrorWithoutTechnicalDiagnostics() {
+        val stored = app.daiyu.android.domain.modelFailureDetails(
             app.daiyu.android.domain.ModelFailure.SERVER,
             app.daiyu.android.domain.ModelRequestDiagnostic(503,
                 providerDetail = app.daiyu.android.domain.ModelProviderDetail.sanitized(
@@ -357,6 +357,8 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
                     app.daiyu.android.domain.ModelTransportPhase.READING_STREAM,
                     app.daiyu.android.domain.ModelTransportCause.SOCKET,
                     app.daiyu.android.domain.ModelRequestKind.RESUME, 9850L, 9000L, 3L, 321L, true, false)))
+        val displayed = stored.substringBefore("\n\n传输诊断：")
+        assertTrue(displayed.contains("req-timeline")); assertTrue(displayed.contains("vendor_overloaded"))
         val entry = ChatTimelineEntry.Reconnect("stored-diagnostics", anchor, 1L,
             "succeeded", 12_000L, stored, 0, "main-model")
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -364,16 +366,18 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         } } }
         ui.onNodeWithText("已重连").performClick()
         ui.onNodeWithText("错误详情").assertIsDisplayed()
-        ui.onNodeWithText(stored).assertExists()
+        ui.onNodeWithText(displayed).assertExists()
         ui.onNodeWithText("READING_STREAM", substring = true).assertDoesNotExist()
+        ui.onNodeWithText("传输诊断：", substring = true).assertDoesNotExist()
+        ui.onNodeWithText("请求耗时：", substring = true).assertDoesNotExist()
         ui.onNodeWithTag("timeline-copy").performClick()
         mainThread {
             val clipboard = activity.getSystemService(android.content.ClipboardManager::class.java)
-            assertEquals(stored, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+            assertEquals(displayed, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
         }
         ui.onNodeWithTag("timeline-close").performClick()
         ui.onNodeWithText("已重连").performClick()
-        ui.onNodeWithText(stored).assertExists()
+        ui.onNodeWithText(displayed).assertExists()
         assertEquals(stored, entry.reason)
         assertEquals(0, fixture.opens.get())
     }
@@ -382,10 +386,18 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         var now = 0L
         val network = app.daiyu.android.model.reconnect.reconnectErrorDetails(app.daiyu.android.domain.ModelFailure.NETWORK)
-        val server = app.daiyu.android.model.reconnect.reconnectErrorDetails(app.daiyu.android.domain.ModelFailure.SERVER,
-            app.daiyu.android.domain.ModelRequestDiagnostic(503))
-        val limited = app.daiyu.android.model.reconnect.reconnectErrorDetails(app.daiyu.android.domain.ModelFailure.RATE_LIMIT,
-            app.daiyu.android.domain.ModelRequestDiagnostic(429))
+        fun storedError(reason: app.daiyu.android.domain.ModelFailure, status: Int, id: String, message: String) =
+            app.daiyu.android.domain.modelFailureDetails(reason, app.daiyu.android.domain.ModelRequestDiagnostic(status,
+                providerDetail = app.daiyu.android.domain.ModelProviderDetail.sanitized(code = "vendor_$status",
+                    type = "service_error", message = message, requestId = id),
+                transport = app.daiyu.android.domain.ModelTransportDiagnostic(
+                    app.daiyu.android.domain.ModelTransportPhase.READING_STREAM,
+                    app.daiyu.android.domain.ModelTransportCause.SOCKET,
+                    app.daiyu.android.domain.ModelRequestKind.RESUME, 100L, 80L, 3L, 40L, true, false)))
+        val serverStored = storedError(app.daiyu.android.domain.ModelFailure.SERVER, 503, "req-server", "Server overloaded")
+        val limitedStored = storedError(app.daiyu.android.domain.ModelFailure.RATE_LIMIT, 429, "req-limited", "Too many requests")
+        val server = serverStored.substringBefore("\n\n传输诊断：")
+        val limited = limitedStored.substringBefore("\n\n传输诊断：")
         var entry by mutableStateOf(ChatTimelineEntry.Reconnect("same-reconnect", anchor, 1L,
             "running", 623_000L, network, 0, "main-model"))
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -403,7 +415,7 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         mainThread { now = 120_000L }
         ui.mainClock.advanceTimeBy(2000)
         ui.onNodeWithText(network).assertExists()
-        mainThread { entry = entry.copy(reason = server) }
+        mainThread { entry = entry.copy(reason = serverStored) }
         ui.mainClock.advanceTimeBy(32)
         ui.onNodeWithText(server).assertExists()
         ui.onNodeWithText(network).assertDoesNotExist()
@@ -412,9 +424,10 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         ui.onAllNodesWithTag("timeline:same-reconnect").assertCountEquals(1)
         ui.onAllNodesWithTag("timeline-details").assertCountEquals(1)
         ui.onNodeWithText(server).assertExists()
-        mainThread { now = 121_000L; entry = entry.copy(reason = limited, elapsedMs = 624_000L) }
+        mainThread { now = 121_000L; entry = entry.copy(reason = limitedStored, elapsedMs = 624_000L) }
         ui.mainClock.advanceTimeBy(1100)
         ui.onNodeWithText(limited).assertExists()
+        ui.onNodeWithText("传输诊断：", substring = true).assertDoesNotExist()
         ui.onNodeWithText(server).assertDoesNotExist()
         ui.onNodeWithTag("timeline-copy").performClick()
         mainThread {

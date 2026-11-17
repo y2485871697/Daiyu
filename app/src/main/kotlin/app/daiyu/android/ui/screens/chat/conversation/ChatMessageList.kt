@@ -151,6 +151,7 @@ internal fun StreamingTailContainer(
         listCoordinates()?.size?.height ?: (viewportHeight() + clearance())
     },
     initialContent: Boolean = false,
+    followIntent: () -> Boolean = follows,
     content: @Composable () -> Unit,
 ) {
     val questionArrival = remember(state, initialContent) {
@@ -193,8 +194,8 @@ internal fun StreamingTailContainer(
                     val actualTop = list.localPositionOf(viewport, Offset.Zero).y
                     (list.size.height - actualTop - if (protect) clearance() else 0).coerceAtLeast(0f)
                 } else size.height
-                // Catchup can place the finite frame above content that is still inside the safe edge.
-                val followingCatchup = state.bounded && state.followCatchup && follows()
+                // A temporary follow gate must not shrink the physical safe edge during catchup.
+                val followingCatchup = state.bounded && state.followCatchup && followIntent()
                 val clipBottom = if (protect && !followingCatchup) minOf(size.height, bottom) else bottom
                 clipRect(bottom = clipBottom) { this@drawWithContent.drawContent() }
             }
@@ -1009,6 +1010,7 @@ internal fun ChatMessageList(
                             viewportHeight = { viewportHeightPx.intValue - currentOcclusionPx - with(density) { 11.dp.roundToPx() + ChatTailClearance.roundToPx() } },
                             listViewportHeight = { viewportHeightPx.intValue },
                             initialContent = initialQuestionContent,
+                            followIntent = { turn.listKey == assistantOwnerKey && followBottom },
                             content = turnContent)
                     } else turnContent()
                 }

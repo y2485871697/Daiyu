@@ -145,14 +145,41 @@ class StreamingOcclusionContract(unittest.TestCase):
             self.assertIn(token, case)
         source = CHAT.read_text()
         drawing = source.split(".drawWithContent {", 1)[1].split(".scrollable", 1)[0]
-        self.assertIn("state.bounded && state.followCatchup && follows()", drawing)
+        self.assertIn("state.bounded && state.followCatchup && followIntent()", drawing)
+        self.assertIn("followIntent: () -> Boolean = follows", source)
+        self.assertIn("followIntent = { turn.listKey == assistantOwnerKey && followBottom }", source)
         self.assertIn("protect && !followingCatchup", drawing)
         self.assertIn("minOf(size.height, bottom) else bottom", drawing)
+
+    def test_real_disclosure_gate_samples_safe_tail_in_the_captured_frame(self):
+        device = DEVICE.with_name("ChatMessageListMeasurePhaseTest.kt").read_text()
+        case = device.split("fun testRealDisclosureGateCannotClipSafeTailWithNonzeroFollowTransform()", 1)[1].split("fun testCurrentPlacementOrigin", 1)[0]
+        for token in ("ChatConversationLayers(", "ChatMessageList(", "ChatTurnMapper.map(",
+                      "LocalWorkflowDisclosureContext.current?.viewport", "work-process-header",
+                      "performSemanticsAction", "follow=true canFollow=false", "catchup=true",
+                      'number(diagnostic, "a") <= 1f', 'number(diagnostic, "q") <= 1f',
+                      'physical("chat-stream-viewport:${turn().listKey}")',
+                      "end.bottom > safeBottom + 1f", "sampleY <= viewport.bottom + 1f",
+                      "ChatTailClearance.value * pixelsPerDp", "eligibleFrames > 0",
+                      "color.red > .9f && color.blue > .9f && color.green < .1f", "failures.isEmpty()"):
+            self.assertIn(token, case)
+        self.assertNotIn('chat-stream-viewport:gate-tail', case)
+        capture = case.index('val image = captureScreenNode(')
+        diagnostic = case.index('val diagnostic = geometry()', capture)
+        gate = case.index('if (!diagnostic.contains(', diagnostic)
+        geometry = case.index('val end = physical(', gate)
+        eligible = case.index('eligibleFrames++', geometry)
+        sample = case.index('val color = pixels[', eligible)
+        self.assertLess(capture, diagnostic)
+        self.assertLess(diagnostic, gate)
+        self.assertLess(gate, geometry)
+        self.assertLess(geometry, eligible)
+        self.assertLess(eligible, sample)
 
     def test_protected_drawing_caps_current_frame_without_clipping_manual_backdrop(self):
         source = CHAT.read_text()
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
-        self.assertIn("val followingCatchup = state.bounded && state.followCatchup && follows()", viewport)
+        self.assertIn("val followingCatchup = state.bounded && state.followCatchup && followIntent()", viewport)
         self.assertIn("val clipBottom = if (protect && !followingCatchup) minOf(size.height, bottom) else bottom", viewport)
         self.assertIn("clipRect(bottom = clipBottom)", viewport)
         self.assertIn("internal val ChatTailClearance = 8.dp", source)

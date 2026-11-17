@@ -7846,7 +7846,8 @@ class MainActivity : ComponentActivity() {
                 }, presentations = toolPresentations, toolReceipt = visibleToolReceipts,
                     childTaskNames = visibleChildNames),
                     controlOwner, phase = state?.phase ?: ExecutionPhase.IDLE, pauseRequested = state?.pauseRequested == true,
-                    stopRequested = controlOwner?.let(controller::runStopping) == true),
+                    stopRequested = controlOwner?.let(controller::runStopping) == true,
+                    terminalTargets = state?.terminalTargets.orEmpty()),
                 submissionPreview = submissionPreview,
                 statusText = controller.problem ?: when {
                     controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";

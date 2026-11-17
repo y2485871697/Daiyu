@@ -75,6 +75,7 @@ jobs:
           import shutil
           from pathlib import Path
           shutil.rmtree('app/build/test-results/testDebugUnitTest', ignore_errors=True)
+          shutil.rmtree('core-domain/build/test-results/test', ignore_errors=True)
           for name in ('task-graph.json', 'record.json'):
               Path('terminal-retention-checks', name).unlink(missing_ok=True)
           PYRESET
@@ -96,6 +97,9 @@ jobs:
             --tests 'app.daiyu.android.integration.tools.TerminalJobSessionTest' \
             --tests 'app.daiyu.android.integration.tools.RunCommandToolsTest' \
             --tests 'app.daiyu.android.integration.tools.ShizukuCommandTransportTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.TerminalToolTargetTest' \
+            --tests 'app.daiyu.android.ui.screens.chat.conversation.ChatTurnMapperTest' \
+            :core-domain:test --tests 'app.daiyu.android.domain.runtime.TerminalExecutionTargetTest' \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee terminal-retention-checks/gradle.log
       - name: 核对定向报告及零安装包
         run: |
@@ -104,13 +108,15 @@ jobs:
           from pathlib import Path
           import xml.etree.ElementTree as ET
           root = Path.cwd()
-          expected = {'app.daiyu.android.terminal.LinuxRunnerGenerationPinsTest', 'app.daiyu.android.terminal.LinuxRootfsBackupAccessTest', 'app.daiyu.android.terminal.LinuxEnvironmentStoreTest', 'app.daiyu.android.terminal.LinuxSettingsApplicationFreezeTest', 'app.daiyu.android.terminal.TerminalGridBufferTest', 'app.daiyu.android.terminal.LinuxWorkspaceDirectoryTest', 'app.daiyu.android.terminal.RootScopeCommandProcessTest', 'app.daiyu.android.terminal.PtyRootScopeProtocolTest', 'app.daiyu.android.terminal.TerminalRegistryRetentionTest', 'app.daiyu.android.terminal.TerminalJobHistoryReaderTest', 'app.daiyu.android.ui.screens.terminal.TerminalTaskOutputTest', 'app.daiyu.android.integration.tools.TerminalJobSessionTest', 'app.daiyu.android.integration.tools.RunCommandToolsTest', 'app.daiyu.android.integration.tools.ShizukuCommandTransportTest'}
+          expected = {'app.daiyu.android.terminal.RootScopeCommandProcessTest', 'app.daiyu.android.terminal.TerminalGridBufferTest', 'app.daiyu.android.terminal.LinuxRootfsBackupAccessTest', 'app.daiyu.android.ui.screens.chat.conversation.TerminalToolTargetTest', 'app.daiyu.android.ui.screens.terminal.TerminalTaskOutputTest', 'app.daiyu.android.integration.tools.RunCommandToolsTest', 'app.daiyu.android.terminal.LinuxRunnerGenerationPinsTest', 'app.daiyu.android.terminal.PtyRootScopeProtocolTest', 'app.daiyu.android.terminal.LinuxWorkspaceDirectoryTest', 'app.daiyu.android.terminal.LinuxEnvironmentStoreTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatTurnMapperTest', 'app.daiyu.android.integration.tools.ShizukuCommandTransportTest', 'app.daiyu.android.terminal.LinuxSettingsApplicationFreezeTest', 'app.daiyu.android.integration.tools.TerminalJobSessionTest', 'app.daiyu.android.terminal.TerminalRegistryRetentionTest', 'app.daiyu.android.terminal.TerminalJobHistoryReaderTest'}
           suites = [ET.parse(p).getroot() for folder in ('app/build/test-results/testDebugUnitTest',) for p in Path(folder).glob('TEST-*.xml')]
           names = [suite.attrib['name'] for suite in suites]
           import sys
           sys.path.insert(0, 'scripts/acceptance')
           from terminal_retention_contract import validate_suites
           validate_suites(suites, expected)
+          core_suites = [ET.parse(p).getroot() for p in Path('core-domain/build/test-results/test').glob('TEST-*.xml')]
+          validate_suites(core_suites, {'app.daiyu.android.domain.runtime.TerminalExecutionTargetTest'})
           assert all(int(s.attrib['tests']) > 0 for s in suites)
           assert all(int(s.attrib.get(k, 0)) == 0 for s in suites for k in ('failures', 'errors', 'skipped'))
           graph = json.loads(Path('terminal-retention-checks/task-graph.json').read_text())
@@ -126,7 +132,8 @@ jobs:
           assert not packages, packages
           record = dict(source_sha=os.environ['EXPECTED_SHA'], workflow_sha=os.environ['GITHUB_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
                         attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), tests=sum(int(s.attrib['tests']) for s in suites),
-                        classes=sorted(names),
+                        classes=sorted(names), core_classes=sorted(s.attrib['name'] for s in core_suites),
+                        core_tests=sum(int(s.attrib['tests']) for s in core_suites),
                         apk_built=False, instrumentation_run=False)
           Path('terminal-retention-checks/record.json').write_text(json.dumps(record, ensure_ascii=False, indent=2) + '\n')
           print(json.dumps(record, ensure_ascii=False))
@@ -141,4 +148,5 @@ jobs:
             app/build/test-results/testDebugUnitTest/
             app/build/reports/tests/testDebugUnitTest/
             app/build/reports/host-pty/
+            core-domain/build/test-results/test/
           if-no-files-found: error

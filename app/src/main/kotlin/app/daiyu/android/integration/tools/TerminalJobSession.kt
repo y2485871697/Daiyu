@@ -165,6 +165,7 @@ internal class TerminalJobSession private constructor(
             if (late) { synchronized(lock) { definitelyNotStarted = true }; stopTransport(transport); return ExecutionReceipt.NotExecuted("terminal_job_cancelled_before_open") }
             val opened = transport.execute("terminal_open", JSONObject().put("request_id", "open"))
             if (!opened.optBoolean("ok")) return receipt(opened)
+            TerminalTargetMetadata.publish(context, opened)
             val raw = transport.execute("terminal_exec", JSONObject().put("request_id", "command")
                 .put("session_id", opened.getString("session_id")).put("command", plan.command).put("mode", plan.mode))
             synchronized(lock) { job = raw.optString("job_id").takeIf { it.matches(Regex("[a-f0-9-]{36}")) } }

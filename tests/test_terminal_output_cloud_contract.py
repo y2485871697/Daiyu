@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import re
 from pathlib import Path
 import sys
 import unittest
@@ -55,7 +56,7 @@ class TerminalOutputCloudContract(unittest.TestCase):
     def test_junit_suite_target_and_reject_missing_or_failed_xml(self):
         workflow = WORKFLOW.read_text()
         self.assertIn("TerminalGridBufferTest", workflow)
-        self.assertIn("actual == expected", workflow)
+        self.assertIn("validate_suites(suites, expected)", workflow)
         self.assertIn("assert not packages", workflow)
         mod = load_module("terminal_retention_contract", ROOT / "scripts/acceptance/terminal_retention_contract.py")
         target = "app.daiyu.android.terminal.TerminalGridBufferTest"
@@ -66,6 +67,24 @@ class TerminalOutputCloudContract(unittest.TestCase):
         failed = ET.fromstring('<testsuite name="x" tests="1" failures="1"/>')
         with self.assertRaises(ValueError):
             mod.validate_suites([failed], {"x"})
+
+    def test_runtime_target_checks_keep_app_and_core_filters_and_evidence_separate(self):
+        workflow = WORKFLOW.read_text()
+        start = workflow.index(':app:compileDebugKotlin :app:testDebugUnitTest')
+        split = workflow.index(':core-domain:test', start)
+        end = workflow.index(':app:compileDebugAndroidTestKotlin', split)
+        app_filters = re.findall(r"--tests '([^']+)'", workflow[start:split])
+        core_filters = re.findall(r"--tests '([^']+)'", workflow[split:end])
+        expected_app = {'app.daiyu.android.terminal.RootScopeCommandProcessTest', 'app.daiyu.android.terminal.TerminalGridBufferTest', 'app.daiyu.android.terminal.LinuxRootfsBackupAccessTest', 'app.daiyu.android.ui.screens.chat.conversation.TerminalToolTargetTest', 'app.daiyu.android.ui.screens.terminal.TerminalTaskOutputTest', 'app.daiyu.android.integration.tools.RunCommandToolsTest', 'app.daiyu.android.terminal.LinuxRunnerGenerationPinsTest', 'app.daiyu.android.terminal.PtyRootScopeProtocolTest', 'app.daiyu.android.terminal.LinuxWorkspaceDirectoryTest', 'app.daiyu.android.terminal.LinuxEnvironmentStoreTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatTurnMapperTest', 'app.daiyu.android.integration.tools.ShizukuCommandTransportTest', 'app.daiyu.android.terminal.LinuxSettingsApplicationFreezeTest', 'app.daiyu.android.integration.tools.TerminalJobSessionTest', 'app.daiyu.android.terminal.TerminalRegistryRetentionTest', 'app.daiyu.android.terminal.TerminalJobHistoryReaderTest'}
+        self.assertEqual(set(app_filters), expected_app)
+        self.assertEqual(len(app_filters), len(expected_app))
+        self.assertEqual(core_filters, ['app.daiyu.android.domain.runtime.TerminalExecutionTargetTest'])
+        self.assertIn("shutil.rmtree('core-domain/build/test-results/test', ignore_errors=True)", workflow)
+        self.assertIn("validate_suites(core_suites, {'app.daiyu.android.domain.runtime.TerminalExecutionTargetTest'})", workflow)
+        self.assertIn("core_classes=sorted(s.attrib['name'] for s in core_suites)", workflow)
+        self.assertIn("core_tests=sum(int(s.attrib['tests']) for s in core_suites)", workflow)
+        upload = workflow[workflow.index('- name: 上传检查证据'):]
+        self.assertIn('core-domain/build/test-results/test/', upload)
 
     def test_instrumentation_parser_nonzero_failure_and_smoke_hard_gate(self):
         parser = load_module("instrumentation_result", ROOT / "scripts/acceptance/instrumentation_result.py")

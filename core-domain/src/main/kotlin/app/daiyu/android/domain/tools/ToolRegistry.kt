@@ -60,7 +60,11 @@ class ToolExecutionContext internal constructor(
     val invocation: ToolInvocation,
     val authorization: TaskAuthorization,
     val cancelled: () -> Boolean
-)
+) {
+    fun reportTerminalTarget(target: app.daiyu.android.domain.runtime.TerminalExecutionTarget) {
+        owner.reportTerminalTarget(invocation, target)
+    }
+}
 
 class PreparedTool private constructor(
     val writeEffect: WriteEffect?,

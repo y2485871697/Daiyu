@@ -423,4 +423,34 @@ class TerminalJobSessionTest {
         } finally { jobExited.set(true); root.deleteRecursively() }
     }
 
+    @Test fun resolvedJobTargetIsVisibleWhileStartReceiptIsStillBlocked() {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val backend = object : Backend() {
+            override fun execute(name: String, arguments: JSONObject): JSONObject {
+                val receipt = super.execute(name, arguments)
+                if (name == "terminal_open") return receipt.put("backend", "linux:debian").put("uid", 0)
+                    .put("guest_uid", 0).put("root", false).put("host_root", false)
+                entered.countDown()
+                check(release.await(5, TimeUnit.SECONDS))
+                return receipt
+            }
+        }
+        val fixture = Fixture(backend = backend)
+        val running = java.util.concurrent.FutureTask { fixture.call() }
+        val worker = Thread(running).apply { isDaemon = true; start() }
+        try {
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            assertFalse(running.isDone)
+            val target = fixture.owner.terminalTargets.values.single()
+            assertEquals("linux:debian", target.backend)
+            assertEquals(0, target.guestUid)
+            assertEquals(false, target.hostRoot)
+        } finally { release.countDown(); worker.join(6000) }
+        assertFalse(worker.isAlive)
+        assertTrue(running.get(1, TimeUnit.SECONDS) is DispatchOutcome.Unknown)
+        assertEquals(2, backend.calls.size)
+        fixture.close()
+    }
+
 }

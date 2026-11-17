@@ -28,6 +28,8 @@ class RunCommandToolsTest {
         var failClose = false
         var cancelled = false
         var onOpen: () -> Unit = {}
+        var onExecute: () -> Unit = {}
+        var openIdentity = JSONObject()
         var openError: String? = null
         val configurations = mutableListOf<TerminalConfiguration>()
         val disclosures = mutableListOf<String>()
@@ -57,8 +59,9 @@ class RunCommandToolsTest {
                             openRequests.add(arguments.getString("request_id"))
                             onOpen()
                             openError?.let { return JSONObject().put("ok", false).put("error", it) }
-                            return JSONObject().put("ok", true).put("session_id", "session")
+                            return JSONObject(openIdentity.toString()).put("ok", true).put("session_id", "session")
                         }
+                        onExecute()
                         executions++
                         executionRequests.add(arguments.getString("request_id"))
                         if (failExecute) throw java.io.IOException("sent but receipt lost")
@@ -250,8 +253,10 @@ class RunCommandToolsTest {
     }
     @Test fun cancellationDuringOpenDoesNotSendCommand() {
         val fixture = Fixture(); fixture.onOpen = { fixture.cancelled = true }
+        fixture.openIdentity = JSONObject().put("backend", "android").put("uid", 0).put("root", true)
         assertTrue(fixture.dispatch() is DispatchOutcome.NotExecuted)
         assertEquals(1, fixture.created); assertEquals(0, fixture.executions)
+        assertTrue(fixture.owner.terminalTargets.isEmpty())
     }
     @Test fun unknownThenEquivalentNewCallRemainsUnknownWithoutNewConsentOrExecution() {
         val fixture = Fixture(); fixture.execution = "unknown"
@@ -357,6 +362,74 @@ class RunCommandToolsTest {
         assertEquals(0, fixture.executions)
         assertTrue(fixture.configurations.all { it.root })
         fixture.leaf.close()
+    }
+
+    @Test fun resolvedTargetIsPublishedBeforeCommandCompletesWithoutConfirmingItsReceipt() {
+        val fixture = Fixture()
+        fixture.openIdentity = JSONObject().put("backend", "linux:debian").put("uid", 0)
+            .put("guest_uid", 0).put("root", true).put("host_root", true)
+        val entered = java.util.concurrent.CountDownLatch(1)
+        val release = java.util.concurrent.CountDownLatch(1)
+        fixture.onExecute = { entered.countDown(); check(release.await(5, java.util.concurrent.TimeUnit.SECONDS)) }
+        val executing = java.util.concurrent.FutureTask { fixture.dispatch() }
+        Thread(executing).start()
+        try {
+            assertTrue(entered.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            assertFalse(executing.isDone)
+            val target = fixture.owner.terminalTargets.values.single()
+            assertEquals("linux:debian", target.backend)
+            assertEquals(0, target.guestUid)
+            assertEquals(true, target.hostRoot)
+            assertEquals(0, fixture.executions)
+            assertEquals(1, fixture.created)
+        } finally { release.countDown() }
+        assertTrue(executing.get(5, java.util.concurrent.TimeUnit.SECONDS) is DispatchOutcome.Confirmed)
+        assertEquals(1, fixture.executions)
+        fixture.leaf.close()
+    }
+
+    @Test fun targetComesFromResolvedIdentityNotRequestedEnvironmentAndRemainsUnknownOnLostReceipt() {
+        val fixture = Fixture()
+        fixture.openIdentity = JSONObject().put("backend", "linux:alpine").put("uid", 1000)
+            .put("guest_uid", 1000).put("root", false).put("host_root", false)
+        fixture.failExecute = true
+        assertTrue(fixture.dispatch(environment = "android") is DispatchOutcome.Unknown)
+        val target = fixture.owner.terminalTargets.values.single()
+        assertEquals("linux:alpine", target.backend)
+        assertEquals(1000, target.guestUid)
+        assertEquals(false, target.hostRoot)
+        assertTrue(fixture.dispatch("next") is DispatchOutcome.NotExecuted)
+        assertEquals(1, fixture.executions)
+        fixture.leaf.close()
+    }
+
+    @Test fun malformedIdentityValuesAreNotCoercedAndUnknownBackendIsNotPublished() {
+        for (invalid in listOf<Any>("0", 0.5, -1, Long.MAX_VALUE)) {
+            val fixture = Fixture()
+            fixture.openIdentity = JSONObject().put("backend", "linux:debian").put("uid", invalid)
+                .put("guest_uid", invalid).put("root", "true").put("host_root", "true")
+            assertTrue(fixture.dispatch() is DispatchOutcome.Confirmed)
+            val target = fixture.owner.terminalTargets.values.single()
+            assertNull(target.uid); assertNull(target.guestUid)
+            assertNull(target.root); assertNull(target.hostRoot)
+            fixture.leaf.close()
+        }
+        val unknown = Fixture()
+        unknown.openIdentity = JSONObject().put("backend", "future:unknown").put("uid", 0)
+        assertTrue(unknown.dispatch() is DispatchOutcome.Confirmed)
+        assertTrue(unknown.owner.terminalTargets.isEmpty())
+        unknown.leaf.close()
+    }
+
+    @Test fun deniedOrFailedOpenNeverPublishesAnActualTarget() {
+        val denied = Fixture().apply { approved = false }
+        assertTrue(denied.dispatch() is DispatchOutcome.NotExecuted)
+        assertTrue(denied.owner.terminalTargets.isEmpty())
+        val failed = Fixture().apply { openError = "root_unavailable" }
+        assertTrue(failed.dispatch() is DispatchOutcome.NotExecuted)
+        assertTrue(failed.owner.terminalTargets.isEmpty())
+        assertEquals(0, failed.executions)
+        denied.leaf.close(); failed.leaf.close()
     }
 
 }

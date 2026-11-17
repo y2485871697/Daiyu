@@ -4710,6 +4710,11 @@ class ChatController internal constructor(private val application:Application,
                         if (!closed && active?.id == assistant.id && active?.runId == run &&
                             active?.conversationId == conversationId) notifyChanged()
                     } },
+                    onTerminalTargetChanged = { owner -> synchronized(this) {
+                        val original = reconnectResources
+                        if (original != null && resources === original && !original.fenced && !closed &&
+                            runner === original.runner && active?.let(owner::owns) == true) notifyChanged()
+                    } },
                     onNativeSearch = { event -> publishNativeSearch(assistant, event) },
                     onReasoning={ event -> publishReasoning(assistant,event) })) {
                 afterTitleParentPersisted(it, user, assistant, pendingTitle)

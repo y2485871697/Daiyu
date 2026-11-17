@@ -264,6 +264,7 @@ internal class RunCommandTools(
         if (!opened.optBoolean("ok")) return ExecutionReceipt.NotExecuted(opened.optString("error", "terminal_open_failed"))
         if (call.cancelled() || synchronized(lock) { closed })
             return ExecutionReceipt.NotExecuted("terminal_cancelled_before_command")
+        TerminalTargetMetadata.publish(call, opened)
         val raw = registry.execute("terminal_exec", JSONObject().put("request_id", "exec-$request")
             .put("session_id", opened.getString("session_id")).put("command", command)
             .put("mode", "sync").put("timeout_ms", timeout))

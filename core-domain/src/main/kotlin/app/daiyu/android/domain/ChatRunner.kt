@@ -81,6 +81,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     private fun queuedSupplementMessages(): List<Message> = supplements + pendingSupplements.map { it.message } +
         listOfNotNull(admittingSupplement)
     @Volatile private var execution = ExecutionState()
+    @Volatile private var targetOwner: RunExecutionOwner? = null
     @Volatile private var session: ModelSession? = null
     @Volatile private var reconnectBudget: TransportReconnectBudget? = null
     @Volatile private var transportInterruption: (() -> Unit)? = null
@@ -161,7 +162,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         return collectSlice()
     }
 
-    fun state(): ExecutionState = execution
+    fun state(): ExecutionState = execution.copy(terminalTargets = targetOwner?.terminalTargets.orEmpty())
     fun stop() {
         // Reserve the terminal outcome before observing the session. The object captured here is
         // the one that may be cancelled; never read session again after leaving the lock.
@@ -344,7 +345,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var usageRequests = emptyList<RequestCheckpoint>()
         var usage: List<RequestUsageCheckpoint> =
             (options.runtimeStore as? PreparationRuntimeStore)?.preparationUsage(initial).orEmpty()
-        val executionOwner = RunExecutionOwner.issue(initial)
+        val executionOwner = RunExecutionOwner.issue(initial, options.onTerminalTargetChanged)
+        targetOwner = executionOwner
         val owner = executionOwner.ownerId
         var ownerBound = false
         var revision = 0L

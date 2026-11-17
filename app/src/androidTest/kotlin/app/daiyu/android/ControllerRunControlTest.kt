@@ -18,6 +18,96 @@ class ControllerRunControlTest:InstrumentationTestCase() {
     override fun tearDown() {
         try {fixtures.forEach {it.close()}} finally {super.tearDown()}
     }
+    private fun targetField(target: Any, name: String): Any? = target.javaClass.getDeclaredField(name).let {
+        it.isAccessible = true; it.get(target)
+    }
+    private fun targetContext(f: RunControlFixture, message: Message): app.daiyu.android.domain.tools.ToolExecutionContext {
+        val catalog = checkNotNull(targetField(f.controller, "runTools"))
+        val owner = targetField(catalog, "owner") as app.daiyu.android.domain.runtime.RunExecutionOwner
+        return app.daiyu.android.domain.tools.ToolExecutionContext(owner,
+            ToolInvocation(ToolCallId("target-notify"), "terminal_exec", "{}"),
+            app.daiyu.android.domain.tools.TaskAuthorization("test", message.runId.value)) { false }
+    }
+    private fun targetNotificationWindow(f: RunControlFixture) {
+        val passed = java.util.concurrent.CountDownLatch(1)
+        controlMain { android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({ passed.countDown() }, 80L) }
+        assertTrue(passed.await(30, TimeUnit.SECONDS))
+        instrumentation.waitForIdleSync()
+        controlMain { assertEquals(false, targetField(f.controller, "changedDispatchPending")) }
+    }
+    private fun publishTarget(context: app.daiyu.android.domain.tools.ToolExecutionContext,
+        target: app.daiyu.android.domain.runtime.TerminalExecutionTarget) {
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable?>()
+        val worker = Thread { try { context.reportTerminalTarget(target) } catch (caught: Throwable) { failure.set(caught) } }
+            .apply { isDaemon = true; start() }
+        worker.join(30_000)
+        assertFalse("target callback must return", worker.isAlive)
+        failure.get()?.let { throw it }
+    }
+    fun testTerminalTargetNotifiesWithoutAnotherModelEvent() {
+        val f = fresh(); val held = f.session(holdSeconds = 120, releaseOnCancel = false); val message = start(f)
+        assertTrue(held.entered.await(30, TimeUnit.SECONDS))
+        val context = targetContext(f, message)
+        val target = app.daiyu.android.domain.runtime.TerminalExecutionTarget("android", 10444)
+        targetNotificationWindow(f)
+        val observed = java.util.concurrent.CountDownLatch(1)
+        val listener: () -> Unit = {
+            if (f.controller.runState(message)?.terminalTargets?.get(context.invocation) == target) observed.countDown()
+        }
+        controlMain { f.controller.observe(listener) }
+        try {
+            publishTarget(context, target)
+            assertTrue("new target must notify after initial dispatch drained", observed.await(30, TimeUnit.SECONDS))
+            controlMain {
+                assertEquals(RunStatus.RUNNING, f.controller.active!!.status)
+                assertEquals(1L, held.release.count)
+                assertEquals(1, f.opens.get())
+            }
+        } finally { controlMain { f.controller.unobserve(listener) }; held.release.countDown() }
+    }
+    fun testFencedTerminalTargetCannotNotifyCurrentObservers() {
+        val f = fresh(); val held = f.session(holdSeconds = 120, releaseOnCancel = false); val message = start(f)
+        assertTrue(held.entered.await(30, TimeUnit.SECONDS))
+        val context = targetContext(f, message)
+        controlMain { assertTrue(f.controller.stop(message)) }
+        assertTrue(held.cancelled.await(30, TimeUnit.SECONDS))
+        targetNotificationWindow(f)
+        val notifications = java.util.concurrent.atomic.AtomicInteger()
+        val listener: () -> Unit = { notifications.incrementAndGet() }
+        controlMain { f.controller.observe(listener) }
+        try {
+            publishTarget(context, app.daiyu.android.domain.runtime.TerminalExecutionTarget("android", 10444))
+            targetNotificationWindow(f)
+            assertEquals(0, notifications.get())
+            assertEquals(1L, held.release.count)
+        } finally { controlMain { f.controller.unobserve(listener) }; held.release.countDown() }
+    }
+    fun testOldTerminalOwnerCannotNotifyOrLabelNextRun() {
+        val f = fresh(); val first = f.session(holdSeconds = 120); val previous = start(f)
+        assertTrue(first.entered.await(30, TimeUnit.SECONDS))
+        val oldContext = targetContext(f, previous)
+        first.release.countDown()
+        awaitControl("first terminal before target isolation") { f.controller.active == null }
+        val next = f.session(holdSeconds = 120, releaseOnCancel = false)
+        assertNotNull(f.controller.send(f.database.conversations().single(), "next user"))
+        val current = checkNotNull(f.controller.active)
+        assertTrue(next.entered.await(30, TimeUnit.SECONDS))
+        targetNotificationWindow(f)
+        val notifications = java.util.concurrent.atomic.AtomicInteger()
+        val listener: () -> Unit = { notifications.incrementAndGet() }
+        controlMain { f.controller.observe(listener) }
+        try {
+            publishTarget(oldContext, app.daiyu.android.domain.runtime.TerminalExecutionTarget("android", 0))
+            targetNotificationWindow(f)
+            assertEquals(0, notifications.get())
+            controlMain {
+                assertTrue(f.controller.runState(current)!!.terminalTargets.isEmpty())
+                assertEquals(current.id, f.controller.active!!.id)
+                assertEquals(1L, next.release.count)
+            }
+        } finally { controlMain { f.controller.unobserve(listener) }; next.release.countDown() }
+    }
+
     fun testWorkerPausedBoundaryNotifiesChangedWithoutAnotherModelEvent() {
         val f=fresh();val first=f.session(releaseOnCancel=false);val owner=start(f)
         assertTrue(first.entered.await(30,TimeUnit.SECONDS))

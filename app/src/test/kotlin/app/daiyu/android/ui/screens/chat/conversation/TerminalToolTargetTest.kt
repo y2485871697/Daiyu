@@ -145,4 +145,88 @@ class TerminalToolTargetTest {
             assertEquals(invocation, message.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation)
         }
     }
+    private fun runtimeOwner(vararg blocks: MessageBlock) = Message(MessageId("runtime-message"), ConversationId("runtime-chat"),
+        RunId("runtime-run"), Message.ASSISTANT_ROLE, blocks.toList(), RunStatus.RUNNING)
+    private fun runtimeSteps(turns: List<ChatTurnUi>) = turns.filterIsInstance<ChatTurnUi.Assistant>().flatMap { turn ->
+        turn.workProcess?.segments.orEmpty().flatMap { it.steps } + turn.content.filterIsInstance<MessageContentUi.Tool>().map { it.step }
+    }
+    private fun runtimeMap(messages: List<Message>, mixed: Boolean = false, cache: ToolPresentationCache? = null) =
+        ChatTurnMapper.map(messages, presentations = cache, dedicatedTool = { _, _ -> if (mixed) "runtime-test" else null })
+
+    @Test fun resolvedRuntimeTargetAppearsBeforeReceiptInBothLayoutsWithoutChangingStepState() {
+        val call = ToolInvocation(ToolCallId("runtime-call"), "terminal_exec", """{"environment":"android"}""")
+        val live = runtimeOwner(MessageBlock.Tool(call))
+        val cases = listOf(
+            app.daiyu.android.domain.runtime.TerminalExecutionTarget("android", uid = 0, root = true) to "Android • root",
+            app.daiyu.android.domain.runtime.TerminalExecutionTarget("android", uid = 10444, root = false) to "Android • user",
+            app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, false, false) to "Debian • root（PRoot）",
+            app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:alpine", 1000, 1000, false, false) to "Alpine • user",
+            app.daiyu.android.domain.runtime.TerminalExecutionTarget("shizuku", uid = 2000) to "Android • Shizuku",
+        )
+        for (mixed in listOf(false, true)) for ((target, label) in cases) {
+            val base = runtimeMap(listOf(live), mixed)
+            val expected = runtimeSteps(base).map { it.copy(name = "${it.name} · $label", executionTargetLabel = label) }
+            val projected = ChatTurnMapper.withStreamingOwner(base, live, terminalTargets = mapOf(call to target))
+            assertEquals(expected, runtimeSteps(projected))
+            assertTrue(runtimeSteps(base).all { it.executionTargetLabel == null })
+            assertSame(projected, ChatTurnMapper.withStreamingOwner(projected, live, terminalTargets = mapOf(call to target)))
+            assertNull(live.blocks.filterIsInstance<MessageBlock.Tool>().single().result)
+        }
+    }
+
+    @Test fun runtimeTargetRequiresExactOwnerAndInvocationAndDoesNotDecorateDuplicateOccurrences() {
+        val call = ToolInvocation(ToolCallId("dup"), "terminal_exec", """{"command":"new"}""")
+        val target = app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)
+        val live = runtimeOwner(MessageBlock.Tool(call))
+        val foreign = live.copy(runId = RunId("foreign-run"))
+        val base = runtimeMap(listOf(foreign, live), mixed = true)
+        val output = RunningTerminalTargets.project(base, live, mapOf(call to target))
+        assertSame(base.first(), output.first())
+        assertTrue(runtimeSteps(listOf(output.last())).all { it.executionTargetLabel == "Debian • root" })
+        assertSame(base, RunningTerminalTargets.project(base, live, mapOf(call.copy(arguments = "{}") to target)))
+        val repeated = live.copy(blocks = listOf(MessageBlock.Tool(call.copy(arguments = "{}"), "{}"), MessageBlock.Tool(call)))
+        val duplicates = runtimeMap(listOf(repeated), mixed = true)
+        assertSame(duplicates, RunningTerminalTargets.project(duplicates, repeated, mapOf(call to target)))
+        val earlier = live.copy(blocks = listOf(MessageBlock.Tool(call.copy(arguments = "{}"))))
+        val merged = runtimeMap(listOf(earlier, live), mixed = true)
+        assertSame(merged, RunningTerminalTargets.project(merged, live, mapOf(call to target)))
+    }
+
+    @Test fun runtimeTargetLeavesCachedPresentationsCleanAndFinalReceiptAuthoritative() {
+        val call = ToolInvocation(ToolCallId("runtime-call"), "terminal_exec", "{}")
+        val live = runtimeOwner(MessageBlock.Tool(call))
+        val cache = ToolPresentationCache()
+        val target = app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)
+        val base = runtimeMap(listOf(live), mixed = true, cache = cache)
+        assertTrue(runtimeSteps(RunningTerminalTargets.project(base, live, mapOf(call to target)))
+            .all { it.executionTargetLabel == "Debian • root" })
+        val fresh = runtimeMap(listOf(live), mixed = true, cache = cache)
+        assertTrue(runtimeSteps(fresh).all { it.executionTargetLabel == null })
+        val received = live.copy(blocks = listOf(MessageBlock.Tool(call, """{"backend":"android","uid":10444,"root":false}""")))
+        val finalBase = runtimeMap(listOf(received), mixed = true, cache = cache)
+        assertSame(finalBase, RunningTerminalTargets.project(finalBase, received, mapOf(call to target)))
+        assertTrue(runtimeSteps(finalBase).all { it.executionTargetLabel == "Android • user" })
+    }
+
+    @Test fun runtimeTargetReachesActuallyRenderedReconnectPartsBeforeReceipt() {
+        val call = ToolInvocation(ToolCallId("reconnected-call"), "terminal_exec", "{}")
+        val live = runtimeOwner(MessageBlock.Tool(call))
+        val anchor = app.daiyu.android.timeline.TimelineAnchor(live.conversationId.value, live.runId.value, live.id.value, 0)
+        val event = app.daiyu.android.timeline.ChatTimelineEntry.Reconnect("runtime-reconnect", anchor, 1L,
+            "succeeded", 10L, "network", 0, "model", app.daiyu.android.timeline.ReconnectPosition(0))
+        val base = ChatTurnMapper.map(listOf(live), reconnects = listOf(event))
+        val target = app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)
+        val displayed = ChatTurnMapper.withStreamingOwner(base, live, terminalTargets = mapOf(call to target))
+            .filterIsInstance<ChatTurnUi.Assistant>().single()
+        val sourceStep = displayed.reconnectSource!!.content.filterIsInstance<MessageContentUi.Tool>().single().step
+        assertEquals("Debian • root", sourceStep.executionTargetLabel)
+        val parts = reconnectParts(displayed, listOf(event))
+        assertEquals(setOf(event.id), parts.placedIds)
+        val steps = parts.parts.flatMap { it.workflow.steps }.filterIsInstance<MessageContentUi.Tool>().map { it.step }
+        assertEquals(1, steps.size)
+        assertEquals("Debian • root", steps.single().executionTargetLabel)
+        assertTrue(steps.single().name.endsWith(" · Debian • root"))
+        assertTrue(runtimeSteps(base).all { it.executionTargetLabel == null })
+    }
+
 }

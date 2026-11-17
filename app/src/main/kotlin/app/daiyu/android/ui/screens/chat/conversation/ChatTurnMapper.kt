@@ -253,9 +253,11 @@ object ChatTurnMapper {
     }
 
     fun withStreamingOwner(turns: List<ChatTurnUi>, owner: Message?, phase: ExecutionPhase? = null,
-        pauseRequested: Boolean = false, stopRequested: Boolean = false): List<ChatTurnUi> {
+        pauseRequested: Boolean = false, stopRequested: Boolean = false,
+        terminalTargets: Map<app.daiyu.android.domain.ToolInvocation, app.daiyu.android.domain.runtime.TerminalExecutionTarget> = emptyMap()): List<ChatTurnUi> {
+        val displayed = RunningTerminalTargets.project(turns, owner, terminalTargets)
         val live = owner?.takeIf { it.role == Message.ASSISTANT_ROLE && it.status == RunStatus.RUNNING }
-        val last = if (live == null) -1 else turns.indexOfLast { turn ->
+        val last = if (live == null) -1 else displayed.indexOfLast { turn ->
             turn is ChatTurnUi.Assistant && turn.ownerMessageId == live.id.value &&
                 turn.listKey == TurnOwner(live.conversationId.value, live.runId.value, turn.id).listKey(turn.segmentIndex)
         }
@@ -271,11 +273,11 @@ object ChatTurnMapper {
             stopRequested && live != null && turn.ownerMessageId == live.id.value &&
                 turn.listKey == TurnOwner(live.conversationId.value, live.runId.value, turn.id).listKey(turn.segmentIndex) ||
                 turn.stopRequested && turn.status == RunStatus.RUNNING && live == null
-        if (turns.withIndex().none { (index, turn) ->
+        if (displayed.withIndex().none { (index, turn) ->
                 turn is ChatTurnUi.Assistant && (turn.isStreaming != (index == streaming) || turn.stopRequested != stopping(turn) ||
                     turn.workProcess?.controlActivity != controlActivity.takeIf { index == last && turn.workProcess != null })
-            }) return turns
-        return turns.mapIndexed { index, turn ->
+            }) return displayed
+        return displayed.mapIndexed { index, turn ->
             if (turn is ChatTurnUi.Assistant) {
                 val activity = controlActivity.takeIf { index == last }
                 val work = turn.workProcess?.let { if (it.controlActivity == activity) it else it.copy(controlActivity = activity) }

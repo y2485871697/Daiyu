@@ -163,6 +163,7 @@ class RunnerOptions(
     val onNativeSearch: (ModelEvent.NativeSearch) -> Unit = {},
     /** A completed request drained; the child may wait before tools or final publication. */
     val onRequestCompletedBoundary: () -> Unit = {},
+    val onTerminalTargetChanged: (RunExecutionOwner) -> Unit = {},
 ) {
     init {
         require(batchExecutor == null || receiptBatchExecutor == null)
@@ -176,6 +177,7 @@ data class ExecutionState(
     val reconnectAttempt: Int = 0,
     val contextLimited: Boolean = false,
     val activeToolCalls: Set<ToolCallId> = emptySet(),
+    val terminalTargets: Map<ToolInvocation, TerminalExecutionTarget> = emptyMap(),
 )
 
 /** Process death is a terminal interruption, not authorization to retry an uncertain request/tool. */

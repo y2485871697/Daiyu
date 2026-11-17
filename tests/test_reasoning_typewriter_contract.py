@@ -71,6 +71,19 @@ class ReasoningTypewriterContract(unittest.TestCase):
         self.assertIn('val expanded = hasSummary && disclosureExpanded', card)
         self.assertNotIn('key(ownerKey, summary.itemId, isThinking)', card)
 
+    def test_title_and_marker_share_visible_completion_without_delaying_the_timer(self):
+        card = (CHAT / 'ReportedReasoningCard.kt').read_text()
+        for token in ('val displayThinking = isThinking || !stopped && summaryDisplays.any { it.waitingForReveal }',
+                      'waitingForReveal = revealEnabled && (observedDisplayLive || queuedForArrival) && !reveal.settled',
+                      'remember(revealGate, revealResetEpoch) { mutableStateOf(isThinking) }',
+                      'leadingIndicator?.invoke(displayThinking)',
+                      'Text(if (displayThinking) "正在思考…" else "已思考"',
+                      'leadingIndicator = { displayThinking ->',
+                      'val complete = (generationComplete || reported.activeSinceNanos == null) && !displayThinking'):
+            self.assertIn(token, card)
+        self.assertIn('ReasoningElapsedTime(ownerKey, rememberReasoningTiming(reported), isThinking && allowLiveTiming', card)
+        self.assertNotIn('onDisplaySettled', card)
+
     def test_body_adapter_and_reasoning_share_one_clock(self):
         typing = (CHAT / 'MarkdownTyping.kt').read_text()
         self.assertIn('return rememberMarkdownReveal(sources, prefixProjection, turn.isStreaming, turn.status != RunStatus.RUNNING && prefix.size == turn.content.size,', ' '.join(typing.split()))

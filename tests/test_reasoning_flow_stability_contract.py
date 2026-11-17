@@ -61,7 +61,7 @@ class ReasoningFlowStabilityContractTest(unittest.TestCase):
 
     def test_completed_thought_has_a_check_without_tool_success_fabrication(self):
         s = self.read('ReportedReasoningCard.kt')
-        self.assertIn('val complete = generationComplete || reported.activeSinceNanos == null', s)
+        self.assertIn('val complete = (generationComplete || reported.activeSinceNanos == null) && !displayThinking', s)
         self.assertIn('if (complete) Icon(DaiyuIcons.Check', s)
         self.assertNotIn('WorkStepState.OK', s)
 

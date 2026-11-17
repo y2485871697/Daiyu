@@ -73,6 +73,8 @@ internal fun ReportedReasoningCard(
     onVisibleAdvance: () -> Unit = {},
     onHandoffReady: (Boolean) -> Unit = {},
     appearance: WorkflowToolAppearance? = null,
+    modifier: Modifier = Modifier,
+    leadingIndicator: (@Composable (Boolean) -> Unit)? = null,
 ) {
     val summaries = reported.filter { hasReportedReasoningText(it.text) }
     val isThinking = !stopped && !generationComplete && isReportedReasoningActive(reported)
@@ -97,8 +99,10 @@ internal fun ReportedReasoningCard(
             val projection = rememberMarkdownProjection(listOf(text), streaming = streamingProjection, windows = listOf(sourceWindow))
             val revealGate = parentExpanded && !manuallyCollapsed && (!stopped || currentOverride == true)
             val revealEnabled = arrived && revealGate && hasReportedReasoningText(text)
+            var observedDisplayLive by remember(revealGate, revealResetEpoch) { mutableStateOf(isThinking) }
+            SideEffect { if (isThinking) observedDisplayLive = true }
+            val queuedForArrival = remember(revealGate, revealResetEpoch) { !arrived && !stopped }
             val reveal = key(revealGate) {
-                val queuedForArrival = remember(revealResetEpoch) { !arrived && !stopped }
                 // First visible summaries are silent; arrival-queued output keeps its explicit empty baseline.
                 key(queuedForArrival || hasReportedReasoningText(text)) {
                     rememberMarkdownReveal(
@@ -114,10 +118,12 @@ internal fun ReportedReasoningCard(
                     )
                 }
             }
-            ReasoningSummaryDisplay(summary, projection, reveal)
+            ReasoningSummaryDisplay(summary, projection, reveal,
+                waitingForReveal = revealEnabled && (observedDisplayLive || queuedForArrival) && !reveal.settled)
         }
     }
     val settled = summaryDisplays.all { it.reveal.settled }
+    val displayThinking = isThinking || !stopped && summaryDisplays.any { it.waitingForReveal }
     val disclosureExpanded = currentOverride ?: (!stopped && (isThinking || observedLive && !settled))
     val expanded = hasSummary && disclosureExpanded && summaryDisplays.any { display ->
         display.projection?.sources?.any(::hasReportedReasoningText) == true
@@ -134,7 +140,9 @@ internal fun ReportedReasoningCard(
         animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
         label = "reported-reasoning-chevron"
     )
-    Column(Modifier.fillMaxWidth().testTag("reported-reasoning:$ownerKey").then(disclosure.containerModifier)
+    Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    leadingIndicator?.invoke(displayThinking)
+    Column(Modifier.weight(1f).testTag("reported-reasoning:$ownerKey").then(disclosure.containerModifier)
         .then(if (embedded) Modifier else Modifier.clip(shape).border(1.dp, colors.line, shape).background(colors.surface))) {
         Row(Modifier.fillMaxWidth().heightIn(min = if (embedded) 44.dp else 35.dp).testTag("reported-reasoning-header:$ownerKey").workflowToolAppearance(appearance).then(disclosure.headerModifier)
             .then(if (hasSummary) Modifier.conversationClickable(
@@ -145,7 +153,7 @@ internal fun ReportedReasoningCard(
             .padding(horizontal = if (embedded) 0.dp else 11.dp, vertical = if (embedded) 5.dp else 9.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (embedded) 6.dp else 7.dp)) {
             Icon(ChatPreviewIcons.Thought, null, Modifier.size(if (embedded) 18.dp else 14.dp), tint = colors.accent)
-            Text(if (isThinking) "正在思考…" else "已思考", Modifier.weight(1f), color = if (embedded) colors.text else colors.accent,
+            Text(if (displayThinking) "正在思考…" else "已思考", Modifier.weight(1f), color = if (embedded) colors.text else colors.accent,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium))
             ReasoningElapsedTime(ownerKey, rememberReasoningTiming(reported), isThinking && allowLiveTiming, nanoTime, embedded)
             if (hasSummary) {
@@ -192,12 +200,14 @@ internal fun ReportedReasoningCard(
             }
         }
     }
+    }
 }
 
 private data class ReasoningSummaryDisplay(
     val reported: ReportedReasoning,
     val projection: MarkdownProjection?,
     val reveal: MarkdownReveal,
+    val waitingForReveal: Boolean,
 )
 
 /** Text and block positions do not change the elapsed-time producer's identity. */
@@ -265,31 +275,30 @@ internal fun ReasoningStepRow(
     val colors = conversationColors()
     val lineMotion = LocalWorkflowLineMotion.current
     val appearance = rememberWorkflowToolAppearance("reasoning:${reported.itemId}")
-    Row(Modifier.fillMaxWidth().testTag("work-reasoning:${reported.itemId}").drawBehind {
-        if (showConnector) drawLine(colors.line, Offset(5.dp.toPx(), 27.dp.toPx()),
-            Offset(5.dp.toPx(), minOf(size.height,
-                27.dp.toPx() + (size.height + lineMotion.spacingAfter.toPx() - 27.dp.toPx()) * (lineMotion.outgoing?.fraction() ?: 1f))), 1.dp.toPx())
-    }, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(Modifier.padding(top = 17.dp).width(12.dp)) {
-            val complete = generationComplete || reported.activeSinceNanos == null
-            val spinning = !complete && allowLiveTiming && !generationComplete && !stopped && LocalWorkflowNodeMotionEnabled.current
-            Box(Modifier.size(10.dp).testTag("reasoning-step-state:${reported.itemId}")
-                .semantics { stateDescription = if (complete) "已思考" else "正在思考" }
-                .workflowCompletion("reasoning:${reported.itemId}", complete, appearance = appearance)
-                .clip(CircleShape).then(when {
-                    complete -> Modifier.background(colors.success)
-                    spinning -> Modifier
-                    else -> Modifier.border(1.5.dp, colors.accent, CircleShape)
-                }), contentAlignment = Alignment.Center) {
-                if (spinning) WorkflowWaitingIndicator("reasoning:${reported.itemId}", colors.accent)
-                else if (complete) Icon(DaiyuIcons.Check, "思考完成", Modifier.size(8.dp), tint = Color.White)
+    ReportedReasoningCard("$ownerKey:reasoning:${reported.itemId}", listOf(reported),
+        allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, stopped = stopped, embedded = true,
+        revealResetEpoch = revealResetEpoch, parentExpanded = parentExpanded,
+        onVisibleAdvance = onVisibleAdvance, onHandoffReady = onHandoffReady, appearance = appearance,
+        modifier = Modifier.testTag("work-reasoning:${reported.itemId}").drawBehind {
+            if (showConnector) drawLine(colors.line, Offset(5.dp.toPx(), 27.dp.toPx()),
+                Offset(5.dp.toPx(), minOf(size.height,
+                    27.dp.toPx() + (size.height + lineMotion.spacingAfter.toPx() - 27.dp.toPx()) * (lineMotion.outgoing?.fraction() ?: 1f))), 1.dp.toPx())
+        },
+        leadingIndicator = { displayThinking ->
+            Box(Modifier.padding(top = 17.dp).width(12.dp)) {
+                val complete = (generationComplete || reported.activeSinceNanos == null) && !displayThinking
+                val spinning = displayThinking && !stopped && LocalWorkflowNodeMotionEnabled.current
+                Box(Modifier.size(10.dp).testTag("reasoning-step-state:${reported.itemId}")
+                    .semantics { stateDescription = if (complete) "已思考" else "正在思考" }
+                    .workflowCompletion("reasoning:${reported.itemId}", complete, appearance = appearance)
+                    .clip(CircleShape).then(when {
+                        complete -> Modifier.background(colors.success)
+                        spinning -> Modifier
+                        else -> Modifier.border(1.5.dp, colors.accent, CircleShape)
+                    }), contentAlignment = Alignment.Center) {
+                    if (spinning) WorkflowWaitingIndicator("reasoning:${reported.itemId}", colors.accent)
+                    else if (complete) Icon(DaiyuIcons.Check, "思考完成", Modifier.size(8.dp), tint = Color.White)
+                }
             }
-        }
-        Column(Modifier.weight(1f)) {
-            ReportedReasoningCard("$ownerKey:reasoning:${reported.itemId}", listOf(reported),
-                allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, stopped = stopped, embedded = true,
-                revealResetEpoch = revealResetEpoch, parentExpanded = parentExpanded,
-                onVisibleAdvance = onVisibleAdvance, onHandoffReady = onHandoffReady, appearance = appearance)
-        }
-    }
+        })
 }

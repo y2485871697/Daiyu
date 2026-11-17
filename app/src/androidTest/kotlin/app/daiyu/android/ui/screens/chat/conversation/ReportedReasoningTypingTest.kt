@@ -82,6 +82,163 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = true
     }
 
+    private fun assertCompletionWaitsForVisibleText(path: Path, terminal: Boolean) {
+        val baseline = "思考开头"
+        val pending = baseline + "继续显示".repeat(90)
+        prepare(baseline, pending)
+        ui.mainClock.autoAdvance = false
+        var value by mutableStateOf(turn(path, baseline))
+        var advances = 0
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    AssistantTurn(value, ChatScreenActions(), onVisibleAdvance = { advances++ })
+                }
+            } }
+            await { visibleText().contains(baseline) }
+            mainThread { value = turn(path, pending) }
+            await { advances > 0 }
+            assertFalse(visibleText().contains(pending))
+            val finished = turn(path, pending, live = terminal)
+            instrumentation.runOnMainSync {
+                value = if (terminal) finished.copy(status = RunStatus.COMPLETED, isStreaming = false,
+                    workProcess = finished.workProcess?.copy(running = false))
+                else finished.copy(status = RunStatus.RUNNING, isStreaming = true,
+                    workProcess = finished.workProcess?.copy(running = true))
+            }
+            var pendingFrames = 0
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                if (!visibleText().contains(pending)) {
+                    ui.onNodeWithText("正在思考…").assertExists()
+                    ui.onNodeWithText("已思考").assertDoesNotExist()
+                    ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)
+                        .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "正在思考"))
+                    ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertDoesNotExist()
+                    pendingFrames++
+                    false
+                } else true
+            }
+            assertTrue("Must observe actual draining frames", pendingFrames > 0)
+            ui.onNodeWithText("已思考").assertExists()
+            ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))
+            ui.onNodeWithText("正在思考…").assertDoesNotExist()
+            ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertExists()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testStandaloneFinalWaitsForVisibleThought() = assertCompletionWaitsForVisibleText(Path.STANDALONE, false)
+    fun testMixedFinalWaitsForVisibleThought() = assertCompletionWaitsForVisibleText(Path.MIXED, false)
+    fun testWorkFinalWaitsForVisibleThought() = assertCompletionWaitsForVisibleText(Path.WORK, false)
+    fun testStandaloneTurnCompletionWaitsForVisibleThought() = assertCompletionWaitsForVisibleText(Path.STANDALONE, true)
+    fun testMixedTurnCompletionWaitsForVisibleThought() = assertCompletionWaitsForVisibleText(Path.MIXED, true)
+    fun testWorkTurnCompletionWaitsForVisibleThought() = assertCompletionWaitsForVisibleText(Path.WORK, true)
+
+    fun testHistoricalParsingAndRemountNeverShowThinking() {
+        val source = "历史摘要" + "甲".repeat(80)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val parser: (String) -> List<app.daiyu.android.MarkdownBlock> = { text ->
+            if (text == source) { entered.countDown(); release.await() }
+            MarkdownParser.parse(text)
+        }
+        var mounted by mutableStateOf(true)
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                        if (mounted) ReasoningStepRow("history", ReportedReasoning("r", source, 1100L))
+                    }
+                }
+            } }
+            ui.waitUntil(5_000) { entered.count == 0L }
+            repeat(2) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.onNodeWithText("已思考").assertExists()
+                ui.onNodeWithText("正在思考…").assertDoesNotExist()
+                ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)
+                    .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))
+                instrumentation.runOnMainSync { mounted = false }
+                ui.mainClock.advanceTimeByFrame()
+                instrumentation.runOnMainSync { mounted = true }
+            }
+            ui.mainClock.advanceTimeByFrame()
+            release.countDown()
+            ui.onNodeWithTag("reported-reasoning-header:history:reasoning:r").performClick()
+            await {
+                ui.onNodeWithText("已思考").assertExists()
+                ui.onNodeWithText("正在思考…").assertDoesNotExist()
+                visibleText().contains(source)
+            }
+            ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertExists()
+        } finally { release.countDown(); ui.mainClock.autoAdvance = true }
+    }
+
+    fun testQueuedTerminalThoughtKeepsThinkingUntilVisibleTextSettles() {
+        val text = "排队的完整摘要" + "甲".repeat(160)
+        prepare(text)
+        val appearance = WorkflowToolAppearance(true)
+        var advances = 0
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    ReportedReasoningCard("queued-final", listOf(ReportedReasoning("r", text, 1100L)),
+                        appearance = appearance, onVisibleAdvance = { advances++ })
+                }
+            } }
+            ui.mainClock.advanceTimeBy(32)
+            ui.onNodeWithTag("reported-reasoning-header:queued-final").performClick()
+            mainThread { appearance.arrived = true; appearance.settled = true }
+            await { advances > 0 }
+            assertFalse(visibleText().contains(text))
+            ui.onNodeWithText("正在思考…").assertExists()
+            ui.onNodeWithText("已思考").assertDoesNotExist()
+            ui.onNodeWithTag("reported-reasoning-duration:queued-final").assertTextEquals("1.1s")
+            await { visibleText().contains(text) }
+            ui.onNodeWithText("已思考").assertExists()
+            ui.onNodeWithTag("reported-reasoning-duration:queued-final").assertTextEquals("1.1s")
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    private fun assertHiddenThoughtDoesNotWaitForReveal(stop: Boolean) {
+        val baseline = "起始摘要"
+        val pending = baseline + "未显示".repeat(100)
+        prepare(baseline, pending)
+        var reported by mutableStateOf(ReportedReasoning("r", baseline, 0L, 0L))
+        var stopped by mutableStateOf(false)
+        var advances = 0
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    ReasoningStepRow("hidden", reported, stopped = stopped,
+                        onVisibleAdvance = { advances++ })
+                }
+            } }
+            await { visibleText().contains(baseline) }
+            mainThread { reported = ReportedReasoning("r", pending, 0L, 0L) }
+            await { advances > 0 }
+            mainThread { reported = ReportedReasoning("r", pending, 1100L) }
+            ui.mainClock.advanceTimeBy(16)
+            ui.onNodeWithText("正在思考…").assertExists()
+            if (stop) instrumentation.runOnMainSync { stopped = true }
+            else ui.onNodeWithTag("reported-reasoning-header:hidden:reasoning:r").performClick()
+            ui.mainClock.advanceTimeByFrame()
+            ui.onNodeWithText("已思考").assertExists()
+            ui.onNodeWithText("正在思考…").assertDoesNotExist()
+            await { ui.onAllNodesWithTag("reported-reasoning-content:hidden:reasoning:r").fetchSemanticsNodes().isEmpty() }
+            val hiddenAdvances = advances
+            repeat(4) { ui.mainClock.advanceTimeByFrame() }
+            assertEquals(hiddenAdvances, advances)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testCollapsedThoughtDoesNotWaitForHiddenReveal() = assertHiddenThoughtDoesNotWaitForReveal(false)
+    fun testStoppedThoughtDoesNotWaitForHiddenReveal() = assertHiddenThoughtDoesNotWaitForReveal(true)
+
     fun testStandaloneThoughtUsesVisibleTypingFeedback() = assertLivePath(Path.STANDALONE)
     fun testMixedThoughtUsesVisibleTypingFeedback() = assertLivePath(Path.MIXED)
     fun testWorkThoughtUsesVisibleTypingFeedback() = assertLivePath(Path.WORK)

@@ -136,10 +136,24 @@ class StreamingOcclusionContract(unittest.TestCase):
                       "The outer follower must actually reveal each new tool"):
             self.assertIn(token, device)
 
+    def test_following_catchup_retains_new_text_and_card_pixel_regression(self):
+        device = DEVICE.with_name("ChatMessageListMeasurePhaseTest.kt").read_text()
+        case = device.split("fun testFollowingCatchupKeepsGrowingCardAndLastLineInsidePhysicalSafeEdge()", 1)[1].split("fun testCurrentPlacementOrigin", 1)[0]
+        for token in ("state.followCatchup && following && protect", "state.scrollOffset", "state.viewportOffset",
+                      "text.bottom > viewport.bottom", "card.bottom < safeBottom", "repeat(3)",
+                      "WorkProcessCard(", "missingText", "missingBorder", "clearanceInk", "failures.isEmpty()"):
+            self.assertIn(token, case)
+        source = CHAT.read_text()
+        drawing = source.split(".drawWithContent {", 1)[1].split(".scrollable", 1)[0]
+        self.assertIn("state.bounded && state.followCatchup && follows()", drawing)
+        self.assertIn("protect && !followingCatchup", drawing)
+        self.assertIn("minOf(size.height, bottom) else bottom", drawing)
+
     def test_protected_drawing_caps_current_frame_without_clipping_manual_backdrop(self):
         source = CHAT.read_text()
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
-        self.assertIn("val clipBottom = if (protect) minOf(size.height, bottom) else bottom", viewport)
+        self.assertIn("val followingCatchup = state.bounded && state.followCatchup && follows()", viewport)
+        self.assertIn("val clipBottom = if (protect && !followingCatchup) minOf(size.height, bottom) else bottom", viewport)
         self.assertIn("clipRect(bottom = clipBottom)", viewport)
         self.assertIn("internal val ChatTailClearance = 8.dp", source)
         device = DEVICE.read_text()

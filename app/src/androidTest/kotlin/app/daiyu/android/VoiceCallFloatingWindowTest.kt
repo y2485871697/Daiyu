@@ -539,13 +539,41 @@ class VoiceCallFloatingWindowTest {
         }
         tapMinimize(root)
         await("real minimize tap reaches the settled Compose control") { minimizes == 1 }
+        var beforeMove = androidx.compose.ui.geometry.Rect.Zero
         main {
-            ready = false
-            val move = host.javaClass.declaredMethods.single { it.name.startsWith("move-") }
-                .apply { isAccessible = true }
-            move.invoke(host, root, androidx.compose.ui.geometry.Offset(8f, 8f).packedValue)
+            beforeMove = panel(root)
+            move(root, 8f, 8f)
         }
-        await("moved window redraws in real screen coordinates") { ready }
+        await("moved window commits its real screen placement") {
+            val params = root.layoutParams as WindowManager.LayoutParams
+            val screen = IntArray(2)
+            val local = IntArray(2)
+            root.getLocationOnScreen(screen)
+            root.getLocationInWindow(local)
+            kotlin.math.abs(panel(root).left - beforeMove.left - 8f) <= 1f &&
+                kotlin.math.abs(panel(root).top - beforeMove.top - 8f) <= 1f &&
+                screen[0] - local[0] == params.x && screen[1] - local[1] == params.y
+        }
+        awaitCommittedDraw(root)
+        main {
+            val screen = IntArray(2)
+            val local = IntArray(2)
+            root.getLocationOnScreen(screen)
+            root.getLocationInWindow(local)
+            val params = root.layoutParams as WindowManager.LayoutParams
+            val composition = (root as ViewGroup).getChildAt(0)
+            assertEquals(params.x, screen[0] - local[0])
+            assertEquals(params.y, screen[1] - local[1])
+            assertEquals(-(screen[0] - local[0]).toFloat(), composition.translationX, .5f)
+            assertEquals(-(screen[1] - local[1]).toFloat(), composition.translationY, .5f)
+            assertEquals(0, params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
+            assertEquals(params.width, root.width)
+            assertEquals(params.height, root.height)
+            assertEquals(1f, root.alpha, 0f)
+            assertEquals(1f, params.alpha, 0f)
+            assertEquals(1f, root.scaleX, 0f)
+            assertEquals(1f, root.scaleY, 0f)
+        }
         tapMinimize(root)
         await("real control remains clickable after window translation") { minimizes == 2 }
         main {

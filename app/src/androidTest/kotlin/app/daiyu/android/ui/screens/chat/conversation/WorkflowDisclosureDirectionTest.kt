@@ -672,11 +672,14 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                     assertTrue("Top ink cannot disappear behind an ancestor clip:\n$evidence", count(y0, middle) > 0)
                     assertTrue("Bottom ink cannot be reduced to a narrow strip:\n$evidence", count(middle, y1) > 0)
                 }
-                assertFalse("Text measured with overflowing content: text=${layout.layoutInput.text.text} " +
-                    "size=${layout.size} constraints=${layout.layoutInput.constraints} " +
-                    "overflow=${layout.didOverflowWidth}/${layout.didOverflowHeight} " +
-                    "paragraph=${layout.multiParagraph.width}/${layout.multiParagraph.height} " +
-                    "lastBottom=${layout.getLineBottom(layout.lineCount - 1)}\n$evidence", layout.hasVisualOverflow)
+                assertFalse("Native paragraph must retain its full height:\n$evidence", layout.didOverflowHeight)
+                assertEquals("The last actual character must remain present:\n$evidence",
+                    layout.layoutInput.text.text.trimEnd().length, layout.getLineEnd(layout.lineCount - 1, visibleEnd = true))
+                for (line in 0 until layout.lineCount) {
+                    assertFalse("No actual line may be ellipsized:\n$evidence", layout.isLineEllipsized(line))
+                    assertTrue("Actual line, not unused paragraph width, must fit the text box:\n$evidence",
+                        layout.getLineLeft(line) >= -1f && layout.getLineRight(line) <= full.width + 1f)
+                }
             }
         }
         ui.mainClock.autoAdvance = false

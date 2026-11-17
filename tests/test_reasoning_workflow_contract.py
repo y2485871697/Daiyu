@@ -15,7 +15,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('fresh && enabled', motion)
         self.assertIn('ToolActivityUi.WAITING', work)
         self.assertIn('if (spinning) WorkflowWaitingIndicator', work)
-        self.assertIn('!complete && allowLiveTiming && !generationComplete && !stopped', thought)
+        self.assertIn('val spinning = displayThinking && !stopped && LocalWorkflowNodeMotionEnabled.current', thought)
         self.assertIn('if (spinning) WorkflowWaitingIndicator', thought)
         self.assertIn('CircularProgressIndicator(Modifier.size(10.dp)', motion)
         self.assertIn('strokeWidth = 1.5.dp', motion)

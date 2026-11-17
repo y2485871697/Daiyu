@@ -189,51 +189,97 @@ class TerminalToolTargetTest {
         }
     }
 
-    @Test fun pendingHeadersExposeUnknownEnvironmentWithoutChangingTheirReceiptState() {
+    @Test fun unresolvedTerminalCardsWaitForTheirOwnTargetWithoutLosingSourceSteps() {
         for (mixed in listOf(false, true)) for (tool in listOf("terminal_exec", "terminal_job_start")) {
             for (arguments in listOf("{\"command\":", "{\"environment\":\"android\"}")) {
                 val call = ToolInvocation(ToolCallId("pending-environment"), tool, arguments)
                 val live = runtimeOwner(MessageBlock.Tool(call))
-                val base = runtimeMap(listOf(live), mixed)
-                val pending = ChatTurnMapper.withStreamingOwner(base, live)
-                val original = runtimeSteps(pending).single()
-                assertEquals(ToolActivityUi.PENDING, original.displayActivity)
-                assertEquals("${original.name} · 环境待确认", original.displayName)
+                val pending = ChatTurnMapper.withStreamingOwner(runtimeMap(listOf(live), mixed), live)
+                val original = runtimeSteps(pending).distinctBy { it.renderKey }.single()
+                val turn = pending.filterIsInstance<ChatTurnUi.Assistant>().single()
+                val hidden = turn.workflowContent().withResolvedTerminalCards()
+                assertNull(hidden.work)
+                assertTrue(hidden.steps.isEmpty())
+                assertFalse(turn.hasVisibleResponse())
+                assertFalse(original.isVisibleInWorkflow)
                 assertNull(original.executionTargetLabel)
-                for (activity in listOf(ToolActivityUi.PENDING, ToolActivityUi.QUEUED, ToolActivityUi.PREPARING)) {
-                    val step = original.copy(activity = activity)
-                    assertEquals("${original.name} · 环境待确认", step.displayName)
-                    assertEquals(activity, step.displayActivity)
-                    assertEquals(original.name, step.name)
-                }
                 val target = app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)
                 val resolved = ChatTurnMapper.withStreamingOwner(pending, live, terminalTargets = mapOf(call to target))
-                val step = runtimeSteps(resolved).single()
-                assertEquals("${original.name} · Debian • root", step.displayName)
-                assertEquals(step.name, step.displayName)
+                val shown = resolved.filterIsInstance<ChatTurnUi.Assistant>().single().workflowContent().withResolvedTerminalCards()
+                val step = shown.steps.filterIsInstance<MessageContentUi.Tool>().single().step
+                assertNotNull(shown.work)
+                assertEquals("${original.name} · Debian • root", step.name)
+                assertEquals("Debian • root", step.executionTargetLabel)
+                assertTrue(step.isVisibleInWorkflow)
                 assertEquals(original.activity, step.activity)
                 assertEquals(original.state, step.state)
+                assertEquals(listOf(original), runtimeSteps(pending).distinctBy { it.renderKey })
                 assertSame(resolved, ChatTurnMapper.withStreamingOwner(resolved, live, terminalTargets = mapOf(call to target)))
+                assertNull(live.blocks.filterIsInstance<MessageBlock.Tool>().single().result)
             }
         }
     }
 
-    @Test fun pendingEnvironmentHintNeverOverridesRealTargetsOrTerminalOutcomes() {
-        val step = WorkStepUi("hint", "执行命令", "", category = "terminal")
-        for (state in WorkStepState.entries.filter { it != WorkStepState.PENDING }) {
-            val terminal = step.copy(state = state, awaitingExecutionTarget = true)
-            assertEquals(terminal.name, terminal.displayName)
+    @Test fun terminalDisplayFilteringKeepsPartitionsAndRemainingNodeOrder() {
+        val hidden = WorkStepUi("hidden", "执行命令", "", category = "terminal")
+        val child = WorkStepUi("child", "后台委派", "", category = "delegation", activity = ToolActivityUi.QUEUED)
+        val narration = MessageContentUi.Text("narration", "说明")
+        val work = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(hidden)),
+            WorkSegmentUi(narration = "说明", steps = listOf(child))), "进行中", running = true)
+        val original = AssistantWorkflowContent(work, listOf(MessageContentUi.Tool(hidden), narration, MessageContentUi.Tool(child)),
+            listOf(MessageContentUi.Text("body", "正文")), pending = listOf(MessageContentUi.Text("pending", "未释放")),
+            leading = listOf(MessageContentUi.Text("leading", "开头")))
+        val visible = original.withResolvedTerminalCards()
+        assertEquals(listOf(narration, MessageContentUi.Tool(child)), visible.steps)
+        assertEquals(listOf(child), visible.work!!.segments.flatMap { it.steps })
+        assertSame(original.leading, visible.leading)
+        assertSame(original.body, visible.body)
+        assertSame(original.pending, visible.pending)
+        assertEquals(listOf(hidden, child), work.segments.flatMap { it.steps })
+        val noCard = original.copy(work = work.copy(segments = work.segments.take(1)),
+            steps = original.steps.take(1)).withResolvedTerminalCards()
+        assertNull(noCard.work)
+        assertTrue(noCard.steps.isEmpty())
+        assertSame(original.body, noCard.body)
+        assertSame(original.pending, noCard.pending)
+    }
+
+    @Test fun targetVisibilityOnlyGatesTerminalCategoriesAndNeverRealChildQueues() {
+        val terminal = WorkStepUi("target", "执行命令", "", category = "terminal")
+        for (state in WorkStepState.entries) for (activity in ToolActivityUi.entries) {
+            for (category in listOf("terminal", "background_job")) {
+                val step = terminal.copy(category = category, state = state, activity = activity)
+                assertFalse(step.isVisibleInWorkflow)
+                assertTrue(step.copy(executionTargetLabel = "Android • user").isVisibleInWorkflow)
+            }
         }
-        for (activity in ToolActivityUi.entries.filter { it !in setOf(ToolActivityUi.PENDING,
-            ToolActivityUi.QUEUED, ToolActivityUi.PREPARING, ToolActivityUi.RUNNING) }) {
-            val terminal = step.copy(activity = activity, awaitingExecutionTarget = true)
-            assertEquals(terminal.name, terminal.displayName)
+        val queued = toolReceiptPresentation(app.daiyu.android.domain.runtime.ToolDisposition.READY, true,
+            app.daiyu.android.domain.runtime.ExecutionPhase.TOOL_EXECUTING)
+        assertEquals(ToolActivityUi.QUEUED, queued.activity)
+        for (mixed in listOf(false, true)) for (tool in listOf("run_child_models", "start_child_tasks", "delegate_task")) {
+            val call = ToolInvocation(ToolCallId("queued-$tool"), tool, "{}")
+            val terminal = ToolInvocation(ToolCallId("hidden-terminal"), "terminal_exec", "{}")
+            val job = ToolInvocation(ToolCallId("hidden-job"), "terminal_job_start", "{}")
+            val owner = runtimeOwner(MessageBlock.Tool(terminal), MessageBlock.Tool(job), MessageBlock.Tool(call))
+            val turns = ChatTurnMapper.map(listOf(owner),
+                dedicatedTool = { _, _ -> if (mixed) "queue-test" else null }, toolReceipt = { _, _ -> queued })
+            val turn = ChatTurnMapper.withStreamingOwner(turns, owner).filterIsInstance<ChatTurnUi.Assistant>().single()
+            val shown = turn.workflowContent().withResolvedTerminalCards()
+            val step = shown.steps.filterIsInstance<MessageContentUi.Tool>().single().step
+            assertTrue(step.isVisibleInWorkflow)
+            assertNull(step.executionTargetLabel)
+            assertEquals(ToolActivityUi.QUEUED, step.displayActivity)
+            assertNotNull(shown.work)
+            assertTrue(turn.hasVisibleResponse())
+            assertEquals(3, runtimeSteps(turns).distinctBy { it.renderKey }.size)
+            val target = app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)
+            val resolved = ChatTurnMapper.withStreamingOwner(turns, owner, terminalTargets = mapOf(terminal to target, job to target))
+                .filterIsInstance<ChatTurnUi.Assistant>().single().workflowContent().withResolvedTerminalCards()
+            val after = resolved.steps.filterIsInstance<MessageContentUi.Tool>().map { it.step }
+            assertEquals(3, after.size)
+            assertEquals(step, after.single { it.toolName == tool })
+            assertTrue(after.filter { it.toolName != tool }.all { it.executionTargetLabel == "Debian • root" })
         }
-        assertEquals(step.name, step.copy(category = "generic", awaitingExecutionTarget = true).displayName)
-        assertEquals(step.name, step.copy(executionTargetLabel = "Android • user", awaitingExecutionTarget = true).displayName)
-        assertEquals(step.name, step.copy(activity = ToolActivityUi.RUNNING).displayName)
-        assertEquals("${step.name} · 环境待确认",
-            step.copy(activity = ToolActivityUi.RUNNING, awaitingExecutionTarget = true).displayName)
     }
 
     @Test fun resolvedRuntimeTargetAppearsBeforeReceiptInBothLayoutsWithoutChangingStepState() {

@@ -61,7 +61,8 @@ internal fun MessageContent(
         ranges.forEach { range ->
             val item = content[range.first]
             val visible = ready && entryVisible(item.workflowKey(range.first))
-            if (visible && (item !is MessageContentUi.Text || item.text.isNotBlank())) add(range.first)
+            if (visible && (item !is MessageContentUi.Tool || item.step.isVisibleInWorkflow) &&
+                (item !is MessageContentUi.Text || item.text.isNotBlank())) add(range.first)
             if (visible && item is MessageContentUi.Reasoning) ready = reasoningReady(item.reported)
         }
     }
@@ -77,6 +78,7 @@ internal fun MessageContent(
         ranges.forEach { range ->
             val index = range.first
             val source = content[index]
+            if (source is MessageContentUi.Tool && !source.step.isVisibleInWorkflow) return@forEach
             val block = key(source.workflowKey(index)) { rememberWorkflowItem(source) }
             val visible = precedingReady && entryVisible(block.workflowKey(index))
             key(block.workflowKey(index)) {

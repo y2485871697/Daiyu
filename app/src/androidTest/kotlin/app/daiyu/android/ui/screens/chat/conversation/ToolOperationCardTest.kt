@@ -58,7 +58,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         val blocks = buildList {
             add(MessageBlock.Text("before", "before operation"))
             if (mixed) add(image)
-            add(MessageBlock.Tool(ToolInvocation(ToolCallId("card-call$fixtureKey"), "terminal_pty_read", "{}"), "{\"wait_status\":0,\"stdout\":\"secret-output\"}"))
+            add(MessageBlock.Tool(ToolInvocation(ToolCallId("card-call$fixtureKey"), "terminal_pty_read", "{}"), "{\"backend\":\"android\",\"uid\":10444,\"wait_status\":0,\"stdout\":\"secret-output\"}"))
             add(MessageBlock.Text("after", "final answer"))
         }
         return Message(MessageId(messageId), ConversationId("conversation"), RunId("run"), Message.ASSISTANT_ROLE, blocks, RunStatus.COMPLETED)
@@ -110,7 +110,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             val message = fixture.copy(blocks = fixture.blocks.map { block ->
                 if (block is MessageBlock.Tool) block.copy(invocation = block.invocation.copy(name = name,
                     arguments = args),
-                    result = """{"ok":true,"execution":"executed","state":"exited","exit_code":0,"stdout":"ordinary-output"}""")
+                    result = """{"ok":true,"backend":"android","uid":10444,"execution":"executed","state":"exited","exit_code":0,"stdout":"ordinary-output"}""")
                 else block
             })
             val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
@@ -159,29 +159,28 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         val root = ui.onRoot(useUnmergedTree = true).fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest
         val view = root.view
         val tag = "tool-step-header:${call.id.value}"
-        var expectedPrefix = ""
+        var expectedPrefix: String? = ""
         var latch = java.util.concurrent.CountDownLatch(1)
         val listener = android.view.ViewTreeObserver.OnDrawListener {
             val headers = root.semanticsOwner.unmergedRootSemanticsNode.walkHeaders().filter {
                 it.config.getOrNull(SemanticsProperties.TestTag) == tag
             }.toList()
-            if (headers.isNotEmpty()) {
-                val header = headers.first()
-                val sample = TerminalHeaderDraw(
-                    header.config.getOrNull(SemanticsProperties.StateDescription).orEmpty(),
-                    header.walkHeaders().flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty().asSequence() }
-                        .map { it.text }.toList(), headers.size)
-                frames.add(sample)
-                android.util.Log.i("TerminalFirstDraw", "$fixtureKey frame=${frames.size} $sample")
-                if (sample.description.startsWith(expectedPrefix)) {
-                    val done = latch
-                    if (android.os.Build.VERSION.SDK_INT >= 29 && view.isHardwareAccelerated) {
-                        view.viewTreeObserver.registerFrameCommitCallback { done.countDown() }
-                    } else view.post { done.countDown() }
-                }
+            val header = headers.firstOrNull()
+            val sample = TerminalHeaderDraw(
+                header?.config?.getOrNull(SemanticsProperties.StateDescription).orEmpty(),
+                header?.walkHeaders()?.flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty().asSequence() }
+                    ?.map { it.text }?.toList().orEmpty(), headers.size)
+            frames.add(sample)
+            android.util.Log.i("TerminalFirstDraw", "$fixtureKey frame=${frames.size} $sample")
+            val prefix = expectedPrefix
+            if (if (prefix == null) headers.isEmpty() else sample.description.startsWith(prefix)) {
+                val done = latch
+                if (android.os.Build.VERSION.SDK_INT >= 29 && view.isHardwareAccelerated) {
+                    view.viewTreeObserver.registerFrameCommitCallback { done.countDown() }
+                } else view.post { done.countDown() }
             }
         }
-        fun drawSnapshot(value: List<ChatTurnUi>, prefix: String) {
+        fun drawSnapshot(value: List<ChatTurnUi>, prefix: String?) {
             val done = java.util.concurrent.CountDownLatch(1)
             instrumentation.runOnMainSync { expectedPrefix = prefix; latch = done; turns.value = value }
             repeat(24) {
@@ -190,7 +189,11 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 instrumentation.runOnMainSync { view.invalidate() }
                 done.await(50, java.util.concurrent.TimeUnit.MILLISECONDS)
             }
-            assertTrue("No actual header draw for $prefix: $frames", done.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            assertTrue("No actual draw for $prefix: $frames", done.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            if (prefix == null) {
+                ui.onNodeWithTag(tag, useUnmergedTree = true).assertDoesNotExist()
+                ui.onAllNodesWithTag("work-process-surface", useUnmergedTree = true).assertCountEquals(0)
+            }
         }
         ui.mainClock.autoAdvance = false
         try {
@@ -199,25 +202,23 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 val pendingOwner = live.copy(blocks = listOf(MessageBlock.Tool(call.copy(arguments = arguments))))
                 val pending = ChatTurnMapper.withStreamingOwner(ChatTurnMapper.map(listOf(pendingOwner), reconnects = reconnects,
                     dedicatedTool = { _, _ -> if (mixed) "runtime-test" else null }), pendingOwner)
-                drawSnapshot(pending, "待派发 ·")
-                val sample = frames.last()
-                assertTrue("A real streaming pending draw must explicitly show unresolved environment: $sample",
-                    sample.texts.any { it.endsWith(" · 环境待确认") })
-                assertFalse(sample.texts.any { it.contains("Debian") || it.contains("root") })
+                drawSnapshot(pending, null)
+                assertTrue("Unresolved streaming cards must have no visible draw: $frames", frames.all { it.headers == 0 })
             }
             val pendingBase = ChatTurnMapper.map(listOf(live), reconnects = reconnects,
                 dedicatedTool = { _, _ -> if (mixed) "runtime-test" else null })
             val resolvedPending = ChatTurnMapper.withStreamingOwner(pendingBase, live,
                 terminalTargets = mapOf(call to app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)))
             drawSnapshot(resolvedPending, "待派发 ·")
-            assertTrue("A resolved pending target must replace, not append to, the placeholder: ${frames.last()}",
-                frames.last().texts.any { it.endsWith(" · Debian • root") && !it.contains("环境待确认") })
+            val firstVisible = frames.first { it.headers > 0 }
+            assertTrue("The card and real target must first appear together: $firstVisible",
+                firstVisible.texts.any { it.endsWith(" · Debian • root") })
             val base = ChatTurnMapper.map(listOf(live), reconnects = reconnects,
                 dedicatedTool = { _, _ -> if (mixed) "runtime-test" else null },
                 toolReceipt = { _, _ -> ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING) })
             val preparing = ChatTurnMapper.withStreamingOwner(base, live,
                 phase = app.daiyu.android.domain.runtime.ExecutionPhase.TOOL_EXECUTING)
-            drawSnapshot(preparing, "准备中 ·")
+            drawSnapshot(preparing, null)
             assertFalse("Active-before-target must never render an executing header", frames.any { it.description.startsWith("执行中 ·") })
             val executing = ChatTurnMapper.withStreamingOwner(preparing, live,
                 phase = app.daiyu.android.domain.runtime.ExecutionPhase.TOOL_EXECUTING,
@@ -225,7 +226,11 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             drawSnapshot(executing, "执行中 ·")
             val allFrames = frames.toList()
             assertTrue(allFrames.isNotEmpty())
-            assertTrue("Each path renders exactly one tool header", allFrames.all { it.headers == 1 })
+            val visibleFrames = allFrames.filter { it.headers > 0 }
+            assertTrue("Each visible path renders exactly one tool header", visibleFrames.all { it.headers == 1 })
+            assertTrue("No card draw may precede its real environment", visibleFrames.all { sample ->
+                sample.texts.any { it.endsWith(" · Debian • root") }
+            })
             val executingFrames = allFrames.filter { it.description.startsWith("执行中 ·") }
             assertTrue("Must record the first actual executing draw", executingFrames.isNotEmpty())
             executingFrames.forEach { sample ->
@@ -244,6 +249,40 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             instrumentation.runOnMainSync { view.viewTreeObserver.removeOnDrawListener(listener) }
             ui.mainClock.autoAdvance = true
             androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(wasDrawing)
+        }
+    }
+
+    fun testConcurrentChildQueueRemainsVisibleWithoutTerminalEnvironment() {
+        val receipt = toolReceiptPresentation(app.daiyu.android.domain.runtime.ToolDisposition.READY, true,
+            app.daiyu.android.domain.runtime.ExecutionPhase.TOOL_EXECUTING)
+        assertEquals(ToolActivityUi.QUEUED, receipt.activity)
+        for (mixed in listOf(false, true)) {
+            val call = ToolInvocation(ToolCallId("queued-child-$mixed"), "start_child_tasks", "{}")
+            val terminal = ToolInvocation(ToolCallId("unresolved-terminal-$mixed"), "terminal_exec", "{}")
+            val job = ToolInvocation(ToolCallId("unresolved-job-$mixed"), "terminal_job_start", "{}")
+            val owner = Message(MessageId("queued-owner-$mixed"), ConversationId("queued-chat"), RunId("queued-run"),
+                Message.ASSISTANT_ROLE, listOf(MessageBlock.Tool(terminal), MessageBlock.Tool(job), MessageBlock.Tool(call)), RunStatus.RUNNING)
+            val turns = ChatTurnMapper.map(listOf(owner),
+                dedicatedTool = { _, _ -> if (mixed) "queue-test" else null }, toolReceipt = { _, _ -> receipt })
+            val turn = ChatTurnMapper.withStreamingOwner(turns, owner).filterIsInstance<ChatTurnUi.Assistant>().single()
+            show(turn, ChatScreenActions())
+            ui.onNodeWithTag("tool-step-header:${call.id.value}", useUnmergedTree = true)
+                .assertExists().assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "排队中 · 已折叠"))
+            ui.onAllNodesWithTag("tool-step:${call.id.value}", useUnmergedTree = true).assertCountEquals(1)
+            for (hidden in listOf(terminal, job)) {
+                ui.onNodeWithTag("tool-step:${hidden.id.value}", useUnmergedTree = true).assertDoesNotExist()
+                ui.onNodeWithTag("tool-step-header:${hidden.id.value}", useUnmergedTree = true).assertDoesNotExist()
+            }
+            val target = app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)
+            val resolved = ChatTurnMapper.withStreamingOwner(turns, owner, terminalTargets = mapOf(terminal to target, job to target))
+                .filterIsInstance<ChatTurnUi.Assistant>().single()
+            show(resolved, ChatScreenActions())
+            ui.onAllNodesWithTag("tool-step:${call.id.value}", useUnmergedTree = true).assertCountEquals(1)
+            ui.onNodeWithTag("tool-step-header:${call.id.value}", useUnmergedTree = true)
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "排队中 · 已折叠"))
+            for (shown in listOf(terminal, job)) {
+                ui.onNodeWithTag("tool-step-header:${shown.id.value}", useUnmergedTree = true).assertTextContains("Debian • root", substring = true)
+            }
         }
     }
 
@@ -300,7 +339,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         ToolCardPresentations.categories.forEach { category ->
             val step = WorkStepUi("reserved", "fixture-$category", "安全摘要", WorkStepState.UNKNOWN,
                 WorkStepOwnerUi("old", "old-run", category), "fixture-only", category,
-                listOf(ToolDetailSectionUi("结果摘要", "结果未确认，不恢复执行权")))
+                listOf(ToolDetailSectionUi("结果摘要", "结果未确认，不恢复执行权")),
+                executionTargetLabel = if (category in setOf("terminal", "background_job")) "Android • user" else null)
             show(ChatTurnUi.Assistant("historical-$category", content = listOf(MessageContentUi.Tool(step))),
                 ChatScreenActions(onRetryStep = { executions++ }))
             openWorkflow()
@@ -325,7 +365,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 val result = "recorded-result-$category-$mixed"
                 val step = WorkStepUi(title, title, "", if (index % 2 == 0) WorkStepState.UNKNOWN else WorkStepState.PENDING,
                     WorkStepOwnerUi("chat", "run", title), "fixture-only", category,
-                    sections = listOf(ToolDetailSectionUi("结果", result)), activity = activity)
+                    sections = listOf(ToolDetailSectionUi("结果", result)), activity = activity,
+                    executionTargetLabel = if (category in setOf("terminal", "background_job")) "Android • user" else null)
                 val turn = if (mixed) ChatTurnUi.Assistant(title, content = listOf(MessageContentUi.Tool(step)))
                     else ChatTurnUi.Assistant(title, workProcess = WorkProcessUi(
                         listOf(WorkSegmentUi(steps = listOf(step))), "已停止"))
@@ -378,7 +419,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             val details = ToolCategoryDetails.project(category, "{}", "{\"count\":0,\"state\":\"unknown\"}")
             val step = WorkStepUi("typed", "typed-$category", "安全摘要", WorkStepState.UNKNOWN,
                 WorkStepOwnerUi("chat", "run", category), "fixture-only", category,
-                categoryDetails = details)
+                categoryDetails = details,
+                executionTargetLabel = if (category in setOf("terminal", "background_job")) "Android • user" else null)
             show(ChatTurnUi.Assistant("typed-$category", content = listOf(MessageContentUi.Tool(step))), ChatScreenActions())
             openWorkflow()
             ui.onNodeWithTag("tool-category:$category").assertDoesNotExist()
@@ -789,7 +831,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             listOf("device_time", "terminal_pty_read", "future_tool"))) {
             val key = names.joinToString("-")
             val message = Message(MessageId(key), ConversationId("conversation"), RunId("run"), Message.ASSISTANT_ROLE,
-                names.mapIndexed { index, name -> MessageBlock.Tool(ToolInvocation(ToolCallId("chain-$index"), name, "{}"), "unique receipt $index") }, RunStatus.COMPLETED)
+                names.mapIndexed { index, name -> MessageBlock.Tool(ToolInvocation(ToolCallId("chain-$index"), name, "{}"),
+                    org.json.JSONObject().put("backend", "android").put("uid", 10444).put("stdout", "unique receipt $index").toString()) }, RunStatus.COMPLETED)
             val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
             show(turn, ChatScreenActions())
             ui.onNodeWithText("工作流程").assertIsDisplayed()

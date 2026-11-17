@@ -14,6 +14,27 @@ internal data class AssistantWorkflowContent(
     val leading: List<MessageContentUi> = emptyList(),
 )
 
+/** Keep source partitions intact: reconnect offsets are classified before display filtering. */
+internal fun AssistantWorkflowContent.withResolvedTerminalCards(): AssistantWorkflowContent {
+    val visibleSteps = steps.filter { it !is MessageContentUi.Tool || it.step.isVisibleInWorkflow }
+    val visibleWork = work?.withResolvedTerminalCards()
+    return copy(work = visibleWork ?: work?.takeIf { visibleSteps.isNotEmpty() }?.copy(segments = emptyList()),
+        steps = visibleSteps)
+}
+
+internal fun WorkProcessUi.withResolvedTerminalCards(): WorkProcessUi? {
+    val visibleSegments = segments.mapNotNull { segment ->
+        val steps = segment.steps.filter { it.isVisibleInWorkflow }
+        when {
+            steps.size == segment.steps.size -> segment
+            steps.isEmpty() && segment.narration.isNullOrBlank() && segment.reasoning == null -> null
+            else -> segment.copy(steps = steps)
+        }
+    }
+    if (visibleSegments == segments) return this
+    return if (visibleSegments.isEmpty()) null else copy(segments = visibleSegments)
+}
+
 internal fun ChatTurnUi.Assistant.workflowContent(): AssistantWorkflowContent {
     if (content.isNotEmpty()) {
         val lastStep = content.indexOfLast { it is MessageContentUi.Reasoning || it is MessageContentUi.Tool }

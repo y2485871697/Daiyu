@@ -61,7 +61,9 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
 internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Modifier = Modifier, allowLiveTiming: Boolean = false, generationComplete: Boolean = !work.running, stopped: Boolean = false, revealResetEpoch: Long = 0L, onVisibleAdvance: () -> Unit = {}, handoff: ReasoningHandoff? = null, onDisclosureHandoffReady: (Boolean) -> Unit = {}, onExpandedChange: (Boolean) -> Unit = {}, answerPending: Boolean = false, workflowTextSettled: Boolean = true, content: (@Composable (Boolean) -> Unit)? = null, nodeMotions: WorkflowNodeMotions? = null, motionItems: List<MessageContentUi>? = null, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
-    val reasoning = work.segments.mapNotNull { it.reasoning }
+    val displayedWork = remember(work) { work.withResolvedTerminalCards() } ?: return
+    val segments = displayedWork.segments
+    val reasoning = segments.mapNotNull { it.reasoning }
     val sequence = handoff ?: remember(ownerKey) { ReasoningHandoff(reasoning) }
     val reasoningReady = stopped || sequence.ready(reasoning)
     val finishing = !work.running || answerPending
@@ -89,14 +91,14 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
         else if (manuallyClosed) reasoning.filter { it.activeSinceNanos == null }.forEach(sequence::complete)
     }
     val reasoningState = rememberSaveableStateHolder()
-    val items = motionItems ?: work.segments.flatMap { segment ->
+    val items = motionItems ?: segments.flatMap { segment ->
         listOfNotNull(segment.reasoning?.let { MessageContentUi.Reasoning(it) }) + segment.steps.map { MessageContentUi.Tool(it) }
     }
     val motions = nodeMotions ?: remember(ownerKey) { WorkflowNodeMotions(items) }
     androidx.compose.runtime.SideEffect { if (!expanded || stopped) motions.suppress(items) }
     val colors = conversationColors()
     val title = work.title
-    val progressSummary = work.progressSummary
+    val progressSummary = displayedWork.progressSummary
     val shape = RoundedCornerShape(12.dp)
     CompositionLocalProvider(LocalWorkflowDisclosureParent provides disclosure,
         LocalWorkflowNodeMotions provides motions,
@@ -147,11 +149,11 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                     if (content != null) reasoningState.SaveableStateProvider("ordered-content") { content(expanded) }
                     else {
                         var precedingReady = true
-                        work.segments.forEachIndexed { segmentIndex, segment ->
+                        segments.forEachIndexed { segmentIndex, segment ->
                             if (!precedingReady) return@forEachIndexed
                             if (!segment.narration.isNullOrBlank()) {
-                                val narrationConnector = work.segments.take(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null } &&
-                                    work.segments.drop(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null }
+                                val narrationConnector = segments.take(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null } &&
+                                    segments.drop(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null }
                                 Text(segment.narration, Modifier.fillMaxWidth().drawBehind {
                                     if (narrationConnector) drawLine(colors.line, Offset(5.dp.toPx(), 0f),
                                         Offset(5.dp.toPx(), size.height), 1.dp.toPx())
@@ -161,10 +163,10 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                             segment.reasoning?.let { reported ->
                                 key(ownerKey, "reasoning", reported.itemId) {
                                     reasoningState.SaveableStateProvider(reported.itemId) {
-                                        WorkTimelineEntry(leadingConnector = work.segments.take(segmentIndex)
+                                        WorkTimelineEntry(leadingConnector = segments.take(segmentIndex)
                                             .any { it.steps.isNotEmpty() || it.reasoning != null }) {
                                             ReasoningStepRow(ownerKey, reported,
-                                                showConnector = segment.steps.isNotEmpty() || work.segments.drop(segmentIndex + 1)
+                                                showConnector = segment.steps.isNotEmpty() || segments.drop(segmentIndex + 1)
                                                     .any { it.steps.isNotEmpty() || it.reasoning != null },
                                                 allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, stopped = stopped,
                                                 revealResetEpoch = revealResetEpoch, parentExpanded = expanded,
@@ -178,9 +180,9 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                             if (precedingReady) segment.steps.forEachIndexed { index, step ->
                                 key(ownerKey, step.renderKey) {
                                     val laterStep = index < segment.steps.lastIndex ||
-                                        work.segments.drop(segmentIndex + 1).any { it.steps.isNotEmpty() || it.reasoning != null }
+                                        segments.drop(segmentIndex + 1).any { it.steps.isNotEmpty() || it.reasoning != null }
                                     WorkTimelineEntry(leadingConnector = index > 0 || segment.reasoning != null ||
-                                        work.segments.take(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null }) {
+                                        segments.take(segmentIndex).any { it.steps.isNotEmpty() || it.reasoning != null }) {
                                         WorkStepRow(step, showConnector = laterStep, toolContent = toolContent, flowRunning = work.running)
                                     }
                                 }
@@ -197,6 +199,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
 /** A single compact timeline row shared by work summaries and ordered mixed content. */
 @Composable
 internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowRunning: Boolean = false, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
+    if (!step.isVisibleInWorkflow) return
     val colors = conversationColors()
     val lineMotion = LocalWorkflowLineMotion.current
     val appearance = rememberWorkflowToolAppearance("tool:${step.renderKey}")
@@ -253,7 +256,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Icon(ToolOperationIcons.operation(step.operationGlyph), null, Modifier.size(18.dp).testTag("tool-operation-icon:${step.toolCallId}"), tint = colors.accent)
                     Column(Modifier.weight(1f)) {
-                        Text(toolHeaderText(step.displayName, step.category in setOf("terminal", "background_job")), color = colors.text,
+                        Text(toolHeaderText(step.name, step.category in setOf("terminal", "background_job")), color = colors.text,
                             inlineContent = toolHeaderInlineContent(colors.text),
                             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
                             maxLines = 2, overflow = TextOverflow.Ellipsis)

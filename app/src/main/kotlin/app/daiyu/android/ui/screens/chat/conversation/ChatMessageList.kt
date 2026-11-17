@@ -1122,7 +1122,8 @@ internal fun AssistantTurn(
     preparing: Boolean = false,
     actionSlotOwner: Boolean = showActions,
 ) = key(turn.listKey) {
-    val ordered = workflowContent ?: rememberAssistantWorkflowContent(turn)
+    val sourceWorkflow = workflowContent ?: rememberAssistantWorkflowContent(turn)
+    val ordered = remember(sourceWorkflow) { sourceWorkflow.withResolvedTerminalCards() }
     val bodySources = remember(ordered.leading, ordered.body) {
         (ordered.leading + ordered.body).filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text, it.markdownWindow) }
     }

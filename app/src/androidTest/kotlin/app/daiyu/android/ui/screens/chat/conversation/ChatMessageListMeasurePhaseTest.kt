@@ -465,7 +465,8 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
                                 }
                                 WorkProcessCard(WorkProcessUi(emptyList(), "进行中", running = true), "short-active-card",
                                     content = {
-                                        WorkStepRow(WorkStepUi("short-active-tool", "执行命令", "", category = "terminal"),
+                                        WorkStepRow(WorkStepUi("short-active-tool", "执行命令 · Android • user", "", category = "terminal",
+                                            executionTargetLabel = "Android • user"),
                                             toolContent = { Box(Modifier.fillMaxWidth().height(1.dp)) })
                                         Text("最后一行必须完整显示", Modifier.testTag("short-active-last-line"),
                                             color = androidx.compose.ui.graphics.Color.Black)

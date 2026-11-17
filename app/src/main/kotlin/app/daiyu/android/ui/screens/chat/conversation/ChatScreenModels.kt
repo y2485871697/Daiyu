@@ -157,11 +157,8 @@ data class WorkStepUi(
 ) {
     val displayActivity: ToolActivityUi get() =
         if (awaitingExecutionTarget && activity == ToolActivityUi.RUNNING) ToolActivityUi.PREPARING else activity
-    val displayName: String get() = if (executionTargetLabel == null && state == WorkStepState.PENDING &&
-        category in setOf("terminal", "background_job") &&
-        (activity in setOf(ToolActivityUi.PENDING, ToolActivityUi.QUEUED, ToolActivityUi.PREPARING) ||
-            awaitingExecutionTarget && activity == ToolActivityUi.RUNNING))
-        "$name · 环境待确认" else name
+    val isVisibleInWorkflow: Boolean get() =
+        category !in setOf("terminal", "background_job") || !executionTargetLabel.isNullOrBlank()
     val toolCallId: String get() = id
 }
 

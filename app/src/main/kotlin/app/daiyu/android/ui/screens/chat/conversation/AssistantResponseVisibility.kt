@@ -10,12 +10,13 @@ internal fun ChatTurnUi.Assistant.hasVisibleResponse(): Boolean {
             when (it) {
                 is MessageContentUi.Text -> it.text.isNotBlank()
                 is MessageContentUi.Reasoning -> hasReportedReasoningText(it.reported.text)
-                is MessageContentUi.Image, is MessageContentUi.Video, is MessageContentUi.Tool -> true
+                is MessageContentUi.Image, is MessageContentUi.Video -> true
+                is MessageContentUi.Tool -> it.step.isVisibleInWorkflow
             }
         }
     } else {
         finalText.isNotBlank() || workProcess?.segments.orEmpty().any {
-            !it.narration.isNullOrBlank() || it.steps.isNotEmpty() ||
+            !it.narration.isNullOrBlank() || it.steps.any { step -> step.isVisibleInWorkflow } ||
                 it.reasoning?.let { reasoning -> hasReportedReasoningText(reasoning.text) } == true
         }
     }

@@ -170,7 +170,7 @@ jobs:
                           'test_chat_ime_motion_contract.py', 'test_ime_frame_contract.py',
                           'test_chat_resume_scroll_contract.py', 'test_page_back_gesture_contract.py')
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'message-actions':
-              patterns = ('test_pane_question_smoke_scope.py', 'test_message_generation_actions_contract.py', 'test_message_action_snapshot_admission_contract.py',
+              patterns = ('test_chat_submission_preview_contract.py', 'test_pane_question_smoke_scope.py', 'test_message_generation_actions_contract.py', 'test_message_action_snapshot_admission_contract.py',
                           'test_message_action_scroll_contract.py', 'test_message_confirmation_contract.py',
                           'test_branch_configuration_inheritance_contract.py', 'test_message_timestamp_style_contract.py')
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'question-card':

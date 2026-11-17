@@ -79,6 +79,35 @@ class MessageActionsActivityTest : WiredActivityTestCase() {
         awaitControl("source run drained") { fixture.controller.active == null }
     }
 
+
+    fun testPendingPreviewCopiesOnlyItsExactTextBeforeHistoryIsAvailable() {
+        val key = "pending-user-copy"
+        val text = "just sent 中文 👋"
+        mainThread {
+            val delegate = MainActivity::class.java.getDeclaredField("chatState\$delegate").apply { isAccessible = true }
+                .get(activity) as androidx.compose.runtime.MutableState<app.daiyu.android.ui.screens.chat.conversation.ChatScreenState>
+            val original = delegate.value
+            val clipboard = activity.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+            try {
+                delegate.value = original.copy(turns = emptyList(), submissionPreview =
+                    app.daiyu.android.ui.screens.chat.conversation.ChatSubmissionPreview(key, text))
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("before", "unchanged"))
+                retainedControls(activity).onCopy("different-preview")
+                assertEquals("unchanged", clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+                retainedControls(activity).onCopy(key)
+                assertEquals(text, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+                delegate.value = delegate.value.copy(turns = listOf(
+                    app.daiyu.android.ui.screens.chat.conversation.ChatTurnUi.User("settled-user", "stored message")),
+                    submissionPreview = app.daiyu.android.ui.screens.chat.conversation.ChatSubmissionPreview(key, text,
+                        settledUserId = "settled-user"))
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("retired", "retired"))
+                retainedControls(activity).onCopy(key)
+                assertEquals("retired", clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+            } finally { delegate.value = original }
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testActualEditCallbackFillsComposerAndCancelRestoresDraftAndHistory() {
         val (conversation, user) = seed()
         mainThread { activity.select(conversation) }; readySnapshot()

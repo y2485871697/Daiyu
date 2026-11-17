@@ -46,8 +46,15 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
     def test_pending_user_is_not_an_action_target(self):
         source = (CHAT / 'ChatMessageList.kt').read_text().split('internal fun UserTurn(', 1)[1].split('internal fun AssistantTurn(', 1)[0]
         self.assertIn('if (!turn.pending) showMenu = true', source)
-        self.assertIn('if (!turn.pending && actions.editingMessageKey != turn.listKey) MessageActionBar(', source)
+        self.assertIn('if (actions.editingMessageKey != turn.listKey) MessageActionBar(', source)
+        self.assertIn('messageActionsEnabled = !turn.pending', source)
+        self.assertIn('branchEnabled = !turn.pending', source)
         self.assertIn('Modifier.testTag("chat-send-preview")', source)
+        main = (APP / 'MainActivity.kt').read_text()
+        copy = main.split('private fun copyMessage(id: String)', 1)[1].split('private fun cycleChatGptSpeed', 1)[0]
+        self.assertIn('submissionTurns(chatState.turns, chatState.submissionPreview).filterIsInstance<ChatTurnUi.User>()', copy)
+        self.assertIn('.firstOrNull { it.pending && it.listKey == id }', copy)
+        self.assertLess(copy.index('chatState.submissionPreview'), copy.index('val turns = chatState.turns'))
         self.assertNotIn('正在准备发送', source)
 
     def test_normal_preparation_uses_existing_composer_control_not_extra_status_or_footer(self):

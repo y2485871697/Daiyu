@@ -227,7 +227,8 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn('measured.isLineEllipsized(line)', readability)
         regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ReasoningWorkflowTest.kt').read_text()
         self.assertIn('fun testMixedResultCountsUpdateWithoutReopeningOrDuplicatingRows', regression)
-        self.assertIn('已完成5步 · 失败', regression)
+        self.assertIn('已完成5步', regression)
+        self.assertIn('assertEquals(state, turn.workProcess!!.segments.flatMap { it.steps }.single().state)', regression)
 
 if __name__ == "__main__":
     unittest.main()

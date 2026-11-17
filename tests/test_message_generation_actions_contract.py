@@ -82,6 +82,7 @@ class MessageGenerationActionsContract(unittest.TestCase):
         spec.loader.exec_module(recorder)
         classes = recorder.MESSAGE_ACTION_PLATFORM_CLASSES
         self.assertEqual(5, len(classes))
+        self.assertIn("test_chat_submission_preview_contract", recorder.MESSAGE_ACTION_MODULES)
         for chosen in (classes, tuple(reversed(classes))):
             command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(chosen)))
             self.assertEqual("message-actions-targeted", scope)

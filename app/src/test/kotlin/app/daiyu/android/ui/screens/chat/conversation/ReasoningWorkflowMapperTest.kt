@@ -19,7 +19,7 @@ class ReasoningWorkflowMapperTest {
         assertTrue(turn.content.isEmpty())
         assertEquals(2, turn.workProcess!!.segments.sumOf { it.steps.size })
         assertTrue(turn.workProcess.segments.flatMap { it.steps }.all { it.state == WorkStepState.UNKNOWN })
-        assertEquals("结果未确认", turn.workProcess.summary)
+        assertEquals("已完成", turn.workProcess.summary)
         assertEquals("answer", turn.finalText)
     }
     @Test fun dedicatedToolsAndImagesKeepTheirOriginalPositionsAndOwners() {

@@ -778,7 +778,7 @@ RETURN_CHAT_HANDOFF_MODULES = tuple(dict.fromkeys(
 
 MESSAGE_ACTION_PLATFORM_CLASSES = ('app.daiyu.android.ControllerMessageActionsTest', 'app.daiyu.android.MessageActionsActivityTest', 'app.daiyu.android.MessageConfirmationActivityTest', 'app.daiyu.android.ui.screens.chat.conversation.MessageActionBarLayoutTest', 'app.daiyu.android.ui.screens.chat.conversation.MessageActionAvailabilityTest')
 MESSAGE_ACTION_MODULES = (
-    "test_message_generation_actions_contract", "test_message_action_snapshot_admission_contract",
+    "test_chat_submission_preview_contract", "test_message_generation_actions_contract", "test_message_action_snapshot_admission_contract",
     "test_message_action_scroll_contract", "test_message_confirmation_contract",
     "test_branch_configuration_inheritance_contract", "test_message_timestamp_style_contract",
     "test_record_tool_tests_scope",

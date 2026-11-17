@@ -50,6 +50,37 @@ class MessageActionAvailabilityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+
+    fun testPendingUserShowsActionBarImmediatelyAndKeepsSyntheticTargetReadOnly() {
+        var pending by mutableStateOf(true)
+        var busy by mutableStateOf(false)
+        val received = mutableListOf<String>()
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                Column(Modifier.width(320.dp)) {
+                    UserTurn(ChatTurnUi.User("preview-user", "just sent", pending = pending),
+                        ChatScreenActions(messageActionsEnabled = !busy,
+                            onCopy = { received += "copy:$it" }, onBranch = { received += "branch:$it" },
+                            onEditUser = { received += "edit:$it" }, onDeleteTurn = { received += "delete:$it" }))
+                }
+            }
+        } }
+        ui.onNodeWithTag("chat-send-preview").assertIsDisplayed()
+        ui.onNodeWithContentDescription("复制回答").assertIsDisplayed().assertIsEnabled().performClick()
+        for (label in listOf("编辑", "分支", "删除")) {
+            ui.onNodeWithContentDescription(label).assertIsDisplayed().assertIsNotEnabled().performTouchInput { click() }
+        }
+        assertEquals(listOf("copy:preview-user"), received)
+        mainThread { pending = false; busy = true }
+        ui.onNodeWithContentDescription("分支").assertIsDisplayed().assertIsEnabled()
+        for (label in listOf("编辑", "删除")) ui.onNodeWithContentDescription(label).assertIsDisplayed().assertIsNotEnabled()
+        mainThread { busy = false }
+        for (label in listOf("编辑", "分支", "删除")) ui.onNodeWithContentDescription(label).assertIsDisplayed().assertIsEnabled()
+        ui.onNodeWithContentDescription("朗读").assertDoesNotExist()
+        ui.onNodeWithContentDescription("重新生成").assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testAlreadyExpandedUserMenuDisablesEditsAndDeletionWithoutHidingThem() {
         var expanded by mutableStateOf(true)
         mainThread {

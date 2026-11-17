@@ -7910,6 +7910,11 @@ class MainActivity : ComponentActivity() {
         shown.addAll(0, earlier); prepareMessageActionSnapshot(); publishChat()
     }
     private fun copyMessage(id: String) {
+        submissionTurns(chatState.turns, chatState.submissionPreview).filterIsInstance<ChatTurnUi.User>()
+            .firstOrNull { it.pending && it.listKey == id }?.let { preview ->
+                (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("代鱼消息", preview.text))
+                return
+            }
         val turns = chatState.turns
         val turn = turns.firstOrNull { it.matchesKey(id) } ?: return
         val sources = ChatTurnMapper.sourceMessages(turn, shown.map { it.second })

@@ -447,10 +447,6 @@ object ChatTurnMapper {
             message.status == RunStatus.FAILED -> "流程失败"
             message.status == RunStatus.STOPPED -> "已停止"
             message.status == RunStatus.INTERRUPTED -> "已中断"
-            segments.any { segment -> segment.steps.any { it.state == WorkStepState.FAILED } } -> "失败"
-            segments.any { it.steps.any { step -> step.state == WorkStepState.UNKNOWN } } -> "结果未确认"
-            segments.any { it.steps.any { step -> step.state == WorkStepState.NOT_EXECUTED } } -> "含未执行步骤"
-            segments.any { it.reasoning?.activeSinceNanos != null || it.steps.any { step -> step.state == WorkStepState.PENDING } } -> "含未完成步骤"
             else -> "已完成"
         }
         return ChatTurnUi.Assistant(

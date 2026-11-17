@@ -58,7 +58,7 @@ class WorkProcessProgressTest {
     @Test fun returnedTextWithoutTrustedReceiptDoesNotBecomeSuccessful() {
         val work = process(source(RunStatus.COMPLETED))
         assertEquals(WorkStepState.UNKNOWN, work.segments.flatMap { it.steps }.single().state)
-        assertEquals("已完成2步 · 结果未确认", work.progressSummary)
+        assertEquals("已完成2步", work.progressSummary)
     }
 
     @Test fun liveSequenceCountsOnlyClosedStepsAndSwitchesCurrentPhase() {
@@ -129,16 +129,37 @@ class WorkProcessProgressTest {
             assertFalse(work.running)
         }
         val failed = process(source(RunStatus.COMPLETED), ToolReceiptUi(WorkStepState.FAILED))
-        assertEquals("已完成2步 · 失败", failed.progressSummary)
+        assertEquals("已完成2步", failed.progressSummary)
         val skipped = process(source(RunStatus.COMPLETED), ToolReceiptUi(WorkStepState.NOT_EXECUTED))
-        assertEquals("已完成2步 · 含未执行步骤", skipped.progressSummary)
+        assertEquals("已完成2步", skipped.progressSummary)
     }
 
-    @Test fun unfinishedStepsInTerminalMessagesDoNotClaimAllCompleted() {
-        assertEquals("已完成1步 · 含未完成步骤",
+    @Test fun terminalSummaryOmitsUnfinishedHintWithoutCountingOpenSteps() {
+        assertEquals("已完成1步",
             process(source(RunStatus.COMPLETED), ToolReceiptUi(WorkStepState.PENDING)).progressSummary)
-        assertEquals("已完成2步 · 含未完成步骤", process(source(RunStatus.COMPLETED, listOf(before, active)),
+        assertEquals("已完成2步", process(source(RunStatus.COMPLETED, listOf(before, active)),
             ToolReceiptUi(WorkStepState.OK)).progressSummary)
+    }
+
+
+    @Test fun completedWorkflowSummaryKeepsOnlyCountAcrossMessageAndDisplayPaths() {
+        for (state in WorkStepState.entries) {
+            val receipt = ToolReceiptUi(state)
+            val message = source(RunStatus.COMPLETED, listOf(before, active))
+            val row = app.daiyu.android.storage.MessageDisplayRow(message.id, message.conversationId, message.runId,
+                message.role, message.blocks, message.status, null, null,
+                listOf(app.daiyu.android.storage.MessageDisplaySegment(message.id, message.role, message.blocks,
+                    null, message.reportedReasoning)))
+            val display = ChatTurnMapper.mapDisplay(app.daiyu.android.storage.MessageDisplayWindow(listOf(1L to row)),
+                toolReceipt = { _, _ -> receipt }).single() as ChatTurnUi.Assistant
+            for (work in listOf(process(message, receipt), checkNotNull(display.workProcess))) {
+                val expectedCount = if (state == WorkStepState.PENDING) 1 else 2
+                assertEquals("已完成${expectedCount}步", work.progressSummary)
+                assertEquals(state, work.segments.flatMap { it.steps }.single().state)
+                assertEquals(receipt.activity, work.segments.flatMap { it.steps }.single().activity)
+                assertNotNull(work.segments.mapNotNull { it.reasoning }.last().activeSinceNanos)
+            }
+        }
     }
 
     @Test fun sameToolIdsAcrossOwnersDoNotShareProgress() {

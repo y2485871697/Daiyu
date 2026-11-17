@@ -615,13 +615,14 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         assertDisclosure("work-process-header", expanded = false)
     }
 
-    fun testUnifiedHeaderKeepsFailureStopAndUnknownVisible() {
+    fun testUnifiedHeaderKeepsLifecycleWithoutRepeatingToolOutcomeHints() {
         prepare()
         for ((status, state, label) in listOf(
-            Triple(RunStatus.COMPLETED, WorkStepState.UNKNOWN, "结果未确认"),
-            Triple(RunStatus.COMPLETED, WorkStepState.FAILED, "失败"),
-            Triple(RunStatus.STOPPED, WorkStepState.UNKNOWN, "已停止"),
-            Triple(RunStatus.INTERRUPTED, WorkStepState.UNKNOWN, "已中断"))) {
+            Triple(RunStatus.COMPLETED, WorkStepState.UNKNOWN, "已完成2步"),
+            Triple(RunStatus.COMPLETED, WorkStepState.FAILED, "已完成2步"),
+            Triple(RunStatus.FAILED, WorkStepState.UNKNOWN, "已完成2步 · 流程失败"),
+            Triple(RunStatus.STOPPED, WorkStepState.UNKNOWN, "已完成2步 · 已停止"),
+            Triple(RunStatus.INTERRUPTED, WorkStepState.UNKNOWN, "已完成2步 · 已中断"))) {
             val source = message(listOf(tool("t1")), listOf(ReportedReasoning("r1", "first summary"))).copy(status = status)
             val turn = ChatTurnMapper.map(listOf(source), toolState = { _, _ -> state }).single() as ChatTurnUi.Assistant
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -629,11 +630,29 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             } } }
             awaitHeader()
             ui.onNodeWithText("工作流程").assertIsDisplayed()
-            ui.onNodeWithText("已完成2步 · $label").assertIsDisplayed()
-            ui.onNodeWithText("已完成2步").assertDoesNotExist()
+            ui.onNodeWithText(label).assertIsDisplayed()
+            assertEquals(state, turn.workProcess!!.segments.flatMap { it.steps }.single().state)
         }
     }
 
+
+    fun testCompletedHeaderOmitsUnfinishedHintButKeepsPendingToolState() {
+        prepare()
+        val source = message(listOf(tool("t1")), listOf(ReportedReasoning("r1", "first summary", blockOffset = 0)))
+        val turn = ChatTurnMapper.map(listOf(source), toolReceipt = { _, _ -> ToolReceiptUi(WorkStepState.PENDING) })
+            .single() as ChatTurnUi.Assistant
+        assertEquals(1, turn.workProcess!!.completedStepCount)
+        assertEquals(WorkStepState.PENDING, turn.workProcess.segments.flatMap { it.steps }.single().state)
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            AssistantTurn(turn, ChatScreenActions())
+        } } }
+        awaitHeader()
+        ui.onNodeWithText("已完成1步").assertIsDisplayed()
+        ui.onNodeWithText("含未完成步骤", substring = true).assertDoesNotExist()
+        ui.onNodeWithTag("work-process-header").performClick()
+        ui.onNodeWithTag("tool-step-header:t1").assert(SemanticsMatcher.expectValue(
+            SemanticsProperties.StateDescription, "待派发 · 已折叠"))
+    }
 
     fun testMixedResultCountsUpdateWithoutReopeningOrDuplicatingRows() {
         prepare()
@@ -651,17 +670,17 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             AssistantTurn(turn, ChatScreenActions())
         } } }
         awaitHeader()
-        ui.onNodeWithText("已完成5步 · 结果未确认").assertIsDisplayed()
+        ui.onNodeWithText("已完成5步").assertIsDisplayed()
         assertDisclosure("work-process-header", expanded = false)
         mainThread { turn = project(WorkStepState.UNKNOWN, WorkStepState.FAILED) }
-        ui.onNodeWithText("已完成5步 · 失败").assertIsDisplayed()
+        ui.onNodeWithText("已完成5步").assertIsDisplayed()
         assertDisclosure("work-process-header", expanded = false)
         ui.onNodeWithTag("work-process-header").performClick()
         ui.onNodeWithTag("tool-step-header:unknown").assertIsDisplayed()
         ui.onNodeWithTag("tool-step-header:failed").assertIsDisplayed()
         ui.onNodeWithTag("work-process-header").performClick()
         mainThread { turn = project(WorkStepState.NOT_EXECUTED, WorkStepState.FAILED) }
-        ui.onNodeWithText("已完成5步 · 失败").assertIsDisplayed()
+        ui.onNodeWithText("已完成5步").assertIsDisplayed()
         ui.onNodeWithText("已完成5步 · 结果未确认").assertDoesNotExist()
         assertDisclosure("work-process-header", expanded = false)
     }

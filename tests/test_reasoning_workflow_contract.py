@@ -233,8 +233,14 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('val status = controlActivity?.label ?: summary', model)
         mapper = (CHAT / 'ChatTurnMapper.kt').read_text()
         self.assertIn('message.status == RunStatus.FAILED -> "流程失败"', mapper)
-        self.assertLess(mapper.index('message.status == RunStatus.STOPPED -> "已停止"'),
-                        mapper.index('segments.any { segment -> segment.steps.any { it.state == WorkStepState.FAILED } } -> "失败"'))
+        terminal = mapper.split('val summary = when {', 1)[1].split('return ChatTurnUi.Assistant(', 1)[0]
+        terminal = terminal.split('message.status == RunStatus.FAILED', 1)[1]
+        self.assertNotIn('segments.any', terminal)
+        for hint in ('含未完成步骤', '含未执行步骤', '结果未确认'):
+            self.assertNotIn(hint, terminal)
+        self.assertIn('message.status == RunStatus.STOPPED -> "已停止"', terminal)
+        self.assertIn('message.status == RunStatus.INTERRUPTED -> "已中断"', terminal)
+        self.assertIn('else -> "已完成"', terminal)
         regression = (ROOT / 'app/src/test/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkProcessProgressTest.kt').read_text()
         for name in ('screenshotShapeAddsSettledUnknownToClosedReasoningSteps',
                      'failedAndUnknownReceiptsRemainVisibleDuringAllControlStates',

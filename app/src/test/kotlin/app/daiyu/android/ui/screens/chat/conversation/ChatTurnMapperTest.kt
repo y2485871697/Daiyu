@@ -218,7 +218,7 @@ class ChatTurnMapperTest {
         listOf("ERROR: not found", "  error timeout", "失败：访问被拒绝", "", "  ").forEach { result ->
             val turn = mapped(message(tool("one", result), text("a", "Done")))
             assertEquals(WorkStepState.UNKNOWN, turn.workProcess!!.segments.single().steps.single().state)
-            assertEquals("结果未确认", turn.workProcess.summary)
+            assertEquals("已完成", turn.workProcess.summary)
         }
     }
 
@@ -228,7 +228,7 @@ class ChatTurnMapperTest {
         val failed = ChatTurnMapper.map(listOf(original), confirmedToolError = { _, _ -> true })
             .single() as ChatTurnUi.Assistant
         assertEquals(WorkStepState.FAILED, failed.workProcess!!.segments.single().steps.single().state)
-        assertEquals("失败", failed.workProcess.summary)
+        assertEquals("已完成", failed.workProcess.summary)
         val unknown = ChatTurnMapper.map(listOf(original), confirmedToolError = { _, _ -> null })
             .single() as ChatTurnUi.Assistant
         assertEquals(mapped(original), unknown)

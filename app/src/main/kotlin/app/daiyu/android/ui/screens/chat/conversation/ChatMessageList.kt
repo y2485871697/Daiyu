@@ -1060,9 +1060,11 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
             UserTurnMenu(pageActive && showMenu, { showMenu = false }, turn.listKey, actions)
             }
         }
-        if (!turn.pending && actions.editingMessageKey != turn.listKey) MessageActionBar(
+        if (actions.editingMessageKey != turn.listKey) MessageActionBar(
             id = turn.listKey,
             actions = actions,
+            messageActionsEnabled = !turn.pending,
+            branchEnabled = !turn.pending,
             showEditAction = true,
             allowSpeech = false,
             showRegenerateAction = false,

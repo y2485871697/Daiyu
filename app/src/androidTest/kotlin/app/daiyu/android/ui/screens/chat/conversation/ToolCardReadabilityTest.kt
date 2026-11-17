@@ -437,11 +437,24 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
                 "lineEnds=${(0 until measured.lineCount).map { measured.getLineEnd(it, visibleEnd = true) }} " +
                 "lineRights=${(0 until measured.lineCount).map { measured.getLineRight(it) }}"
             android.util.Log.i("DaiyuWorkflowHeader", diagnostic)
-            assertFalse(diagnostic, measured.hasVisualOverflow)
-            for (line in 0 until measured.lineCount) assertFalse(measured.isLineEllipsized(line))
+            assertFalse(diagnostic, measured.didOverflowHeight)
+            for (line in 0 until measured.lineCount) {
+                assertFalse(diagnostic, measured.isLineEllipsized(line))
+                assertTrue(diagnostic, measured.getLineLeft(line) >= -1f)
+                assertTrue(diagnostic, measured.getLineRight(line) <= measured.size.width + 1f)
+                assertTrue(diagnostic, measured.getLineTop(line) >= -1f)
+                assertTrue(diagnostic, measured.getLineBottom(line) <= measured.size.height + 1f)
+            }
+            for (offset in expected.indices.filterNot { expected[it].isWhitespace() }) {
+                val character = measured.getBoundingBox(offset)
+                assertTrue(diagnostic, character.left >= -1f && character.right <= measured.size.width + 1f)
+                assertTrue(diagnostic, character.top >= -1f && character.bottom <= measured.size.height + 1f)
+            }
             assertEquals(expected.length, measured.getLineEnd(measured.lineCount - 1, visibleEnd = true))
             val titleBounds = ui.onNodeWithText("工作流程", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
             val statusBounds = node.fetchSemanticsNode().boundsInRoot
+            assertTrue(diagnostic, statusBounds.width >= measured.size.width - 1f)
+            assertTrue(diagnostic, statusBounds.height >= measured.size.height - 1f)
             val header = ui.onNodeWithTag("work-process-header", useUnmergedTree = true).fetchSemanticsNode()
             val actualWidth = with(measured.layoutInput.density) { header.size.width.toDp() }
             val case = "requestedWidth=$width actualWidth=$actualWidth fontScale=$fontScale"

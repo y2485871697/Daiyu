@@ -5,9 +5,21 @@ import app.daiyu.android.ui.screens.assistants.assistantPreviewPalette
 import androidx.compose.foundation.Indication
 import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -98,16 +110,42 @@ internal fun ChatIconButton(
     shape: Shape = CircleShape,
     indication: Indication? = LocalIndication.current,
     visualEnabled: Boolean = enabled,
+    animateChanges: Boolean = false,
 ) {
-    Box(modifier.size(48.dp).clip(shape).combinedClickable(
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressScale = if (animateChanges) {
+        val pressed by interactionSource.collectIsPressedAsState()
+        animateFloatAsState(
+            targetValue = if (enabled && pressed) .92f else 1f,
+            animationSpec = if (pressed) tween(90) else spring(dampingRatio = .72f, stiffness = 650f),
+            label = "chat-action-press",
+        )
+    } else null
+    Box(modifier.size(48.dp).clip(shape)
+        .then(if (animateChanges) Modifier.semantics { contentDescription = label } else Modifier)
+        .combinedClickable(
         enabled = enabled, role = Role.Button, onClickLabel = label,
-        interactionSource = remember { MutableInteractionSource() }, indication = indication,
+        interactionSource = interactionSource, indication = indication,
         onLongClick = onLongClick, onClick = onClick,
     ), contentAlignment = Alignment.Center) {
-        Box(if (containerColor == null) Modifier else Modifier.size(containerSize).background(containerColor, CircleShape),
+        Box(Modifier.then(if (pressScale == null) Modifier else Modifier.graphicsLayer {
+            scaleX = pressScale.value
+            scaleY = pressScale.value
+        }).then(if (containerColor == null) Modifier else Modifier.size(containerSize).background(containerColor, CircleShape)),
             contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = label, modifier = Modifier.size(iconSize ?: if (containerColor == null) 20.dp else 12.dp),
-                tint = if (visualEnabled) tint else tint.copy(alpha = 0.38f))
+            val imageSize = iconSize ?: if (containerColor == null) 20.dp else 12.dp
+            val imageTint = if (visualEnabled) tint else tint.copy(alpha = 0.38f)
+            if (animateChanges) {
+                AnimatedContent(icon, contentAlignment = Alignment.Center,
+                    transitionSpec = {
+                        ((fadeIn(tween(140)) + scaleIn(tween(140), initialScale = .72f)) togetherWith
+                            (fadeOut(tween(90)) + scaleOut(tween(90), targetScale = .72f))).using(null)
+                    }, label = "chat-action-icon") { image ->
+                    Icon(image, contentDescription = null, modifier = Modifier.size(imageSize), tint = imageTint)
+                }
+            } else {
+                Icon(icon, contentDescription = label, modifier = Modifier.size(imageSize), tint = imageTint)
+            }
         }
     }
 }

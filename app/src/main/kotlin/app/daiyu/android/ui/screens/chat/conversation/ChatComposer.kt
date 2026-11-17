@@ -342,7 +342,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 containerColor = if (compressionBlocked) MiuixTheme.colorScheme.onSurface.copy(alpha = .12f)
                                     else (if (preparingSend || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
                                         .copy(alpha = if (primaryVisualEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f),
-                                enabled = pageActive && (primaryEnabled || compressionBlocked), containerSize = 28.dp, visualEnabled = primaryVisualEnabled,
+                                enabled = pageActive && (primaryEnabled || compressionBlocked), containerSize = 28.dp, visualEnabled = primaryVisualEnabled, animateChanges = true,
                                 tint = if (compressionBlocked) MiuixTheme.colorScheme.onSurface
                                     else if (preparingSend || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
                                 iconSize = if (preparingSend || !textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp,

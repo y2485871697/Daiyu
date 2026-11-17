@@ -571,7 +571,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             Box(Modifier.safeDrawingPadding()) {
-                BoxWithConstraints(Modifier.size(320.dp, 420.dp).testTag("clip-summary-host")) {
+                BoxWithConstraints(Modifier.size(320.dp, if (growInterToolText) 520.dp else 420.dp).testTag("clip-summary-host")) {
                     val steps = if (growInterToolText) listOf(before, versions[version]) + others.take(5)
                         else others.take(3) + versions[version] + others.subList(4, if (appended) 7 else 6)
                     val content = if (growInterToolText) buildList<MessageContentUi> {
@@ -709,6 +709,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             if (growInterToolText) {
                 ui.onNodeWithTag(header).performTouchInput { click() }
                 repeat(48) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+                sampleFrame(-1, "open-inter-tool-baseline")
                 verifyFinalInk()
                 fun awaitBody(target: Int): androidx.compose.ui.text.TextLayoutResult {
                     val expected = bodyPrefixes[target].replace("  \n", "\n")
@@ -716,7 +717,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                     repeat(120) { frame ->
                         ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
                         ui.onNodeWithTag(header).assert(SemanticsMatcher.expectValue(
-                            androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
+                            androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "成功 · 已展开"))
                         sampleFrame(target * 100 + frame, "open-inter-tool-text-$target")
                         verifyFinalInk()
                         val tag = "message-content-text:1"

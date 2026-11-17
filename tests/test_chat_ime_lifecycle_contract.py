@@ -52,6 +52,41 @@ class ChatImeLifecycleContractTest(unittest.TestCase):
         self.assertIn('!lifecycleDismissInProgress && !isInputDismissInProgress()', composer)
         self.assertIn('hideChatInputIme(focus, keyboard, view)', composer)
 
+    def test_lifecycle_activation_does_not_revoke_route_input_ownership(self):
+        retained = self.read(MAIN / 'ui/navigation/PageRetainedContent.kt')
+        host = self.read(MAIN / 'ui/navigation/PageBackGestures.kt')
+        page = self.read(CHAT / 'ChatPageHost.kt')
+        composer = self.read(CHAT / 'ChatComposer.kt')
+        activity = self.read(MAIN / 'MainActivity.kt')
+        self.assertIn('inputOwned: Boolean = active', retained)
+        self.assertIn('LocalPageInputOwned = compositionLocalOf { true }', retained)
+        self.assertIn('LocalPageContentActive provides active', retained)
+        self.assertIn('LocalPageInputOwned provides inputOwned', retained)
+        self.assertIn('focusProperties { canFocus = inputOwned }', retained)
+        self.assertIn('owner.update(parent.lifecycle.currentState, active)', retained)
+        self.assertIn('val rootActive = retainedRootActive && resumed', host)
+        self.assertIn('PageRetainedContent(retainedRootVisible, rootActive, inputOwned = retainedRootActive)', host)
+        self.assertIn('val authorized = drawn && requested && active && parentAuthorized', page)
+        self.assertIn('val inputOwned = drawn && requested && parentInputOwned', page)
+        self.assertIn('LocalPageInputOwned provides inputOwned', page)
+        self.assertIn('focusProperties { canFocus = inputOwned }.onPreviewKeyEvent { !authorized }', page)
+        effect = composer.split('LaunchedEffect(inputOwned)', 1)[1].split('val lifecycle =', 1)[0]
+        self.assertIn('if (!inputOwned && inputFocused) focus.clearFocus(force = true)', effect)
+        self.assertIn('!app.daiyu.android.ui.components.LocalConversationDrawerBlocksIme.current', composer)
+        self.assertIn('readOnly = !inputOwned', composer)
+        self.assertIn('focusProperties { canFocus = inputOwned }', composer)
+        self.assertNotIn('canFocus = pageActive', composer)
+        navigation = self.read(ANDROID / 'ui/navigation/PageImeCompositionActivityTest.kt')
+        self.assertIn('testRetainedRootKeepsInputOwnershipButNotActivityWhileParentPaused', navigation)
+        self.assertIn('assertTrue(inputOwned)', navigation)
+        self.assertIn('assertFalse(contentActive)', navigation)
+        self.assertNotIn('it.copy(enabled = it.enabled && routeActive)', activity)
+        change = composer.split('onValueChange = { value ->', 1)[1].split('enabled = state.enabled', 1)[0]
+        self.assertIn('pageActive && lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)', change)
+        self.assertIn('if (!pageActive) return false', composer)
+        for forbidden in ('requestFocus(', '.show(', 'postOnAnimation'):
+            self.assertNotIn(forbidden, effect)
+
     def test_drawer_focus_check_handles_only_disabled_missing_semantics(self):
         text = self.read(ANDROID / 'ChatComposerImeActivityTest.kt')
         check = text.split('private fun assertBackgroundDraftDoesNotOwnFocus()', 1)[1].split('fun testDrawerSearchIme', 1)[0]
@@ -85,6 +120,11 @@ class ChatImeLifecycleContractTest(unittest.TestCase):
         self.assertIn('Lifecycle.Event.ON_STOP', home)
         self.assertIn('stopped.await(5,', home)
         self.assertIn('restoreOriginalHost(original)', home)
+        self.assertLess(home.index('stopped.await(5,'), home.index('awaitHomeWindowSettled()'))
+        self.assertLess(home.index('awaitHomeWindowSettled()'), home.index('restoreOriginalHost(original)'))
+        self.assertIn('assertEquals(originalEditorId, node("chat-draft").fetchSemanticsNode().id)', home)
+        self.assertIn('testRealPausedEditorCallbacksCannotChangeDraftOrSelection', android)
+        self.assertIn('testRouteDepartureRevokesInputOwnershipWithoutExplicitDismiss', android)
         driver = self.read(ANDROID / 'ComposeActivityTestCase.kt').split('protected fun restoreOriginalHost', 1)[1].split('protected fun awaitHostWindowFocus', 1)[0]
         self.assertIn('am start -n $component -f 0x30020000', driver)
         self.assertNotIn('FLAG_ACTIVITY_CLEAR_TASK', home)

@@ -338,46 +338,6 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
     fun testActivityFieldsSwitchAndOutsideButtonRunsOnce() = exerciseFields(false)
     fun testOffsetDialogFieldsUseTheirOwnWindowAndScreenBounds() = exerciseFields(true)
 
-    private fun awaitHomeWindowSettled() {
-        val automation = instrumentation.uiAutomation
-        val oldFlags = automation.serviceInfo.flags
-        data class HomeFrame(val windowId: Int, val bounds: android.graphics.Rect)
-        var previous: HomeFrame? = null
-        var stable = 0
-        try {
-            automation.serviceInfo = automation.serviceInfo.apply {
-                flags = flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-            }
-            awaitControl("external app focused with no IME window in two polls") {
-                var home: HomeFrame? = null
-                var imeShown = false
-                for (window in automation.windows) {
-                    try {
-                        val bounds = android.graphics.Rect()
-                        window.getBoundsInScreen(bounds)
-                        if (window.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD && !bounds.isEmpty)
-                            imeShown = true
-                        if (window.type == android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION &&
-                            window.isFocused && !bounds.isEmpty) {
-                            val root = window.root
-                            try {
-                                val owner = root?.packageName?.toString()
-                                if (!owner.isNullOrEmpty() && owner != activity.packageName)
-                                    home = HomeFrame(window.id, bounds)
-                            } finally { root?.recycle() }
-                        }
-                    } finally { window.recycle() }
-                }
-                val next = home.takeUnless { imeShown }
-                stable = if (next != null && next == previous) stable + 1 else if (next != null) 1 else 0
-                previous = next
-                stable >= 2
-            }
-        } finally {
-            automation.serviceInfo = automation.serviceInfo.apply { flags = oldFlags }
-        }
-    }
-
     private fun fieldHomeRoundTrip(tag: String, hiddenBeforeHome: Boolean) {
         val original = activity
         val task = original.taskId

@@ -790,7 +790,7 @@ internal fun PageBackGestureHost(
                             LocalPageBackStackPath provides stackPath.takeIf { rootActive },
                             LocalPageBackPreviewFrame provides frame.takeIf { retainedRootVisible && captureFromContent },
                         ) {
-                            PageRetainedContent(retainedRootVisible, rootActive) { active ->
+                            PageRetainedContent(retainedRootVisible, rootActive, inputOwned = retainedRootActive) { active ->
                                 // Entry marker only; Compose tracing owns the composition duration.
                                 synchronousTrace("daiyu.chat.retained-compose-entry") {}
                                 retainedRootContent(active)

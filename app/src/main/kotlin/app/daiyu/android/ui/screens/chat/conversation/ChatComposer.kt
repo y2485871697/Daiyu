@@ -109,9 +109,11 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
     val pageActive = app.daiyu.android.ui.navigation.LocalPageContentActive.current && LocalChatPresentationActive.current
+    val inputOwned = app.daiyu.android.ui.navigation.LocalPageInputOwned.current &&
+        !app.daiyu.android.ui.components.LocalConversationDrawerBlocksIme.current
     var inputFocused by remember { mutableStateOf(false) }
-    androidx.compose.runtime.LaunchedEffect(pageActive) {
-        if (!pageActive && inputFocused) focus.clearFocus(force = true)
+    androidx.compose.runtime.LaunchedEffect(inputOwned) {
+        if (!inputOwned && inputFocused) focus.clearFocus(force = true)
     }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val editing = actions.editingMessageKey != null
@@ -274,8 +276,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 }
                             },
                             enabled = state.enabled,
-                            readOnly = !pageActive,
-                            modifier = Modifier.testTag("chat-draft").focusProperties { canFocus = pageActive }.workspacePullUpGesture(workspacePointers, workspaceGestureEnabled, openWorkspace).onFocusChanged { inputFocused = it.isFocused; onInputFocusChanged(it.isFocused) }.fillMaxWidth().heightIn(min = 53.dp, max = 176.dp)
+                            readOnly = !inputOwned,
+                            modifier = Modifier.testTag("chat-draft").focusProperties { canFocus = inputOwned }.workspacePullUpGesture(workspacePointers, workspaceGestureEnabled, openWorkspace).onFocusChanged { inputFocused = it.isFocused; onInputFocusChanged(it.isFocused) }.fillMaxWidth().heightIn(min = 53.dp, max = 176.dp)
                                 .padding(start = 14.dp, end = 14.dp, top = 13.dp, bottom = 7.dp),
                             maxLines = 6, textStyle = MiuixTheme.textStyles.body1.copy(color = chrome.text, fontSize = 16.sp, lineHeight = 24.sp),
                             cursorBrush = SolidColor(if (WindowInsets.isImeVisible) chrome.accent else Color.Unspecified),

@@ -119,7 +119,8 @@ class ManagedInputContractTest(unittest.TestCase):
         self.assertIn('!= wantedSelection', home)
         self.assertLess(home.index('stopped.await('), home.index('awaitHomeWindowSettled()'))
         self.assertLess(home.index('awaitHomeWindowSettled()'), home.index('restoreOriginalHost(original)'))
-        background = text.split('private fun awaitHomeWindowSettled()', 1)[1].split('private fun fieldHomeRoundTrip', 1)[0]
+        driver = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
+        background = driver.split('protected fun awaitHomeWindowSettled()', 1)[1].split('protected fun restoreOriginalHost', 1)[0]
         for token in ('window.isFocused', 'TYPE_APPLICATION', 'TYPE_INPUT_METHOD',
                       '!owner.isNullOrEmpty() && owner != activity.packageName', 'home.takeUnless { imeShown }',
                       'root?.recycle()', 'window.recycle()', 'FLAG_RETRIEVE_INTERACTIVE_WINDOWS',

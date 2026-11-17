@@ -31,6 +31,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntSize
 import app.daiyu.android.ui.navigation.LocalPageContentActive
+import app.daiyu.android.ui.navigation.LocalPageInputOwned
 
 internal val LocalChatPresentationActive = compositionLocalOf { true }
 
@@ -57,6 +58,7 @@ private class PageFrame { var recorded = false }
 @Composable
 internal fun ChatPageHost(owner: Any?, modifier: Modifier = Modifier, content: PageContent) {
     val active = LocalPageContentActive.current
+    val parentInputOwned = LocalPageInputOwned.current
     val parentAuthorized = LocalChatPresentationActive.current
     val rootToken = remember { Any() }
     var committed by remember { mutableStateOf<ChatPageVisit?>(null) }
@@ -78,16 +80,17 @@ internal fun ChatPageHost(owner: Any?, modifier: Modifier = Modifier, content: P
             val drawn = visit === front
             val requested = visit === wanted
             val authorized = drawn && requested && active && parentAuthorized
+            val inputOwned = drawn && requested && parentInputOwned
             val body = if (requested) content else visit.content
             val report = remember(visit) { { value: Boolean -> visit.ready = value } }
             val layer = rememberGraphicsLayer()
             val frame = remember { PageFrame() }
             DisposableEffect(visit) { onDispose { ChatPageHostProbe.observer?.onDisposed?.invoke(visit) } }
-            CompositionLocalProvider(LocalChatPresentationActive provides authorized) {
+            CompositionLocalProvider(LocalChatPresentationActive provides authorized, LocalPageInputOwned provides inputOwned) {
                 Box(Modifier.fillMaxSize().onPlaced {
                     visit.placed = true
                     ChatPageHostProbe.observer?.onPlaced?.invoke(visit.owner, it.size)
-                }.focusProperties { canFocus = authorized }.onPreviewKeyEvent { !authorized }
+                }.focusProperties { canFocus = inputOwned }.onPreviewKeyEvent { !authorized }
                     .then(if (authorized) Modifier else Modifier.clearAndSetSemantics {})
                     .pointerInput(authorized) {
                         if (!authorized) awaitPointerEventScope {

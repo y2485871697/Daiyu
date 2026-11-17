@@ -377,7 +377,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('SideEffect { if (visible) visited = true }', retained)
         self.assertIn('if (!visible && !visited) return', retained)
         self.assertNotIn('!resumed', retained)
-        self.assertIn('PageRetainedContent(retainedRootVisible, rootActive)', self.host)
+        self.assertIn('PageRetainedContent(retainedRootVisible, rootActive, inputOwned = retainedRootActive)', self.host)
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/navigation/PageRetainedContentActivityTest.kt').read_text()
         for method in ('testHiddenRootRetainsItsStoppedInstanceAcrossPauseAndResume',
                        'testRealChatHiddenPauseResumeReturnsWithoutRemountOrContentShift',

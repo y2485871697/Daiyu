@@ -185,7 +185,7 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
         # Pausing still revokes interaction; only the visual-intent wiring changes.
         host = (APP / 'ui/navigation/PageBackGestures.kt').read_text()
         self.assertIn('val rootActive = retainedRootActive && resumed', host)
-        self.assertIn('PageRetainedContent(retainedRootVisible, rootActive)', host)
+        self.assertIn('PageRetainedContent(retainedRootVisible, rootActive, inputOwned = retainedRootActive)', host)
         self.assertIn('retainedRootContent(active)', host)
         tests = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ConversationPaneVisualTest.kt').read_text()
         for token in ('testRealOpenedDrawerKeepsPositionAcrossPauseResume',

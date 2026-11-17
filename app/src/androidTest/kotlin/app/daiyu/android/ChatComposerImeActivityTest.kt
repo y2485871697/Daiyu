@@ -327,6 +327,7 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         val database = fixture.database.exportBackup()
         val original = activity
         val task = original.taskId
+        val originalEditorId = node("chat-draft").fetchSemanticsNode().id
         val stopped = java.util.concurrent.CountDownLatch(1)
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) stopped.countDown()
@@ -336,6 +337,16 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
             assertTrue(instrumentation.uiAutomation.performGlobalAction(
                 android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME))
             assertTrue("HOME must stop the original Activity", stopped.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            awaitHomeWindowSettled()
+            controlMain {
+                assertFalse(original.window.decorView.hasWindowFocus())
+                assertEquals(androidx.lifecycle.Lifecycle.State.CREATED, original.lifecycle.currentState)
+                val paused = invokeHost(original, "getChatState") as ChatScreenState
+                assertTrue(paused.composer.enabled)
+                assertEquals(draft, paused.composer.text)
+                assertEquals(1, paused.composer.selectionStart)
+                assertEquals(4, paused.composer.selectionEnd)
+            }
         } finally {
             instrumentation.runOnMainSync { original.lifecycle.removeObserver(observer) }
             restoreOriginalHost(original)
@@ -344,6 +355,7 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         assertSame("HOME must retain the original host", original, activity)
         assertFalse(original.isDestroyed)
         assertEquals(task, original.taskId)
+        assertEquals(originalEditorId, node("chat-draft").fetchSemanticsNode().id)
         node("chat-draft").assertIsFocused()
         val returned = settledFrame(visible = !hideBeforeLeaving, before = before)
         node("chat-draft").assertIsFocused()
@@ -365,6 +377,7 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
 
     fun testRealPauseWithoutStopPreservesDraftAndSelection() {
         dismissIme()
+        val before = settledFrame(visible = false)
         setDraft(" 暂时遮盖的草稿 ")
         node("chat-draft").performTouchInput {
             advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
@@ -377,8 +390,65 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
         assertHostSelection(1, 4)
         val database = fixture.database.exportBackup()
         realPauseResume(activity)
-        // The translucent cover also takes window focus; only draft/selection must survive it.
+        node("chat-draft").assertIsFocused()
+        settledFrame(visible = true, before = before)
         assertDraft(" 暂时遮盖的草稿 ")
+        assertSelection(1, 4)
+        assertHostSelection(1, 4)
+        assertEquals(database, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testRealPausedEditorCallbacksCannotChangeDraftOrSelection() {
+        dismissIme()
+        val draft = " 暂停拒绝旧编辑回调 "
+        setDraft(draft)
+        setSelection(1, 4, relativeToOriginalText = true)
+        val editor = node("chat-draft").fetchSemanticsNode()
+        val edit = checkNotNull(editor.config[androidx.compose.ui.semantics.SemanticsActions.SetText].action)
+        val select = checkNotNull(editor.config[androidx.compose.ui.semantics.SemanticsActions.SetSelection].action)
+        val database = fixture.database.exportBackup()
+        val original = activity
+        realPauseResumeWithPausedFrames(original, whilePaused = {
+            awaitVisualIdle()
+            controlMain {
+                assertEquals(androidx.lifecycle.Lifecycle.State.STARTED, original.lifecycle.currentState)
+                edit(androidx.compose.ui.text.AnnotatedString("不应被接受"))
+                select(0, 0, true)
+                val paused = invokeHost(original, "getChatState") as ChatScreenState
+                assertTrue(paused.composer.enabled)
+                assertEquals(draft, paused.composer.text)
+                assertEquals(1, paused.composer.selectionStart)
+                assertEquals(4, paused.composer.selectionEnd)
+            }
+        })
+        assertDraft(draft)
+        assertSelection(1, 4)
+        assertHostSelection(1, 4)
+        assertEquals(database, fixture.database.exportBackup())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testRouteDepartureRevokesInputOwnershipWithoutExplicitDismiss() {
+        dismissIme()
+        val draft = " 切页保留草稿与选区 "
+        setDraft(draft)
+        node("chat-draft").performTouchInput {
+            advanceEventTime(android.view.ViewConfiguration.getDoubleTapTimeout().toLong() + 1)
+            click()
+        }
+        awaitImeFrame(node("chat-draft"), visible = true)
+        setSelection(1, 4, relativeToOriginalText = true)
+        val database = fixture.database.exportBackup()
+        mainThread { invokeHost(activity, "setRetainedPage", "settings") }
+        awaitUniqueTag("page:设置")
+        awaitImeFrame(node("page:设置"), visible = false)
+        assertHostSelection(1, 4)
+        mainThread { invokeHost(activity, "returnToChat") }
+        awaitUniqueTag("chat-draft")
+        node("chat-draft").assertIsNotFocused()
+        awaitImeFrame(node("chat-draft"), visible = false)
+        assertDraft(draft)
         assertSelection(1, 4)
         assertHostSelection(1, 4)
         assertEquals(database, fixture.database.exportBackup())

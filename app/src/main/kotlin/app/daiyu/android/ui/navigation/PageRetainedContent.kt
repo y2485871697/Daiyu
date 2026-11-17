@@ -24,6 +24,7 @@ import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
 
 internal val LocalPageContentActive = compositionLocalOf { true }
+internal val LocalPageInputOwned = compositionLocalOf { true }
 
 private class RetainedPageLifecycle : LifecycleOwner {
     val registry = LifecycleRegistry(this)
@@ -46,7 +47,7 @@ private class RetainedPageLifecycle : LifecycleOwner {
 
 /** One already visited target stays measured; a hidden target is never placed or started. */
 @Composable
-internal fun PageRetainedContent(visible: Boolean, active: Boolean, content: @Composable (Boolean) -> Unit) {
+internal fun PageRetainedContent(visible: Boolean, active: Boolean, inputOwned: Boolean = active, content: @Composable (Boolean) -> Unit) {
     var visited by remember { mutableStateOf(false) }
     SideEffect { if (visible) visited = true }
     if (!visible && !visited) return
@@ -61,8 +62,9 @@ internal fun PageRetainedContent(visible: Boolean, active: Boolean, content: @Co
     }
     SideEffect { owner.update(parent.lifecycle.currentState, active) }
     DisposableEffect(owner) { onDispose { owner.close() } }
-    CompositionLocalProvider(LocalLifecycleOwner provides owner, LocalPageContentActive provides active) {
-        Box(Modifier.fillMaxSize().focusProperties { canFocus = active }
+    CompositionLocalProvider(LocalLifecycleOwner provides owner, LocalPageContentActive provides active,
+        LocalPageInputOwned provides inputOwned) {
+        Box(Modifier.fillMaxSize().focusProperties { canFocus = inputOwned }
             .then(if (visible) Modifier else Modifier.clearAndSetSemantics {})
             .layout { measurable, constraints ->
                 val placeable = measurable.measure(constraints)

@@ -2539,7 +2539,7 @@ class MainActivity : ComponentActivity() {
                             val usageLocale = remember(usageConfiguration) { java.util.Locale.getDefault() }
                             val contextUsageLabels = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsageLabels(contextUsage, usageLocale)
                             val pageState = chatState.copy(interactiveModeEnabled = interactiveModeEnabled, balanceState = balanceState,
-                                        composer = projectedVoiceComposer().let { it.copy(enabled = it.enabled && routeActive) }.copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
+                                        composer = projectedVoiceComposer().copy(voiceMode = voiceEntryMode, modelLabel = confirmedModelLabel,
                                             contextFraction = contextUsage.fraction, contextUsageText = contextUsageLabels.first,
                                             contextTokensText = contextUsageLabels.second,
                                             voiceModes = buildSet {

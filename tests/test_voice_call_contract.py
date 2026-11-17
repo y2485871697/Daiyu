@@ -243,8 +243,8 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertIn('FLAG_LAYOUT_IN_SCREEN', floating)
         self.assertIn('viewTreeObserver.addOnPreDrawListener(syncOrigin)', floating)
         self.assertIn('viewTreeObserver.removeOnPreDrawListener(syncOrigin)', floating)
-        self.assertIn('composition.translationX = -x.toFloat()', floating)
-        self.assertIn('composition.translationY = -y.toFloat()', floating)
+        self.assertNotIn('composition.translationX =', floating)
+        self.assertNotIn('composition.translationY =', floating)
         self.assertIn('getLocationInWindow(local)', floating)
         self.assertIn('private var originCommitted = false', floating)
         self.assertIn('val matches = x == params.x && y == params.y', floating)
@@ -406,44 +406,65 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertIn('current.imeComposerBaseline ?: (start + (previousAnchor.imeInsets?.bottom ?: ime.source))', placement)
         self.assertIn('val end = baseline - ime.target', placement)
         self.assertIn('transition.endComposerTop - transition.startComposerTop', placement)
-        self.assertIn('if (progress >= 1f) current.imePlacement = null', placement)
+        self.assertIn('if (progress >= 1f)', placement)
+        self.assertIn('current.imeComposerBaseline = null', placement)
         self.assertNotIn('ValueAnimator', placement)
 
-    def test_manual_ime_reuses_displayed_composer_geometry_and_owner_minimize(self):
+    def test_manual_and_untouched_ime_share_one_compact_panel_without_automatic_mini(self):
         floating = (SRC / 'VoiceCallFloatingWindow.kt').read_text()
-        manual = floating.split('private fun placeManualIme(', 1)[1].split('private fun fullHeight(', 1)[0]
-        self.assertIn('previousIme.bottom == 0 && previousIme.target == 0', manual)
-        self.assertIn('previousAnchor.composerBounds', manual)
-        self.assertIn('resting.overlaps(composer)', manual)
-        self.assertIn('current.actions.onMinimize()', manual)
-        self.assertNotIn('picture.copy(', manual)
-        self.assertIn('ManualImePlacement(resting, previousAnchor.composerTop)', manual)
+        manual = floating.split('private fun placeManualIme(', 1)[1].split('private fun imeVisible(', 1)[0]
+        placement = floating.split('private fun placeInitial(', 1)[1].split('private fun imeHeight(', 1)[0]
+        self.assertIn('compactHeight(current)', manual)
+        self.assertIn('compactHeight(current)', placement)
+        self.assertNotIn('onMinimize()', manual)
+        self.assertNotIn('overlaps(', manual)
+        self.assertNotIn('manualImeSuppressed', floating)
         self.assertIn('saved.bounds.bottom + anchor.composerTop - saved.composerTop', manual)
-        self.assertIn('imeHeight(current, previousAnchor, fittedHeight)', manual)
         self.assertIn('Rect(saved.bounds.left, bottom - height, saved.bounds.right, bottom)', manual)
         self.assertIn('current.panelBounds = saved.bounds', manual)
         self.assertNotIn('ValueAnimator', manual)
-        screen = (SRC / 'ui/screens/chat/conversation/ChatScreen.kt').read_text()
-        self.assertIn('composerBounds = bounds(composer)', screen)
+        height = floating.split('private fun compactHeight(', 1)[1].split('private fun fullHeight(', 1)[0]
+        self.assertIn('CallImeCompactLayout.HEIGHT_DP', height)
+        self.assertNotIn('panelBounds', height)
+        overlay = (SRC / 'ui/screens/chat/conversation/DoubaoCallOverlay.kt').read_text()
+        self.assertIn('const val HEIGHT_DP = 238', overlay)
+        self.assertIn('if (!imeCompact)', overlay)
+        self.assertIn('imeCompact = if (closing) lastLiveCompact else imeCompact', overlay)
+        self.assertIn('onClick = actions.onMinimize', overlay)
         fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt').read_text()
         for assertion in ('keyboard dismissal restores the complete saved manual rect',
                           'manual height shares the existing IME animation progress',
                           'manual horizontal placement is never re-centered',
                           'ordinary call updates cannot resize an IME-adjusted window',
-                          'only positive-area overlap uses the real minimize action'):
+                          'IME never invokes the user MINI action',
+                          'compact status lines are removed, not clipped',
+                          'expand with IME open returns to the same compact panel'):
             self.assertIn(assertion, fixture)
 
-    def test_native_drag_reads_absolute_position_in_placement_not_composition(self):
+    def test_native_drag_keeps_local_content_and_wave_reads_clock_only_during_draw(self):
         floating = (SRC / 'VoiceCallFloatingWindow.kt').read_text()
-        composition = floating.split('setContent {', 1)[1].split('val metrics = app.resources.displayMetrics', 1)[0]
+        composition = floating.split('setContent {', 1)[1].split('private var touchPosition', 1)[0]
         self.assertIn('completion, Rect(Offset.Zero, panelSize)', composition)
-        self.assertIn('panelPosition = { panelBounds.topLeft }', composition)
-        self.assertNotIn('completion, panelBounds,', composition)
-        overlay = (SRC / 'ui/screens/chat/conversation/DoubaoCallOverlay.kt').read_text()
-        self.assertIn('panelPosition: (() -> Offset)? = null', overlay)
-        self.assertIn('.offset {\n                val position = panelPosition?.invoke()', overlay)
+        self.assertIn('panelPosition = { panelOffset }', composition)
+        self.assertNotIn('panelBounds.topLeft', composition)
+        self.assertIn('LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT)', composition)
+        self.assertNotIn('LayoutParams(metrics.widthPixels, metrics.heightPixels)', floating)
+        self.assertIn('current.renderAnchor = anchor.translate(', floating)
         self.assertIn('current.postOnAnimation(current.moveFrame)', floating)
         self.assertIn('Size(panel.width.roundToInt().toFloat(), panel.height.roundToInt().toFloat())', floating)
+        dispatch = floating.split('override fun dispatchTouchEvent(', 1)[1].split('private val inputBlocked', 1)[0]
+        self.assertIn('Offset(event.rawX, event.rawY)', dispatch)
+        self.assertIn('event.pointerCount == 1 && !inputBlocked', dispatch)
+        self.assertIn('position - dragPosition', dispatch)
+        self.assertIn('super.dispatchTouchEvent(cancel)', dispatch)
+        for start, end in (('private fun dismiss(current:', 'private fun fade('),
+                           ('private fun remove(', 'override fun close('),
+                           ('fun release()', 'override fun onDetachedFromWindow()')):
+            self.assertIn('cancelNativeDrag(', floating.split(start, 1)[1].split(end, 1)[0])
+        overlay = (SRC / 'ui/screens/chat/conversation/DoubaoCallOverlay.kt').read_text()
+        wave = overlay.split('internal fun CallWave(', 1)[1].split('private fun CallGlyph(', 1)[0]
+        self.assertNotIn('phaseMillis ?: elapsed', wave.split('Canvas(Modifier.matchParentSize())', 1)[0])
+        self.assertIn('phaseMillis ?: elapsed', wave.split('Canvas(Modifier.matchParentSize())', 1)[1])
 
     def test_external_close_is_visual_only_and_detaches_after_its_own_animation(self):
         floating = (ROOT / 'app/src/main/kotlin/app/daiyu/android/VoiceCallFloatingWindow.kt').read_text()

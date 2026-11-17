@@ -36,6 +36,8 @@ class VoiceCallFloatingWindowTest {
         val added = mutableListOf<View>()
         val removals = mutableListOf<View>()
         var updates = 0
+        var recordFrames = false
+        val updatesPerFrame = mutableMapOf<Long, Int>()
         var failAdd = false
         var failUpdate = false
         var onDraw: ((View) -> Unit)? = null
@@ -43,6 +45,10 @@ class VoiceCallFloatingWindowTest {
             if (failUpdate) throw SecurityException("synthetic overlay update rejection")
             assertInputPolicy(params)
             updates++
+            if (recordFrames) {
+                val frame = android.view.Choreographer.getInstance().frameTimeNanos
+                updatesPerFrame[frame] = (updatesPerFrame[frame] ?: 0) + 1
+            }
             actual.updateViewLayout(view, params)
         }
         override fun addView(view: View, params: ViewGroup.LayoutParams) {
@@ -505,9 +511,9 @@ class VoiceCallFloatingWindowTest {
                 } else null
                 if (root.alpha != 1f || params.alpha != 1f || root.scaleX != 1f || root.scaleY != 1f)
                     invalidDraw = "native alpha or scale changed during Genie"
-                if (kotlin.math.abs(composition.translationX + origin[0]) > .5f ||
-                    kotlin.math.abs(composition.translationY + origin[1]) > .5f)
-                    invalidDraw = "composition origin did not match the drawn native origin"
+                if (composition.translationX != 0f || composition.translationY != 0f ||
+                    composition.width != root.width || composition.height != root.height)
+                    invalidDraw = "composition must stay inside its local native viewport"
             }
             assertTrue(host.update(state, callbacks, anchor, motion, inApp = true))
         }
@@ -564,8 +570,8 @@ class VoiceCallFloatingWindowTest {
             val composition = (root as ViewGroup).getChildAt(0)
             assertEquals(params.x, screen[0] - local[0])
             assertEquals(params.y, screen[1] - local[1])
-            assertEquals(-(screen[0] - local[0]).toFloat(), composition.translationX, .5f)
-            assertEquals(-(screen[1] - local[1]).toFloat(), composition.translationY, .5f)
+            assertEquals(0f, composition.translationX, 0f)
+            assertEquals(0f, composition.translationY, 0f)
             assertEquals(0, params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE)
             assertEquals(params.width, root.width)
             assertEquals(params.height, root.height)
@@ -678,7 +684,7 @@ class VoiceCallFloatingWindowTest {
                 assertEquals(params.x, screen[0] - local[0])
                 assertEquals(params.y, screen[1] - local[1])
                 val composition = (root as ViewGroup).getChildAt(0)
-                assertEquals(-(screen[1] - local[1]).toFloat(), composition.translationY, .5f)
+                assertEquals(0f, composition.translationY, 0f)
             }
         }
         main {
@@ -697,7 +703,7 @@ class VoiceCallFloatingWindowTest {
             assertEquals("manually moved calls do not re-anchor", manual, panel(next))
         }
         val coordinatedState = state.copy(sessionKey = -35L)
-        val inset = (full.composerTop - 210f * density).roundToInt()
+        val inset = (full.composerTop - 360f * density).roundToInt()
         var currentInset = inset
         fun imeAnchor(bottom: Int, source: Int, target: Int) = full.copy(
             bounds = full.bounds.translate(androidx.compose.ui.geometry.Offset(0f, -bottom.toFloat())),
@@ -715,9 +721,7 @@ class VoiceCallFloatingWindowTest {
             val endComposer = full.composerTop - target
             main {
                 initial = panel(coordinated)
-                val safe = coordinated.javaClass.getDeclaredMethod("getSafeTop").apply { isAccessible = true }
-                    .invoke(coordinated) as Int
-                endHeight = minOf(followed.height, endComposer - 10f * density - maxOf(8f * density, safe.toFloat()))
+                endHeight = if (target > 0) 238f * density else followed.height
                 assertTrue(host.update(coordinatedState, actions, imeAnchor(source, source, target), inApp = true))
                 assertEquals("IME reversal starts from the displayed bounds", initial, panel(coordinated))
             }
@@ -854,8 +858,8 @@ class VoiceCallFloatingWindowTest {
         }
         awaitCommittedDraw(root)
         main { resting = panel(root) }
-        val inset = (resting.bottom - topLimit - 140f * density).roundToInt()
-        assertTrue("fixture must squeeze the dragged window", inset > 0)
+        val inset = minOf(180f * density, resting.bottom - topLimit - 238f * density - 24f * density).roundToInt()
+        assertTrue("fixture must animate without position clamping", inset > 0)
         var currentInset = 0
         fun anchor(bottom: Int, source: Int, target: Int, settledMetadata: Boolean = false) = full.copy(
             composerTop = full.composerTop - bottom,
@@ -867,7 +871,7 @@ class VoiceCallFloatingWindowTest {
         fun stage(target: Int, fractions: List<Float>, settleTail: Boolean = false) {
             val source = currentInset
             var start = androidx.compose.ui.geometry.Rect.Zero
-            val endHeight = minOf(resting.height, (resting.bottom - target - topLimit).coerceAtLeast(1f))
+            val endHeight = if (target > 0) 238f * density else resting.height
             main {
                 start = panel(root)
                 assertTrue(host.update(state, actions, anchor(source, source, target), inApp = true))
@@ -905,46 +909,170 @@ class VoiceCallFloatingWindowTest {
         }
     }
 
-    @Test fun openingImeMinimizesOnceOnlyForStrictTwoDimensionalComposerOverlap() {
+    private fun tagBounds(root: View): Map<String, androidx.compose.ui.geometry.Rect> {
+        fun owner(view: View): androidx.compose.ui.semantics.SemanticsOwner? {
+            val getter = view.javaClass.methods.firstOrNull { it.name.startsWith("getSemanticsOwner") && it.parameterCount == 0 }
+            if (getter != null) return getter.invoke(view) as androidx.compose.ui.semantics.SemanticsOwner
+            if (view is ViewGroup) for (index in 0 until view.childCount) owner(view.getChildAt(index))?.let { return it }
+            return null
+        }
+        val result = mutableMapOf<String, androidx.compose.ui.geometry.Rect>()
+        fun visit(node: androidx.compose.ui.semantics.SemanticsNode) {
+            val tag = androidx.compose.ui.semantics.SemanticsProperties.TestTag
+            if (node.config.contains(tag)) result[node.config[tag]] = node.boundsInRoot
+            node.children.forEach(::visit)
+        }
+        visit(checkNotNull(owner(root)).unmergedRootSemanticsNode)
+        return result
+    }
+
+    @Test fun openingImeUsesTheSameCompactPanelAtEveryPositionWithoutMinimizing() {
         val density = context.resources.displayMetrics.density
         var minimizes = 0
         val callbacks = actions.copy(onMinimize = { minimizes++ })
-        for (kind in listOf("overlap", "touching", "horizontal-gap")) {
-            val state = picture(-50L - windows.added.size).copy(skipEntryAnimation = true)
+        var fingerprint: Map<String, androidx.compose.ui.geometry.Rect>? = null
+        for (kind in listOf("untouched", "top", "middle", "overlap", "touching", "horizontal-gap")) {
+            val state = picture(-50L - windows.added.size).copy(skipEntryAnimation = true,
+                visualState = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallVisualState.MUTED)
             var closed = callAnchor().copy(imeInsets = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(0))
             main { assertTrue(host.update(state, callbacks, closed, inApp = true)) }
-            await("overlap fixture attached") { windows.added.last().isLaidOut }
+            await("uniform compact fixture attached") { windows.added.last().isLaidOut }
             val root = windows.added.last()
-            var before = androidx.compose.ui.geometry.Rect.Zero
-            main { before = panel(root); move(root, 0f, 30f * density) }
-            await("overlap fixture dragged") { panel(root).top > before.top }
+            var resting = androidx.compose.ui.geometry.Rect.Zero
+            if (kind != "untouched") {
+                main { move(root, 0f, if (kind == "top") -100_000f else if (kind == "middle") -60f * density else 20f * density) }
+                await("uniform compact fixture manually positioned") {
+                    root.javaClass.getDeclaredMethod("getMovePending").apply { isAccessible = true }.invoke(root) == false &&
+                        root.javaClass.getDeclaredMethod("getHeightRestore").apply { isAccessible = true }.invoke(root) == null
+                }
+            }
             main {
-                before = panel(root)
+                resting = panel(root)
                 val composer = when (kind) {
-                    "touching" -> androidx.compose.ui.geometry.Rect(0f, before.bottom,
-                        closed.hostBounds.right, before.bottom + 40f * density)
-                    "horizontal-gap" -> androidx.compose.ui.geometry.Rect(before.right + 1f, before.top,
-                        closed.hostBounds.right, before.bottom + 40f * density)
-                    else -> androidx.compose.ui.geometry.Rect(0f, before.bottom - 1f,
-                        closed.hostBounds.right, before.bottom + 40f * density)
+                    "touching" -> androidx.compose.ui.geometry.Rect(0f, resting.bottom, closed.hostBounds.right, resting.bottom + 40f * density)
+                    "horizontal-gap" -> androidx.compose.ui.geometry.Rect(resting.right + 1f, resting.top,
+                        closed.hostBounds.right + 20f * density, resting.bottom + 40f * density)
+                    else -> androidx.compose.ui.geometry.Rect(0f, resting.bottom - 1f,
+                        closed.hostBounds.right, resting.bottom + 40f * density)
                 }
                 closed = closed.copy(composerBounds = composer)
                 assertTrue(host.update(state, callbacks, closed, inApp = true))
-                val oldCount = minimizes
-                val opening = closed.copy(imeInsets = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(0, 0, 100))
-                repeat(3) { assertTrue(host.update(state, callbacks, opening, inApp = true)) }
-                assertEquals("only positive-area overlap uses the real minimize action: $kind",
-                    oldCount + if (kind == "overlap") 1 else 0, minimizes)
-                if (kind == "overlap") {
-                    assertTrue(host.update(state.copy(presentation = DoubaoCallPresentation.MINI), callbacks, opening, inApp = true))
-                    assertEquals(67f * density, panel(root).height, 1f)
-                    assertTrue(host.isShowing(state.sessionKey))
+            }
+            val inset = (160f * density).roundToInt()
+            fun frame(bottom: Int, source: Int = 0, target: Int = inset) = closed.copy(
+                composerTop = closed.composerTop - bottom,
+                bounds = closed.bounds.translate(androidx.compose.ui.geometry.Offset(0f, -bottom.toFloat())),
+                imeInsets = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(bottom, source, target))
+            for (progress in listOf(0f, .4f, 1f)) {
+                val bottom = (inset * progress).roundToInt()
+                main {
+                    assertTrue(host.update(state, callbacks, frame(bottom), inApp = true))
+                    assertEquals("all positions share one compact height curve: $kind",
+                        resting.height + (238f * density - resting.height) * bottom / inset, panel(root).height, 1.5f)
+                    assertEquals("IME never invokes the user MINI action: $kind", 0, minimizes)
                 }
-                assertEquals(0, hangups)
+                awaitCommittedDraw(root)
+            }
+            await("compact status lines are removed, not clipped: $kind") {
+                val tags = tagBounds(root)
+                "doubao-call-expanded" in tags && "doubao-call-status" !in tags && "doubao-call-status-detail" !in tags
+            }
+            main {
+                assertEquals(238f * density, panel(root).height, 1f)
+                val tags = tagBounds(root)
+                val origin = checkNotNull(tags["doubao-call-expanded"]).topLeft
+                val current = listOf("doubao-call-orb", "doubao-call-controls", "doubao-call-caption-area")
+                    .associateWith { checkNotNull(tags[it]).translate(-origin) }
+                val expected = fingerprint
+                if (expected == null) fingerprint = current else current.forEach { (tag, bounds) ->
+                    val other = checkNotNull(expected[tag])
+                    assertEquals("same local $tag at $kind", other.left, bounds.left, 1f)
+                    assertEquals(other.top, bounds.top, 1f)
+                    assertEquals(other.width, bounds.width, 1f)
+                    assertEquals(other.height, bounds.height, 1f)
+                }
+                assertTrue(host.update(state.copy(transcript = "ordinary call update"), callbacks, frame(inset), inApp = true))
+                assertEquals(238f * density, panel(root).height, 1f)
                 assertSame(root, windows.added.last())
+                assertTrue(windows.removals.none { it === root })
+            }
+            if (kind == "middle") {
+                var compact = androidx.compose.ui.geometry.Rect.Zero
+                main { compact = panel(root); move(root, 2f * density, 3f * density) }
+                await("dragging while compact keeps the compact layout") { panel(root).left > compact.left + density }
+                main {
+                    assertEquals(238f * density, panel(root).height, 1f)
+                    assertNull(root.javaClass.getDeclaredMethod("getHeightRestore").apply { isAccessible = true }.invoke(root))
+                    resting = resting.translate(panel(root).topLeft - compact.topLeft)
+                }
+            }
+            if (kind == "untouched") {
+                tapMinimize(root)
+                await("explicit right corner minimize remains live") { minimizes == 1 }
+                main {
+                    host.update(state.copy(presentation = DoubaoCallPresentation.MINI), callbacks, frame(inset), inApp = true)
+                    assertEquals(67f * density, panel(root).height, 1f)
+                    host.update(state, callbacks, frame(inset), inApp = true)
+                    assertEquals("expand with IME open returns to the same compact panel", 238f * density, panel(root).height, 1f)
+                }
+                minimizes = 0
+            }
+            main {
+                host.update(state, callbacks, frame(0, inset, 0), inApp = true)
+                assertEquals("keyboard dismissal restores the saved position: $kind", resting, panel(root))
+                assertEquals(0, hangups)
             }
         }
-        assertEquals(1, minimizes)
+    }
+
+    @Test fun stableNativeDragReusesLocalContentAcrossCommittedWindowMoves() {
+        val original = picture(-60L)
+        val state = original.copy(skipEntryAnimation = true, endedAtMillis = original.startedAtMillis,
+            visualState = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallVisualState.MUTED)
+        main { host.update(state, actions, callAnchor(), inApp = true) }
+        await("local viewport drag fixture") { windows.added.last().isLaidOut }
+        val root = windows.added.last() as ViewGroup
+        val composition = root.getChildAt(0)
+        val density = context.resources.displayMetrics.density
+        main { move(root, 0f, 100f * density - panel(root).top) }
+        await("local viewport drag starts away from crop boundaries") { kotlin.math.abs(panel(root).top - 100f * density) < 1f }
+        awaitCommittedDraw(root)
+        val offsetGetter = root.javaClass.declaredMethods.single { it.name.startsWith("getPanelOffset") }.apply { isAccessible = true }
+        var offset: Any? = null
+        var layouts = 0
+        val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layouts++ }
+        main { offset = offsetGetter.invoke(root); composition.addOnLayoutChangeListener(listener); windows.recordFrames = true }
+        try {
+            repeat(40) { index ->
+                var before = 0f
+                main { before = panel(root).top; repeat(6) { move(root, 0f, if (index % 2 == 0) -.5f else .5f) } }
+                await("the native surface commits drag frame $index") {
+                    val params = root.layoutParams as WindowManager.LayoutParams
+                    val screen = IntArray(2)
+                    val local = IntArray(2)
+                    root.getLocationOnScreen(screen)
+                    root.getLocationInWindow(local)
+                    kotlin.math.abs(panel(root).top - before) > 2f &&
+                        screen[0] - local[0] == params.x && screen[1] - local[1] == params.y
+                }
+                awaitCommittedDraw(root)
+                main {
+                    assertEquals("native movement must not publish a local placement change", offset, offsetGetter.invoke(root))
+                    assertEquals(0f, composition.translationX, 0f)
+                    assertEquals(0f, composition.translationY, 0f)
+                    assertEquals(root.width, composition.width)
+                    assertEquals(root.height, composition.height)
+                }
+            }
+            main {
+                assertTrue("one actual WM update per drag vsync", windows.updatesPerFrame.size >= 30)
+                assertTrue(windows.updatesPerFrame.values.all { it == 1 })
+                assertEquals("pure native movement does not change Compose child layout bounds", 0, layouts)
+                assertSame(root, windows.added.single())
+                assertTrue(windows.removals.isEmpty())
+                android.util.Log.i("NativeCallDrag", "frames=${windows.updatesPerFrame.size} wmMax=${windows.updatesPerFrame.values.maxOrNull()} contentLayouts=$layouts viewport=${composition.width}x${composition.height}")
+            }
+        } finally { main { windows.recordFrames = false; composition.removeOnLayoutChangeListener(listener) } }
     }
 
     @Test fun stableDragIsCoalescedAndKeepsTheHandleOutsideTheStatusBar() {

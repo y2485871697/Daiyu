@@ -154,6 +154,14 @@ internal fun ImageBitmap.restoreLegacyCallCaptureAlpha(): ImageBitmap {
         android.graphics.Bitmap.Config.ARGB_8888).apply { density = source.density }.asImageBitmap()
 }
 
+internal object CallImeCompactLayout {
+    const val HEIGHT_DP = 238
+    val header = 44.dp
+    val captions = 36.dp
+    val controls = 72.dp
+    val bottom = 6.dp
+}
+
 private val CallShadowOutset = 28.dp
 private val CallMotionEasing = CubicBezierEasing(0.2f, 0f, 0f, 1f)
 
@@ -535,13 +543,14 @@ private fun ExpandedCallContent(
     captionScroll: androidx.compose.foundation.ScrollState,
     captionFollow: CallCaptionFollow,
     captions: Pair<State<String>, State<String>>,
+    imeCompact: Boolean = false,
 ) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
-    val bottomPadding = if (maxHeight < 312.dp) 4.dp else 12.dp
+    val bottomPadding = if (imeCompact) CallImeCompactLayout.bottom else if (maxHeight < 312.dp) 4.dp else 12.dp
     Column(Modifier.fillMaxSize().padding(start = 18.dp, end = 18.dp, bottom = bottomPadding)) {
         // The original drag zone extends 7dp into each horizontal padding; the heading adds
         // its own 7dp start inset, keeping the title aligned with the captions below.
-        Column(Modifier.fillMaxWidth().height(58.dp).layout { measurable, constraints ->
+        Column(Modifier.fillMaxWidth().height(if (imeCompact) CallImeCompactLayout.header else 58.dp).layout { measurable, constraints ->
             val inset = 7.dp.roundToPx()
             val child = measurable.measure(constraints.copy(
                 minWidth = constraints.minWidth + inset * 2, maxWidth = constraints.maxWidth + inset * 2))
@@ -551,7 +560,7 @@ private fun ExpandedCallContent(
             .testTag("doubao-call-drag-handle"), contentAlignment = Alignment.Center) {
             Box(Modifier.size(31.dp, 4.dp).background(Color(0xFFD9D1E3), RoundedCornerShape(2.dp)))
         }
-        Row(Modifier.fillMaxWidth().height(40.dp).padding(start = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(if (imeCompact) CallImeCompactLayout.header - 18.dp else 40.dp).padding(start = 7.dp), verticalAlignment = Alignment.CenterVertically) {
             Row(Modifier.weight(1f).fillMaxHeight().then(if (state.modelSelectable) Modifier else dragHandle),
                 verticalAlignment = Alignment.CenterVertically) {
                 Row(Modifier.testTag("voice-call-select-model").then(if (state.modelSelectable)
@@ -585,10 +594,10 @@ private fun ExpandedCallContent(
         }
         // Preserve the 374dp layout; compact only the fixed focus spacing on short screens.
         BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
-            val controlsHeight = if (maxHeight < 250.dp) 72.dp else 78.dp
-            val captionHeight = (maxHeight - controlsHeight - 142.dp).coerceIn(36.dp, 80.dp)
+            val controlsHeight = if (imeCompact) CallImeCompactLayout.controls else if (maxHeight < 250.dp) 72.dp else 78.dp
+            val captionHeight = if (imeCompact) CallImeCompactLayout.captions else (maxHeight - controlsHeight - 142.dp).coerceIn(36.dp, 80.dp)
             val focusHeight = (maxHeight - controlsHeight - captionHeight).coerceAtLeast(0.dp)
-            val compact = focusHeight < 142.dp
+            val compact = imeCompact || focusHeight < 142.dp
             Column(Modifier.fillMaxSize().testTag("doubao-call-body")) {
             Column(Modifier.fillMaxWidth().height(focusHeight)
                 .padding(top = if (compact) 0.dp else 8.dp, bottom = if (compact) 0.dp else 6.dp),
@@ -600,6 +609,7 @@ private fun ExpandedCallContent(
                         CallWave(state.orbState(), Modifier.requiredSize(80.dp), running = running)
                     }
                 }
+                if (!imeCompact) {
                 Spacer(Modifier.height(if (compact) 0.dp else 13.dp))
                 Text(state.statusLabel(compressionState.dots), color = Color(0xFF51445F), fontSize = 19.sp, lineHeight = 28.sp,
                     fontWeight = FontWeight(550),
@@ -609,6 +619,7 @@ private fun ExpandedCallContent(
                 Text(state.statusDetail(), color = Color(0xFFAAA0B6), fontSize = 10.sp, lineHeight = 16.sp,
                     modifier = Modifier.height(16.dp).testTag("doubao-call-status-detail"),
                     textAlign = TextAlign.Center, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
             }
             CallCaptionArea(state, enabled, captionScroll, captionFollow, captions, Modifier.height(captionHeight))
             Row(Modifier.fillMaxWidth().height(controlsHeight).testTag("doubao-call-controls"),
@@ -799,11 +810,11 @@ internal fun CallWave(
     val ended = state == DoubaoCallVisualState.ENDED || state == DoubaoCallVisualState.ERROR
     val muted = state == DoubaoCallVisualState.MUTED
     val style = DoubaoGenieGeometry.orbStyle(DoubaoGenieGeometry.OrbMode.valueOf(state.name), compact)
-    val frame = DoubaoGenieGeometry.orbFrame(phaseMillis ?: elapsed,
-        responding = state == DoubaoCallVisualState.RESPONDING, compact = compact,
-        still = muted || ended || reducedMotion)
     Box(modifier.testTag(if (compact) "doubao-call-mini-orb" else "doubao-call-orb-pixels"), contentAlignment = Alignment.Center) {
         Canvas(Modifier.matchParentSize()) {
+            val frame = DoubaoGenieGeometry.orbFrame(phaseMillis ?: elapsed,
+                responding = state == DoubaoCallVisualState.RESPONDING, compact = compact,
+                still = muted || ended || reducedMotion)
             val unit = size.minDimension / if (compact) 37f else 80f
             val center = this.center
             val radius = (if (compact) 18.5f else 33f) * unit
@@ -900,7 +911,7 @@ private fun CallGlyph(control: CallControl, color: Color, modifier: Modifier, ac
 /** Bounded system-window content: no composer anchor, full-screen scrim or in-app Genie. */
 @Composable
 internal fun FloatingVoiceCallContent(state: DoubaoCallUi, actions: DoubaoCallActions,
-    enabled: Boolean, onDrag: (Offset) -> Unit, decorated: Boolean = true) {
+    enabled: Boolean, onDrag: (Offset) -> Unit, decorated: Boolean = true, imeCompact: Boolean = false) {
     key(state.sessionKey) {
         val mini = state.presentation == DoubaoCallPresentation.MINI
         val scroll = rememberScrollState()
@@ -931,7 +942,7 @@ internal fun FloatingVoiceCallContent(state: DoubaoCallUi, actions: DoubaoCallAc
                 running = enabled, compressionState = indicator)
             else ExpandedCallContent(state, callClock(state), enabled, handle, actions,
                 running = enabled, compressionState = indicator, captionScroll = scroll,
-                captionFollow = follow, captions = captions)
+                captionFollow = follow, captions = captions, imeCompact = imeCompact)
         }
     }
 }
@@ -940,20 +951,23 @@ internal fun FloatingVoiceCallContent(state: DoubaoCallUi, actions: DoubaoCallAc
 @Composable
 internal fun FloatingVoiceCallSurface(state: DoubaoCallUi, actions: DoubaoCallActions,
     panelBounds: Rect, anchorBounds: Rect, motion: DoubaoCallMotionState,
-    animationAllowed: Boolean, enabled: Boolean, panelPosition: (() -> Offset)? = null, onDrag: (Offset) -> Unit) {
+    animationAllowed: Boolean, enabled: Boolean, panelPosition: (() -> Offset)? = null,
+    imeCompact: Boolean = false, onDrag: (Offset) -> Unit) {
     key(state.sessionKey) {
         var lastLivePicture by remember { mutableStateOf(state) }
         var closingPicture by remember { mutableStateOf<DoubaoCallUi?>(null) }
+        var lastLiveCompact by remember { mutableStateOf(imeCompact) }
         val closing = state.presentation == DoubaoCallPresentation.CLOSING
         if (closing && closingPicture == null)
             closingPicture = lastLivePicture.copy(endedAtMillis = SystemClock.elapsedRealtime())
         val picture = if (closing) checkNotNull(closingPicture) else state
-        SideEffect { if (!closing) { lastLivePicture = state; closingPicture = null } }
+        SideEffect { if (!closing) { lastLivePicture = state; closingPicture = null; lastLiveCompact = imeCompact } }
         Box(Modifier.fillMaxSize()) {
             CallGeniePanel(state, actions, panelBounds, anchorBounds, motion,
                 mini = picture.presentation == DoubaoCallPresentation.MINI, enabled = enabled,
                 animationAllowed = animationAllowed, panelPosition = panelPosition) { interactive ->
-                FloatingVoiceCallContent(picture, actions, interactive, onDrag, decorated = false)
+                FloatingVoiceCallContent(picture, actions, interactive, onDrag, decorated = false,
+                    imeCompact = if (closing) lastLiveCompact else imeCompact)
             }
         }
     }

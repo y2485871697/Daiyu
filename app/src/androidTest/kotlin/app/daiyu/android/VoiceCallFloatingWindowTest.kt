@@ -1062,30 +1062,83 @@ class VoiceCallFloatingWindowTest {
         val diagnostics = java.io.File(context.getExternalFilesDir(null), "visual-diagnostics/native-call-content-motion")
             .apply { mkdirs() }
         val pixelRecords = mutableListOf<String>()
-        fun ink(name: String): Long {
-            var area = androidx.compose.ui.geometry.Rect.Zero
+        fun ownerView(view: View): View? {
+            if (view.javaClass.methods.any { it.name.startsWith("getSemanticsOwner") && it.parameterCount == 0 }) return view
+            if (view is ViewGroup) for (child in 0 until view.childCount) ownerView(view.getChildAt(child))?.let { return it }
+            return null
+        }
+        data class CaptureGeometry(val area: androidx.compose.ui.geometry.Rect,
+            val markerScreen: android.graphics.Rect, val markerLocal: android.graphics.Rect)
+        fun captureGeometry(): CaptureGeometry {
+            val owner = checkNotNull(ownerView(root))
+            val ownerXY = IntArray(2)
+            val rootXY = IntArray(2)
+            owner.getLocationOnScreen(ownerXY)
+            root.getLocationOnScreen(rootXY)
+            val tags = tagBounds(root)
+            val bounds = checkNotNull(tags["doubao-call-status"])
+            val expanded = checkNotNull(tags["doubao-call-expanded"])
+            val area = bounds.translate(androidx.compose.ui.geometry.Offset(ownerXY[0].toFloat(), ownerXY[1].toFloat()))
+            val x = (expanded.center.x + ownerXY[0]).roundToInt() - 3
+            val y = (expanded.top + 8f * density + ownerXY[1]).roundToInt() - 3
+            val screen = android.graphics.Rect(x, y, x + 6, y + 6)
+            val local = android.graphics.Rect(screen).apply { offset(-rootXY[0], -rootXY[1]) }
+            return CaptureGeometry(area, screen, local)
+        }
+        fun ink(name: String, frameId: Int): Long {
+            val color = android.graphics.Color.rgb(17 + frameId * 13, 23, 199)
+            val marker = android.graphics.drawable.ColorDrawable(color)
+            lateinit var installed: CaptureGeometry
             main {
-                val bounds = checkNotNull(tagBounds(root)["doubao-call-status"])
-                val location = IntArray(2)
-                root.getLocationOnScreen(location)
-                area = bounds.translate(androidx.compose.ui.geometry.Offset(location[0].toFloat(), location[1].toFloat()))
+                installed = captureGeometry()
+                marker.bounds = installed.markerLocal
+                root.overlay.add(marker)
+                root.invalidate()
             }
-            val image = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+            val deadline = SystemClock.uptimeMillis() + 2_000
             try {
-                var result = 0L
-                for (y in area.top.roundToInt().coerceAtLeast(0) until area.bottom.roundToInt().coerceAtMost(image.height))
-                    for (x in area.left.roundToInt().coerceAtLeast(0) until area.right.roundToInt().coerceAtMost(image.width)) {
-                        val c = image.getPixel(x, y)
-                        result += (240 - maxOf(android.graphics.Color.red(c), android.graphics.Color.green(c),
-                            android.graphics.Color.blue(c))).coerceAtLeast(0)
+                do {
+                    lateinit var before: CaptureGeometry
+                    main { before = captureGeometry() }
+                    val image = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+                    try {
+                        lateinit var after: CaptureGeometry
+                        main { after = captureGeometry() }
+                        val r = before.markerScreen
+                        var visible = r.left >= 0 && r.top >= 0 && r.right <= image.width && r.bottom <= image.height
+                        if (visible) for (y in r.top until r.bottom) for (x in r.left until r.right) {
+                            val c = image.getPixel(x, y)
+                            if (kotlin.math.abs(android.graphics.Color.red(c) - android.graphics.Color.red(color)) > 2 ||
+                                kotlin.math.abs(android.graphics.Color.green(c) - android.graphics.Color.green(color)) > 2 ||
+                                kotlin.math.abs(android.graphics.Color.blue(c) - android.graphics.Color.blue(color)) > 2) visible = false
+                        }
+                        java.io.File(diagnostics, "$name.png").outputStream().use {
+                            check(image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                        }
+                        val stable = before == after && before.markerLocal == installed.markerLocal
+                        pixelRecords += "$name geometry=$before stable=$stable marker=$visible"
+                        if (stable && visible) {
+                            val area = before.area
+                            assertTrue("status sampling rectangle is fully onscreen", area.left >= 0f && area.top >= 0f &&
+                                area.right <= image.width && area.bottom <= image.height && area.width > 0f && area.height > 0f)
+                            var result = 0L
+                            for (y in area.top.roundToInt() until area.bottom.roundToInt())
+                                for (x in area.left.roundToInt() until area.right.roundToInt()) {
+                                    val c = image.getPixel(x, y)
+                                    result += (240 - maxOf(android.graphics.Color.red(c), android.graphics.Color.green(c),
+                                        android.graphics.Color.blue(c))).coerceAtLeast(0)
+                                }
+                            pixelRecords += "$name ink=$result"
+                            return result
+                        }
+                    } finally {
+                        java.io.File(diagnostics, "samples.txt").writeText(pixelRecords.joinToString("\n"))
+                        image.recycle()
                     }
-                java.io.File(diagnostics, "$name.png").outputStream().use {
-                    check(image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
-                }
-                pixelRecords += "$name area=$area ink=$result"
-                java.io.File(diagnostics, "samples.txt").writeText(pixelRecords.joinToString("\n"))
-                return result
-            } finally { image.recycle() }
+                    SystemClock.sleep(8)
+                } while (SystemClock.uptimeMillis() < deadline)
+                throw AssertionError("target surface frame marker not observed: ${pixelRecords.lastOrNull()}")
+            } finally { main { root.overlay.remove(marker) } }
         }
         val timeline = listOf(0, 25, 50, 75, 100, 75, 50, 25, 55, 30, 80, 100, 50, 0)
         var previous = 0
@@ -1122,23 +1175,21 @@ class VoiceCallFloatingWindowTest {
                     assertEquals(prior.height, b.height, 1f)
                 } } ?: run { samples[percent] = local }
                 records += "$index p=$percent displayed=$compression orb=${local["doubao-call-orb"]} controls=${local["doubao-call-controls"]}"
+                android.util.Log.i("NativeCallContentMotion", records.last())
             }
             if (index == 0) {
-                baselineInk = ink("baseline")
+                baselineInk = ink("baseline", index)
                 assertTrue("full status has real dark glyph pixels", baselineInk > 1000L)
             } else if (percent == 25) {
-                val deadline = SystemClock.uptimeMillis() + 2_000
-                var faded: Long
-                var consecutive = 0
-                do {
-                    faded = ink("sample-$index")
-                    consecutive = if (faded > baselineInk / 5 && faded < baselineInk * 4 / 5) consecutive + 1 else 0
-                    if (consecutive < 2 && SystemClock.uptimeMillis() < deadline) {
-                        awaitCommittedDraw(root)
-                    }
-                } while (consecutive < 2 && SystemClock.uptimeMillis() < deadline)
+                main {
+                    val compression = ((fullHeight - panel(root).height) / (fullHeight - 238f * density)).coerceIn(0f, 1f)
+                    assertEquals("pixel sample uses the actual quarter-compressed panel", .25f, compression, .02f)
+                    val contentProgress = root.javaClass.getDeclaredMethod("getImeCompactProgress").apply { isAccessible = true }.invoke(root) as Float
+                    assertEquals("pixel sample and actual content share one progress", compression, contentProgress, .01f)
+                }
+                val faded = ink("sample-$index", index)
                 assertTrue("status has genuinely partially transparent pixels, not just a retained tag: $faded/$baselineInk",
-                    consecutive == 2)
+                    faded > baselineInk / 5 && faded < baselineInk * 4 / 5)
             }
             previous = percent
         }

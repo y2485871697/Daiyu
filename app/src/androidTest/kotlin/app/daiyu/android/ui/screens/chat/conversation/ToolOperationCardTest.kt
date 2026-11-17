@@ -118,7 +118,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithText("工作流程").assertIsDisplayed()
             openWorkflow()
             ui.onNodeWithText("未知工具回退").assertDoesNotExist()
-            ui.onNodeWithTag("tool-step-header:card-callordinary-$name-$mixed").scrollToVisible().assertIsDisplayed().assertTextContains(title).performClick()
+            ui.onNodeWithTag("tool-step-header:card-callordinary-$name-$mixed").scrollToVisible().assertIsDisplayed().assertTextContains("$title · Android • user").performClick()
             ui.onNodeWithText("ordinary-output").scrollToVisible().assertIsDisplayed()
             ui.onNodeWithText("技术详情").assertDoesNotExist()
             ui.onNodeWithText("未知工具回退").assertDoesNotExist()
@@ -148,7 +148,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                Column(Modifier.verticalScroll(rememberScrollState())) {
+                Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
                     for (turn in turns.value.filterIsInstance<ChatTurnUi.Assistant>()) {
                         if (reconnects.isEmpty()) AssistantTurn(turn, ChatScreenActions())
                         else ReconnectedAssistantTurn(turn, reconnectParts(turn, reconnects), ChatScreenActions())
@@ -186,8 +186,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             repeat(24) {
                 if (done.count == 0L) return@repeat
                 ui.mainClock.advanceTimeByFrame()
-                instrumentation.runOnMainSync { view.invalidate() }
-                done.await(50, java.util.concurrent.TimeUnit.MILLISECONDS)
+                ui.waitForIdle()
+                awaitStableWindowFrame(view) { Unit }
             }
             assertTrue("No actual draw for $prefix: $frames", done.await(2, java.util.concurrent.TimeUnit.SECONDS))
             if (prefix == null) {
@@ -281,7 +281,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             ui.onNodeWithTag("tool-step-header:${call.id.value}", useUnmergedTree = true)
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "排队中 · 已折叠"))
             for (shown in listOf(terminal, job)) {
-                ui.onNodeWithTag("tool-step-header:${shown.id.value}", useUnmergedTree = true).assertTextContains("Debian • root", substring = true)
+                ui.onNodeWithTag("tool-step-header:${shown.id.value}").assertTextContains("Debian • root", substring = true)
             }
         }
     }
@@ -637,7 +637,9 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         for (mixed in listOf(false, true)) {
             val source = source(mixed, "long-output-$mixed")
             val message = source.copy(blocks = source.blocks.map { block ->
-                if (block is MessageBlock.Tool) block.copy(result = org.json.JSONObject().put("stdout", body).toString()) else block
+                if (block is MessageBlock.Tool) {
+                    block.copy(result = org.json.JSONObject(requireNotNull(block.result)).put("stdout", body).toString())
+                } else block
             })
             val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> WorkStepState.OK }).single() as ChatTurnUi.Assistant
             mainThread { activity.setContent {
@@ -651,7 +653,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             } }
             ui.waitForIdle()
             openWorkflow()
-            ui.onNodeWithText("读取输出").scrollToVisible().assertIsDisplayed().performClick()
+            ui.onNodeWithTag("tool-step-header:card-calllong-output-$mixed").scrollToVisible()
+                .assertIsDisplayed().assertTextContains("读取输出 · Android • user").performClick()
             ui.onAllNodesWithText("trusted-host-slot").assertCountEquals(1)
             ui.onNodeWithText(body).assertDoesNotExist()
             val layouts = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()

@@ -1126,7 +1126,8 @@ def command_for(python, env):
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (
                 sorted(CHILD_TASK_CARD_PLATFORM_CLASSES), sorted(CHILD_TASK_CARD_INHERITANCE_CLASSES),
                 sorted(CHILD_TASK_CARD_THEME_CLASSES), sorted(CHILD_DELEGATION_PLATFORM_CLASSES),
-                sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES), sorted(CHILD_TASK_STATUS_PLATFORM_CLASSES))):
+                sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES), sorted(CHILD_TASK_STATUS_PLATFORM_CLASSES),
+                ["app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest"])):
         return [python, "-B", "-m", "unittest", *CHILD_TASK_CARD_MODULES, "-v"], "child-task-cards-targeted"
     return [python, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full"
 
@@ -1161,7 +1162,8 @@ def record(python):
     validation_cwd = None
     if scope in ("user-message-entrance-targeted", "composer-action-targeted", "error-details-targeted", "media-send-targeted", "receipt-summary-targeted", "runtime-stop-targeted", "workflow-collapse-targeted", "voice-browser-targeted", "browser-targeted", "doubao-motion-targeted", "child-hot-configuration-targeted", "child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted", "page-back-targeted") or (
             scope == "child-task-cards-targeted" and sorted(os.environ.get("SMOKE_TEST_CLASSES", "").split(","))
-            == sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES)):
+            in (sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES),
+                ["app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest"])):
         validation_cwd = Path(__file__).resolve().parents[2]
         child_env["PYTHONPATH"] = str(validation_cwd / "tests") + os.pathsep + os.environ.get("PYTHONPATH", "")
     log = root / "unittest.log"

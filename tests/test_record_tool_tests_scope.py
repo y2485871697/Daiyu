@@ -566,6 +566,18 @@ class ChildTaskCardScopeTest(unittest.TestCase):
                 self.assertEqual("child-task-cards-targeted", scope)
                 self.assertEqual([python, "-B", "-m", "unittest", *self.MODULES, "-v"], command)
 
+    def test_only_tool_operation_card_keeps_exact_targeted_command(self):
+        classes = "app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest"
+        for python in ("python", "python3"):
+            command, scope = recorder.command_for(python, dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=classes))
+            self.assertEqual("child-task-cards-targeted", scope)
+            self.assertEqual([python, "-B", "-m", "unittest", *self.MODULES, "-v"], command)
+        for invalid in (classes + ",", " " + classes, classes + " ", classes + "," + classes,
+                        classes + ",app.daiyu.android.OtherTest"):
+            self.assertEqual("full", recorder.command_for("python", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=invalid))[1])
+        for mode in ("", "build", "compile", "candidate", "daily", "release", "checks"):
+            self.assertEqual("full", recorder.command_for("python", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=classes))[1])
+
     def test_task_status_scope_adds_storage_and_catalog_without_widening_old_scope(self):
         classes = (*self.CLASSES, "app.daiyu.android.ControllerChildModelsTest",
                    "app.daiyu.android.ControllerModelPreparationTest", "app.daiyu.android.storage.SQLiteChildTaskStoreTest")
@@ -656,7 +668,9 @@ class ChildTaskCardScopeTest(unittest.TestCase):
 
     def test_partial_extended_duplicate_malformed_and_other_modes_keep_full(self):
         raw = ",".join(self.CLASSES)
-        invalid = [",".join(classes) for size in range(4) for classes in itertools.combinations(self.CLASSES, size)]
+        invalid = [",".join(classes) for size in range(4)
+                   for classes in itertools.combinations(self.CLASSES, size)
+                   if classes != ("app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest",)]
         invalid += [raw + ",unknown", raw + "," + recorder.SPEECH_PLATFORM_CLASS, " " + raw, raw + " ", raw + ",", raw.replace(",", ", ", 1)]
         invalid += [raw + "," + name for name in self.CLASSES]
         invalid += [raw.replace(name, "app.daiyu.android.OtherTest") for name in self.CLASSES]

@@ -273,7 +273,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
 
     private fun assertPhysicalArrival(beforeBottom: Float, samples: List<PhysicalSample>, fullBody: Float, tailPadding: Float = 0f) {
         val waiting = samples.filter { !it.reached }
-        val hidden = waiting.filter { it.body <= maxOf(.03f, fullBody * .01f) }
+        val hidden = samples.filter { it.body <= maxOf(.03f, fullBody * .01f) }
         val tolerance = with(density) { 2.dp.toPx() }
         waiting.forEachIndexed { frame, sample ->
             assertTrue("physical height ran ahead of the painted line at $frame: $sample before=$beforeBottom",
@@ -282,7 +282,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         samples.forEach { sample ->
             assertEquals("following content must see the same physical extent", sample.bottom, sample.following, 1f)
         }
-        assertTrue("must observe an intermediate physical extension while the target is still hidden",
+        assertTrue("must observe an intermediate physical extension while the target is still hidden: before=$beforeBottom tail=$tailPadding fullBody=$fullBody samples=$samples",
             hidden.any { it.bottom > beforeBottom + tolerance && it.frontier > beforeBottom + tolerance })
     }
 

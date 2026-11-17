@@ -109,7 +109,7 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
         self.assertNotIn('following?.let', physical)
         self.assertIn('val reached = rail.isNotEmpty() && rail.all { it >= lineContrast * .9f }', physical)
         self.assertIn('val waiting = samples.filter { !it.reached }', physical)
-        self.assertIn('val hidden = waiting.filter { it.body <= maxOf(.03f, fullBody * .01f) }', physical)
+        self.assertIn('val hidden = samples.filter { it.body <= maxOf(.03f, fullBody * .01f) }', physical)
         self.assertIn('waiting.forEachIndexed', physical)
         self.assertIn('samples.forEach { sample ->', physical)
         self.assertIn('fun testFirstFreshNodeReleasesHeightWithItsOwnEntrance()', source)

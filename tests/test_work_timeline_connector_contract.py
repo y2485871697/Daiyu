@@ -91,6 +91,9 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
         chain = source[source.index('private fun verifyLiveChain('):source.index('fun testNewEdgesWaitForUpstreamIncoming(')]
         self.assertIn('val beforeSecondTool =', chain)
         self.assertIn('observe(listOf(t1, a, t2), beforeSecondTool)', chain)
+        self.assertIn('completed reasoning geometry must settle before appending a tool', chain)
+        self.assertIn('val beforeSecondTool = completedBounds.first().bottom', chain)
+        self.assertIn('source.copy(blocks = source.blocks + tool("live-t2"))', chain)
         self.assertIn('testTag("motion-following")', chain)
         body = source[source.index('private fun bodyInk('):source.index('private fun operationY(')]
         self.assertIn('timeline?.intersect(raster) ?: raster', body)
@@ -114,6 +117,22 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
         self.assertIn('samples.forEach { sample ->', physical)
         self.assertIn('fun testFirstFreshNodeReleasesHeightWithItsOwnEntrance()', source)
         self.assertIn('fun testQueuedNodePreventsFollowingNarrationFromReservingHeight()', source)
+
+    def test_disabled_motion_consumes_connector_without_replaying_on_enable(self):
+        motion = (CHAT / 'WorkflowNodeMotion.kt').read_text()
+        lines = motion[motion.index('internal fun rememberWorkflowLineMotions'):motion.index('internal class WorkflowToolAppearance')]
+        for token in ('LaunchedEffect(progress, enabled)', 'if (!enabled) progress.snapTo(1f)',
+                      'else if (animate && progress.value < 1f)',
+                      'snapshotFlow { upstream.value?.fraction() ?: 1f }.first { it >= 1f }',
+                      'val animate = remember(owner, edge) { owner.connect(edge) }',
+                      'val visibleMotion = if (LocalWorkflowNodeMotionEnabled.current) motion else null',
+                      '(visibleMotion ?: WorkflowLineMotion()).copy(spacingAfter = spacingAfter)'):
+            self.assertIn(token, lines)
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNodeMotionTest.kt').read_text()
+        self.assertIn('fun testDisablingAnIncomingConnectorConsumesItWithoutReplay()', source)
+        self.assertIn('disabled connector must be complete in its first displayed frame', source)
+        self.assertIn('consumed connector must not retreat or replay', source)
+        self.assertIn('disabled entrance must expose a complete connector', source)
 
     def test_android_regression_samples_every_join_and_rejects_stray_end_segments(self):
         source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkTimelineConnectorTest.kt').read_text()

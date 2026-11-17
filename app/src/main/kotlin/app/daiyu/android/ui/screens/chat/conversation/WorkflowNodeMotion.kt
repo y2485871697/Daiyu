@@ -83,6 +83,7 @@ internal val LocalWorkflowLineMotion = staticCompositionLocalOf { WorkflowLineMo
 @Composable
 internal fun rememberWorkflowLineMotions(items: List<MessageContentUi>, visible: List<Int>, continuous: Boolean): Map<Int, WorkflowLineMotion> {
     val owner = LocalWorkflowNodeMotions.current ?: return emptyMap()
+    val enabled = LocalWorkflowNodeMotionEnabled.current
     val nodes = visible.filter { items[it] is MessageContentUi.Tool || items[it] is MessageContentUi.Reasoning }
     val result = mutableMapOf<Int, WorkflowLineMotion>()
     nodes.zipWithNext().forEach { (from, to) ->
@@ -92,8 +93,9 @@ internal fun rememberWorkflowLineMotions(items: List<MessageContentUi>, visible:
             val upstream = rememberUpdatedState(result[from]?.incoming)
             val animate = remember(owner, edge) { owner.connect(edge) }
             val progress = remember(owner, edge) { Animatable(if (animate) 0f else 1f) }
-            LaunchedEffect(progress) {
-                if (animate) {
+            LaunchedEffect(progress, enabled) {
+                if (!enabled) progress.snapTo(1f)
+                else if (animate && progress.value < 1f) {
                     snapshotFlow { upstream.value?.fraction() ?: 1f }.first { it >= 1f }
                     progress.animateTo(1f, tween(300, easing = FastOutSlowInEasing))
                 }
@@ -112,7 +114,8 @@ internal fun rememberWorkflowLineMotions(items: List<MessageContentUi>, visible:
 
 @Composable
 internal fun WorkflowLineScope(motion: WorkflowLineMotion?, spacingAfter: Dp, content: @Composable () -> Unit) {
-    CompositionLocalProvider(LocalWorkflowLineMotion provides (motion ?: WorkflowLineMotion()).copy(spacingAfter = spacingAfter), content = content)
+    val visibleMotion = if (LocalWorkflowNodeMotionEnabled.current) motion else null
+    CompositionLocalProvider(LocalWorkflowLineMotion provides (visibleMotion ?: WorkflowLineMotion()).copy(spacingAfter = spacingAfter), content = content)
 }
 
 internal class WorkflowToolAppearance(animate: Boolean) {

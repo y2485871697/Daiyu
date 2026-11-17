@@ -748,9 +748,21 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             observe(listOf(t1, a), beforeFirstReasoning)
             val full1 = r1.copy(text = r1.text + "乙".repeat(24))
             type(r1.itemId, r1.text, full1.text) { source = source.copy(reportedReasoning = listOf(full1)) }
-            val beforeSecondTool = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds().bottom
-            instrumentation.runOnMainSync { source = source.copy(blocks = source.blocks + tool("live-t2"),
-                reportedReasoning = listOf(full1.copy(activeSinceNanos = null))) }
+            instrumentation.runOnMainSync { source = source.copy(reportedReasoning = listOf(full1.copy(activeSinceNanos = null))) }
+            val reasoningContent = "reported-reasoning-content:$owner:reasoning:${r1.itemId}"
+            ui.waitUntil(5_000) { frame(); ui.onAllNodesWithTag(reasoningContent).fetchSemanticsNodes().isEmpty() }
+            val completedBounds = listOf("motion-raster", a, "motion-following").map { tag ->
+                ui.onNodeWithTag(tag).fetchSemanticsNode().physicalBounds()
+            }
+            repeat(2) {
+                frame()
+                assertEquals("completed reasoning geometry must settle before appending a tool", completedBounds,
+                    listOf("motion-raster", a, "motion-following").map { tag ->
+                        ui.onNodeWithTag(tag).fetchSemanticsNode().physicalBounds()
+                    })
+            }
+            val beforeSecondTool = completedBounds.first().bottom
+            instrumentation.runOnMainSync { source = source.copy(blocks = source.blocks + tool("live-t2")) }
             observe(listOf(t1, a, t2), beforeSecondTool)
             val beforeSecondReasoning = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds().bottom
             instrumentation.runOnMainSync { source = source.copy(reportedReasoning = source.reportedReasoning + r2) }
@@ -929,6 +941,32 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         } finally { scale.factor = 1f; ui.mainClock.autoAdvance = true }
     }
 
+    fun testDisablingAnIncomingConnectorConsumesItWithoutReplay() {
+        rows = listOf(first.copy(state = WorkStepState.OK))
+        narrationText = "Narration between tool nodes."
+        ui.mainClock.autoAdvance = false
+        try {
+            show()
+            change(rows + second)
+            ui.mainClock.advanceTimeBy(48)
+            val growing = line(pixels())
+            assertTrue("must disable an actually growing connector", growing.any { it > lineContrast * .35f } &&
+                growing.any { it < lineContrast * .9f })
+            instrumentation.runOnMainSync { motionEnabled = false }
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+            val consumed = line(pixels())
+            assertTrue("disabled connector must be complete in its first displayed frame", consumed.isNotEmpty() &&
+                consumed.all { it >= lineContrast * .9f })
+            instrumentation.runOnMainSync { motionEnabled = true }
+            repeat(24) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                assertEquals("consumed connector must not retreat or replay", consumed, line(pixels()))
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     fun testFailureArrivingDuringDisclosureExitIsConsumedWithoutReplay() {
         rows = listOf(first.copy(state = WorkStepState.OK))
         ui.mainClock.autoAdvance = false
@@ -936,14 +974,19 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             show()
             instrumentation.runOnMainSync { motionEnabled = false }
             change(rows + second.copy(state = WorkStepState.FAILED, activity = ToolActivityUi.FAILED))
+            val immediateLine = line(pixels())
+            assertTrue("disabled entrance must expose a complete connector", immediateLine.isNotEmpty() &&
+                immediateLine.all { it >= lineContrast * .9f })
             val immediate = coverage(pixels(), error, "tool-step:motion-b")
             assertTrue(immediate > 0f)
             val immediateBody = bodyInk(pixels())
             assertTrue(immediateBody > 1f)
             instrumentation.runOnMainSync { motionEnabled = true }
             repeat(2) { ui.mainClock.advanceTimeByFrame() }
+            assertEquals("re-enabling must not replay the consumed connector", immediateLine, line(pixels()))
             assertEquals(immediate, coverage(pixels(), error, "tool-step:motion-b"), .01f)
             ui.mainClock.advanceTimeBy(160)
+            assertEquals("re-enabling must not replay the consumed connector", immediateLine, line(pixels()))
             assertEquals(immediate, coverage(pixels(), error, "tool-step:motion-b"), .01f)
             assertEquals(immediateBody, bodyInk(pixels()), .03f)
         } finally { ui.mainClock.autoAdvance = true }

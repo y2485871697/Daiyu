@@ -398,8 +398,13 @@ class RunCommandToolsTest {
         assertEquals("linux:alpine", target.backend)
         assertEquals(1000, target.guestUid)
         assertEquals(false, target.hostRoot)
-        assertTrue(fixture.dispatch("next") is DispatchOutcome.NotExecuted)
+        val protected = fixture.dispatch("next")
+        assertTrue(protected is DispatchOutcome.Unknown)
+        assertEquals("unknown_effect_protected", (protected as DispatchOutcome.Unknown).code)
+        assertTrue(fixture.dispatch("different", command = "echo different") is DispatchOutcome.NotExecuted)
         assertEquals(1, fixture.executions)
+        assertEquals(1, fixture.prompts)
+        assertEquals(1, fixture.owner.terminalTargets.size)
         fixture.leaf.close()
     }
 

@@ -407,14 +407,19 @@ internal class VoiceCallFloatingWindow(context: Context,
         val morphing = current.genieClosing || current.inApp && current.entryGenie && current.motion.transforming
         val panel = current.panelBounds
         current.imeCompact = current.picture.presentation == DoubaoCallPresentation.EXPANDED &&
-            current.inApp && (imeVisible(current) || current.imePlacement != null)
+            current.inApp && (imeVisible(current) || current.imePlacement != null || current.heightRestore != null)
+        if (!current.imeCompact && current.picture.presentation == DoubaoCallPresentation.EXPANDED)
+            current.expandedContentHeight = panel.height
+        val contentTravel = current.expandedContentHeight - compactHeight(current)
+        current.imeCompactProgress = if (!current.imeCompact) 0f else if (contentTravel <= .5f) 1f
+            else ((current.expandedContentHeight - panel.height) / contentTravel).coerceIn(0f, 1f)
         current.panelSize = Size(panel.width.roundToInt().toFloat(), panel.height.roundToInt().toFloat())
         val anchor = current.anchor?.bounds
         val frame = if (morphing && anchor != null) Rect(
             minOf(panel.left, anchor.left) - dp(28), minOf(panel.top, anchor.top) - dp(28),
             maxOf(panel.right, anchor.right) + dp(28), maxOf(panel.bottom, anchor.bottom) + dp(28)) else panel.inflate(dp(28).toFloat())
-        val left = frame.left.roundToInt().coerceAtLeast(0)
-        val top = frame.top.roundToInt().coerceAtLeast(0)
+        val left = frame.left.roundToInt()
+        val top = frame.top.roundToInt()
         val width = (frame.right.roundToInt() - left).coerceAtLeast(1)
         val height = (frame.bottom.roundToInt() - top).coerceAtLeast(1)
         val offset = Offset((panel.left.roundToInt() - left).toFloat(),
@@ -502,6 +507,8 @@ internal class VoiceCallFloatingWindow(context: Context,
         var imeCompact by mutableStateOf(false)
         var expandedWidth = dp(380).toFloat()
         var expandedHeight = dp(374).toFloat()
+        var expandedContentHeight by mutableStateOf(expandedHeight)
+        var imeCompactProgress by mutableStateOf(0f)
         val entryGenie = initialInApp && initialAnchor != null && !initial.skipEntryAnimation
         val motion = sharedMotion ?: DoubaoCallMotionState()
         var livePresentation = initial.presentation
@@ -551,6 +558,8 @@ internal class VoiceCallFloatingWindow(context: Context,
                         FloatingVoiceCallSurface(picture.copy(skipEntryAnimation = !entryGenie || picture.skipEntryAnimation),
                             completion, Rect(Offset.Zero, panelSize), renderAnchor, motion,
                             panelPosition = { panelOffset }, imeCompact = imeCompact,
+                            imeCompactProgress = imeCompactProgress,
+                            imeExpandedHeight = with(androidx.compose.ui.platform.LocalDensity.current) { expandedContentHeight.toDp() },
                             animationAllowed = inApp, enabled = !departing,
                             onDrag = { delta ->
                                 touchPosition?.let {
@@ -625,6 +634,8 @@ internal class VoiceCallFloatingWindow(context: Context,
             if (geometry != configurationGeometry) {
                 cancelNativeDrag()
                 configurationGeometry = geometry
+                safeTop = safeTopInset()
+                expandedContentHeight = fullHeight(this)
                 imePlacement = null
                 imeComposerBaseline = null
                 manualImePlacement = null
@@ -642,9 +653,12 @@ internal class VoiceCallFloatingWindow(context: Context,
         }
         fun invalidateOrigin() { originCommitted = false }
 
+        private val screenPosition = IntArray(2)
+        private val windowPosition = IntArray(2)
         private fun syncCompositionOrigin(): Boolean {
-            val screen = IntArray(2)
-            val local = IntArray(2)
+            if (originCommitted && !genieClosing && !(inApp && entryGenie && motion.transforming)) return true
+            val screen = screenPosition
+            val local = windowPosition
             getLocationOnScreen(screen)
             getLocationInWindow(local)
             val x = screen[0] - local[0]

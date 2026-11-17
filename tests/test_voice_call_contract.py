@@ -428,7 +428,8 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertNotIn('panelBounds', height)
         overlay = (SRC / 'ui/screens/chat/conversation/DoubaoCallOverlay.kt').read_text()
         self.assertIn('const val HEIGHT_DP = 238', overlay)
-        self.assertIn('if (!imeCompact)', overlay)
+        self.assertIn('if (compression < 1f)', overlay)
+        self.assertIn('imeCompactProgress = if (closing) lastLiveCompression else imeCompactProgress', overlay)
         self.assertIn('imeCompact = if (closing) lastLiveCompact else imeCompact', overlay)
         self.assertIn('onClick = actions.onMinimize', overlay)
         fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt').read_text()
@@ -481,6 +482,27 @@ class FloatingVoiceCallContract(unittest.TestCase):
         self.assertNotIn('startDuplex', floating)
         self.assertNotIn('RECORD_AUDIO', floating)
         self.assertIn('VoiceCallFloatingWindowTest', (ROOT / '.github/workflows/doubao-call-motion-checks.yml').read_text())
+
+    def test_ime_content_uses_displayed_geometry_and_drag_keeps_the_complete_shadow_viewport(self):
+        floating = (SRC / 'VoiceCallFloatingWindow.kt').read_text()
+        overlay = (SRC / 'ui/screens/chat/conversation/DoubaoCallOverlay.kt').read_text()
+        frame = floating.split('private fun syncFrame(', 1)[1].split('private fun remove(', 1)[0]
+        self.assertIn('(current.expandedContentHeight - panel.height) / contentTravel', frame)
+        self.assertIn('current.imePlacement != null || current.heightRestore != null', frame)
+        self.assertIn('dragDuringSettledImeTailKeepsContentProgressUntilHeightRestoreCompletes', (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt').read_text())
+        self.assertIn('val left = frame.left.roundToInt()', frame)
+        self.assertIn('val top = frame.top.roundToInt()', frame)
+        self.assertNotIn('roundToInt().coerceAtLeast(0)', frame)
+        self.assertIn('val expandedHeight = if (imeCompact || compression > 0f) imeExpandedHeight else maxHeight', overlay)
+        self.assertIn('space(expandedControls, CallImeCompactLayout.controls)', overlay)
+        self.assertIn('graphicsLayer { alpha = statusOpacity }', overlay)
+        self.assertNotIn('if (!imeCompact)', overlay)
+        fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceCallFloatingWindowTest.kt').read_text()
+        self.assertIn('imeContentFadesAndMovesWithDisplayedPanelHeightThroughReversal', fixture)
+        self.assertIn('genuinely partially transparent pixels', fixture)
+        self.assertIn('continuousDiagonalDragKeepsFullShadowViewportAndLocalContentFixed', fixture)
+        self.assertIn('diagonal edge dragging never resizes the native surface', fixture)
+
 
 if __name__ == '__main__':
     unittest.main()

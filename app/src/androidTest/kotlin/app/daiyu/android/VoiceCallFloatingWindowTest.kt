@@ -520,8 +520,8 @@ class VoiceCallFloatingWindowTest {
                 val shadow = (28 * context.resources.displayMetrics.density).roundToInt().toFloat()
                 val bounded = panel.inflate(shadow)
                 settledFrame = if (ready && !motion.transforming && motion.progress.value == 1f &&
-                    params.x == bounded.left.roundToInt().coerceAtLeast(0) &&
-                    params.y == bounded.top.roundToInt().coerceAtLeast(0) &&
+                    params.x == bounded.left.roundToInt() &&
+                    params.y == bounded.top.roundToInt() &&
                     params.x + params.width == bounded.right.roundToInt() &&
                     params.y + params.height == bounded.bottom.roundToInt() &&
                     params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE == 0 &&
@@ -555,8 +555,8 @@ class VoiceCallFloatingWindowTest {
             val shadow = (28 * context.resources.displayMetrics.density).roundToInt().toFloat()
             val expected = panel.inflate(shadow)
             val actual = checkNotNull(settledFrame)
-            assertEquals(expected.left.roundToInt().coerceAtLeast(0), actual.left)
-            assertEquals(expected.top.roundToInt().coerceAtLeast(0), actual.top)
+            assertEquals(expected.left.roundToInt(), actual.left)
+            assertEquals(expected.top.roundToInt(), actual.top)
             assertEquals("settled viewport must retain exactly the original shadow, not the large animation envelope",
                 expected.right.roundToInt(), actual.right)
             assertEquals(expected.bottom.roundToInt(), actual.bottom)
@@ -1042,6 +1042,205 @@ class VoiceCallFloatingWindowTest {
                 assertEquals(0, hangups)
             }
         }
+    }
+
+
+    @Test fun imeContentFadesAndMovesWithDisplayedPanelHeightThroughReversal() {
+        val initial = picture(-64L)
+        val state = initial.copy(skipEntryAnimation = true, endedAtMillis = initial.startedAtMillis,
+            visualState = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallVisualState.MUTED)
+        val closed = callAnchor().copy(imeInsets = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(0))
+        val density = context.resources.displayMetrics.density
+        val inset = (160f * density).roundToInt()
+        main { assertTrue(host.update(state, actions, closed, inApp = true)) }
+        val root = windows.added.last()
+        await("content animation fixture laid out") { root.isLaidOut }
+        awaitCommittedDraw(root)
+        val fullHeight = panel(root).height
+        val samples = mutableMapOf<Int, Map<String, androidx.compose.ui.geometry.Rect>>()
+        var baselineInk = 0L
+        fun ink(): Long {
+            var area = androidx.compose.ui.geometry.Rect.Zero
+            main {
+                val bounds = checkNotNull(tagBounds(root)["doubao-call-status"])
+                val params = root.layoutParams as WindowManager.LayoutParams
+                area = bounds.translate(androidx.compose.ui.geometry.Offset(params.x.toFloat(), params.y.toFloat()))
+            }
+            val image = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
+            try {
+                var result = 0L
+                for (y in area.top.roundToInt().coerceAtLeast(0) until area.bottom.roundToInt().coerceAtMost(image.height))
+                    for (x in area.left.roundToInt().coerceAtLeast(0) until area.right.roundToInt().coerceAtMost(image.width)) {
+                        val c = image.getPixel(x, y)
+                        result += (240 - maxOf(android.graphics.Color.red(c), android.graphics.Color.green(c),
+                            android.graphics.Color.blue(c))).coerceAtLeast(0)
+                    }
+                return result
+            } finally { image.recycle() }
+        }
+        val timeline = listOf(0, 25, 50, 75, 100, 75, 50, 25, 55, 30, 80, 100, 50, 0)
+        var previous = 0
+        val records = mutableListOf<String>()
+        for ((index, percent) in timeline.withIndex()) {
+            val bottom = (inset * percent / 100f).roundToInt()
+            val opening = percent >= previous
+            val anchor = closed.copy(composerTop = closed.composerTop - bottom,
+                bounds = closed.bounds.translate(androidx.compose.ui.geometry.Offset(0f, -bottom.toFloat())),
+                imeInsets = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(bottom,
+                    if (opening) 0 else inset, if (opening) inset else 0))
+            main { assertTrue(host.update(state, actions, anchor, inApp = true)) }
+            awaitCommittedDraw(root)
+            main {
+                val compression = ((fullHeight - panel(root).height) / (fullHeight - 238f * density)).coerceIn(0f, 1f)
+                val tags = tagBounds(root)
+                val origin = checkNotNull(tags["doubao-call-expanded"]).topLeft
+                val local = listOf("doubao-call-orb", "doubao-call-controls", "doubao-call-caption-area")
+                    .associateWith { checkNotNull(tags[it]).translate(-origin) }
+                assertEquals("orb follows the same continuous displayed-height curve", (68f - 17f * compression) * density,
+                    checkNotNull(local["doubao-call-orb"]).top, 2f)
+                assertEquals("controls preserve the continuous bottom layout", (284f - 124f * compression) * density,
+                    checkNotNull(local["doubao-call-controls"]).top, 2f)
+                if (percent < 100) {
+                    assertTrue("status survives all intermediate compression frames", "doubao-call-status" in tags)
+                    assertTrue("detail survives all intermediate compression frames", "doubao-call-status-detail" in tags)
+                } else {
+                    assertFalse("fully compact status is removed", "doubao-call-status" in tags)
+                    assertFalse("fully compact detail is removed", "doubao-call-status-detail" in tags)
+                }
+                samples[percent]?.let { old -> local.forEach { (tag, b) ->
+                    val prior = checkNotNull(old[tag])
+                    assertEquals("reversing IME retains the same local geometry: $tag", prior.top, b.top, 1f)
+                    assertEquals(prior.height, b.height, 1f)
+                } } ?: run { samples[percent] = local }
+                records += "$index p=$percent displayed=$compression orb=${local["doubao-call-orb"]} controls=${local["doubao-call-controls"]}"
+            }
+            if (index == 0) {
+                baselineInk = ink()
+                assertTrue("full status has real dark glyph pixels", baselineInk > 1000L)
+            } else if (percent == 25) {
+                val faded = ink()
+                assertTrue("status has genuinely partially transparent pixels, not just a retained tag: $faded/$baselineInk",
+                    faded > baselineInk / 5 && faded < baselineInk * 4 / 5)
+            }
+            previous = percent
+        }
+        android.util.Log.i("NativeCallContentMotion", records.joinToString("\n"))
+    }
+
+    @Test fun dragDuringSettledImeTailKeepsContentProgressUntilHeightRestoreCompletes() {
+        val original = picture(-66L)
+        val state = original.copy(skipEntryAnimation = true, endedAtMillis = original.startedAtMillis,
+            visualState = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallVisualState.MUTED)
+        val closed = callAnchor().copy(imeInsets = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(0))
+        val density = context.resources.displayMetrics.density
+        val inset = (160f * density).roundToInt()
+        fun anchor(bottom: Int, source: Int, target: Int, metadataSettled: Boolean = false) = closed.copy(
+            composerTop = closed.composerTop - bottom,
+            bounds = closed.bounds.translate(androidx.compose.ui.geometry.Offset(0f, -bottom.toFloat())),
+            imeInsets = if (metadataSettled) app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(0)
+                else app.daiyu.android.ui.screens.chat.conversation.DoubaoCallImeInsets(bottom, source, target))
+        main { assertTrue(host.update(state, actions, closed, inApp = true)) }
+        val root = windows.added.last()
+        await("tail drag fixture laid out") { root.isLaidOut }
+        awaitCommittedDraw(root)
+        val fullHeight = panel(root).height
+        for (a in listOf(anchor(0, 0, inset), anchor(inset, 0, inset), anchor(inset, inset, 0),
+            anchor((inset * .6f).roundToInt(), inset, 0, metadataSettled = true))) {
+            main { assertTrue(host.update(state, actions, a, inApp = true)) }
+            awaitCommittedDraw(root)
+        }
+        val progressGetter = root.javaClass.declaredMethods.single { it.name.startsWith("getImeCompactProgress") }
+            .apply { isAccessible = true }
+        val expandedGetter = root.javaClass.declaredMethods.single { it.name.startsWith("getExpandedContentHeight") }
+            .apply { isAccessible = true }
+        val frames = mutableListOf<Triple<Float, Float, Float>>()
+        val listener = android.view.ViewTreeObserver.OnPreDrawListener {
+            frames += Triple(panel(root).height, progressGetter.invoke(root) as Float, expandedGetter.invoke(root) as Float)
+            true
+        }
+        main {
+            assertTrue("composer tail remains partially compact after inset metadata closes", (progressGetter.invoke(root) as Float) > .4f)
+            root.viewTreeObserver.addOnPreDrawListener(listener)
+            move(root, 2f * density, 0f)
+        }
+        try {
+            await("tail drag height restores") { kotlin.math.abs(panel(root).height - fullHeight) < .5f }
+            awaitCommittedDraw(root)
+            main {
+                assertTrue("manual tail restoration has actual intermediate draws", frames.count { it.second > 0f && it.second < 1f } >= 2)
+                frames.forEach { (height, progress, expanded) ->
+                    assertEquals("tail drag retains the original expanded endpoint", fullHeight, expanded, .5f)
+                    val expected = ((fullHeight - height) / (fullHeight - 238f * density)).coerceIn(0f, 1f)
+                    assertEquals("content never snaps ahead of the displayed height during tail drag", expected, progress, .01f)
+                }
+                assertEquals(0f, progressGetter.invoke(root) as Float, .01f)
+            }
+        } finally { main { if (root.viewTreeObserver.isAlive) root.viewTreeObserver.removeOnPreDrawListener(listener) } }
+    }
+
+    @Test fun continuousDiagonalDragKeepsFullShadowViewportAndLocalContentFixed() {
+        val original = picture(-65L)
+        val state = original.copy(skipEntryAnimation = true, endedAtMillis = original.startedAtMillis,
+            visualState = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallVisualState.MUTED)
+        main { host.update(state, actions, callAnchor(), inApp = true) }
+        val root = windows.added.last() as ViewGroup
+        await("continuous diagonal fixture attached") { root.isLaidOut }
+        awaitCommittedDraw(root)
+        val child = root.getChildAt(0)
+        val density = context.resources.displayMetrics.density
+        val shadow = (28f * density).roundToInt()
+        val offsetGetter = root.javaClass.declaredMethods.single { it.name.startsWith("getPanelOffset") }.apply { isAccessible = true }
+        val completed = java.util.concurrent.CountDownLatch(1)
+        val inputFrames = mutableListOf<Long>()
+        val viewports = mutableSetOf<Pair<Int, Int>>()
+        var layouts = 0
+        var failure: Throwable? = null
+        val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layouts++ }
+        main {
+            child.addOnLayoutChangeListener(listener)
+            windows.recordFrames = true
+            android.view.Choreographer.getInstance().postFrameCallback(object : android.view.Choreographer.FrameCallback {
+                var index = 0
+                override fun doFrame(time: Long) {
+                    try {
+                        val p = root.layoutParams as WindowManager.LayoutParams
+                        viewports += p.width to p.height
+                        val bounds = panel(root).inflate(shadow.toFloat())
+                        assertEquals("complete left shadow including negative viewport origin", bounds.left.roundToInt(), p.x)
+                        assertEquals(bounds.top.roundToInt(), p.y)
+                        assertEquals(bounds.right.roundToInt(), p.x + p.width)
+                        assertEquals(bounds.bottom.roundToInt(), p.y + p.height)
+                        assertEquals("fixed 28dp local origin", androidx.compose.ui.geometry.Offset(shadow.toFloat(), shadow.toFloat()), offsetGetter.invoke(root))
+                        if (index == 72) { completed.countDown(); return }
+                        inputFrames += time
+                        val sign = if ((index / 6) % 2 == 0) -1f else 1f
+                        repeat(6) { move(root, sign * 2f * density, sign * .5f * density) }
+                        index++
+                        android.view.Choreographer.getInstance().postFrameCallback(this)
+                    } catch (t: Throwable) { failure = t; completed.countDown() }
+                }
+            })
+        }
+        try {
+            assertTrue("continuous vsync input completes without per-move draw waits", completed.await(8, java.util.concurrent.TimeUnit.SECONDS))
+            failure?.let { throw it }
+            await("last continuous drag displacement consumed") {
+                root.javaClass.getDeclaredMethod("getMovePending").apply { isAccessible = true }.invoke(root) == false
+            }
+            main {
+                assertEquals("diagonal edge dragging never resizes the native surface", 1, viewports.size)
+                assertEquals("diagonal dragging preserves Compose child layout bounds", 0, layouts)
+                assertEquals(72, inputFrames.size)
+                assertTrue(inputFrames.zipWithNext().all { (a, b) -> b > a })
+                assertTrue("actual coalesced WM updates recorded", windows.updatesPerFrame.size >= 30)
+                assertTrue("at most one native update per drag vsync", windows.updatesPerFrame.values.all { it == 1 })
+                assertEquals(0f, child.translationX, 0f)
+                assertEquals(0f, child.translationY, 0f)
+                assertSame(root, windows.added.single())
+                assertTrue(windows.removals.isEmpty())
+                android.util.Log.i("NativeCallDragContinuous", "inputFrames=${inputFrames.size} wmFrames=${windows.updatesPerFrame.size} viewportSizes=$viewports childBoundsChanges=$layouts intervalsNs=${inputFrames.zipWithNext { a, b -> b - a }}")
+            }
+        } finally { main { windows.recordFrames = false; child.removeOnLayoutChangeListener(listener) } }
     }
 
     @Test fun stableNativeDragReusesLocalContentAcrossCommittedWindowMoves() {

@@ -198,6 +198,17 @@ class ManagedInputContractTest(unittest.TestCase):
         self.assertIn('image[it % width + inset, it / width + inset]', text)
         self.assertIn('testNativeFieldsKeepDraftAndSelectionWhenOutsideTapClearsFocus', text)
         self.assertNotIn('performTouchInput', text)
+        gesture = text.split('fun testLongPressAndDragDoNotDismissEditing()', 1)[1].split(
+            'fun testNativeFieldsKeepDraftAndSelectionWhenOutsideTapClearsFocus()', 1)[0]
+        self.assertLess(gesture.index('assertFalse("Real long press selects text"'),
+                        gesture.index('realTap("managed-first")'))
+        self.assertLess(gesture.index('realTap("managed-first")'),
+                        gesture.index('assertTrue("Independent long-press drag starts from a caret"'))
+        self.assertLess(gesture.index('assertTrue("Independent long-press drag starts from a caret"'),
+                        gesture.index('realDrag("managed-first")'))
+        self.assertIn('assertFalse("Real long-press drag retains a text selection", dragged.collapsed)', gesture)
+        for forbidden in ('SemanticsActions.SetSelection', 'performTextInputSelection'):
+            self.assertNotIn(forbidden, gesture)
 
     def test_real_touches_map_layout_window_bounds_to_screen_before_injection(self):
         text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ManagedInputActivityTest.kt').read_text()

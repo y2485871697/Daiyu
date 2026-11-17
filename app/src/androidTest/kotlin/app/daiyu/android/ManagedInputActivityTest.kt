@@ -651,6 +651,11 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
             val selected = node("managed-first").fetchSemanticsNode().config[
                 androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange]
             assertFalse("Real long press selects text", selected.collapsed)
+            realTap("managed-first")
+            node("managed-first").assertIsFocused()
+            val caret = node("managed-first").fetchSemanticsNode().config[
+                androidx.compose.ui.semantics.SemanticsProperties.TextSelectionRange]
+            assertTrue("Independent long-press drag starts from a caret", caret.collapsed)
             realDrag("managed-first")
             node("managed-first").assertIsFocused()
             val dragged = node("managed-first").fetchSemanticsNode().config[

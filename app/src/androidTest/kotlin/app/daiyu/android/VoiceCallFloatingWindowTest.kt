@@ -36,7 +36,26 @@ class VoiceCallFloatingWindowTest {
         val added = mutableListOf<View>()
         val removals = mutableListOf<View>()
         var updates = 0
+        var recordedFrameTimeNanos = Long.MIN_VALUE
+            private set
+        private val frameRecorder = object : android.view.Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
+                if (!recordFrames) return
+                recordedFrameTimeNanos = frameTimeNanos
+                if (recordFrames) android.view.Choreographer.getInstance().postFrameCallback(this)
+            }
+        }
         var recordFrames = false
+            set(value) {
+                field = value
+                val choreographer = android.view.Choreographer.getInstance()
+                choreographer.removeFrameCallback(frameRecorder)
+                if (value) {
+                    updatesPerFrame.clear()
+                    recordedFrameTimeNanos = Long.MIN_VALUE
+                    choreographer.postFrameCallback(frameRecorder)
+                }
+            }
         val updatesPerFrame = mutableMapOf<Long, Int>()
         var failAdd = false
         var failUpdate = false
@@ -46,8 +65,8 @@ class VoiceCallFloatingWindowTest {
             assertInputPolicy(params)
             updates++
             if (recordFrames) {
-                val frame = android.view.Choreographer.getInstance().frameTimeNanos
-                updatesPerFrame[frame] = (updatesPerFrame[frame] ?: 0) + 1
+                check(recordedFrameTimeNanos != Long.MIN_VALUE) { "drag update must follow a recorded vsync" }
+                updatesPerFrame[recordedFrameTimeNanos] = (updatesPerFrame[recordedFrameTimeNanos] ?: 0) + 1
             }
             actual.updateViewLayout(view, params)
         }
@@ -1043,6 +1062,7 @@ class VoiceCallFloatingWindowTest {
         val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layouts++ }
         main { offset = offsetGetter.invoke(root); composition.addOnLayoutChangeListener(listener); windows.recordFrames = true }
         try {
+            await("the drag frame recorder receives its first vsync") { windows.recordedFrameTimeNanos != Long.MIN_VALUE }
             repeat(40) { index ->
                 var before = 0f
                 main { before = panel(root).top; repeat(6) { move(root, 0f, if (index % 2 == 0) -.5f else .5f) } }

@@ -269,11 +269,15 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         ui.waitUntil(timeoutMillis = 8_000) {
             ui.onAllNodes(hasTestTag("chat-send") and isEnabled()).fetchSemanticsNodes().size == 1
         }
-        node("chat-send").assertIsDisplayed().assertIsEnabled().performClick()
+        dismissIme()
+        val send = node("chat-send")
+        awaitImeFrame(send, visible = false)
+        awaitNodeTouchReady(send)
+        send.performClick()
         awaitTextSendResult(activity)
+        assertDraft("")
         assertTrue("initial model session entered: ${fixture.controller.problem}", first.entered.await(30, TimeUnit.SECONDS))
         assertNull(fixture.controller.problem)
-        assertDraft("")
         val owner = checkNotNull(fixture.controller.active)
         assertEquals(1, fixture.opens.get())
         awaitReceipts()

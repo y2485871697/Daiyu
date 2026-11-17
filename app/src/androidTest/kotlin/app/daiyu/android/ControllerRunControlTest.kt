@@ -24,9 +24,11 @@ class ControllerRunControlTest:InstrumentationTestCase() {
     private fun targetContext(f: RunControlFixture, message: Message): app.daiyu.android.domain.tools.ToolExecutionContext {
         val catalog = checkNotNull(targetField(f.controller, "runTools"))
         val owner = targetField(catalog, "owner") as app.daiyu.android.domain.runtime.RunExecutionOwner
-        return app.daiyu.android.domain.tools.ToolExecutionContext(owner,
-            ToolInvocation(ToolCallId("target-notify"), "terminal_exec", "{}"),
-            app.daiyu.android.domain.tools.TaskAuthorization("test", message.runId.value)) { false }
+        val constructor = app.daiyu.android.domain.tools.ToolExecutionContext::class.java.declaredConstructors.single()
+            .apply { isAccessible = true }
+        return constructor.newInstance(owner, ToolInvocation(ToolCallId("target-notify"), "terminal_exec", "{}"),
+            app.daiyu.android.domain.tools.TaskAuthorization("test", message.runId.value), { false }) as
+            app.daiyu.android.domain.tools.ToolExecutionContext
     }
     private fun targetNotificationWindow(f: RunControlFixture) {
         val passed = java.util.concurrent.CountDownLatch(1)

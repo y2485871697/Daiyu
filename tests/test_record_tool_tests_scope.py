@@ -16,6 +16,65 @@ recorder = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(recorder)
 
 
+class ReceiptSummaryToolTestsScopeTest(unittest.TestCase):
+    def test_exact_filter_permutations_keep_all_required_contracts(self):
+        classes = recorder.RECEIPT_SUMMARY_PLATFORM_CLASSES
+        self.assertEqual(("app.daiyu.android.ToolReceiptPauseActivityTest",
+                          "app.daiyu.android.ui.screens.chat.conversation.ToolCardReadabilityTest",
+                          "app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest"), classes)
+        modules = tuple(dict.fromkeys(recorder.PAUSE_RECEIPT_MODULES + (
+            "test_reasoning_workflow_contract", "test_tool_card_html_contract", "test_streaming_freeze_contract")))
+        self.assertEqual(modules, recorder.RECEIPT_SUMMARY_MODULES)
+        for selected in itertools.permutations(classes):
+            command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))
+            self.assertEqual("receipt-summary-targeted", scope)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *modules, "-v"], command)
+
+    def test_other_filters_modes_and_existing_scopes_remain_unchanged(self):
+        classes = recorder.RECEIPT_SUMMARY_PLATFORM_CLASSES
+        raw = ",".join(classes)
+        for selected in ("", ",".join(classes[:-1]), raw + ",", " " + raw, raw + " ",
+                         raw + "," + classes[0], raw + ",app.daiyu.android.OtherTest"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=selected))[1])
+        for mode in ("", "compile", "candidate", "daily", "release", "checks", "build"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
+        for prefix, scope in (("PAUSE_RECEIPT", "pause-receipts-targeted"), ("PANE_RECEIPT", "pane-receipts-targeted")):
+            command, actual = recorder.command_for("python3", dict(SMOKE_MODE="smoke",
+                SMOKE_TEST_CLASSES=",".join(getattr(recorder, prefix + "_PLATFORM_CLASSES"))))
+            self.assertEqual(scope, actual)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *getattr(recorder, prefix + "_MODULES"), "-v"], command)
+
+    def test_receipt_keeps_exit_code_identity_and_frozen_tool_cwd(self):
+        old = Path.cwd()
+        for code in (0, 9):
+            with tempfile.TemporaryDirectory() as directory:
+                try:
+                    os.chdir(directory)
+                    env = dict(GITHUB_SHA="b" * 40, EXPECTED_SHA="a" * 40, GITHUB_RUN_ID="42",
+                        GITHUB_RUN_ATTEMPT="1", SMOKE_MODE="smoke",
+                        SMOKE_TEST_CLASSES=",".join(recorder.RECEIPT_SUMMARY_PLATFORM_CLASSES))
+                    with patch.dict(os.environ, env, clear=True), patch.object(recorder.subprocess,
+                            "check_output", return_value="a" * 40 + "\n"), patch.object(recorder.subprocess,
+                            "call", return_value=code) as call, patch.object(recorder.sys,
+                            "stdout", SimpleNamespace(buffer=io.BytesIO())):
+                        self.assertEqual(code, recorder.record("python3"))
+                    receipt = json.loads(Path("tool-evidence/receipt.json").read_text())
+                    self.assertEqual(dict(sha="a" * 40, run_id=42, attempt=1), receipt["identity"])
+                    self.assertEqual("b" * 40, receipt["workflow_sha"])
+                    self.assertEqual("b" * 40, receipt["validation_tools_sha"])
+                    self.assertEqual("receipt-summary-targeted", receipt["scope"])
+                    self.assertEqual(code, receipt["exit_code"])
+                    command = ["python3", "-B", "-m", "unittest", *recorder.RECEIPT_SUMMARY_MODULES, "-v"]
+                    self.assertEqual(command, receipt["command"])
+                    call.assert_called_once()
+                    self.assertEqual(command, call.call_args.args[0])
+                    root = Path(recorder.__file__).resolve().parents[2]
+                    self.assertEqual(root, call.call_args.kwargs["cwd"])
+                    self.assertEqual(str(root / "tests") + os.pathsep, call.call_args.kwargs["env"]["PYTHONPATH"])
+                finally:
+                    os.chdir(old)
+
+
 class RecordToolTestsScopeTest(unittest.TestCase):
     def test_runtime_stop_scope_is_exact_and_preserves_other_coverage(self):
         classes = recorder.RUNTIME_STOP_PLATFORM_CLASSES

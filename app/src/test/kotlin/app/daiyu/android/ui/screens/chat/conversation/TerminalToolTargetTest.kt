@@ -189,6 +189,53 @@ class TerminalToolTargetTest {
         }
     }
 
+    @Test fun pendingHeadersExposeUnknownEnvironmentWithoutChangingTheirReceiptState() {
+        for (mixed in listOf(false, true)) for (tool in listOf("terminal_exec", "terminal_job_start")) {
+            for (arguments in listOf("{\"command\":", "{\"environment\":\"android\"}")) {
+                val call = ToolInvocation(ToolCallId("pending-environment"), tool, arguments)
+                val live = runtimeOwner(MessageBlock.Tool(call))
+                val base = runtimeMap(listOf(live), mixed)
+                val pending = ChatTurnMapper.withStreamingOwner(base, live)
+                val original = runtimeSteps(pending).single()
+                assertEquals(ToolActivityUi.PENDING, original.displayActivity)
+                assertEquals("${original.name} · 环境待确认", original.displayName)
+                assertNull(original.executionTargetLabel)
+                for (activity in listOf(ToolActivityUi.PENDING, ToolActivityUi.QUEUED, ToolActivityUi.PREPARING)) {
+                    val step = original.copy(activity = activity)
+                    assertEquals("${original.name} · 环境待确认", step.displayName)
+                    assertEquals(activity, step.displayActivity)
+                    assertEquals(original.name, step.name)
+                }
+                val target = app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)
+                val resolved = ChatTurnMapper.withStreamingOwner(pending, live, terminalTargets = mapOf(call to target))
+                val step = runtimeSteps(resolved).single()
+                assertEquals("${original.name} · Debian • root", step.displayName)
+                assertEquals(step.name, step.displayName)
+                assertEquals(original.activity, step.activity)
+                assertEquals(original.state, step.state)
+                assertSame(resolved, ChatTurnMapper.withStreamingOwner(resolved, live, terminalTargets = mapOf(call to target)))
+            }
+        }
+    }
+
+    @Test fun pendingEnvironmentHintNeverOverridesRealTargetsOrTerminalOutcomes() {
+        val step = WorkStepUi("hint", "执行命令", "", category = "terminal")
+        for (state in WorkStepState.entries.filter { it != WorkStepState.PENDING }) {
+            val terminal = step.copy(state = state, awaitingExecutionTarget = true)
+            assertEquals(terminal.name, terminal.displayName)
+        }
+        for (activity in ToolActivityUi.entries.filter { it !in setOf(ToolActivityUi.PENDING,
+            ToolActivityUi.QUEUED, ToolActivityUi.PREPARING, ToolActivityUi.RUNNING) }) {
+            val terminal = step.copy(activity = activity, awaitingExecutionTarget = true)
+            assertEquals(terminal.name, terminal.displayName)
+        }
+        assertEquals(step.name, step.copy(category = "generic", awaitingExecutionTarget = true).displayName)
+        assertEquals(step.name, step.copy(executionTargetLabel = "Android • user", awaitingExecutionTarget = true).displayName)
+        assertEquals(step.name, step.copy(activity = ToolActivityUi.RUNNING).displayName)
+        assertEquals("${step.name} · 环境待确认",
+            step.copy(activity = ToolActivityUi.RUNNING, awaitingExecutionTarget = true).displayName)
+    }
+
     @Test fun resolvedRuntimeTargetAppearsBeforeReceiptInBothLayoutsWithoutChangingStepState() {
         val call = ToolInvocation(ToolCallId("runtime-call"), "terminal_exec", """{"environment":"android"}""")
         val live = runtimeOwner(MessageBlock.Tool(call))

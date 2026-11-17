@@ -415,6 +415,20 @@ internal fun ChatMessageList(
             resumeFollow = { if (pageActive && scrollResumed && !currentDragging) followBottom = true },
             canAnchor = { pageActive && scrollResumed && !currentDragging && !initialPositionPending && !currentRetainingRows && !currentNestedTail.migrating &&
                 (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial) && !exactNavigationOwnsScroll },
+            anchorClearance = { itemKey ->
+                val viewport = nestedStates[itemKey]
+                val list = clearanceLayout.coordinates?.takeIf { it.isAttached }
+                val placed = viewport?.viewportCoordinates?.takeIf { it.isAttached }
+                val nominalHeight = (list?.size?.height ?: 0) - currentOcclusionPx -
+                    currentFollowClearancePx - (11f * currentDensity).roundToInt()
+                if (itemKey != assistantOwnerKey || itemKey != currentTailKey || !followBottom || currentDragging ||
+                    !pageActive || !scrollResumed || initialPositionPending || currentRetainingRows ||
+                    exactNavigationOwnsScroll || currentOcclusionPx <= 0 || viewport == null || !viewport.bounded ||
+                    viewport.migrating || viewport.contentHeight !in 1..nominalHeight || list == null || placed == null ||
+                    currentScrollSerial != consumedScrollSerial && currentScrollSerial != null) null
+                else list.localPositionOf(placed, Offset.Zero).y + viewport.contentHeight - viewport.scrollOffset.roundToInt() -
+                    (list.size.height - currentOcclusionPx - currentFollowClearancePx)
+            },
             correctAnchor = { itemKey, remaining ->
                 var consumed = 0f
                 if (clearanceLayout.active && !clearanceLayout.correcting && nestedStates[itemKey]?.migrating != true) {

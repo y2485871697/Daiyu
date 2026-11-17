@@ -47,6 +47,7 @@ internal class WorkflowDisclosureViewport(
     val resumeFollow: () -> Unit,
     val canAnchor: () -> Boolean,
     val correctAnchor: (String, () -> Float) -> Float,
+    val anchorClearance: (String) -> Float? = { null },
 ) {
     var followingOnPress = false
     var diagnostics: () -> String = { "" }
@@ -159,15 +160,21 @@ internal class WorkflowDisclosureMotion(
             viewport.active = null
             return true
         }
-        if (settling || abs(anchorDelta()) > .5f) {
+        if (settling || abs(anchorDelta()) > .5f || (viewport.anchorClearance(context.itemKey) ?: 0f) > .5f) {
             correctingAnchor = true
             try {
                 lastConsumed = viewport.correctAnchor(context.itemKey) {
-                    anchorDelta().also { lastRequested = it }
+                    val anchor = anchorDelta()
+                    val delta = maxOf(anchor, viewport.anchorClearance(context.itemKey) ?: anchor)
+                    // Keep the same scroll owner when the editor raises its safe bottom.
+                    val shift = delta - anchor
+                    anchorTop -= shift
+                    anchorBottom -= shift
+                    delta.also { lastRequested = it }
                 }
             } finally { correctingAnchor = false }
         }
-        return abs(anchorDelta()) <= .5f
+        return abs(anchorDelta()) <= .5f && (viewport.anchorClearance(context.itemKey) ?: 0f) <= .5f
     }
 
     private fun chooseDirection(following: Boolean): Boolean {

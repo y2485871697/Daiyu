@@ -32,6 +32,13 @@ internal class AndroidUniversalPlayback(
     @Volatile private var releaseFailure: Throwable? = null
     private var finalBody = false // control-thread confined
     private var received = ""
+    @Volatile private var bodyText = ""
+    private var queuedEnd = 0
+    private var spokenListener: ((Int) -> Unit)? = null
+    override fun observeSpoken(listener: (Int) -> Unit) { spokenListener = listener }
+    private fun spoken(end: Int) = post {
+        if (!closed.get() && allowed()) spokenListener?.invoke(end)
+    }
     private val outputReleasing = AtomicBoolean(false)
     @Volatile private var outputClosed = false
     @Volatile private var outputFailure: Throwable? = null
@@ -48,11 +55,17 @@ internal class AndroidUniversalPlayback(
         finally { outputReleasing.set(false) }
     }
     private val trackedOutput = object : SpeechOutput by output {
-        override fun speak(text: String, events: SpeechOutput.Events) = output.speak(text, object : SpeechOutput.Events {
-            override fun started() { playbackProgress.incrementAndGet(); events.started() }
-            override fun completed() { playbackProgress.incrementAndGet(); events.completed() }
-            override fun failed(reason: String) = events.failed(reason)
-        })
+        override fun speak(text: String, events: SpeechOutput.Events) {
+            val start = bodyText.indexOf(text, queuedEnd).takeIf { it >= 0 } ?: queuedEnd
+            val end = start + text.length
+            queuedEnd = end
+            output.speak(text, object : SpeechOutput.Events {
+                override fun started() { playbackProgress.incrementAndGet(); spoken(start); events.started() }
+                override fun progress(spokenCharacters: Int) { spoken(start + spokenCharacters.coerceIn(0, text.length)) }
+                override fun completed() { playbackProgress.incrementAndGet(); spoken(end); events.completed() }
+                override fun failed(reason: String) = events.failed(reason)
+            })
+        }
         override fun stop() = releaseOutput(false)
         override fun close() = releaseOutput(true)
     }
@@ -80,6 +93,7 @@ internal class AndroidUniversalPlayback(
         check(text.length <= 100_000)
         if (!allowed()) { finish(false); return }
         if (finalBody) return
+        bodyText = text
         if (complete) {
             finalBody = true // Before done: empty final may complete synchronously.
             // VoiceChain cannot undo already committed audio, including a final correction to empty.

@@ -65,6 +65,7 @@ class ProductionSpeechOutput internal constructor(
     private class Request(val id: String, val events: SpeechOutput.Events) {
         var started = false // main-confined
         var terminal = false // main-confined
+        var spokenCharacters = 0
     }
     private val lock = Any()
     private val playerOwner = UUID.randomUUID().toString()
@@ -120,9 +121,15 @@ class ProductionSpeechOutput internal constructor(
         if (player !== source || !current(request) || request.terminal ||
             state.owner != playerOwner || state.requestId != request.id) return
         when (state.phase) {
-            SpeechPhase.SPEAKING -> if (!request.started) {
-                request.started = true
-                dispatchEvent { if (current(request)) request.events.started() }
+            SpeechPhase.SPEAKING -> {
+                if (!request.started) {
+                    request.started = true
+                    dispatchEvent { if (current(request)) request.events.started() }
+                }
+                if (state.spokenCharacters > request.spokenCharacters) {
+                    request.spokenCharacters = state.spokenCharacters
+                    dispatchEvent { if (current(request)) request.events.progress(state.spokenCharacters) }
+                }
             }
             SpeechPhase.COMPLETED -> terminal(request, null)
             SpeechPhase.ERROR, SpeechPhase.UNAVAILABLE -> terminal(request,

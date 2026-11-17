@@ -11,6 +11,7 @@ import app.daiyu.android.domain.Message
 import app.daiyu.android.domain.MessageBlock
 import app.daiyu.android.domain.RunStatus
 import java.util.concurrent.atomic.AtomicBoolean
+import org.json.JSONObject
 import kotlinx.coroutines.*
 
 /** Only exact assistant Text blocks; no protocol/reasoning/tools/history-segment/user text. */
@@ -29,10 +30,40 @@ internal fun universalAssistantBody(owner: VoiceAssistantOwner, message: Message
         app.daiyu.android.domain.RequestReasoningEffort.entries.firstOrNull { it.unsupportedMessage == message.error }
         else null
     return VoiceAssistantBody(owner, message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("") { it.text },
-        status, unsupportedReasoning = unsupportedReasoning, responseFailure = voiceResponseFailure(message, status),
+        status, searchCompletion = browserSearchCompletion(message, status),
+        unsupportedReasoning = unsupportedReasoning, responseFailure = voiceResponseFailure(message, status),
         browsing = status == VoiceBodyStatus.STREAMING && message.blocks.filterIsInstance<MessageBlock.Tool>().any {
             it.invocation.name in setOf("browser_read", "browser_write") && it.result == null
         })
+}
+
+/** The browser adapter emits this envelope only after its result and persistence are confirmed. */
+private fun browserSearchCompletion(message: Message, status: VoiceBodyStatus): String? {
+    if (status !in setOf(VoiceBodyStatus.STREAMING, VoiceBodyStatus.COMPLETE)) return null
+    if (message.blocks.filterIsInstance<MessageBlock.Tool>().any {
+        it.invocation.name in setOf("browser_read", "browser_write") && it.result == null
+    }) return null
+    val tool = message.blocks.filterIsInstance<MessageBlock.Tool>().lastOrNull {
+        it.invocation.name in setOf("browser_read", "browser_write")
+    } ?: return null
+    val payload = tool.result?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
+    if (payload.opt("text") !is String || payload.optJSONObject("browser_control") == null ||
+        !payload.optBoolean("ok", true) || payload.has("error")) return null
+    return "browser:${message.runId.value}:${tool.invocation.id.value}"
+}
+
+/** Retain the last new receipt while either source is busy; old source snapshots cannot replay it. */
+internal class VoiceCallSearchActivity {
+    private var browser: String? = null
+    private var native: String? = null
+    private var completion: String? = null
+    fun project(body: VoiceAssistantBody, search: VoiceNativeSearchState): VoiceAssistantBody {
+        body.searchCompletion?.takeIf { it != browser }?.let { browser = it; completion = it }
+        search.completion?.takeIf { it != native }?.let { native = it; completion = "native:$it" }
+        return body.withNativeSearch(search).copy(searchCompletion = completion.takeIf {
+            body.status in setOf(VoiceBodyStatus.STREAMING, VoiceBodyStatus.COMPLETE)
+        })
+    }
 }
 
 private val knownResponseFailures = ModelFailure.entries.map { it.userMessage } +
@@ -65,7 +96,7 @@ internal fun voiceResponseFailure(message: Message, status: VoiceBodyStatus): St
 
 internal fun VoiceAssistantBody.withNativeSearch(search: VoiceNativeSearchState): VoiceAssistantBody = copy(
     searching = status == VoiceBodyStatus.STREAMING && search.searching,
-    searchCompletion = search.completion.takeIf { status in setOf(VoiceBodyStatus.STREAMING, VoiceBodyStatus.COMPLETE) })
+    searchCompletion = (search.completion ?: searchCompletion).takeIf { status in setOf(VoiceBodyStatus.STREAMING, VoiceBodyStatus.COMPLETE) })
 
 /**
  * Optional ready-to-mount parent observer. Subscribes before replay; terminal persisted body is
@@ -85,6 +116,7 @@ internal class AndroidUniversalOwnerObserver(
         var read: Job? = null
         var currentBody: VoiceAssistantBody? = null
         var searchState = controller.nativeSearchState(owner)
+        val activity = VoiceCallSearchActivity()
         fun matching(value: Message?) = value?.takeIf {
             it.role == Message.ASSISTANT_ROLE && it.id.value == owner.messageId &&
                 it.runId.value == owner.runId && it.conversationId.value == owner.conversationId
@@ -95,7 +127,7 @@ internal class AndroidUniversalOwnerObserver(
             catch (_: Exception) { VoiceAssistantBody(owner, "", VoiceBodyStatus.UNKNOWN) }
             snapshot?.let { value ->
                 currentBody = value
-                body(value.withNativeSearch(searchState))
+                body(activity.project(value, searchState))
             }
         }
         val listener: () -> Unit = listener@{
@@ -138,7 +170,7 @@ internal class AndroidUniversalOwnerObserver(
             if (!closed.get()) {
                 searchState = search
                 currentBody?.takeIf { it.status == VoiceBodyStatus.STREAMING }?.let {
-                    body(it.withNativeSearch(search))
+                    body(activity.project(it, search))
                 }
             }
         }

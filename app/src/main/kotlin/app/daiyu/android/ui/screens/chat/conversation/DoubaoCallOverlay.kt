@@ -107,6 +107,7 @@ data class DoubaoCallUi(
     val replyTextComplete: Boolean = false,
     val transcriptTextComplete: Boolean = false,
     val browsing: Boolean = false,
+    val replySpokenCharacters: Int? = null,
     val skipEntryAnimation: Boolean = false,
 )
 
@@ -253,7 +254,7 @@ private fun DoubaoCallSession(
     val captionsRunning = !closing && !mini && state.captionsEnabled
     val captions = key(picture.captionEpoch) {
         rememberCallCaptionReveal(picture.transcript, picture.transcriptTextComplete, captionsRunning) to
-            rememberCallCaptionReveal(picture.reply, picture.replyTextComplete, captionsRunning)
+            rememberCallCaptionReveal(picture.reply, picture.replyTextComplete, captionsRunning, picture.replySpokenCharacters)
     }
     SideEffect {
         if (!closing) {
@@ -505,7 +506,7 @@ private fun callClock(state: DoubaoCallUi): String {
     return "${(seconds / 60).toString().padStart(2, '0')}:${(seconds % 60).toString().padStart(2, '0')}"
 }
 
-private fun DoubaoCallUi.statusDetail(): String = if (compressing) "压缩完成后自动恢复麦克风" else if (searching) "正在查询相关信息" else if (browsing) "正在浏览网页" else reason?.takeIf { it.isNotBlank() } ?: when (visualState) {
+private fun DoubaoCallUi.statusDetail(): String = if (compressing) "压缩完成后自动恢复麦克风" else if (searching || browsing) "正在查询相关信息" else reason?.takeIf { it.isNotBlank() } ?: when (visualState) {
     DoubaoCallVisualState.LISTENING -> if (muted) "麦克风已关闭" else "不用着急，我一直在这里"
     DoubaoCallVisualState.RESPONDING -> "正在回应你的话"
     DoubaoCallVisualState.MUTED -> "麦克风已关闭"
@@ -514,7 +515,7 @@ private fun DoubaoCallUi.statusDetail(): String = if (compressing) "压缩完成
 }
 
 private fun DoubaoCallUi.statusLabel(dots: Int): String = if (compressing) "正在压缩" + ".".repeat(dots)
-    else if (searching) "正在搜索" + ".".repeat(dots) else if (browsing) "正在浏览" + ".".repeat(dots) else when (visualState) {
+    else if (searching || browsing) "正在搜索" + ".".repeat(dots) else when (visualState) {
     DoubaoCallVisualState.LISTENING -> "我在听，你说"
     DoubaoCallVisualState.RESPONDING -> if (modelSelectable) "正在回应" else "豆包正在回应"
     DoubaoCallVisualState.MUTED -> "麦克风已静音"
@@ -554,7 +555,7 @@ private fun ExpandedCallContent(
             Row(Modifier.weight(1f).fillMaxHeight().then(if (state.modelSelectable) Modifier else dragHandle),
                 verticalAlignment = Alignment.CenterVertically) {
                 Row(Modifier.testTag("voice-call-select-model").then(if (state.modelSelectable)
-                    Modifier.combinedClickable(enabled = enabled, role = Role.Button, onClick = actions.onSelectModel,
+                    Modifier.combinedClickable(enabled = enabled, role = Role.Button, interactionSource = null, indication = null, onClick = actions.onSelectModel,
                         onLongClickLabel = "调整思考深度", onLongClick = actions.onModelLongPress) else Modifier),
                     verticalAlignment = Alignment.CenterVertically) {
                     Text(state.title, Modifier.testTag("voice-call-model-title"), color = CallInk,
@@ -915,7 +916,7 @@ internal fun FloatingVoiceCallContent(state: DoubaoCallUi, actions: DoubaoCallAc
             state.searching, state.searchCompletion?.takeUnless { it == initialSearch }, state.captionEpoch, browsing = state.browsing)
         val captions = key(state.captionEpoch) {
             rememberCallCaptionReveal(state.transcript, state.transcriptTextComplete, enabled && !mini && state.captionsEnabled) to
-                rememberCallCaptionReveal(state.reply, state.replyTextComplete, enabled && !mini && state.captionsEnabled)
+                rememberCallCaptionReveal(state.reply, state.replyTextComplete, enabled && !mini && state.captionsEnabled, state.replySpokenCharacters)
         }
         val drag by rememberUpdatedState(onDrag)
         val handle = Modifier.pointerInput(enabled) {

@@ -35,6 +35,8 @@ class VoiceCallControllerTest {
         val observations = mutableListOf<Observation>()
         class Output(val drained: () -> Unit, val failed: () -> Unit) : VoiceControlPlayback {
             val bodies = mutableListOf<Pair<String, Boolean>>()
+            var spoken: ((Int) -> Unit)? = null
+            override fun observeSpoken(listener: (Int) -> Unit) { spoken = listener }
             override var progress = 0L
             override var drainTimeoutMillis = 0L
             var closes = 0
@@ -138,6 +140,55 @@ class VoiceCallControllerTest {
         assertEquals(expected to true, f.outputs.single().bodies.last())
         assertTrue(c.state.value.active)
         c.stop(c.state.value.permitId!!)
+    }
+
+    @Test fun bareSourcesStayOutOfEveryTelephoneSnapshot() {
+        val examples = listOf(
+            "答复。（prod.mirrordaily.news）" to "答复。",
+            "答复。(prod.mirrordaily.news)" to "答复。",
+            "答复。（来源：prod.mirrordaily.news）" to "答复。",
+            "好。prod.mirrordaily.news/story?q=1#part 可以。" to "好。 可以。",
+            "答复。example.com/a,2026年增长。" to "答复。,2026年增长。",
+            "答复。https://example.com/a,2026年增长。" to "答复。,2026年增长。",
+            "答复。a.com,b.com 可以。" to "答复。, 可以。",
+            "好。[prod.mirrordaily.news](https://example.org) 可以。" to "好。 可以。",
+            "建议（如果天气允许）明天出门。" to "建议（如果天气允许）明天出门。",
+            "GPT-5、OpenAI、2026年、3.14、v1.2.3。" to "GPT-5、OpenAI、2026年、3.14、v1.2.3。")
+        for ((raw, expected) in examples) {
+            var previous = ""
+            for (end in 0..raw.length) {
+                val shown = app.daiyu.android.voice.VoiceCallOutput.text(raw.take(end), false)
+                assertTrue("stable at $end: $shown", shown.startsWith(previous))
+                assertTrue("source-free at $end: $shown", expected.startsWith(shown))
+                previous = shown
+            }
+            assertEquals(expected, app.daiyu.android.voice.VoiceCallOutput.text(raw, true))
+        }
+        val f = Fake(); val c = VoiceCallController(f)
+        c.start(profile); f.flush(); f.finishRecognition(); f.accept(owner)
+        val raw = "答复。（prod.mirrordaily.news）"
+        for (end in 0..raw.length) {
+            f.body(owner, raw.take(end))
+            assertEquals(c.state.value.reply, f.outputs.last().bodies.last().first)
+            assertTrue("答复。".startsWith(c.state.value.reply))
+        }
+        f.body(owner, raw, VoiceBodyStatus.COMPLETE)
+        assertEquals("答复。", c.state.value.reply)
+        assertEquals("答复。" to true, f.outputs.last().bodies.last())
+    }
+
+    @Test fun generatedBodyCannotAdvanceCaptionsWithoutOwnedPlaybackProgress() {
+        val f = Fake(); val c = VoiceCallController(f)
+        c.start(profile); f.flush(); f.finishRecognition(); f.accept(owner)
+        f.body(owner, "第一句。第二句。", VoiceBodyStatus.COMPLETE)
+        assertEquals(0, c.state.value.replySpokenCharacters)
+        f.outputs.last().spoken?.invoke(2); f.flush()
+        assertEquals(2, c.state.value.replySpokenCharacters)
+        val old = f.outputs.last().spoken
+        f.recognitions.last().speechStarted(); f.flush()
+        assertEquals(0, c.state.value.replySpokenCharacters)
+        old?.invoke(8); f.flush()
+        assertEquals(0, c.state.value.replySpokenCharacters)
     }
 
     @Test fun referenceOnlyTelephoneAnswerDrainsEmptyAndTheNextAnswerHasAFreshProjection() {

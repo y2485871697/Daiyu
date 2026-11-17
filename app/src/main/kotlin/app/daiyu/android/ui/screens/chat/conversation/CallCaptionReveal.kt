@@ -20,7 +20,13 @@ internal class CallCaptionTypingState {
 }
 
 @Composable
-internal fun rememberCallCaptionReveal(text: String, complete: Boolean, running: Boolean): State<String> {
+internal fun rememberCallCaptionReveal(text: String, complete: Boolean, running: Boolean,
+    spokenCharacters: Int? = null): State<String> {
+    if (spokenCharacters != null) {
+        var end = spokenCharacters.coerceIn(0, text.length)
+        if (end > 0 && end < text.length && text[end - 1].isHighSurrogate() && text[end].isLowSurrogate()) end--
+        return rememberUpdatedState(text.take(end))
+    }
     val motion = remember { CallCaptionTypingState() }
     val target = remember(text, complete) { motion.update(text, complete) }
     val boundaries = remember(text) { MarkdownTextBoundaries(text) }

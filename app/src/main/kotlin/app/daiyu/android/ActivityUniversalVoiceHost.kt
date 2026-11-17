@@ -252,6 +252,7 @@ internal class ActivityUniversalVoiceHost(
                     base.speak(text, object : SpeechOutput.Events {
                         override fun started() { if (allowed()) events.started() else events.failed("universal_output_revoked") }
                         override fun completed() { if (allowed()) events.completed() else events.failed("universal_output_revoked") }
+                        override fun progress(spokenCharacters: Int) { if (allowed()) events.progress(spokenCharacters) }
                         override fun failed(reason: String) = events.failed(reason)
                     })
                 }

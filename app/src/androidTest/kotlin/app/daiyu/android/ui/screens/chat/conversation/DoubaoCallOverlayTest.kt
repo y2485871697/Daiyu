@@ -207,6 +207,51 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         ui.onNodeWithTag("doubao-call-status").assertTextEquals("连接遇到问题")
     }
 
+    fun testModelSelectorHasNoPressedBackgroundAndKeepsClickAction() {
+        mount(initialState = session().copy(title = "GPT", modelSelectable = true))
+        finishOpening()
+        val model = ui.onNodeWithTag("voice-call-select-model")
+        val before = captureScreenNode(model).toPixelMap()
+        model.performTouchInput { down(center) }
+        ui.mainClock.advanceTimeBy(180L); ui.waitForIdle()
+        val pressed = captureScreenNode(model).toPixelMap()
+        assertEquals(before.width, pressed.width); assertEquals(before.height, pressed.height)
+        for (y in 0 until before.height) for (x in 0 until before.width) assertEquals(before[x, y], pressed[x, y])
+        model.performTouchInput { up() }
+        model.assertHasClickAction()
+    }
+
+    fun testTelephoneCaptionsRevealOnlyPlayedTextEvenAfterBodyCompletes() {
+        val full = "已经生成但尚未朗读的回答。\n".repeat(35)
+        mount(400.dp, initialState = session().copy(modelSelectable = true, visualState = DoubaoCallVisualState.RESPONDING,
+            reply = full, replyTextComplete = true, replySpokenCharacters = 0))
+        finishOpening()
+        ui.mainClock.advanceTimeBy(3_000L)
+        ui.onNodeWithTag("call-caption-reply").assertTextEquals("")
+        mainThread { call = call!!.copy(replySpokenCharacters = 7) }
+        ui.mainClock.advanceTimeBy(160L); ui.waitForIdle()
+        ui.onNodeWithTag("call-caption-reply").assertTextEquals(full.take(7))
+        mainThread { call = call!!.copy(reply = full + "更多尚未播放的文字") }
+        ui.mainClock.advanceTimeBy(3_000L)
+        ui.onNodeWithTag("call-caption-reply").assertTextEquals(full.take(7))
+        mainThread { call = call!!.copy(replySpokenCharacters = 200) }
+        advanceOverlayFrames(24)
+        ui.onNodeWithTag("call-caption-reply").assertTextEquals(full.take(200))
+        val caption = ui.onNodeWithTag("doubao-call-caption-area")
+        val scroll = scrollPosition(caption)
+        assertTrue("Played captions must overflow", scroll.second > 0f)
+        assertEquals(scroll.second, scroll.first, 1f)
+        caption.performTouchInput { swipe(Offset(center.x, height * .25f), Offset(center.x, height * .8f), 400L) }
+        advanceOverlayFrames(32)
+        val reading = scrollPosition(caption)
+        assertTrue("Manual reading must move off the played line", reading.first < scroll.first - 1f)
+        mainThread { call = call!!.copy(replySpokenCharacters = full.length) }
+        advanceOverlayFrames(32)
+        val after = scrollPosition(caption)
+        assertTrue("Playback must continue adding lines", after.second > reading.second)
+        assertEquals("Playback must not override manual reading", reading.first, after.first, 1f)
+    }
+
     fun testModelChevronActualInkIsCenteredBesideModelTitle() {
         mount(initialState = session().copy(title = "GPT", modelSelectable = true))
         finishOpening()
@@ -1077,27 +1122,29 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
     }
 
 
-    fun testBrowserBusyIsVisibleAndDoesNotManufactureSearchSuccess() {
+    fun testBrowserSearchUsesNativeSearchPresentationAndRetainsPendingCompletion() {
         mount(initialState = session().copy(title = "DeepSeek", modelSelectable = true, browsing = true))
         finishOpening()
-        ui.onNodeWithTag("voice-call-browsing").assertExists()
-        ui.onNodeWithTag("voice-call-searching").assertDoesNotExist()
+        ui.onNodeWithTag("voice-call-searching").assertExists()
+        ui.onNodeWithTag("doubao-call-status").assertTextContains("正在搜索", substring = true)
+        ui.onNodeWithTag("doubao-call-status-detail").assertTextEquals("正在查询相关信息")
+        ui.onNodeWithText("正在浏览").assertDoesNotExist()
         ui.onNodeWithTag("voice-call-searched").assertDoesNotExist()
         ui.onNodeWithTag("doubao-call-minimize").performClick().also { awaitVisualIdle() }
-        ui.onNodeWithTag("voice-call-browsing").assertExists()
+        ui.onNodeWithTag("voice-call-searching").assertExists()
         ui.onNodeWithTag("doubao-call-expand").performClick().also { awaitVisualIdle() }
-        ui.onNodeWithTag("voice-call-browsing").assertExists()
-        mainThread { call = call!!.copy(browsing = false) }
+        mainThread { call = call!!.copy(searchCompletion = "browser-complete") }
         ui.mainClock.advanceTimeBy(320L)
-        ui.onNodeWithTag("voice-call-browsing").assertDoesNotExist()
+        ui.onNodeWithTag("voice-call-searching").assertExists()
         ui.onNodeWithTag("voice-call-searched").assertDoesNotExist()
-        mainThread { call = call!!.copy(searchCompletion = "native-complete") }
-        ui.mainClock.advanceTimeBy(320L)
-        ui.onNodeWithTag("voice-call-searched").assertExists()
+        mainThread { call = call!!.copy(browsing = false, visualState = DoubaoCallVisualState.RESPONDING) }
+        ui.mainClock.advanceTimeBy(500L); ui.waitForIdle()
+        assertSmallSuccessGlyph("voice-call-searched")
+        ui.onNodeWithTag("doubao-call-status").assertTextEquals("正在回应")
+        ui.mainClock.advanceTimeBy(2_700L)
         mainThread { call = call!!.copy(browsing = true) }
         ui.mainClock.advanceTimeBy(320L)
-        ui.onNodeWithTag("voice-call-browsing").assertExists()
-        ui.onNodeWithTag("voice-call-searched").assertDoesNotExist()
+        ui.onNodeWithTag("voice-call-searching").assertExists()
         mainThread { call = call!!.copy(browsing = false) }
         ui.mainClock.advanceTimeBy(320L)
         ui.onNodeWithTag("voice-call-searched").assertDoesNotExist()
@@ -1119,11 +1166,10 @@ class DoubaoCallOverlayTest : ComposeActivityTestCase() {
         for (presentation in listOf(DoubaoCallPresentation.EXPANDED, DoubaoCallPresentation.MINI)) {
             mainThread { call = session().copy(presentation = presentation, modelSelectable = true, browsing = true) }
             ui.mainClock.advanceTimeBy(400L); ui.waitForIdle()
-            ui.onNodeWithTag("voice-call-browsing").assertExists()
+            ui.onNodeWithTag("voice-call-searching").assertExists()
             mainThread { call = call!!.copy(searching = true) }
             ui.mainClock.advanceTimeBy(400L); ui.waitForIdle()
             ui.onNodeWithTag("voice-call-searching").assertExists()
-            ui.onNodeWithTag("voice-call-browsing").assertDoesNotExist()
             mainThread { call = call!!.copy(compressing = true) }
             ui.mainClock.advanceTimeBy(400L); ui.waitForIdle()
             ui.onNodeWithTag("voice-call-compressing").assertExists()

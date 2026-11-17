@@ -109,6 +109,34 @@ class RemoteVoiceHostPlayerAudioFocusTest {
         return media.last()
     }
 
+    @Test fun telephoneCaptionsPrepareTheFullTrackInsteadOfStreamingUnknownDuration() {
+        host.closeStrict()
+        val transport = object : app.daiyu.android.voice.providers.VoiceHttpStreamingTransport {
+            override fun execute(request: app.daiyu.android.voice.providers.VoiceHttpRequest, maxResponseBytes: Int): VoiceHttpResponse {
+                requests++
+                return VoiceHttpResponse(200, synthesizedContentType, synthesizedAudio)
+            }
+            override fun stream(request: app.daiyu.android.voice.providers.VoiceHttpRequest, maxResponseBytes: Int):
+                kotlinx.coroutines.flow.Flow<app.daiyu.android.voice.providers.VoiceHttpChunk> = error("telephone must prepare full audio")
+        }
+        host = RemoteVoiceHostPlayer(context, scope, runtime, FrozenVoiceSpeech(config), transport,
+            pcmFactory = { _, _ -> error("telephone must not stream PCM") }, temporaryVoiceOwner = "caption-test")
+            .also { it.bindOwner("owner") }
+        val (player, shadow) = preparing("call-caption")
+        assertEquals(1, requests)
+        assertEquals(0, host.state.value.spokenCharacters)
+        assertFalse(player.isPlaying)
+        shadow.invokePreparedListener()
+        assertTrue(player.isPlaying)
+        assertEquals(SpeechPhase.SPEAKING, host.state.value.phase)
+        dispatcher.scheduler.runCurrent()
+        assertEquals(0, host.state.value.spokenCharacters)
+        host.closeStrict()
+        dispatcher.scheduler.advanceTimeBy(100)
+        dispatcher.scheduler.runCurrent()
+        assertEquals(SpeechPhase.STOPPED, host.state.value.phase)
+    }
+
     @Test fun personalPreparedDurationDiagnosticDistinguishesInvalidAndOverCapBeforeStart() {
         for (duration in listOf(-1, 0, 15_000, 15_001)) {
             val file = File.createTempFile("personal-cap-", ".json", context.cacheDir).apply { delete() }

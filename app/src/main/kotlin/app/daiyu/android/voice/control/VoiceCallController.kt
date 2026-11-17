@@ -34,6 +34,7 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         var captionEpoch = 0L
         var transcript = ""
         var reply = ""
+        var replySpokenCharacters = 0
         var replyTextComplete = false
         var transcriptTextComplete = false
         var searching = false
@@ -143,7 +144,8 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
             searching = session.searching, searchCompletion = session.searchCompletion,
             replyTextComplete = session.replyTextComplete, transcriptTextComplete = session.transcriptTextComplete,
             responseFailed = session.responseFailed, unsupportedReasoning = session.unsupportedReasoning,
-            responseFailure = session.responseFailure, browsing = session.browsing)
+            responseFailure = session.responseFailure, browsing = session.browsing,
+            replySpokenCharacters = session.replySpokenCharacters)
     }
     private fun listen(session: Call) {
         if (!current(session) || session.input != null || session.pending != null || session.compressing || session.muted || session.modelPicker) return
@@ -264,6 +266,12 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
                     if (current(session) && session.answer === answer) end(session, VoiceControlStopReason.PLAYBACK_FAILED)
                 } })
             if (!current(session) || session.answer !== answer) { playback.closeAndDrain(); return }
+            playback.observeSpoken { end -> post {
+                if (current(session) && session.answer === answer) {
+                    session.replySpokenCharacters = maxOf(session.replySpokenCharacters, end.coerceIn(0, session.reply.length))
+                    publish(session)
+                }
+            } }
             answer.playback = playback
             val observation = ports.observe(answer.owner) { value -> post { body(session, answer, value) } }
             if (current(session) && session.answer === answer) answer.observation = observation else observation.cancel()
@@ -331,6 +339,7 @@ internal class VoiceCallController(private val ports: VoiceControlPorts) : AutoC
         input.speech = true
         session.captionEpoch++
         session.reply = ""
+        session.replySpokenCharacters = 0
         session.replyTextComplete = false
         session.transcriptTextComplete = false
         session.responseFailed = false; session.unsupportedReasoning = null; session.responseFailure = null

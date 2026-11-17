@@ -55,6 +55,7 @@ interface VoiceControlRecognition {
 enum class VoiceControlFailureStage { ADMISSION, RESPONSE, DRAIN, PLAYBACK, RECOGNITION, RELEASE }
 
 interface VoiceControlPlayback {
+    fun observeSpoken(listener: (Int) -> Unit) {}
     /** Real player starts/completions, not enqueues or body updates. */
     val progress: Long get() = 0L
     /** A production adapter may need synthesis + preparation + playback for one sentence. */

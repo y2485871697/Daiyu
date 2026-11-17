@@ -59,6 +59,20 @@ class SpeechPlaybackControllerTest {
         fun ready(error: SpeechError? = null) { engine.onReady(error); drain() }
     }
 
+    @Test fun onlyCurrentUtteranceRangeAdvancesSpokenCharacters() {
+        val f = Fixture(); f.play(text = "甲乙丙丁"); f.ready()
+        val old = f.engine.spoken.last().second
+        assertEquals(0, f.state.spokenCharacters)
+        f.engine.event(SpeechEvent.START); f.drain()
+        f.engine.event(SpeechEvent.RANGE, code = 2); f.drain()
+        assertEquals(2, f.state.spokenCharacters)
+        f.engine.event(SpeechEvent.RANGE, code = 1); f.drain()
+        assertEquals(2, f.state.spokenCharacters)
+        f.play("next", "新句子")
+        f.engine.event(SpeechEvent.RANGE, token = old, code = 4); f.drain()
+        assertEquals(0, f.state.spokenCharacters)
+    }
+
     @Test fun bindingAndPrewarmingNeverSpeakAutomatically() {
         val f = Fixture()
         assertEquals(SpeechPhase.IDLE, f.state.phase)

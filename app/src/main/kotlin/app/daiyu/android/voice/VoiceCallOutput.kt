@@ -18,6 +18,10 @@ internal object VoiceCallOutput {
     private val number = Regex("\\d+(?:[,，–-]\\d+)*")
     private val sourceListPrefix = Regex("^\\d+(?:[.)]\\s*)?$")
 
+    private val bareDomain = Regex("""(?i)^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}(?::[0-9]{1,5})?(?:[/\?#].*)?$""")
+    private fun asciiAlnum(c: Char) = c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9'
+    private fun domainChar(c: Char) = asciiAlnum(c) || c in "._~:/?#%@!$&*+=-"
+
     /** Withhold undecided tails so a split URL or citation is never submitted to speech. */
     fun text(raw: String, complete: Boolean): String = buildString {
         var at = 0
@@ -34,10 +38,28 @@ internal object VoiceCallOutput {
                 }
                 if (!complete && headers.any { it.startsWith(rest, ignoreCase = true) }) break
             }
+            if (raw[at] == '(' || raw[at] == '（') {
+                val open = raw[at]
+                val close = if (open == '(') ')' else '）'
+                var end = at + 1
+                var depth = 1
+                while (end < raw.length && depth > 0) {
+                    if (raw[end] == open) depth++
+                    if (raw[end] == close) depth--
+                    end++
+                }
+                if (depth > 0 && !complete) break
+                val inner = text(raw.substring(at + 1, if (depth == 0) end - 1 else end), true).trim()
+                if (inner.isNotEmpty() && headers.none { it.equals(inner, ignoreCase = true) }) {
+                    append(open); append(inner)
+                    if (depth == 0) append(close)
+                }
+                at = end; continue
+            }
             val scheme = schemes.firstOrNull { raw.regionMatches(at, it, 0, it.length, ignoreCase = true) }
             if (scheme != null) {
                 at += scheme.length
-                while (at < raw.length && !raw[at].isWhitespace() && raw[at] !in "<>，。！？；、") at++
+                while (at < raw.length && !raw[at].isWhitespace() && raw[at] !in "<>,，。！？；、") at++
                 continue
             }
             if (!complete && raw.length - at < 8 && schemes.any {
@@ -82,6 +104,15 @@ internal object VoiceCallOutput {
                     val label = raw.substring(at + 1, end)
                     if ('†' in label || number.matches(label)) { at = end + 1; continue }
                 }
+            }
+            if (asciiAlnum(raw[at])) {
+                var end = at + 1
+                while (end < raw.length && domainChar(raw[end])) end++
+                if (end == raw.length && !complete) break
+                val token = raw.substring(at, end)
+                val core = token.trimEnd('.', ',', '!', ':')
+                if (bareDomain.matches(core)) append(token.substring(core.length)) else append(token)
+                at = end; continue
             }
             append(raw[at++])
         }

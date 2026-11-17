@@ -80,6 +80,9 @@ private class AndroidSpeechBackend(
                             override fun onStart(utteranceId: String?) {
                                 utteranceId?.let { onEvent(it, SpeechEvent.START, null) }
                             }
+                            override fun onRangeStart(utteranceId: String?, start: Int, end: Int, frame: Int) {
+                                utteranceId?.let { onEvent(it, SpeechEvent.RANGE, end) }
+                            }
                             override fun onDone(utteranceId: String?) {
                                 utteranceId?.let { onEvent(it, SpeechEvent.DONE, null) }
                             }

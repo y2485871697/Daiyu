@@ -38,6 +38,8 @@ class ProductionSpeechOutputTest {
     private class Events : SpeechOutput.Events {
         var starts = 0; var completes = 0
         val failures = mutableListOf<String>()
+        val progress = mutableListOf<Int>()
+        override fun progress(spokenCharacters: Int) { progress += spokenCharacters }
         override fun started() { starts++ }
         override fun completed() { completes++ }
         override fun failed(reason: String) { failures += reason }
@@ -53,6 +55,21 @@ class ProductionSpeechOutputTest {
             { commands.addLast(it) }, { it() }, { events.addLast(it) })
         fun main() { while (commands.isNotEmpty()) commands.removeFirst()() }
         fun callbacks() { while (events.isNotEmpty()) events.removeFirst()() }
+    }
+
+    @Test fun playbackPositionIsForwardedOnlyForCurrentSpeakingRequest() {
+        val f = Fixture(owner); val e = Events()
+        f.output.speak("甲乙丙丁", e); f.main()
+        val p = f.players.single()
+        p.state.value = SpeechPlaybackState(p.owner, p.id, SpeechPhase.QUEUED, spokenCharacters = 4)
+        f.callbacks(); assertTrue(e.progress.isEmpty())
+        p.state.value = SpeechPlaybackState(p.owner, p.id, SpeechPhase.SPEAKING, spokenCharacters = 2)
+        f.callbacks(); assertEquals(listOf(2), e.progress)
+        p.state.value = SpeechPlaybackState(p.owner, "stale", SpeechPhase.SPEAKING, spokenCharacters = 4)
+        f.callbacks(); assertEquals(listOf(2), e.progress)
+        f.output.close()
+        p.state.value = SpeechPlaybackState(p.owner, p.id, SpeechPhase.SPEAKING, spokenCharacters = 4)
+        f.callbacks(); assertEquals(listOf(2), e.progress)
     }
 
     @Test fun acceptanceAndQueuedAreNotStartedOnlyMatchingSpeakingIsEvidence() {

@@ -21,7 +21,7 @@ enum class PlaybackEvidence(val wireValue: String) {
 interface SpeechOutput {
     val startedEvidence: PlaybackEvidence get() = PlaybackEvidence.UNSPECIFIED_CALLBACK
     /** started reports the adapter's stated evidence, NOT guaranteed rendered/audible samples. */
-    interface Events { fun started(); fun completed(); fun failed(reason: String) }
+    interface Events { fun started(); fun completed(); fun failed(reason: String); fun progress(spokenCharacters: Int) {} }
     fun speak(text: String, events: Events)
     fun stop()
     fun close()

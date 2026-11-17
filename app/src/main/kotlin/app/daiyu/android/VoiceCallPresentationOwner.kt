@@ -35,6 +35,7 @@ internal class VoiceCallPresentationOwner {
                 else -> DoubaoCallVisualState.LISTENING
             },
             transcript = value.transcript, reply = value.reply, captionEpoch = value.captionEpoch,
+            replySpokenCharacters = value.replySpokenCharacters,
             replyTextComplete = value.replyTextComplete, transcriptTextComplete = value.transcriptTextComplete, muted = value.muted, speaker = speaker,
             compressing = compressing,
             searching = value.searching, searchCompletion = value.searchCompletion, browsing = value.browsing,

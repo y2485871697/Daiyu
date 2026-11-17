@@ -47,6 +47,35 @@ class AndroidUniversalPlaybackTest {
         fun flush() { var count = 0; while (true) { val action = queue.poll() ?: return; check(++count < 100); action() } }
     }
 
+    @Test fun captionsFollowPlaybackRangesNotQueuedOrGeneratedText() {
+        val f = Fixture()
+        val positions = mutableListOf<Int>()
+        f.playback.observeSpoken { positions += it }
+        f.playback.body("同一句。同一句。", true); f.flush()
+        assertTrue(positions.isEmpty())
+        f.output.requests[0].second.started(); f.flush()
+        assertEquals(listOf(0), positions)
+        f.output.requests[0].second.progress(2); f.flush()
+        assertEquals(2, positions.last())
+        f.output.complete(0); f.flush()
+        assertEquals(4, positions.last())
+        f.output.requests[1].second.started(); f.flush()
+        f.output.requests[1].second.progress(2); f.flush()
+        assertEquals(6, positions.last())
+        f.playback.closeAndDrain()
+        val count = positions.size
+        f.output.requests[1].second.progress(4); f.flush()
+        assertEquals(count, positions.size)
+    }
+
+    @Test fun audioPositionInterpolationIsBoundedAndNeverSplitsEmoji() {
+        assertEquals(0, app.daiyu.android.voice.speechProgressCharacters("甲😀乙", 0, 100))
+        assertEquals(1, app.daiyu.android.voice.speechProgressCharacters("甲😀乙", 50, 100))
+        assertEquals(3, app.daiyu.android.voice.speechProgressCharacters("甲😀乙", 80, 100))
+        assertEquals(4, app.daiyu.android.voice.speechProgressCharacters("甲😀乙", 120, 100))
+        assertEquals(0, app.daiyu.android.voice.speechProgressCharacters("甲", 5, 0))
+    }
+
     @Test fun personalLongAnswerDrainsOnlyAfterEveryShortTrackActuallyCompletes() {
         val f = Fixture(segmentCodePoints = 32)
         val text = "很长的搜索结果回答".repeat(20) + "。"

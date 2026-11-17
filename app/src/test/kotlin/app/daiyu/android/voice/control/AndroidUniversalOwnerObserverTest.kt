@@ -91,11 +91,49 @@ class AndroidUniversalOwnerObserverTest {
         val completedNative = body.withNativeSearch(VoiceNativeSearchState(false, "native-receipt"))
         assertTrue(completedNative.browsing); assertEquals("native-receipt", completedNative.searchCompletion)
         val result = checkNotNull(universalAssistantBody(owner, pending.copy(blocks = listOf(
-            MessageBlock.Tool(invocation, "confirmed"))), false)).withNativeSearch(VoiceNativeSearchState())
-        assertFalse(result.browsing); assertNull(result.searchCompletion)
+            MessageBlock.Tool(invocation, """{"text":"confirmed","filePath":null,"browser_control":{"revision":1}}"""))), false)).withNativeSearch(VoiceNativeSearchState())
+        assertFalse(result.browsing); assertEquals("browser:run:browser", result.searchCompletion)
         val failed = checkNotNull(universalAssistantBody(owner, pending.copy(status = RunStatus.FAILED), false))
             .withNativeSearch(VoiceNativeSearchState(true, "late"))
         assertFalse(failed.browsing); assertFalse(failed.searching); assertNull(failed.searchCompletion)
+    }
+
+    @Test fun browserCompletionRequiresLatestPositiveReceiptAndNoPendingTool() {
+        val invocation = ToolInvocation(ToolCallId("browser"), "browser_read", "{}")
+        val confirmed = """{"text":"readable","browser_control":{"revision":1}}"""
+        for (result in listOf(null, "confirmed", ModelHistory.UNKNOWN_TOOL_RESULT,
+            """{"ok":false,"executed":false,"error":"cancelled"}""")) {
+            val source = message().copy(blocks = listOf(MessageBlock.Tool(invocation, result)))
+            assertNull(universalAssistantBody(owner, source, false)?.searchCompletion)
+        }
+        val done = message().copy(blocks = listOf(MessageBlock.Tool(invocation, confirmed)))
+        assertEquals("browser:run:browser", universalAssistantBody(owner, done, false)?.searchCompletion)
+        assertEquals("browser:run:browser", universalAssistantBody(owner, done.copy(status = RunStatus.COMPLETED), false)?.searchCompletion)
+        assertNull(universalAssistantBody(owner, done.copy(status = RunStatus.STOPPED), false)?.searchCompletion)
+        val recovered = done.copy(blocks = listOf(MessageBlock.Tool(invocation.copy(id = ToolCallId("failed")),
+            """{"ok":false,"error":"rejected"}"""), MessageBlock.Text("retry", "重新查询。")) + done.blocks)
+        assertEquals("browser:run:browser", universalAssistantBody(owner, recovered, false)?.searchCompletion)
+        assertNull(universalAssistantBody(owner, done.copy(blocks = listOf(
+            MessageBlock.Tool(invocation.copy(id = ToolCallId("earlier-pending")))) + done.blocks), false)?.searchCompletion)
+        val adjacentRecovery = recovered.copy(blocks = recovered.blocks.filterNot { it is MessageBlock.Text })
+        assertEquals("browser:run:browser", universalAssistantBody(owner, adjacentRecovery, false)?.searchCompletion)
+        assertNull(universalAssistantBody(owner, done.copy(blocks = done.blocks +
+            MessageBlock.Tool(invocation.copy(id = ToolCallId("pending")))), false)?.searchCompletion)
+    }
+
+    @Test fun mergedReceiptsSurviveBusySnapshotsWithoutReplayingTheOtherSource() {
+        val activity = VoiceCallSearchActivity()
+        val idle = VoiceAssistantBody(owner, "", VoiceBodyStatus.STREAMING)
+        val browser = idle.copy(searchCompletion = "browser:run:one")
+        assertNull(activity.project(idle.copy(browsing = true), VoiceNativeSearchState()).searchCompletion)
+        assertEquals("browser:run:one", activity.project(browser, VoiceNativeSearchState()).searchCompletion)
+        assertEquals("browser:run:one", activity.project(browser, VoiceNativeSearchState(true)).searchCompletion)
+        assertEquals("native:one", activity.project(browser, VoiceNativeSearchState(false, "one")).searchCompletion)
+        assertEquals("native:one", activity.project(browser, VoiceNativeSearchState()).searchCompletion)
+        assertEquals("native:one", activity.project(idle.copy(browsing = true), VoiceNativeSearchState()).searchCompletion)
+        assertEquals("browser:run:two", activity.project(browser.copy(searchCompletion = "browser:run:two"),
+            VoiceNativeSearchState()).searchCompletion)
+        assertNull(activity.project(idle.copy(status = VoiceBodyStatus.CANCELLED), VoiceNativeSearchState()).searchCompletion)
     }
 
 }

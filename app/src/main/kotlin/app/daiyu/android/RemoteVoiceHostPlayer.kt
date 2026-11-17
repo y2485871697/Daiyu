@@ -38,6 +38,7 @@ internal class RemoteVoiceHostPlayer(
     private var owner: String? = null
     private var job: Job? = null
     private var deadline: Job? = null
+    private var progressJob: Job? = null
     private var pcm: StreamingPcmPlayer? = null
     private var player: MediaPlayer? = null
     private var focus: SpeechAudioFocus? = null
@@ -75,7 +76,8 @@ internal class RemoteVoiceHostPlayer(
         }
         val synthesisJob = scope.launch(Dispatchers.Main.immediate) {
             try {
-                if (config.speech().engine == SpeechEngine.DOUBAO && !DoubaoSpeech.usesCreate(config.model) &&
+                // Telephone captions need the complete track duration before playback starts.
+                if (temporaryVoiceOwner == null && config.speech().engine == SpeechEngine.DOUBAO && !DoubaoSpeech.usesCreate(config.model) &&
                     frozen.upload == null && transport is VoiceHttpStreamingTransport) {
                     streamPcm(owner, requestId, text, transport)
                     return@launch
@@ -185,6 +187,13 @@ internal class RemoteVoiceHostPlayer(
                         source.start()
                         diagnostics?.recordAsync(DiagnosticEvent.SPEECH_NATIVE_STARTED)
                         mutable.value = SpeechPlaybackState(owner, requestId, SpeechPhase.SPEAKING)
+                        progressJob = scope.launch(Dispatchers.Main.immediate) {
+                            while (!closed && player === source && mutable.value.requestId == requestId) {
+                                val shown = speechProgressCharacters(text, source.currentPosition.toLong(), source.duration.toLong())
+                                if (shown > mutable.value.spokenCharacters) mutable.value = mutable.value.copy(spokenCharacters = shown)
+                                delay(40)
+                            }
+                        }
                         // Secondary wall-clock cutoff as well as rejecting over-limit media durations.
                         if (closed || player !== source) return@setOnPreparedListener
                         deadline = scope.launch(Dispatchers.Main.immediate) {
@@ -333,6 +342,7 @@ internal class RemoteVoiceHostPlayer(
         val oldFocus = focus; focus = null
         val oldJob = job; job = null
         val oldDeadline = deadline; deadline = null
+        val oldProgress = progressJob; progressJob = null
         val oldPcm = pcm; pcm = null
         val p = player; player = null
         val oldFile = file; file = null
@@ -340,7 +350,7 @@ internal class RemoteVoiceHostPlayer(
         releasing = true
         try {
             try {
-                oldJob?.cancel(); oldDeadline?.cancel()
+                oldJob?.cancel(); oldDeadline?.cancel(); oldProgress?.cancel()
                 try { oldPcm?.closeStrict() } finally {
                     try { p?.reset() } finally {
                         try { p?.release() } finally {

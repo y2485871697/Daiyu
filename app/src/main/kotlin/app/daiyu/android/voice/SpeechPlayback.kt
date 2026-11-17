@@ -19,6 +19,7 @@ data class SpeechPlaybackState(
     val phase: SpeechPhase = SpeechPhase.IDLE,
     val error: SpeechError? = null,
     val platformErrorCode: Int? = null,
+    val spokenCharacters: Int = 0,
 )
 
 internal interface SpeechBackend {
@@ -30,7 +31,15 @@ internal interface SpeechBackend {
     fun shutdown()
 }
 
-internal enum class SpeechEvent { START, DONE, STOP, ERROR }
+internal enum class SpeechEvent { START, DONE, STOP, ERROR, RANGE }
+
+/** Audio-position interpolation for engines that do not provide word timestamps. */
+internal fun speechProgressCharacters(text: String, position: Long, duration: Long): Int {
+    if (duration <= 0 || position <= 0) return 0
+    val points = text.codePointCount(0, text.length)
+    val shown = (points.toDouble() * position.coerceAtMost(duration) / duration).toInt().coerceIn(0, points)
+    return text.offsetByCodePoints(0, shown)
+}
 
 /**
  * Single-threaded controller; only backend callbacks cross threads, through [dispatch].
@@ -178,6 +187,9 @@ internal class SpeechPlaybackController(
                     if (isCurrentEngine(instance, generation) && token == activeToken) {
                         when (event) {
                             SpeechEvent.START -> publish(SpeechPhase.SPEAKING, state.value.requestId)
+                            SpeechEvent.RANGE -> if (state.value.phase == SpeechPhase.SPEAKING && code != null && code >= 0) {
+                                mutableState.value = state.value.copy(spokenCharacters = maxOf(state.value.spokenCharacters, code))
+                            }
                             SpeechEvent.DONE -> finish(SpeechPhase.COMPLETED)
                             SpeechEvent.STOP -> finish(SpeechPhase.STOPPED)
                             SpeechEvent.ERROR -> {

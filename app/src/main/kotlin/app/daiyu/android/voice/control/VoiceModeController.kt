@@ -22,7 +22,7 @@ data class VoiceControlState(val phase: VoiceControlPhase = VoiceControlPhase.OF
     val unsupportedReasoning: app.daiyu.android.domain.RequestReasoningEffort? = null,
     val replyTextComplete: Boolean = false, val transcriptTextComplete: Boolean = false,
     val failureStage: VoiceControlFailureStage? = null, val responseFailed: Boolean = false,
-    val responseFailure: String? = null, val browsing: Boolean = false) {
+    val responseFailure: String? = null, val browsing: Boolean = false, val replySpokenCharacters: Int? = null) {
     val active: Boolean get() = phase != VoiceControlPhase.OFF && phase != VoiceControlPhase.STOPPED
 }
 

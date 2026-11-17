@@ -196,10 +196,10 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             assertFalse(visibleText().contains(text))
             ui.onNodeWithText("正在思考…").assertExists()
             ui.onNodeWithText("已思考").assertDoesNotExist()
-            ui.onNodeWithTag("reported-reasoning-duration:queued-final").assertTextEquals("1.1s")
+            ui.onNodeWithTag("reported-reasoning-duration:queued-final", useUnmergedTree = true).assertTextEquals("1.1s")
             await { visibleText().contains(text) }
             ui.onNodeWithText("已思考").assertExists()
-            ui.onNodeWithTag("reported-reasoning-duration:queued-final").assertTextEquals("1.1s")
+            ui.onNodeWithTag("reported-reasoning-duration:queued-final", useUnmergedTree = true).assertTextEquals("1.1s")
         } finally { ui.mainClock.autoAdvance = true }
     }
 
@@ -227,10 +227,10 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             await { advances > 0 }
             assertFalse(visibleText().contains(text))
             ui.onNodeWithText("正在思考…").assertExists()
-            ui.onNodeWithTag("reported-reasoning-duration:queued-collapsed").assertTextEquals("1.1s")
+            ui.onNodeWithTag("reported-reasoning-duration:queued-collapsed", useUnmergedTree = true).assertTextEquals("1.1s")
             await { visibleText().contains(text) }
             ui.onNodeWithText("已思考").assertExists()
-            ui.onNodeWithTag("reported-reasoning-duration:queued-collapsed").assertTextEquals("1.1s")
+            ui.onNodeWithTag("reported-reasoning-duration:queued-collapsed", useUnmergedTree = true).assertTextEquals("1.1s")
         } finally { ui.mainClock.autoAdvance = true }
     }
 

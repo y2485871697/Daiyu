@@ -152,7 +152,10 @@ data class WorkStepUi(
     val executionTargetLabel: String? = null,
     /** Stable per-render occurrence key; invocation ids may repeat in restored history. */
     val renderKey: String = id,
+    val awaitingExecutionTarget: Boolean = false,
 ) {
+    val displayActivity: ToolActivityUi get() =
+        if (awaitingExecutionTarget && activity == ToolActivityUi.RUNNING) ToolActivityUi.PREPARING else activity
     val toolCallId: String get() = id
 }
 

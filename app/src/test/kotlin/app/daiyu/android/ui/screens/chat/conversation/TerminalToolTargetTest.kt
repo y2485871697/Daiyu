@@ -153,6 +153,42 @@ class TerminalToolTargetTest {
     private fun runtimeMap(messages: List<Message>, mixed: Boolean = false, cache: ToolPresentationCache? = null) =
         ChatTurnMapper.map(messages, presentations = cache, dedicatedTool = { _, _ -> if (mixed) "runtime-test" else null })
 
+    @Test fun everyExecutingHeaderSnapshotAlreadyHasItsResolvedTarget() {
+        for (mixed in listOf(false, true)) for (tool in listOf("terminal_exec", "terminal_job_start")) {
+            val call = ToolInvocation(ToolCallId("first-frame"), tool, """{"environment":"android"}""")
+            val live = runtimeOwner(MessageBlock.Tool(call))
+            val base = ChatTurnMapper.map(listOf(live),
+                dedicatedTool = { _, _ -> if (mixed) "runtime-test" else null },
+                toolReceipt = { _, _ -> ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING) })
+            val preparing = ChatTurnMapper.withStreamingOwner(base, live,
+                phase = app.daiyu.android.domain.runtime.ExecutionPhase.TOOL_EXECUTING)
+            runtimeSteps(preparing).forEach {
+                assertEquals(ToolActivityUi.RUNNING, it.activity)
+                assertEquals(ToolActivityUi.PREPARING, it.displayActivity)
+                assertNull(it.executionTargetLabel)
+            }
+            val target = app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)
+            // Production may reuse the last projected turns when only runtime metadata changes.
+            val executing = ChatTurnMapper.withStreamingOwner(preparing, live,
+                phase = app.daiyu.android.domain.runtime.ExecutionPhase.TOOL_EXECUTING,
+                terminalTargets = mapOf(call to target))
+            runtimeSteps(executing).forEach {
+                assertEquals(ToolActivityUi.RUNNING, it.displayActivity)
+                assertEquals("Debian • root", it.executionTargetLabel)
+                assertTrue(it.name.endsWith(" · Debian • root"))
+                assertFalse(it.awaitingExecutionTarget)
+            }
+            for (activity in listOf(ToolActivityUi.PAUSING, ToolActivityUi.PAUSED, ToolActivityUi.STOPPING,
+                    ToolActivityUi.STOPPED, ToolActivityUi.INTERRUPTED, ToolActivityUi.WAITING,
+                    ToolActivityUi.SUCCESS, ToolActivityUi.UNKNOWN, ToolActivityUi.FAILED, ToolActivityUi.NOT_EXECUTED)) {
+                runtimeSteps(preparing).forEach { step ->
+                    assertEquals(activity, step.copy(activity = activity).displayActivity)
+                }
+            }
+            assertNull(live.blocks.filterIsInstance<MessageBlock.Tool>().single().result)
+        }
+    }
+
     @Test fun resolvedRuntimeTargetAppearsBeforeReceiptInBothLayoutsWithoutChangingStepState() {
         val call = ToolInvocation(ToolCallId("runtime-call"), "terminal_exec", """{"environment":"android"}""")
         val live = runtimeOwner(MessageBlock.Tool(call))
@@ -183,13 +219,33 @@ class TerminalToolTargetTest {
         val output = RunningTerminalTargets.project(base, live, mapOf(call to target))
         assertSame(base.first(), output.first())
         assertTrue(runtimeSteps(listOf(output.last())).all { it.executionTargetLabel == "Debian • root" })
-        assertSame(base, RunningTerminalTargets.project(base, live, mapOf(call.copy(arguments = "{}") to target)))
+        val unresolved = RunningTerminalTargets.project(base, live, mapOf(call.copy(arguments = "{}") to target))
+        assertSame(base.first(), unresolved.first())
+        val own = runtimeSteps(listOf(unresolved.last()))
+        assertTrue(own.all { it.executionTargetLabel == null })
+        assertEquals(runtimeSteps(listOf(base.last())).map { it.name }, own.map { it.name })
         val repeated = live.copy(blocks = listOf(MessageBlock.Tool(call.copy(arguments = "{}"), "{}"), MessageBlock.Tool(call)))
         val duplicates = runtimeMap(listOf(repeated), mixed = true)
         assertSame(duplicates, RunningTerminalTargets.project(duplicates, repeated, mapOf(call to target)))
         val earlier = live.copy(blocks = listOf(MessageBlock.Tool(call.copy(arguments = "{}"))))
         val merged = runtimeMap(listOf(earlier, live), mixed = true)
         assertSame(merged, RunningTerminalTargets.project(merged, live, mapOf(call to target)))
+    }
+
+    @Test fun ambiguousRunningOccurrencesWaitWithoutBorrowingAnotherTargetsLabel() {
+        val call = ToolInvocation(ToolCallId("ambiguous"), "terminal_exec", "{}")
+        val live = runtimeOwner(MessageBlock.Tool(call), MessageBlock.Tool(call.copy(arguments = "{\"command\":\"other\"}")))
+        val target = app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)
+        val base = ChatTurnMapper.map(listOf(live), dedicatedTool = { _, _ -> "ambiguous-test" },
+            toolReceipt = { _, _ -> ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING) })
+        val displayed = RunningTerminalTargets.project(base, live, mapOf(call to target))
+        val steps = runtimeSteps(displayed)
+        assertTrue(steps.isNotEmpty())
+        steps.forEach {
+            assertNull(it.executionTargetLabel)
+            assertTrue(it.awaitingExecutionTarget)
+            assertEquals(ToolActivityUi.PREPARING, it.displayActivity)
+        }
     }
 
     @Test fun runtimeTargetLeavesCachedPresentationsCleanAndFinalReceiptAuthoritative() {

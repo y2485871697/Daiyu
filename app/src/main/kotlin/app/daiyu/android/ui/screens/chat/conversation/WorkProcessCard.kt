@@ -205,19 +205,20 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
     visibility.targetState = expanded
     val disclosure = rememberWorkflowDisclosureMotion(step.renderKey, visibility)
     val detailExtent = remember(step.renderKey) { WorkflowCollapseExtent() }
-    val running = step.activity in setOf(ToolActivityUi.RUNNING, ToolActivityUi.PREPARING, ToolActivityUi.PAUSING, ToolActivityUi.PAUSED)
+    val activity = step.displayActivity
+    val running = activity in setOf(ToolActivityUi.RUNNING, ToolActivityUi.PREPARING, ToolActivityUi.PAUSING, ToolActivityUi.PAUSED)
     val tint = when {
         step.state == WorkStepState.FAILED -> colors.error
         step.state == WorkStepState.OK -> colors.success
         running -> colors.accent
-        step.activity in setOf(ToolActivityUi.WAITING, ToolActivityUi.UNKNOWN) -> colors.warning
+        activity in setOf(ToolActivityUi.WAITING, ToolActivityUi.UNKNOWN) -> colors.warning
         else -> colors.muted
     }
-    val stateLabel = when (step.activity) {
+    val stateLabel = when (activity) {
         ToolActivityUi.STOPPING -> "所属运行停止中"
         ToolActivityUi.STOPPED -> "所属运行已停止"
         ToolActivityUi.INTERRUPTED -> "所属运行已中断"
-        else -> step.activity.label
+        else -> activity.label
     }
     Row(Modifier.fillMaxWidth().testTag("tool-step:${step.toolCallId}").then(disclosure.containerModifier).drawBehind {
         if (showConnector) drawLine(colors.line,
@@ -226,7 +227,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
     }, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(Modifier.padding(top = 17.dp).width(12.dp), contentAlignment = Alignment.TopStart) {
             val terminal = step.state == WorkStepState.OK || step.state == WorkStepState.FAILED
-            val spinning = flowRunning && !terminal && LocalWorkflowNodeMotionEnabled.current && step.activity in setOf(ToolActivityUi.PENDING,
+            val spinning = flowRunning && !terminal && LocalWorkflowNodeMotionEnabled.current && activity in setOf(ToolActivityUi.PENDING,
                 ToolActivityUi.QUEUED, ToolActivityUi.PREPARING, ToolActivityUi.RUNNING, ToolActivityUi.WAITING,
                 ToolActivityUi.PAUSING, ToolActivityUi.STOPPING)
             val ring = running && !terminal

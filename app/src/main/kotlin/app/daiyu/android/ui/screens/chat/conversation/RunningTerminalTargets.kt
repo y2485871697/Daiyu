@@ -9,7 +9,7 @@ import org.json.JSONObject
 
 internal object RunningTerminalTargets {
     fun project(turns: List<ChatTurnUi>, owner: Message?, targets: Map<ToolInvocation, TerminalExecutionTarget>): List<ChatTurnUi> {
-        if (owner == null || owner.role != Message.ASSISTANT_ROLE || owner.status != RunStatus.RUNNING || targets.isEmpty()) return turns
+        if (owner == null || owner.role != Message.ASSISTANT_ROLE || owner.status != RunStatus.RUNNING) return turns
         val scope = WorkStepOwnerUi(owner.conversationId.value, owner.runId.value, owner.id.value)
         val renderedKeys = mutableMapOf<String, MutableSet<String>>()
         fun record(value: WorkStepUi) {
@@ -30,12 +30,15 @@ internal object RunningTerminalTargets {
                 val label = TerminalToolTarget.from(block.invocation.name, receipt)?.label ?: return@mapNotNull null
                 id to (block.invocation.name to label)
             }.toMap()
-        if (pending.isEmpty()) return turns
         fun step(value: WorkStepUi): WorkStepUi {
-            if (value.owner != scope || value.executionTargetLabel != null || value.category !in setOf("terminal", "background_job")) return value
-            val (tool, label) = pending[value.id] ?: return value
-            if (tool != value.toolName) return value
-            return value.copy(name = "${value.name} · $label", executionTargetLabel = label)
+            if (value.owner != scope || value.category !in setOf("terminal", "background_job")) return value
+            val label = pending[value.id]?.takeIf { it.first == value.toolName }?.second
+            val awaiting = value.executionTargetLabel == null && value.state == WorkStepState.PENDING &&
+                value.activity == ToolActivityUi.RUNNING && value.toolName in setOf("terminal_exec", "terminal_job_start")
+            if (label == null || value.executionTargetLabel != null) {
+                return if (value.awaitingExecutionTarget == awaiting) value else value.copy(awaitingExecutionTarget = awaiting)
+            }
+            return value.copy(name = "${value.name} · $label", executionTargetLabel = label, awaitingExecutionTarget = false)
         }
         fun content(items: List<MessageContentUi>): List<MessageContentUi> = items.map { item ->
             if (item !is MessageContentUi.Tool) item else {

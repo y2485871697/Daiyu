@@ -11,6 +11,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -124,6 +125,117 @@ class ToolOperationCardTest : WiredActivityTestCase() {
             assertEquals(0, executions)
         }
     }
+    private data class TerminalHeaderDraw(val description: String, val texts: List<String>, val headers: Int)
+
+    private fun androidx.compose.ui.semantics.SemanticsNode.walkHeaders(): Sequence<androidx.compose.ui.semantics.SemanticsNode> = sequence {
+        yield(this@walkHeaders)
+        for (child in children) yieldAll(child.walkHeaders())
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun verifyFirstExecutingDraw(mixed: Boolean, reconnect: Boolean, tool: String) {
+        val fixtureKey = "first-$mixed-$reconnect-$tool"
+        val call = ToolInvocation(ToolCallId(fixtureKey), tool, """{"environment":"android"}""")
+        val live = Message(MessageId(fixtureKey), ConversationId("header-frame"), RunId(fixtureKey),
+            Message.ASSISTANT_ROLE, listOf(MessageBlock.Tool(call)), RunStatus.RUNNING)
+        val reconnects = if (!reconnect) emptyList() else listOf(app.daiyu.android.timeline.ChatTimelineEntry.Reconnect(
+            "$fixtureKey-reconnect", app.daiyu.android.timeline.TimelineAnchor(
+                live.conversationId.value, live.runId.value, live.id.value, 0), 1L,
+            "succeeded", 10L, "network", 0, "model", app.daiyu.android.timeline.ReconnectPosition(0)))
+        val turns = androidx.compose.runtime.mutableStateOf<List<ChatTurnUi>>(emptyList())
+        val frames = java.util.concurrent.ConcurrentLinkedQueue<TerminalHeaderDraw>()
+        val wasDrawing = androidx.test.platform.graphics.HardwareRendererCompat.isDrawingEnabled()
+        androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    for (turn in turns.value.filterIsInstance<ChatTurnUi.Assistant>()) {
+                        if (reconnects.isEmpty()) AssistantTurn(turn, ChatScreenActions())
+                        else ReconnectedAssistantTurn(turn, reconnectParts(turn, reconnects), ChatScreenActions())
+                    }
+                }
+            }
+        } }
+        val root = ui.onRoot(useUnmergedTree = true).fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest
+        val view = root.view
+        val tag = "tool-step-header:${call.id.value}"
+        var expectedPrefix = ""
+        var latch = java.util.concurrent.CountDownLatch(1)
+        val listener = android.view.ViewTreeObserver.OnDrawListener {
+            val headers = root.semanticsOwner.unmergedRootSemanticsNode.walkHeaders().filter {
+                it.config.getOrNull(SemanticsProperties.TestTag) == tag
+            }.toList()
+            if (headers.isNotEmpty()) {
+                val header = headers.first()
+                val sample = TerminalHeaderDraw(
+                    header.config.getOrNull(SemanticsProperties.StateDescription).orEmpty(),
+                    header.walkHeaders().flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty().asSequence() }
+                        .map { it.text }.toList(), headers.size)
+                frames.add(sample)
+                android.util.Log.i("TerminalFirstDraw", "$fixtureKey frame=${frames.size} $sample")
+                if (sample.description.startsWith(expectedPrefix)) {
+                    val done = latch
+                    if (android.os.Build.VERSION.SDK_INT >= 29 && view.isHardwareAccelerated) {
+                        view.viewTreeObserver.registerFrameCommitCallback { done.countDown() }
+                    } else view.post { done.countDown() }
+                }
+            }
+        }
+        fun drawSnapshot(value: List<ChatTurnUi>, prefix: String) {
+            val done = java.util.concurrent.CountDownLatch(1)
+            instrumentation.runOnMainSync { expectedPrefix = prefix; latch = done; turns.value = value }
+            repeat(24) {
+                if (done.count == 0L) return@repeat
+                ui.mainClock.advanceTimeByFrame()
+                instrumentation.runOnMainSync { view.invalidate() }
+                done.await(50, java.util.concurrent.TimeUnit.MILLISECONDS)
+            }
+            assertTrue("No actual header draw for $prefix: $frames", done.await(2, java.util.concurrent.TimeUnit.SECONDS))
+        }
+        ui.mainClock.autoAdvance = false
+        try {
+            instrumentation.runOnMainSync { view.viewTreeObserver.addOnDrawListener(listener) }
+            val base = ChatTurnMapper.map(listOf(live), reconnects = reconnects,
+                dedicatedTool = { _, _ -> if (mixed) "runtime-test" else null },
+                toolReceipt = { _, _ -> ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING) })
+            val preparing = ChatTurnMapper.withStreamingOwner(base, live,
+                phase = app.daiyu.android.domain.runtime.ExecutionPhase.TOOL_EXECUTING)
+            drawSnapshot(preparing, "准备中 ·")
+            assertFalse("Active-before-target must never render an executing header", frames.any { it.description.startsWith("执行中 ·") })
+            val executing = ChatTurnMapper.withStreamingOwner(preparing, live,
+                phase = app.daiyu.android.domain.runtime.ExecutionPhase.TOOL_EXECUTING,
+                terminalTargets = mapOf(call to app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)))
+            drawSnapshot(executing, "执行中 ·")
+            val allFrames = frames.toList()
+            assertTrue(allFrames.isNotEmpty())
+            assertTrue("Each path renders exactly one tool header", allFrames.all { it.headers == 1 })
+            val executingFrames = allFrames.filter { it.description.startsWith("执行中 ·") }
+            assertTrue("Must record the first actual executing draw", executingFrames.isNotEmpty())
+            executingFrames.forEach { sample ->
+                assertTrue("No executing draw may precede its target label: $sample", sample.texts.any { it.endsWith(" · Debian • root") })
+            }
+            val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/terminal-first-frame").apply { mkdirs() }
+            java.io.File(directory, "$fixtureKey.txt").writeText(allFrames.mapIndexed { index, sample -> "$index $sample" }.joinToString("\n"))
+            instrumentation.uiAutomation.takeScreenshot()?.let { bitmap ->
+                try { java.io.File(directory, "$fixtureKey.png").outputStream().use {
+                    bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                } } finally { bitmap.recycle() }
+            }
+            assertNull(live.blocks.filterIsInstance<MessageBlock.Tool>().single().result)
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            instrumentation.runOnMainSync { view.viewTreeObserver.removeOnDrawListener(listener) }
+            ui.mainClock.autoAdvance = true
+            androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(wasDrawing)
+        }
+    }
+
+    fun testFirstExecutingHeaderDrawIncludesItsRealTargetInBothPathsAndReconnect() {
+        for (mixed in listOf(false, true)) for (reconnect in listOf(false, true)) {
+            for (tool in listOf("terminal_exec", "terminal_job_start")) verifyFirstExecutingDraw(mixed, reconnect, tool)
+        }
+    }
+
     fun testReceiptTargetLabelsRenderInBothProductionPathsWithoutReexecution() {
         var executions = 0
         for (mixed in listOf(false, true)) for ((name, target) in listOf(

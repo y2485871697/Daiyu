@@ -98,7 +98,8 @@ internal fun ReportedReasoningCard(
             val sourceWindow = LocalReasoningSourceWindows.current[summary.itemId]
             val projection = rememberMarkdownProjection(listOf(text), streaming = streamingProjection, windows = listOf(sourceWindow))
             val revealGate = parentExpanded && !manuallyCollapsed && (!stopped || currentOverride == true)
-            val revealEnabled = arrived && revealGate && hasReportedReasoningText(text)
+            val revealEnabled = arrived && revealGate && hasReportedReasoningText(text) &&
+                (isThinking || observedLive || currentOverride == true)
             var observedDisplayLive by remember(revealGate, revealResetEpoch) { mutableStateOf(isThinking) }
             SideEffect { if (isThinking) observedDisplayLive = true }
             val queuedForArrival = remember(revealGate, revealResetEpoch) { !arrived && !stopped }
@@ -112,7 +113,7 @@ internal fun ReportedReasoningCard(
                         onVisibleAdvance = onVisibleAdvance,
                         enabled = revealEnabled,
                         allowBaselinePrefix = false,
-                        live = isThinking,
+                        live = isThinking || queuedForArrival,
                         paceTerminal = queuedForArrival,
                         initialBaseline = if (queuedForArrival) emptyList() else null,
                     )

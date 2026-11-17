@@ -203,6 +203,37 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         } finally { ui.mainClock.autoAdvance = true }
     }
 
+    fun testQueuedCollapsedTerminalThoughtDoesNotAdvanceUntilOpened() {
+        val text = "折叠排队摘要" + "甲".repeat(160)
+        prepare(text)
+        val appearance = WorkflowToolAppearance(true)
+        var advances = 0
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    ReportedReasoningCard("queued-collapsed", listOf(ReportedReasoning("r", text, 1100L)),
+                        appearance = appearance, onVisibleAdvance = { advances++ })
+                }
+            } }
+            ui.mainClock.advanceTimeBy(32)
+            mainThread { appearance.arrived = true; appearance.settled = true }
+            ui.mainClock.advanceTimeBy(1_000)
+            assertEquals(0, advances)
+            ui.onNodeWithText("已思考").assertExists()
+            ui.onNodeWithText("正在思考…").assertDoesNotExist()
+            ui.onNodeWithTag("reported-reasoning-content:queued-collapsed").assertDoesNotExist()
+            ui.onNodeWithTag("reported-reasoning-header:queued-collapsed").performClick()
+            await { advances > 0 }
+            assertFalse(visibleText().contains(text))
+            ui.onNodeWithText("正在思考…").assertExists()
+            ui.onNodeWithTag("reported-reasoning-duration:queued-collapsed").assertTextEquals("1.1s")
+            await { visibleText().contains(text) }
+            ui.onNodeWithText("已思考").assertExists()
+            ui.onNodeWithTag("reported-reasoning-duration:queued-collapsed").assertTextEquals("1.1s")
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     private fun assertHiddenThoughtDoesNotWaitForReveal(stop: Boolean) {
         val baseline = "起始摘要"
         val pending = baseline + "未显示".repeat(100)

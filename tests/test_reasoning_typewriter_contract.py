@@ -76,6 +76,8 @@ class ReasoningTypewriterContract(unittest.TestCase):
         for token in ('val displayThinking = isThinking || !stopped && summaryDisplays.any { it.waitingForReveal }',
                       'waitingForReveal = revealEnabled && (observedDisplayLive || queuedForArrival) && !reveal.settled',
                       'remember(revealGate, revealResetEpoch) { mutableStateOf(isThinking) }',
+                      'live = isThinking || queuedForArrival',
+                      '(isThinking || observedLive || currentOverride == true)',
                       'leadingIndicator?.invoke(displayThinking)',
                       'Text(if (displayThinking) "正在思考…" else "已思考"',
                       'leadingIndicator = { displayThinking ->',

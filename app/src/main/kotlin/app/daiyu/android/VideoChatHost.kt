@@ -132,6 +132,7 @@ internal class VideoChatHost internal constructor(
     private var picker: Selection? = null
     private var excursion: Selection? = null
     private var excursionStopped = false
+    private var returnedSelection: Pair<Selection, List<Uri>>? = null
     private var lifecycleBinding: DefaultLifecycleObserver? = null
     private val recoveringOwners = mutableSetOf<VideoAttachmentOwner>()
     private val deletingOwners = mutableSetOf<VideoAttachmentOwner>()
@@ -203,11 +204,14 @@ internal class VideoChatHost internal constructor(
             override fun onStart(owner: LifecycleOwner) {
                 if (lifecycleBinding !== this) return
                 if (excursionStopped && excursion === picker && validSelection(picker)) {
+                    val returned = returnedSelection
+                    returnedSelection = null
                     excursion = null
                     excursionStopped = false
                     changed = onChanged
                     visible = true
                     persist(); publish()
+                    if (returned != null) picked(returned.first, returned.second)
                 } else attach(onChanged)
             }
             override fun onStop(owner: LifecycleOwner) {
@@ -284,6 +288,8 @@ internal class VideoChatHost internal constructor(
     }
 
     private fun invalidateVisit() {
+        if (returnedSelection?.first === picker) picker = null
+        returnedSelection = null
         excursion = null
         excursionStopped = false
         visit++
@@ -317,6 +323,7 @@ internal class VideoChatHost internal constructor(
     fun selectionLaunchFailed(selection: Selection) {
         checkThread()
         if (picker === selection) {
+            returnedSelection = null
             picker = null
             excursion = null
             excursionStopped = false
@@ -326,7 +333,14 @@ internal class VideoChatHost internal constructor(
     /** Validate the captured ticket before any URI is passed to a provider. Oversized picks reject all. */
     fun picked(selection: Selection, uris: List<Uri>): Boolean {
         checkThread()
-        if (picker !== selection) return false
+        if (picker !== selection || returnedSelection != null) return false
+        if (!visible && excursionStopped && excursion === selection && validSelection(selection) &&
+            uris.size <= selection.remaining && uris.size <= VideoHostDraftStore.MAX_VIDEOS - selected.items.size) {
+            // ActivityResultRegistry can dispatch before this route's onStart observer.
+            returnedSelection = selection to uris.toList()
+            return true
+        }
+        returnedSelection = null
         picker = null
         excursion = null
         excursionStopped = false

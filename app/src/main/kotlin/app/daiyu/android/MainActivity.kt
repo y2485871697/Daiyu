@@ -942,10 +942,15 @@ class MainActivity : ComponentActivity() {
             compact = true, manageLifecycle = false, pickRequest = pick, onControls = { controls ->
                 videoComposerControls = controls
                 if (controls != null && pick != null && videoPickEntry === pick) {
-                    videoPickEntry = null
-                    if (activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+                    val current = activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
                         pick.owner == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision) &&
-                        pick.epoch == contextManagementEntryEpoch) controls.select()
+                        pick.epoch == contextManagementEntryEpoch
+                    if (!current) videoPickEntry = null
+                    else if (controls.canSelect) {
+                        val launched = controls.select()
+                        if (launched && videoPickEntry === pick) videoPickEntry = null
+                        if (!launched) toast("视频选择器未打开，请重试")
+                    }
                 }
             }, onControlsDisposed = { disposed ->
                 if (videoComposerControls === disposed) videoComposerControls = null
@@ -1207,16 +1212,7 @@ class MainActivity : ComponentActivity() {
             try {
                 val description = withContext(Dispatchers.IO) {
                     if (data == null || !platformSaf.accept(data, request.tree)) return@withContext null
-                    try {
-                        contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME,
-                            android.provider.OpenableColumns.SIZE), null, null, null)?.use { cursor ->
-                            if (!cursor.moveToFirst()) null else {
-                                val name = cursor.getString(0).orEmpty().take(200).replace('\n', ' ').replace('\r', ' ')
-                                val size = if (cursor.isNull(1)) "大小未知" else "${cursor.getLong(1)} 字节"
-                                "$name（$size）"
-                            }
-                        } ?: "名称及大小未知"
-                    } catch (_: Exception) { "名称及大小未知" }
+                    app.daiyu.android.references.ChatReferenceMetadata.describe(contentResolver, uri, request.tree)
                 }
                 if (chatReferencePick !== request || !request.live || !generationResumed() || !voiceForeground ||
                     !chatReferenceAvailable() || !chatReferenceMatches(request)) return@launch

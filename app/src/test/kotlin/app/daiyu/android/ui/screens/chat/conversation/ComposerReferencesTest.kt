@@ -76,4 +76,33 @@ class ComposerReferencesTest {
         org.junit.Assert.assertEquals("修改\n$reference\n$details", projected.edit("修改"))
         org.junit.Assert.assertEquals("问题", projected.remove(projected.references.single()))
     }
+    @Test fun legacyUnknownDirectoryMetadataFallsBackWithoutRewritingDraft() {
+        val raw = "问题\n$folder\n附件信息（按需读取）：名称及大小未知；用 list_files 按需列举"
+        val p = ComposerReferences(raw)
+        assertEquals("中文+目录", p.references.single().label)
+        assertEquals(raw, p.edit(p.text))
+        assertEquals(raw.substringAfter('\n'), p.references.single().serialized)
+        assertEquals("问题", p.remove(p.references.single()))
+    }
+    @Test fun directoryMetadataDisplaysOnlyItsNameAndPreservesExactPayload() {
+        val raw = "$folder\n附件信息（按需读取）：目录名称；用 list_files 按需列举"
+        val p = ComposerReferences(raw)
+        assertEquals("目录名称", p.references.single().label)
+        assertEquals(raw, p.edit(p.text))
+        assertEquals("新正文\n$raw", p.edit("新正文"))
+    }
+    @Test fun realUnknownNamedFileIsNotTreatedAsTheLegacyPlaceholder() {
+        val p = ComposerReferences("$file\n附件信息（按需读取）：名称及大小未知.txt（32 字节）；按需读取")
+        assertEquals("名称及大小未知.txt（32 字节）", p.references.single().label)
+    }
+
+    @Test fun directoryNamesThatLookLikeSizesRemainExact() {
+        for (name in listOf("资料（42 字节）", "（42 字节）", "资料（大小未知）")) {
+            val raw = "$folder\n附件信息（按需读取）：$name；用 list_files 按需列举"
+            val p = ComposerReferences(raw)
+            assertEquals(name, p.references.single().label)
+            assertEquals(raw, p.edit(p.text))
+        }
+    }
+
 }

@@ -94,6 +94,7 @@ jobs:
             --tests '*MessageImageContractTest' \
             --tests '*ImageAttachmentsStateTest' \
             --tests '*VideoChatHostTest' \
+            --tests '*ComposerReferencesTest' \
             --tests '*ToolReceiptSourceTest' \
             --tests '*ChatTurnMapperTest' \
             --tests '*ReasoningWorkflowMapperTest' \
@@ -108,7 +109,7 @@ jobs:
           expected_groups = ('ChatMediaPreview', 'MessageMediaLayoutTest', 'MessageMediaPreviewBridgeTest',
                              'EditingImageSelectionStoreTest', 'MessageEditBaselineTest', 'MessageActionRenderedRevisionTest',
                              'ForegroundComposerStateTest', 'MessageImageContractTest', 'ImageAttachmentsStateTest',
-                             'VideoChatHostTest', 'ToolReceiptSourceTest',
+                             'VideoChatHostTest', 'ComposerReferencesTest', 'ToolReceiptSourceTest',
                              'ChatTurnMapperTest', 'ReasoningWorkflowMapperTest')
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}

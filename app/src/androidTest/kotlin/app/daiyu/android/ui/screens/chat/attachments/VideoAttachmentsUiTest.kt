@@ -451,6 +451,60 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         assertEquals(1, media.imports.get())
     }
 
+    fun testResultBeforeStartWaitsForVisibleOwnerAndImportsOnce() {
+        node("video_attachments_select").performClick()
+        val code = picker.launches.last()
+        mainThread {
+            life.registry.currentState = Lifecycle.State.CREATED
+            picker.result(code)
+            assertFalse(host.state.visible)
+            assertEquals(0, media.imports.get())
+            assertTrue(host.state.items.isEmpty())
+        }
+        node("video_attachments_notice").assertDoesNotExist()
+        mainThread { life.registry.currentState = Lifecycle.State.STARTED }
+        awaitReady()
+        assertEquals(1, media.imports.get())
+        assertEquals(1, picker.launches.size)
+    }
+
+    fun testCancelledResultBeforeStartReleasesButtonWithoutImport() {
+        node("video_attachments_select").performClick()
+        val code = picker.launches.last()
+        mainThread {
+            life.registry.currentState = Lifecycle.State.CREATED
+            picker.cancel(code)
+            assertEquals(0, media.imports.get())
+            life.registry.currentState = Lifecycle.State.STARTED
+        }
+        node("video_attachments_select").assertIsEnabled().performClick()
+        assertEquals(2, picker.launches.size)
+        mainThread { picker.cancel(picker.launches.last()) }
+        assertEquals(0, media.imports.get())
+    }
+
+    fun testUnmountAfterEarlyResultNeverImportsOrRetainsReturnedTicket() {
+        node("video_attachments_select").performClick()
+        val code = picker.launches.last()
+        mainThread {
+            life.registry.currentState = Lifecycle.State.CREATED
+            picker.result(code)
+            mounted.value = false
+        }
+        ui.waitForIdle()
+        mainThread {
+            assertEquals(0, media.imports.get())
+            life.registry.currentState = Lifecycle.State.STARTED
+            mounted.value = true
+        }
+        ui.waitForIdle()
+        node("video_attachments_select").assertIsEnabled().performClick()
+        assertEquals(2, picker.launches.size)
+        mainThread { picker.cancel(picker.launches.last()) }
+        assertEquals(0, media.imports.get())
+        assertTrue(host.state.items.isEmpty())
+    }
+
     fun testSecondStopMakesStillRegisteredCallbackStale() {
         node("video_attachments_select").performClick()
         val old = picker.launches.last()

@@ -119,7 +119,8 @@ internal fun VideoAttachments(
 internal data class VideoComposerControls(
     val canSubmit: Boolean,
     val blocked: Boolean,
-    val select: () -> Unit,
+    val canSelect: Boolean,
+    val select: () -> Boolean,
     val send: () -> Unit,
 )
 
@@ -156,7 +157,8 @@ private fun VideoAttachmentsContent(
         val published = VideoComposerControls(canSubmit,
             picker.selecting || state.fenced || state.storageFailed || state.recovering ||
                 state.items.isNotEmpty() && !canSubmit,
-            select = { if (live && canSelect && sameVideoVisit(state, host.state)) picker.launch(state) },
+            canSelect = canSelect,
+            select = { live && canSelect && sameVideoVisit(state, host.state) && picker.launch(state) },
             send = { if (live) send() })
         controls(published)
         onDispose {

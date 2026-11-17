@@ -11,6 +11,144 @@ import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 import java.util.concurrent.atomic.AtomicInteger
 
 class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
+    private class MetadataProvider : android.content.ContentProvider() {
+        var columns = arrayOf(android.provider.OpenableColumns.DISPLAY_NAME)
+        var values = arrayOf<Any?>("工作目录")
+        var unavailable = false
+        val queries = mutableListOf<Pair<Uri, List<String>>>()
+        var returned: android.database.MatrixCursor? = null
+        override fun onCreate() = true
+        override fun getType(uri: Uri) = android.provider.DocumentsContract.Document.MIME_TYPE_DIR
+        override fun query(uri: Uri, projection: Array<out String>?, selection: String?,
+            selectionArgs: Array<out String>?, sortOrder: String?): android.database.Cursor {
+            queries.add(uri to projection.orEmpty().toList())
+            check(uri.pathSegments.contains("document")) { "tree URI is not a document" }
+            if (unavailable) throw IllegalArgumentException("unavailable metadata")
+            return android.database.MatrixCursor(columns).apply { addRow(values); returned = this }
+        }
+        override fun insert(uri: Uri, values: android.content.ContentValues?): Uri? = throw AssertionError("no writes")
+        override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?) = throw AssertionError("no writes")
+        override fun update(uri: Uri, values: android.content.ContentValues?, selection: String?, selectionArgs: Array<out String>?) = throw AssertionError("no writes")
+    }
+
+    private fun metadataProvider(): Pair<MetadataProvider, android.test.mock.MockContentResolver> {
+        val provider = MetadataProvider()
+        provider.attachInfo(instrumentation.targetContext, android.content.pm.ProviderInfo().apply {
+            authority = "chat-reference.fixture"; exported = false
+        })
+        return provider to android.test.mock.MockContentResolver().apply { addProvider("chat-reference.fixture", provider) }
+    }
+
+    fun testDirectoryMetadataQueriesRootDocumentNameOnlyWithoutSizeOrChildren() {
+        val (provider, resolver) = metadataProvider()
+        val tree = Uri.parse("content://chat-reference.fixture/tree/primary%3A%E5%B7%A5%E4%BD%9C")
+        val description = app.daiyu.android.references.ChatReferenceMetadata.describe(resolver, tree, true)
+        assertEquals("工作目录", description)
+        assertEquals(1, provider.queries.size)
+        assertEquals(android.provider.DocumentsContract.buildDocumentUriUsingTree(tree,
+            android.provider.DocumentsContract.getTreeDocumentId(tree)), provider.queries.single().first)
+        assertEquals(listOf(android.provider.OpenableColumns.DISPLAY_NAME), provider.queries.single().second)
+        assertTrue(provider.returned!!.isClosed)
+        assertFalse(description.contains("大小"))
+        assertEquals("content://chat-reference.fixture/tree/primary%3A%E5%B7%A5%E4%BD%9C", tree.toString())
+    }
+
+    fun testDirectoryMissingOrUnavailableMetadataKeepsNameWithoutReportingSize() {
+        val (provider, resolver) = metadataProvider()
+        val tree = Uri.parse("content://chat-reference.fixture/tree/primary%3A%E4%B8%AD%E6%96%87%2B%E7%9B%AE%E5%BD%95")
+        provider.columns = arrayOf("unrelated"); provider.values = arrayOf<Any?>(null)
+        assertEquals("中文+目录", app.daiyu.android.references.ChatReferenceMetadata.describe(resolver, tree, true))
+        provider.unavailable = true
+        assertEquals("中文+目录", app.daiyu.android.references.ChatReferenceMetadata.describe(resolver, tree, true))
+        assertEquals(2, provider.queries.size)
+        assertTrue(provider.queries.all { it.second == listOf(android.provider.OpenableColumns.DISPLAY_NAME) })
+    }
+
+    fun testFileMetadataRetainsNameAndActualOrUnknownSizeWithReorderedColumns() {
+        val (provider, resolver) = metadataProvider()
+        val file = Uri.parse("content://chat-reference.fixture/document/log")
+        provider.columns = arrayOf(android.provider.OpenableColumns.SIZE, android.provider.OpenableColumns.DISPLAY_NAME)
+        provider.values = arrayOf<Any?>(42L, "日志.txt")
+        assertEquals("日志.txt（42 字节）", app.daiyu.android.references.ChatReferenceMetadata.describe(resolver, file, false))
+        provider.columns = arrayOf(android.provider.OpenableColumns.DISPLAY_NAME); provider.values = arrayOf<Any?>("日志.txt")
+        assertEquals("日志.txt（大小未知）", app.daiyu.android.references.ChatReferenceMetadata.describe(resolver, file, false))
+        assertEquals(file, provider.queries.first().first)
+    }
+
+    fun testOldDirectoryPlaceholderDisplaysDecodedNameWithoutChangingPersistedReference() {
+        prepare()
+        val raw = "$original\n目录引用（未读取）：content://reference-never-read.invalid/tree/primary%3A%E5%B7%A5%E4%BD%9C%E7%9B%AE%E5%BD%95\n" +
+            "附件信息（按需读取）：名称及大小未知；用 list_files 按需列举，勿自动读取全部文件。"
+        mainThread { retainedControls(activity).onTextChange(raw) }
+        assertReferenceDraft(raw, original)
+        ui.onNodeWithText("目录 · 工作目录").assertIsDisplayed()
+        ui.onNodeWithText("名称及大小未知", substring = true).assertDoesNotExist()
+        activity = recreateActivity(activity)
+        assertReferenceDraft(raw, original)
+        ui.onNodeWithText("目录 · 工作目录").assertIsDisplayed()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testRealVideoAttachmentMenuLaunchesOnceAndCancellationKeepsDraft() {
+        prepare()
+        val launches = AtomicInteger()
+        val picker = object : Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
+                if (intent.action != Intent.ACTION_GET_CONTENT || intent.type != "video/*") return null
+                assertTrue(intent.getBooleanExtra(Intent.EXTRA_ALLOW_MULTIPLE, false))
+                launches.incrementAndGet()
+                return Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null)
+            }
+        }
+        instrumentation.addMonitor(picker)
+        try {
+            repeat(2) { index ->
+                ui.onNodeWithContentDescription("附件").performClick()
+                node("chat-attachment:ATTACH_VIDEO").performClick()
+                ui.waitUntil(5_000) { launches.get() == index + 1 }
+                ui.waitForIdle()
+                assertDraft(original)
+                assertNull(MainActivity::class.java.getDeclaredField("videoPickEntry").apply { isAccessible = true }.get(activity))
+            }
+            assertEquals(2, launches.get())
+            assertEquals(0, fixture.opens.get())
+        } finally { instrumentation.removeMonitor(picker) }
+    }
+
+    fun testRealVideoMenuKeepsRequestUntilSameOwnerRecoveryFinishes() {
+        prepare()
+        val host = fixture.controller.videoHost
+        @Suppress("UNCHECKED_CAST")
+        val recovering = VideoChatHost::class.java.getDeclaredField("recoveringOwners").apply { isAccessible = true }
+            .get(host) as MutableSet<app.daiyu.android.media.video.VideoAttachmentOwner>
+        val publish = VideoChatHost::class.java.getDeclaredMethod("publish").apply { isAccessible = true }
+        val launches = AtomicInteger()
+        val picker = object : Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: Intent): Instrumentation.ActivityResult? {
+                if (intent.action != Intent.ACTION_GET_CONTENT || intent.type != "video/*") return null
+                launches.incrementAndGet()
+                return Instrumentation.ActivityResult(Activity.RESULT_CANCELED, null)
+            }
+        }
+        instrumentation.addMonitor(picker)
+        try {
+            mainThread { recovering.add(host.state.owner); publish.invoke(host) }
+            ui.onNodeWithContentDescription("附件").performClick()
+            node("chat-attachment:ATTACH_VIDEO").performClick()
+            ui.waitForIdle()
+            assertEquals(0, launches.get())
+            assertNotNull(MainActivity::class.java.getDeclaredField("videoPickEntry").apply { isAccessible = true }.get(activity))
+            mainThread { recovering.remove(host.state.owner); publish.invoke(host) }
+            ui.waitUntil(5_000) { launches.get() == 1 }
+            ui.waitForIdle()
+            assertDraft(original)
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            instrumentation.removeMonitor(picker)
+            mainThread { recovering.clear(); publish.invoke(host) }
+        }
+    }
+
     private val original = "reference stays unsent"
     private val readFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
     private fun prepare() {

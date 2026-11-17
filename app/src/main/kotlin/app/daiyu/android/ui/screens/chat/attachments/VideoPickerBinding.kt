@@ -28,9 +28,12 @@ internal class VideoPickerBinding(
     var selecting by mutableStateOf(false); private set
     var notice by mutableStateOf<String?>(null); private set
 
-    fun launch(expected: VideoChatHost.Snapshot) {
-        if (closed || pending != null) return
-        val ticket = host.requestSelection(expected) ?: return
+    fun launch(expected: VideoChatHost.Snapshot): Boolean {
+        if (closed || pending != null) return false
+        val ticket = host.requestSelection(expected) ?: run {
+            notice = "视频尚未准备好，请稍后重试"
+            return false
+        }
         notice = null
         lateinit var launcher: ActivityResultLauncher<String>
         try {
@@ -43,7 +46,7 @@ internal class VideoPickerBinding(
                         current.revision == ticket.revision && current.visit == ticket.visit
                     val admitted = host.picked(ticket, uris)
                     notice = when {
-                        !sameVisit -> "已忽略离页或旧草稿的视频选择结果，请重新选择"
+                        !admitted && !sameVisit -> "已忽略离页或旧草稿的视频选择结果，请重新选择"
                         uris.size > ticket.remaining -> "本次最多还能选择 ${ticket.remaining} 个视频；未导入任何视频"
                         !admitted -> "视频选择未导入，请重新选择"
                         else -> null
@@ -64,6 +67,7 @@ internal class VideoPickerBinding(
                 pending = null
                 selecting = false
                 notice = "无法打开视频选择器，请重试"
+                return false
             }
         } catch (_: Exception) {
             host.selectionLaunchFailed(ticket)
@@ -71,7 +75,9 @@ internal class VideoPickerBinding(
             pending = null
             selecting = false
             notice = "无法打开视频选择器，请重试"
+            return false
         }
+        return true
     }
 
     override fun close() {

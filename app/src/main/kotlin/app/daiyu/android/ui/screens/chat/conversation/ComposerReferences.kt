@@ -9,7 +9,8 @@ internal class ComposerReferences(val source: String, composing: IntRange? = nul
         val details: String? = null) {
         val label: String get() {
             if (kind == "会话") return PromptReferences.conversation(serialized)?.title?.ifBlank { "会话" } ?: "会话"
-            details?.let { return it.substringBefore('；').take(200) }
+            details?.substringBefore('；')?.takeIf { it.isNotBlank() && it != "名称及大小未知" }
+                ?.let { return it.take(200) }
             val tail = value.trimEnd('/').substringAfterLast('/').substringAfterLast('\\')
             val decoded = runCatching { URLDecoder.decode(tail.replace("+", "%2B"), "UTF-8") }.getOrDefault(tail)
             return decoded.substringAfterLast(':').filterNot { it.isISOControl() }.take(120).ifBlank { kind }

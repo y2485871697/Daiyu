@@ -108,6 +108,63 @@ class VideoChatHostTest {
         activity.pause().stop().destroy()
     }
 
+    @Test fun pickerResultBeforeStartWaitsWithoutProviderAccessAndImportsExactlyOnce() = runTest {
+        val media = Media(); val d = StandardTestDispatcher(testScheduler)
+        val host = VideoChatHost(Journal(), media, d, d)
+        val activity = Robolectric.buildActivity(PickerActivity::class.java).setup()
+        val binding = host.bindLifecycle(activity.get())
+        val ticket = checkNotNull(host.requestSelection())
+        assertTrue(host.launchSelection(ticket) {})
+        activity.pause().stop()
+        assertTrue(host.picked(ticket, listOf(uri)))
+        assertFalse(host.picked(ticket, listOf(uri)))
+        testScheduler.advanceUntilIdle()
+        assertFalse(host.state.visible)
+        assertEquals(0, media.imports)
+        assertTrue(host.state.items.isEmpty())
+        activity.start().resume()
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, media.imports)
+        assertTrue(host.state.items.single() is VideoChatHost.Item.Ready)
+        assertFalse(host.picked(ticket, listOf(uri)))
+        binding.close(); activity.pause().stop().destroy()
+    }
+
+    @Test fun cancelledEarlyResultRestoresSelectionWithoutImportOrStaleTicket() = runTest {
+        val media = Media(); val d = StandardTestDispatcher(testScheduler)
+        val host = VideoChatHost(Journal(), media, d, d)
+        val activity = Robolectric.buildActivity(PickerActivity::class.java).setup()
+        val binding = host.bindLifecycle(activity.get())
+        val ticket = checkNotNull(host.requestSelection())
+        assertTrue(host.launchSelection(ticket) {})
+        activity.pause().stop()
+        assertTrue(host.picked(ticket, emptyList()))
+        activity.start().resume()
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, media.imports)
+        assertNotNull(host.requestSelection())
+        binding.close(); activity.pause().stop().destroy()
+    }
+
+    @Test fun routeDepartureDiscardsEarlyResultWithoutBorrowingNextVisit() = runTest {
+        val media = Media(); val d = StandardTestDispatcher(testScheduler)
+        val host = VideoChatHost(Journal(), media, d, d)
+        val activity = Robolectric.buildActivity(PickerActivity::class.java).setup()
+        val binding = host.bindLifecycle(activity.get())
+        val ticket = checkNotNull(host.requestSelection())
+        assertTrue(host.launchSelection(ticket) {})
+        activity.pause().stop()
+        assertTrue(host.picked(ticket, listOf(uri)))
+        host.enter("other"); host.enter(null)
+        activity.start().resume()
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, media.imports)
+        val fresh = checkNotNull(host.requestSelection())
+        assertFalse(host.picked(ticket, listOf(uri)))
+        host.selectionLaunchFailed(fresh)
+        binding.close(); activity.pause().stop().destroy()
+    }
+
     @Test fun actualLifecycleRouteDepartureDestroyWrongTicketAndLaunchFailureStayFenced() = runTest {
         val journal = Journal(); val media = Media(); val d = StandardTestDispatcher(testScheduler)
         val host = VideoChatHost(journal, media, d, d)

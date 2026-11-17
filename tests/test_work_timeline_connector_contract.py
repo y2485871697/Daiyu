@@ -92,6 +92,12 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
         self.assertIn('val beforeSecondTool =', chain)
         self.assertIn('observe(listOf(t1, a, t2), beforeSecondTool)', chain)
         self.assertIn('testTag("motion-following")', chain)
+        body = source[source.index('private fun bodyInk('):source.index('private fun operationY(')]
+        self.assertIn('timeline?.intersect(raster) ?: raster', body)
+        self.assertIn('maxOf(row.top, clip.top)', body)
+        self.assertIn('minOf(row.bottom, clip.bottom)', body)
+        self.assertIn('row.left + with(density) { 18.dp.toPx() }', body)
+        self.assertIn('minOf(row.right, clip.right)', body)
         physical = source[source.index('private fun physicalSample('):source.index('private fun terminalInk(')]
         self.assertIn('ui.onNodeWithTag("motion-following").fetchSemanticsNode()', physical)
         self.assertNotIn('singleOrNull()', physical)

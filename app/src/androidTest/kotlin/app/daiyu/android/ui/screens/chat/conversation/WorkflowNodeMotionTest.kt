@@ -143,10 +143,14 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
     private fun bodyInk(p: PixelMap, tag: String = "tool-step:motion-b"): Float {
         val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()
         val row = ui.onNodeWithTag(tag).fetchSemanticsNode().physicalBounds()
-        val left = ceil(row.left - raster.left + with(density) { 18.dp.toPx() }).toInt()
-        val right = floor(row.right - raster.left).toInt().coerceAtMost(p.width)
-        val top = ceil(row.top - raster.top).toInt()
-        val bottom = floor(row.bottom - raster.top).toInt().coerceAtMost(p.height)
+        val timeline = ui.onAllNodesWithTag("workflow-timeline-extent").fetchSemanticsNodes()
+            .singleOrNull()?.physicalBounds()
+        val clip = timeline?.intersect(raster) ?: raster
+        val left = ceil(maxOf(row.left + with(density) { 18.dp.toPx() }, clip.left) - raster.left)
+            .toInt().coerceAtLeast(0)
+        val right = floor(minOf(row.right, clip.right) - raster.left).toInt().coerceAtMost(p.width)
+        val top = ceil(maxOf(row.top, clip.top) - raster.top).toInt().coerceAtLeast(0)
+        val bottom = floor(minOf(row.bottom, clip.bottom) - raster.top).toInt().coerceAtMost(p.height)
         var ink = 0f
         for (y in top until bottom) for (x in left until right) ink += distance(pixel(p, x, y), background)
         return ink

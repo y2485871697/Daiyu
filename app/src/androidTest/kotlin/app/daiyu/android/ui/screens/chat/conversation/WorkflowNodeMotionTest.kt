@@ -187,9 +187,12 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         val from = ceil(a.top - raster.top + with(density) { 28.dp.toPx() }).toInt()
         val to = floor(b.top - raster.top + with(density) { 16.dp.toPx() }).toInt()
         val stroke = with(density) { 1.dp.toPx() }
+        val timeline = ui.onNodeWithTag("workflow-timeline-extent").fetchSemanticsNode().physicalBounds()
         return (from..to).map { y ->
-            (floor(x - stroke / 2f).toInt()..ceil(x + stroke / 2f).toInt())
-                .sumOf { i -> distance(pixel(p, i, y), background).toDouble() }.toFloat() / stroke
+            // The shell's bottom border is not a rail past the clipped timeline frontier.
+            if (raster.top + y >= timeline.bottom) 0f else
+                (floor(x - stroke / 2f).toInt()..ceil(x + stroke / 2f).toInt())
+                    .sumOf { i -> distance(pixel(p, i, y), background).toDouble() }.toFloat() / stroke
         }
     }
 
@@ -623,8 +626,21 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                     assertTrue("$legacy: connector must have a measurable span", rail.isNotEmpty())
                     val mask = rail.map { it > contrast * .35f }
                     val last = mask.indexOfLast { it }
-                    assertTrue("$legacy: gap behind frontier at frame $index, $from -> $to",
-                        mask.take((last - 2).coerceAtLeast(0)).all { it })
+                    val continuous = mask.take((last - 2).coerceAtLeast(0)).all { it }
+                    if (!continuous) {
+                        val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/workflow-arrival").apply { mkdirs() }
+                        val name = "gap-${if (legacy) "legacy" else "mixed"}-${tags.size}-frame$index"
+                        java.io.File(directory, "$name.png").outputStream().use {
+                            image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                        }
+                        java.io.File(directory, "$name.txt").writeText(buildString {
+                            appendLine("raster=${ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()}")
+                            appendLine("timeline=${ui.onNodeWithTag("workflow-timeline-extent").fetchSemanticsNode().physicalBounds()}")
+                            appendLine("source=${ui.onNodeWithTag(from).fetchSemanticsNode().physicalBounds()} target=${ui.onNodeWithTag(to).fetchSemanticsNode().physicalBounds()}")
+                            appendLine("contrast=$contrast rail=${rail.joinToString()}")
+                        })
+                    }
+                    assertTrue("$legacy: gap behind frontier at frame $index, $from -> $to", continuous)
                     if (to != target) assertTrue("arrived upstream must remain connected", mask.all { it })
                 }
                 if (present) {

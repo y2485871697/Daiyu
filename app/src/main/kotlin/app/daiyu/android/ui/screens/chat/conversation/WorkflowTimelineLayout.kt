@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layoutId
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.constrainHeight
@@ -22,6 +23,11 @@ internal class WorkflowItemLayout {
     var appearance: WorkflowToolAppearance? = null
     private var fullyVisible = false
     private var releasedGap = 0f
+
+    fun consumeDisplayed(gap: Int) {
+        fullyVisible = true
+        releasedGap = gap.toFloat()
+    }
 
     fun extent(height: Int, gap: Int, leading: Float, trailing: Float): Int {
         val line = motion
@@ -84,7 +90,7 @@ internal fun WorkflowTimelineColumn(timeline: Boolean, content: @Composable () -
     }
     Layout(content = {
         CompositionLocalProvider(LocalWorkflowTimelineLayout provides true) { content() }
-    }, modifier = Modifier.clipToBounds()) { measurables, constraints ->
+    }, modifier = Modifier.clipToBounds().testTag("workflow-timeline-extent")) { measurables, constraints ->
         val placeables = measurables.map { it.measure(constraints.copy(minHeight = 0)) }
         var naturalTop = 0
         var extent = 0
@@ -92,7 +98,10 @@ internal fun WorkflowTimelineColumn(timeline: Boolean, content: @Composable () -
         placeables.forEachIndexed { index, child ->
             val item = measurables[index].layoutId as? WorkflowItemLayout
             val allocated = when {
-                !enabled -> child.height
+                !enabled -> {
+                    item?.let { it.consumeDisplayed(it.spacingAfter.roundToPx()) }
+                    child.height
+                }
                 !prefixVisible -> 0
                 item == null -> child.height
                 else -> item.extent(child.height, item.spacingAfter.roundToPx(), 17.dp.toPx(), 27.dp.toPx())

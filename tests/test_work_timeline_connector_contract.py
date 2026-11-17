@@ -77,6 +77,7 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
         self.assertIn('!prefixVisible -> 0', layout)
         self.assertIn('prefixVisible = prefixVisible && allocated >= child.height', layout)
         self.assertIn('releasedGap = maxOf(', layout)
+        self.assertIn('it.consumeDisplayed(it.spacingAfter.roundToPx())', layout)
         self.assertIn('if (!LocalWorkflowTimelineLayout.current)', layout)
         self.assertNotIn('val arriving:', layout)
         self.assertNotIn('Animatable', layout)

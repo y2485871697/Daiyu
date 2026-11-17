@@ -197,6 +197,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             ui.onNodeWithText("正在思考…").assertExists()
             ui.onNodeWithText("已思考").assertDoesNotExist()
             ui.onNodeWithTag("reported-reasoning-duration:queued-final", useUnmergedTree = true).assertTextEquals("1.1s")
+            ui.mainClock.advanceTimeBy(3_000)
             await { visibleText().contains(text) }
             ui.onNodeWithText("已思考").assertExists()
             ui.onNodeWithTag("reported-reasoning-duration:queued-final", useUnmergedTree = true).assertTextEquals("1.1s")
@@ -228,6 +229,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             assertFalse(visibleText().contains(text))
             ui.onNodeWithText("正在思考…").assertExists()
             ui.onNodeWithTag("reported-reasoning-duration:queued-collapsed", useUnmergedTree = true).assertTextEquals("1.1s")
+            ui.mainClock.advanceTimeBy(3_000)
             await { visibleText().contains(text) }
             ui.onNodeWithText("已思考").assertExists()
             ui.onNodeWithTag("reported-reasoning-duration:queued-collapsed", useUnmergedTree = true).assertTextEquals("1.1s")

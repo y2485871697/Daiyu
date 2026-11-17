@@ -1244,7 +1244,7 @@ class VoiceCallFloatingWindowTest {
                         assertEquals(bounds.top.roundToInt(), p.y)
                         assertEquals(bounds.right.roundToInt(), p.x + p.width)
                         assertEquals(bounds.bottom.roundToInt(), p.y + p.height)
-                        assertEquals("fixed 28dp local origin", androidx.compose.ui.geometry.Offset(shadow.toFloat(), shadow.toFloat()), offsetGetter.invoke(root))
+                        assertEquals("fixed 28dp local origin", androidx.compose.ui.geometry.Offset(shadow.toFloat(), shadow.toFloat()).packedValue, offsetGetter.invoke(root))
                         if (index == 72) { completed.countDown(); return }
                         inputFrames += time
                         val sign = if ((index / 6) % 2 == 0) -1f else 1f

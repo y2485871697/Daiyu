@@ -146,10 +146,23 @@ class ContextUsageWiringContractTest(unittest.TestCase):
         schema_version = re.search(r'null,\s*(\d+)\)', schema)
         self.assertIsNotNone(schema_version)
         self.assertGreaterEqual(int(schema_version.group(1)), 32)
-        self.assertIn('oldVersion in 1..32 && newVersion == 33', schema)
+        upgrade = schema.split('override fun onUpgrade(', 1)[1]
+        guard = 'oldVersion in 1..33 && newVersion == 34'
+        self.assertIn(guard, upgrade)
+        schema_33_path = re.search(
+            r'if\s*\(\s*oldVersion\s*==\s*33\s*\)\s*\{(?P<body>[^{}]*)\}', upgrade)
+        self.assertIsNotNone(schema_33_path)
+        self.assertLess(upgrade.index(guard), schema_33_path.start())
+        direct_upgrade = schema_33_path.group('body')
+        self.assertIn('SQLiteGenerationOutputStore.upgradeProtocols(db)', direct_upgrade)
+        self.assertIn('SQLiteGenerationAttemptStore.upgradeOutcomeLimit(db)', direct_upgrade)
+        self.assertRegex(direct_upgrade, r'\breturn\s*$')
+        legacy_upgrade = upgrade[schema_33_path.end():]
         for token in ('CloudContextUsageStore.installSchema(db)', 'ConversationUsageStore.installSchema(db)',
                       'ConversationUsageStore.backfill(db)'):
-            self.assertLess(schema.index(token), schema.index('if (oldVersion >= 13) return'))
+            self.assertNotIn(token, direct_upgrade)
+            self.assertLess(legacy_upgrade.index(token), legacy_upgrade.index('if (oldVersion >= 13) return'))
+        self.assertIn('if (needsUsageReceiptBackfill) ConversationUsageStore.backfill(db)', legacy_upgrade)
         self.assertNotIn('CloudContextUsageStore.record', schema)
 
     def test_sql_schema_keeps_request_receipts_when_messages_are_deleted(self):

@@ -284,7 +284,7 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
 
         fun recoverPending(db: SQLiteDatabase) {
             db.execSQL("UPDATE child_tasks SET status='NOT_EXECUTED',text='',detail='interrupted_before_send' WHERE status='QUEUED'")
-            db.execSQL("UPDATE child_tasks SET status='UNKNOWN',text='',detail='interrupted_after_admission' WHERE status='RUNNING'")
+            db.execSQL("UPDATE child_tasks SET status='UNKNOWN',text='',detail=COALESCE(NULLIF(detail,''),'interrupted_after_admission') WHERE status='RUNNING'")
         }
     }
 }

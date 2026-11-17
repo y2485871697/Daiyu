@@ -150,7 +150,7 @@ internal object BackupChildTaskCodec {
     internal fun terminal(row: JSONObject): JSONObject = JSONObject(row.toString()).apply {
         when (getString("status")) {
             "QUEUED" -> { put("status", "NOT_EXECUTED"); put("detail", "backup_history_not_dispatched") }
-            "RUNNING" -> { put("status", "UNKNOWN"); put("detail", "backup_history_not_resumable") }
+            "RUNNING" -> { put("status", "UNKNOWN"); if (isNull("detail")) put("detail", "backup_history_not_resumable") }
         }
     }
     fun restore(db: SQLiteDatabase, value: Validated) {

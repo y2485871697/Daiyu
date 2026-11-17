@@ -367,6 +367,23 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
         } + "AFTER INSERT ON child_task_commands BEGIN DELETE FROM child_task_commands WHERE call_id=NEW.call_id; END")
     }
 
+    fun testRecoveryKeepsRunningDiagnosticAndFencesOldOwnerWithoutReplay() {
+        val db = fresh(); val first = lease(db); val owner = parent(db); val rows = tasks(owner, 2)
+        first.childTasks.enqueue(owner, rows)
+        rows.forEach { first.childTasks.started(it) }
+        val details = "HTTP 402\n请求 ID：req-recovery\n余额不足".padEnd(ChildTaskRecord.MAX_DETAIL_CHARS, '详')
+        first.childTasks.diagnosed(rows[0], details)
+        first.close(); db.close()
+        val next = lease(db)
+        assertEquals(ChildTaskStatus.UNKNOWN, next.childTasks.get(rows[0].owner)?.status)
+        assertEquals(details, next.childTasks.get(rows[0].owner)?.detail)
+        assertEquals("interrupted_after_admission", next.childTasks.get(rows[1].owner)?.detail)
+        assertEquals(details, next.childTasks.list(owner.conversationId.value).single { it.index == 0 }.detail)
+        rejects { first.childTasks.diagnosed(rows[0], "late old owner") }
+        rejects { next.childTasks.started(rows[0]) }
+        assertEquals(details, next.childTasks.get(rows[0].owner)?.detail)
+    }
+
     fun testRecoveryPreservesCompletedAndFencesRunningAndQueuedWithoutReplay() {
         val db = fresh(); val first = lease(db); val owner = parent(db); val rows = tasks(owner)
         first.childTasks.enqueue(owner, rows)

@@ -487,7 +487,6 @@ class ResponsesModel internal constructor(
                 var failure = original
                 if (failure !== deliveryFailure && failure !is ModelDeliveryRejectedException && !cancelled.get()) {
                     try { eventBuffer.flush() } catch (delivery: Exception) {
-                        if (delivery !== original) delivery.addSuppressed(original)
                         failure = delivery
                     }
                 } else eventBuffer.discard()

@@ -134,6 +134,65 @@ class ProviderFailureBoundaryTest {
         }
     }
 
+    @Test fun bufferedDeliveryFailureDoesNotAttachThePriorExternalReadFailure() {
+        val partial = created + "data: {\"type\":\"response.output_text.delta\",\"sequence_number\":1,\"item_id\":\"m\",\"content_index\":0,\"delta\":\"ok\"}\n\n"
+        val readFailed = java.util.concurrent.atomic.AtomicBoolean()
+        fun broken() = object : Connection() {
+            override fun getInputStream(): ByteArrayInputStream = object : ByteArrayInputStream(partial.toByteArray()) {
+                override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
+                    if (available() == 0) { readFailed.set(true); throw IOException(sentinel) }
+                    return super.read(bytes, offset, length)
+                }
+            }
+        }
+        for (acknowledged in listOf(false, true)) {
+            readFailed.set(false)
+            var calls = 0
+            val session = if (acknowledged) resumable { calls++; broken() }
+                else port(ProviderProtocol.RESPONSES) { calls++; broken() }.open(emptyList())
+            val original = ModelRequestException(ModelFailure.PERMISSION)
+            val observed = failure {
+                if (acknowledged) (session as CheckpointedResumableModelSession).nextAcknowledged(emptyList()) { batch ->
+                    if (batch.events.any { it is ModelEvent.TextFinal }) throw original
+                    ModelDeliveryAck.ACCEPTED
+                } else session.next(emptyList()) { if (it is ModelEvent.TextFinal) throw original }
+            }
+            assertSame(original, observed)
+            assertTrue(readFailed.get())
+            assertTrue(original.suppressed.isEmpty())
+            assertFalse(StringWriter().also { original.printStackTrace(PrintWriter(it)) }.toString().contains(sentinel))
+            assertEquals(1, calls)
+        }
+    }
+
+    @Test fun bufferedTextDeliveryFailureDoesNotAttachExternalReadFailureForMessagesAndChat() {
+        val partial = mapOf(
+            ProviderProtocol.MESSAGES to listOf(
+                "{\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"role\":\"assistant\",\"content\":[]}}",
+                "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"ok\"}}"
+            ).joinToString("") { "data: $it\n\n" },
+            ProviderProtocol.CHAT_COMPLETIONS to "data: {\"id\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null}]}\n\n")
+        for ((protocol, events) in partial) {
+            val readFailed = java.util.concurrent.atomic.AtomicBoolean()
+            val conn = object : Connection() {
+                override fun getInputStream(): ByteArrayInputStream = object : ByteArrayInputStream(events.toByteArray()) {
+                    override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
+                        if (available() == 0) { readFailed.set(true); throw IOException(sentinel) }
+                        return super.read(bytes, offset, length)
+                    }
+                }
+            }
+            val original = ModelRequestException(ModelFailure.PERMISSION)
+            val observed = failure { port(protocol) { conn }.open(emptyList()).next(emptyList()) {
+                if (it is ModelEvent.TextDelta) throw original
+            } }
+            assertSame(protocol.name, original, observed)
+            assertTrue(readFailed.get())
+            assertTrue(original.suppressed.isEmpty())
+            assertFalse(StringWriter().also { original.printStackTrace(PrintWriter(it)) }.toString().contains(sentinel))
+        }
+    }
+
     @Test fun inputEstimateFailureKeepsIdentityAndNeverConnectsOrReposts() {
         for (protocol in protocols) {
             var calls = 0

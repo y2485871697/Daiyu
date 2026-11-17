@@ -38,6 +38,20 @@ class LargeChildTaskBackupTest {
         assertEquals("UNKNOWN", BackupChildTaskCodec.terminal(task(1).put("status", "RUNNING").put("text", "")).getString("status"))
     }
 
+    @Test fun runningDiagnosticSurvivesHistoricalRestoreWithoutRestoringExecution() {
+        val details = "HTTP 402\n请求 ID：req-backup\n余额不足".padEnd(
+            app.daiyu.android.domain.delegation.ChildTaskRecord.MAX_DETAIL_CHARS, '详')
+        val running = task(0).put("status", "RUNNING").put("text", "").put("detail", details)
+        val validated = validate(listOf(running)).tasks.single()
+        val history = BackupChildTaskCodec.terminal(validated)
+        assertEquals("UNKNOWN", history.getString("status"))
+        assertEquals(details, history.getString("detail"))
+        assertEquals("RUNNING", validated.getString("status"))
+        assertEquals(history.toString(), BackupChildTaskCodec.terminal(history).toString())
+        assertEquals("backup_history_not_resumable", BackupChildTaskCodec.terminal(
+            task(1).put("status", "RUNNING")).getString("detail"))
+    }
+
     @Test fun requestRoutingAndUnreportedMainRequestSurviveVersionSevenValidation() {
         val task = task(0).put("tool_access_json", JSONObject.NULL).put("original_role", "REVIEW")
             .put("assigned_profile_id", "replacement")

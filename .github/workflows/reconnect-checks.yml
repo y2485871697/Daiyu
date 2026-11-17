@@ -162,7 +162,7 @@ jobs:
               --tests 'app.daiyu.android.model.ProviderHttpFailureTest' \
               --tests 'app.daiyu.android.model.ProviderRequestTraceTest' \
               --tests 'app.daiyu.android.model.ProviderFailureBoundaryTest' \
-              --tests 'app.daiyu.android.model.ProviderFailureBoundaryTest' \
+              --tests 'app.daiyu.android.backup.LargeChildTaskBackupTest' \
               --tests 'app.daiyu.android.model.reconnect.*' \
               --tests 'app.daiyu.android.integration.tools.RunChildTaskAccessTest' \
               :app:compileDebugAndroidTestKotlin \
@@ -227,7 +227,7 @@ jobs:
                           'app': {'RunCheckpointCodecTest', 'SQLiteRuntimeSnapshotTest', 'RuntimeCheckpointReuseTest'}}
           if os.environ['CHECK_SCOPE'] == 'error-details':
               required = {'domain': {'ModelFailureDetailsTest', 'ModelRequestDiagnosticTest', 'ModelFailureProtocolNeutralTest', 'ChildFailureDiagnosticsTest', 'ChildModelBatchTest'},
-                          'app': {'ProviderDetailedFailureTest', 'ProviderHttpFailureTest', 'ProviderRequestTraceTest', 'ProviderFailureBoundaryTest', 'ReconnectErrorDetailsTest', 'ModelErrorReconnectTest', 'RunChildTaskAccessTest'}}
+                          'app': {'ProviderDetailedFailureTest', 'ProviderHttpFailureTest', 'ProviderRequestTraceTest', 'ProviderFailureBoundaryTest', 'LargeChildTaskBackupTest', 'ReconnectErrorDetailsTest', 'ModelErrorReconnectTest', 'RunChildTaskAccessTest'}}
           reports = {}
           for scope, root in roots.items():
               suites = [ET.parse(p).getroot() for p in root.glob('TEST-*.xml')]

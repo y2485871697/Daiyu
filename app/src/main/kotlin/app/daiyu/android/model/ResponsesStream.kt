@@ -447,10 +447,7 @@ internal object ResponsesStream {
                     restore(saved)
                     if (cancelled() || failure is InterruptedException || failure is java.util.concurrent.CancellationException) discardPending()
                     else {
-                        try { flushPending() } catch (delivery: Exception) {
-                            if (delivery !== failure) delivery.addSuppressed(failure)
-                            throw delivery
-                        }
+                        flushPending()
                         poisoned = true
                     }
                 }
@@ -462,10 +459,7 @@ internal object ResponsesStream {
         } catch (failure: Exception) {
             if (failure !== deliveryFailure) {
                 if (cancelled() || failure is InterruptedException || failure is java.util.concurrent.CancellationException) discardPending()
-                else try { flushPending() } catch (delivery: Exception) {
-                    if (delivery !== failure) delivery.addSuppressed(failure)
-                    throw delivery
-                }
+                else flushPending()
             }
             throw failure
         }

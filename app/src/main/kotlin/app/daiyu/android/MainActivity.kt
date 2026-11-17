@@ -6146,15 +6146,7 @@ class MainActivity : ComponentActivity() {
         }?.value ?: return false
         val canAnswer = active && !sidebarVisible && displayWindow == null && question.canAnswer
         key(question.identity) {
-            val binding = question.binding
-            if (binding != null) {
-                QuestionCard(question.identity, question.record, canAnswer, binding)
-            } else {
-                QuestionCard(question.identity, question.record, canAnswer = false,
-                    submit = { _, _, complete ->
-                        complete(app.daiyu.android.question.QuestionCardView.Reply.STOPPED)
-                    })
-            }
+            QuestionCard(question.identity, question.record, canAnswer, question.binding)
         }
         return true
     }
@@ -7763,7 +7755,7 @@ class MainActivity : ComponentActivity() {
                     val evidence = toolReceiptSnapshot?.questionEvidence(conversation.value, run.value, message.value)
                     blocks.filterIsInstance<MessageBlock.Tool>().forEach { block ->
                         controller.questionProjection(conversation, run, message, role, block.invocation, evidence)?.let { question ->
-                            put(owner to block.invocation, question)
+                            put(owner to block.invocation, question.confirmed(questionCards[owner to block.invocation]))
                         }
                     }
                 }
@@ -7778,7 +7770,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
             else questionCards = if (toolReceiptKey?.conversation != selected?.id) emptyMap()
-                else questionCards.mapValues { (_, question) -> question.copy(binding = null, canAnswer = false) }
+                else questionCards.mapValues { (_, question) -> question.readOnly() }
             val reconnects = visibleTimeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
             val oldReconnects = chatState.timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
             val currentReceipts = currentToolReceiptKey()

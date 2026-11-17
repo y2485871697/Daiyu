@@ -59,6 +59,28 @@ class QuestionCardReadabilityContractTest(unittest.TestCase):
                       'private fun openArchived()', 'assertCollapsed()', 'Reply.UNCONFIRMED'):
             self.assertIn(token, DEVICE.read_text())
 
+    def test_confirmed_answer_handoff_keeps_one_card_callsite_without_restoring_authority(self):
+        host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
+        dedicated = host.split('private fun DedicatedQuestion(', 1)[1].split('private fun ', 1)[0]
+        self.assertEqual(1, dedicated.count('QuestionCard('))
+        self.assertIn('QuestionCard(question.identity, question.record, canAnswer, question.binding)', dedicated)
+        self.assertNotIn('if (binding != null)', dedicated)
+        projection = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ChatController.kt').read_text().split(
+            'internal data class QuestionProjection(', 1)[1].split('@Synchronized internal fun questionProjection(', 1)[0]
+        for token in ('record.answer ?: binding?.savedAnswer(identity)',
+                      'it.identity == identity && it.record.question == record.question',
+                      'it.record.answer ?: it.binding?.savedAnswer(identity)',
+                      'confirmed().copy(binding = null, canAnswer = false)'):
+            self.assertIn(token, projection)
+        card = CARD.read_text()
+        self.assertIn('canAnswer && binding != null', card)
+        self.assertIn('if (binding != null) binding.submit(identity, answer, done) else done(Reply.STOPPED)', card)
+        binding = (ROOT / 'app/src/main/kotlin/app/daiyu/android/question/QuestionCardBinding.kt').read_text()
+        accessor = binding.split('internal fun savedAnswer(', 1)[1].split('init {', 1)[0]
+        self.assertIn('drafts[identity]?.saved', accessor)
+        self.assertNotIn('selection', accessor)
+        self.assertIn('testConfirmedSubmissionStaysAnsweredAndKeepsDisclosureAcrossReadOnlyRefresh', DEVICE.read_text())
+
     def test_archived_field_is_complete_static_text_not_an_input_target(self):
         text = CARD.read_text()
         field = text.split('private fun QuestionInput(', 1)[1].split('\n@Composable', 1)[0]

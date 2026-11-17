@@ -7,6 +7,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -330,6 +332,104 @@ class QuestionCardReadabilityTest : WiredActivityTestCase() {
             assertArchived(1)
             assertEquals(2, layout("调整配置\n保留已有数据", 15).lineCount)
             for (index in 0..3) assertCentered(index)
+        }
+    }
+
+    fun testConfirmedSubmissionStaysAnsweredAndKeepsDisclosureAcrossReadOnlyRefresh() {
+        val question = UserQuestion("下一步操作", prompt, listOf(
+            QuestionOption("keep", label, description), QuestionOption("change", "调整配置")),
+            allowOther = false, allowDelegation = false, allowNote = false)
+        val pending = QuestionRecord(owner.storageKey, question)
+        val store = object : app.daiyu.android.domain.question.QuestionStore {
+            private var row = pending
+            @Synchronized override fun get(callId: String) = row.takeIf { it.callId == callId }
+            @Synchronized override fun records() = listOf(row)
+            @Synchronized override fun create(record: QuestionRecord) = false
+            @Synchronized override fun answer(callId: String, answer: QuestionAnswer): Boolean {
+                if (row.callId != callId || row.answer != null || row.interrupted) return false
+                row = row.copy(answer = answer)
+                return true
+            }
+            @Synchronized override fun interruptPending() { if (row.answer == null) row = row.copy(interrupted = true) }
+            override fun interruptPending(ownerPrefix: String) = interruptPending()
+        }
+        val registry = app.daiyu.android.question.QuestionRegistry(store, owner)
+        val writer = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val binding = app.daiyu.android.question.QuestionCardBinding(registry, owner, writer) { true }
+        var projection by androidx.compose.runtime.mutableStateOf(
+            app.daiyu.android.ChatController.QuestionProjection(owner, pending, binding, true))
+        try {
+            mainThread {
+                activity.setContent {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                        Column(Modifier.width(300.dp).verticalScroll(rememberScrollState()).testTag("question-scroll")) {
+                            val current = projection
+                            QuestionCard(current.identity, current.record, current.canAnswer, current.binding)
+                        }
+                    }
+                }
+            }
+            ui.waitForIdle()
+            scrollTo("question-option:0").performClick()
+            scrollTo("question-submit").performClick()
+            ui.waitUntil(timeoutMillis = 8_000) { binding.savedAnswer(owner) == QuestionAnswer.Selected("keep") }
+            ui.waitForIdle()
+            assertCollapsed()
+            node("question-toggle").assertTextContains("已回答 · 下一步操作")
+            mainThread {
+                assertNull(projection.record.answer)
+                val directHandoff = app.daiyu.android.ChatController.QuestionProjection(owner, pending, null, false)
+                    .confirmed(projection)
+                assertEquals(QuestionAnswer.Selected("keep"), directHandoff.record.answer)
+                val other = owner.copy(callId = "other")
+                val unrelated = app.daiyu.android.ChatController.QuestionProjection(
+                    other, pending.copy(callId = other.storageKey), null, false)
+                assertNull(unrelated.confirmed(projection).record.answer)
+                val changed = app.daiyu.android.ChatController.QuestionProjection(owner,
+                    pending.copy(question = question.copy(title = "新问题")), null, false)
+                assertNull(changed.confirmed(projection).record.answer)
+                projection = projection.readOnly()
+                assertNull(projection.binding)
+                assertFalse(projection.canAnswer)
+                assertEquals(QuestionAnswer.Selected("keep"), projection.record.answer)
+            }
+            ui.waitForIdle()
+            assertCollapsed()
+            node("question-toggle").assertTextContains("已回答 · 下一步操作")
+            mainThread {
+                val previous = projection
+                projection = app.daiyu.android.ChatController.QuestionProjection(owner, pending, null, false).confirmed(previous)
+                assertEquals(previous.record.answer, projection.record.answer)
+                assertNull(projection.copy(identity = owner.copy(callId = "other"),
+                    record = pending.copy(callId = owner.copy(callId = "other").storageKey)).confirmed(previous).record.answer)
+                assertNull(projection.copy(record = pending.copy(question = question.copy(title = "新问题"))).confirmed(previous).record.answer)
+            }
+            ui.waitForIdle()
+            assertCollapsed()
+            scrollTo("question-toggle").performClick()
+            ui.waitForIdle()
+            assertExpanded()
+            node("question-toggle").assertTextContains("已回答 · 下一步操作")
+            node("question-option:0").assertIsSelected().assertIsNotEnabled()
+            node("question-submit").assertDoesNotExist()
+            ui.onAllNodes(hasSetTextAction()).assertCountEquals(0)
+            mainThread { projection = projection.copy(record = checkNotNull(store.get(owner.storageKey))) }
+            ui.mainClock.autoAdvance = false
+            try {
+                repeat(24) {
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.waitForIdle()
+                    assertExpanded()
+                    node("question-toggle").assertTextContains("已回答 · 下一步操作")
+                    ui.onNodeWithText("当前不可作答 · 下一步操作").assertDoesNotExist()
+                }
+            } finally { ui.mainClock.autoAdvance = true }
+            assertEquals(QuestionAnswer.Selected("keep"), store.get(owner.storageKey)?.answer)
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            writer.shutdown()
+            assertTrue(writer.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS))
+            registry.close()
         }
     }
 

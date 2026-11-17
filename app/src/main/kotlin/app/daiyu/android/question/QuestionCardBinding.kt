@@ -36,6 +36,9 @@ class QuestionCardBinding(
         require(identity.ownerPrefix == owner.ownerPrefix) { "question_owner_mismatch" }
         return drafts.getOrPut(identity) { Draft() }
     }
+    @Synchronized internal fun savedAnswer(identity: QuestionIdentity): QuestionAnswer? =
+        drafts[identity]?.saved
+
     init { require(registry.ownerPrefix == owner.ownerPrefix) { "question_owner_mismatch" } }
 
     fun identity(callId: String): QuestionIdentity = owner.copy(callId = callId)

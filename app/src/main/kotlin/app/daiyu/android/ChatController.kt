@@ -1806,7 +1806,15 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     internal data class QuestionProjection(val identity:QuestionIdentity,val record:QuestionRecord,
-        val binding:QuestionCardBinding?,val canAnswer:Boolean)
+        val binding:QuestionCardBinding?,val canAnswer:Boolean) {
+        fun confirmed(previous:QuestionProjection?=null):QuestionProjection {
+            val saved = record.answer ?: binding?.savedAnswer(identity) ?: previous?.takeIf {
+                it.identity == identity && it.record.question == record.question
+            }?.let { it.record.answer ?: it.binding?.savedAnswer(identity) }
+            return if (record.answer == null && saved != null) copy(record = record.copy(answer = saved)) else this
+        }
+        fun readOnly():QuestionProjection = confirmed().copy(binding = null, canAnswer = false)
+    }
     private val questionHistory=linkedMapOf<String,Pair<QuestionIdentity,QuestionRecord>>()
     private fun questionIdentity(key:String):QuestionIdentity? = try {
         require(key.startsWith("q1:"))

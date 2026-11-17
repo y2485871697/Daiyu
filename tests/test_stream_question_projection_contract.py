@@ -19,7 +19,7 @@ class StreamQuestionProjectionContract(unittest.TestCase):
         host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         self.assertIn('controller.questionWaiting(message)', host)
         self.assertIn('toolReceiptSnapshot?.questionEvidence(conversation.value, run.value, message.value)', host)
-        self.assertIn('question.copy(binding = null, canAnswer = false)', host)
+        self.assertIn('question.readOnly()', host)
     def test_display_and_authority_share_exact_question_identity_without_write_capability(self):
         host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         collect = host.split('if (receiptsReady) questionCards = buildMap {', 1)[1].split('else questionCards =', 1)[0]
@@ -27,7 +27,7 @@ class StreamQuestionProjectionContract(unittest.TestCase):
         self.assertIn('else display.rows.forEach', collect)
         self.assertIn('collect(row.conversationId, row.runId, segment.messageId, segment.role, segment.blocks)', collect)
         self.assertIn('controller.questionProjection(conversation, run, message, role, block.invocation, evidence)', collect)
-        self.assertIn('put(owner to block.invocation, question)', collect)
+        self.assertIn('put(owner to block.invocation, question.confirmed(questionCards[owner to block.invocation]))', collect)
         self.assertNotIn('database.', collect)
         self.assertEqual(2, host.count('questionCards[owner to block.invocation]?.identity?.storageKey'))
         dedicated = host.split('private fun DedicatedQuestion(', 1)[1].split('private fun ', 1)[0]

@@ -77,10 +77,12 @@ internal fun QuestionCard(
     owner: QuestionIdentity,
     record: QuestionRecord,
     canAnswer: Boolean,
-    binding: QuestionCardBinding,
+    binding: QuestionCardBinding?,
     modifier: Modifier = Modifier,
 ) {
-    QuestionCardContent(owner, record, canAnswer, binding, binding::submit, modifier)
+    QuestionCardContent(owner, record, canAnswer && binding != null, binding, { identity, answer, done ->
+        if (binding != null) binding.submit(identity, answer, done) else done(Reply.STOPPED)
+    }, modifier)
 }
 
 /** Callback-only counterpart of QuestionCardView.bind; suitable for read-only transcript rows too. */

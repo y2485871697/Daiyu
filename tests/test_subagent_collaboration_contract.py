@@ -386,7 +386,7 @@ class SubAgentCollaborationContractTest(unittest.TestCase):
             self.assertIn(check, helper)
         binding = (SRC / 'delegation/SavedSubAgentRuntimeBindings.kt').read_text()
         create = binding.split('val original = ChildModelDefinition(', 1)[1]
-        original = create.split('\n            val lock = Any()', 1)[0]
+        original, _ = create.split('\n            fun taskDefinition(): ChildModelDefinition {', 1)
         self.assertIn('runModel(binding.child)', original)
         self.assertIn('latest = null, selection = binding.child', original)
         self.assertNotIn('resolveSavedModel', original)

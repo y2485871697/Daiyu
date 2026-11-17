@@ -103,7 +103,10 @@ class TerminalCommandPagerInventoryTest(unittest.TestCase):
         self.assertIsNotNone(match)
         rows = json.loads(match.group(1))
         self.assertEqual([("26", 0), ("37.2", 0)], [(row["api"], row["shard"]) for row in rows])
-        self.assertIn("SMOKE_SHARD_COUNT: ${{ (inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == '" + target + "') && '1'", workflow)
+        self.assertIn(
+            "(inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == '" + target + "') && '1'",
+            next(line for line in workflow.splitlines() if line.lstrip().startswith("SMOKE_SHARD_COUNT:")),
+        )
 
     def test_command_policy_is_shared_without_changing_interactive_setup(self):
         root = Path(__file__).resolve().parents[1]

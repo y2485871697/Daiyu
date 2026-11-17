@@ -13,7 +13,11 @@ internal object TerminalTargetMetadata {
             val value = number.toLong()
             return value.takeIf { it in 0..Int.MAX_VALUE.toLong() && number.toString() == it.toString() }?.toInt()
         }
-        context.reportTerminalTarget(TerminalExecutionTarget(backend, uid("uid"), uid("guest_uid"),
+        val actualUid = uid("uid")
+        val actualGuestUid = uid("guest_uid")
+        if ((receipt.has("uid") && !receipt.isNull("uid") && actualUid == null) ||
+            (receipt.has("guest_uid") && !receipt.isNull("guest_uid") && actualGuestUid == null)) return
+        context.reportTerminalTarget(TerminalExecutionTarget(backend, actualUid, actualGuestUid,
             receipt.opt("root") as? Boolean, receipt.opt("host_root") as? Boolean))
     }
 }

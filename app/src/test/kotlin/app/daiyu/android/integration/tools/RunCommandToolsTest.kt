@@ -409,9 +409,7 @@ class RunCommandToolsTest {
             fixture.openIdentity = JSONObject().put("backend", "linux:debian").put("uid", invalid)
                 .put("guest_uid", invalid).put("root", "true").put("host_root", "true")
             assertTrue(fixture.dispatch() is DispatchOutcome.Confirmed)
-            val target = fixture.owner.terminalTargets.values.single()
-            assertNull(target.uid); assertNull(target.guestUid)
-            assertNull(target.root); assertNull(target.hostRoot)
+            assertTrue(fixture.owner.terminalTargets.isEmpty())
             fixture.leaf.close()
         }
         val unknown = Fixture()
@@ -419,6 +417,39 @@ class RunCommandToolsTest {
         assertTrue(unknown.dispatch() is DispatchOutcome.Confirmed)
         assertTrue(unknown.owner.terminalTargets.isEmpty())
         unknown.leaf.close()
+    }
+
+    @Test fun oneMalformedUidCannotDisappearAndPromoteTheOtherUidToRoot() {
+        for (key in listOf("uid", "guest_uid")) {
+            for (invalid in listOf<Any>("0", "bad", 0.5, -1, Long.MAX_VALUE)) {
+                val fixture = Fixture()
+                fixture.openIdentity = JSONObject().put("backend", "linux:debian").put("uid", 0)
+                    .put("guest_uid", 0).put(key, invalid)
+                try {
+                    assertTrue(fixture.dispatch() is DispatchOutcome.Confirmed)
+                    assertTrue("Malformed $key=$invalid must not publish a stronger identity",
+                        fixture.owner.terminalTargets.isEmpty())
+                    assertEquals(1, fixture.executions)
+                } finally { fixture.leaf.close() }
+            }
+        }
+    }
+
+    @Test fun missingAndExplicitNullUidKeepCompatibleResolvedMetadata() {
+        for (key in listOf("uid", "guest_uid")) {
+            for (explicitNull in listOf(false, true)) {
+                val fixture = Fixture()
+                fixture.openIdentity = JSONObject().put("backend", "linux:debian").put("uid", 0).put("guest_uid", 0)
+                if (explicitNull) fixture.openIdentity.put(key, JSONObject.NULL) else fixture.openIdentity.remove(key)
+                try {
+                    assertTrue(fixture.dispatch() is DispatchOutcome.Confirmed)
+                    val target = fixture.owner.terminalTargets.values.single()
+                    assertEquals("linux:debian", target.backend)
+                    assertEquals(if (key == "uid") null else 0, target.uid)
+                    assertEquals(if (key == "guest_uid") null else 0, target.guestUid)
+                } finally { fixture.leaf.close() }
+            }
+        }
     }
 
     @Test fun deniedOrFailedOpenNeverPublishesAnActualTarget() {

@@ -193,8 +193,9 @@ internal fun StreamingTailContainer(
                     val actualTop = list.localPositionOf(viewport, Offset.Zero).y
                     (list.size.height - actualTop - if (protect) clearance() else 0).coerceAtLeast(0f)
                 } else size.height
-                // Follow protection owns this measured frame; detached reading keeps its extended backdrop.
-                val clipBottom = if (protect) minOf(size.height, bottom) else bottom
+                // Catchup can place the finite frame above content that is still inside the safe edge.
+                val followingCatchup = state.bounded && state.followCatchup && follows()
+                val clipBottom = if (protect && !followingCatchup) minOf(size.height, bottom) else bottom
                 clipRect(bottom = clipBottom) { this@drawWithContent.drawContent() }
             }
             .scrollable(innerScroll, Orientation.Vertical, enabled = userScrollEnabled && state.bounded)

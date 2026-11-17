@@ -37,7 +37,13 @@ class StreamingFreezeContract(unittest.TestCase):
         self.assertIn('workflowBoundaries != oldBoundaries', remap)
         self.assertIn('toolReceiptSnapshot?.displayReader(loaded, currentReceipts, controller::runState, controller::runStopping)', source)
         self.assertIn('if (receiptsReady) questionCards = buildMap', source)
-        self.assertIn('question.copy(binding = null, canAnswer = false)', source)
+        if 'question.readOnly()' in source:
+            self.assertIn('questionCards.mapValues { (_, question) -> question.readOnly() }', source)
+            controller = (APP / 'ChatController.kt').read_text()
+            helper = controller.split('fun readOnly():QuestionProjection = ', 1)[1].split('\n', 1)[0]
+            self.assertEqual('confirmed().copy(binding = null, canAnswer = false)', helper.strip())
+        else:
+            self.assertIn('question.copy(binding = null, canAnswer = false)', source)
         selection = source.split('    private fun select(conversation: Conversation?, prepared:', 1)[1].split('    private fun compressionSendBlocked', 1)[0]
         self.assertIn('questionCards = emptyMap()', selection)
 

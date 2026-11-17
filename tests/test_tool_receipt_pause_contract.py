@@ -40,7 +40,13 @@ class ToolReceiptPauseContract(unittest.TestCase):
     def test_display_continuity_does_not_relax_question_binding_or_unknown_semantics(self):
         host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         questions = host.split('if (receiptsReady) questionCards =', 1)[1].split('val reconnects', 1)[0]
-        self.assertIn('question.copy(binding = null, canAnswer = false)', questions)
+        if 'question.readOnly()' in questions:
+            self.assertIn('questionCards.mapValues { (_, question) -> question.readOnly() }', questions)
+            controller = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ChatController.kt').read_text()
+            helper = controller.split('fun readOnly():QuestionProjection = ', 1)[1].split('\n', 1)[0]
+            self.assertEqual('confirmed().copy(binding = null, canAnswer = false)', helper.strip())
+        else:
+            self.assertIn('question.copy(binding = null, canAnswer = false)', questions)
         self.assertNotIn('canDisplayFor', questions)
         activity = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolActivityUi.kt').read_text()
         self.assertIn('ToolDisposition.UNKNOWN -> WorkStepState.UNKNOWN', activity)

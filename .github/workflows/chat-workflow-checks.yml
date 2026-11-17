@@ -8,7 +8,7 @@ on:
         type: string
         required: true
       contract_tools_sha:
-        description: 仅task-scroll可选；固定修正后的契约工具提交，不改变被检源码或重新打包
+        description: task-scroll或message-actions可选；固定修正后的契约工具提交，不改变被检源码或重新打包
         type: string
         default: ''
       check_id:
@@ -48,7 +48,7 @@ jobs:
         env:
           CONTRACT_TOOLS_SHA: ${{ inputs.contract_tools_sha }}
         run: |
-          test "$WORKFLOW_CHECK_SCOPE" = task-scroll
+          test "$WORKFLOW_CHECK_SCOPE" = task-scroll || test "$WORKFLOW_CHECK_SCOPE" = message-actions
           [[ "$CONTRACT_TOOLS_SHA" =~ ^[0-9a-f]{40}$ ]]
       - name: 固定独立契约工具
         if: inputs.contract_tools_sha != ''
@@ -66,14 +66,24 @@ jobs:
           python3 -B - <<'PY'
           import hashlib, json, os
           from pathlib import Path
-          name = 'tests/test_streaming_occlusion_contract.py'
-          target = Path(name)
-          tool = Path('.contract-tools-source') / name
-          before, after = target.read_bytes(), tool.read_bytes()
-          receipt = dict(source_sha=os.environ['EXPECTED_SHA'], tools_sha=os.environ['CONTRACT_TOOLS_SHA'],
-                         file=name, source_sha256=hashlib.sha256(before).hexdigest(),
-                         tools_sha256=hashlib.sha256(after).hexdigest())
-          target.write_bytes(after)
+          scope = os.environ['WORKFLOW_CHECK_SCOPE']
+          names = {
+              'task-scroll': ('tests/test_streaming_occlusion_contract.py',),
+              'message-actions': ('tests/test_pane_question_smoke_scope.py', 'tests/test_message_confirmation_contract.py'),
+          }[scope]
+          files = []
+          for name in names:
+              target = Path(name)
+              tool = Path('.contract-tools-source') / name
+              before, after = target.read_bytes(), tool.read_bytes()
+              files.append(dict(file=name, source_sha256=hashlib.sha256(before).hexdigest(),
+                                tools_sha256=hashlib.sha256(after).hexdigest()))
+              target.write_bytes(after)
+          receipt = dict(source_sha=os.environ['EXPECTED_SHA'], tools_sha=os.environ['CONTRACT_TOOLS_SHA'])
+          if scope == 'task-scroll':
+              receipt.update(files[0])
+          else:
+              receipt['files'] = files
           Path('workflow-checks').mkdir(exist_ok=True)
           Path('workflow-checks/contract-tools.json').write_text(json.dumps(receipt, indent=2) + '\n')
           PY

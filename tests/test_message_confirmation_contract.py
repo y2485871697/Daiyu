@@ -46,8 +46,9 @@ class MessageConfirmationContractTest(unittest.TestCase):
         status = self.main.split("statusText = controller.problem ?: when {", 1)[1].split("composer = ComposerUi(", 1)[0]
         self.assertNotIn("正在准备重新生成", self.main)
         self.assertNotIn("regeneration", status)
+        self.assertNotIn("imageHost.sending ->", status)
         for token in ("controller.dataBusy -> controller.dataStatus", '!controller.ready -> "恢复会话中"',
-                      '!selectionReady -> "加载会话中"', "messageEditBlocked ->", "imageHost.sending ->"):
+                      '!selectionReady -> "加载会话中"', "messageEditBlocked ->"):
             self.assertIn(token, status)
         self.assertIn("else -> null", status)
         activity = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ChatSubmissionActivityTest.kt").read_text()

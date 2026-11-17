@@ -167,7 +167,8 @@ private fun MessageMediaGroup(
 @Composable
 private fun rememberMessageImageResult(image: MessageImageUi, loader: MessageImageLoader?): State<MessageImageLoadResult> {
     val initial = if (loader == null || image.expectedOwner != image.reference.owner)
-        MessageImageLoadResult.Unavailable else MessageImageLoadResult.Loading
+        MessageImageLoadResult.Unavailable else loader.cached(image.expectedOwner, image.reference, 1024)
+            ?.let(MessageImageLoadResult::Ready) ?: MessageImageLoadResult.Loading
     // Key the producer itself: replacing an image must never briefly reuse the old ready bitmap
     // (and accidentally enable a click for an asset which has not yet passed validation).
     return key(image, loader) {

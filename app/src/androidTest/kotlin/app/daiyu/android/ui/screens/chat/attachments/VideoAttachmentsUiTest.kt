@@ -259,9 +259,11 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         assertTrue(item.top >= surface.top && item.bottom <= input.top)
         assertTrue(surface.height > empty.height)
         node("chat-send").assertIsEnabled().performClick()
-        node("video_attachments_confirmation").assertIsDisplayed()
-        assertNull(handed)
-        node("video_attachments_cancel_confirmation").performClick()
+        node("video_attachments_confirmation").assertDoesNotExist()
+        node("video_attachments_fenced").assertDoesNotExist()
+        assertNotNull(handed)
+        mainThread { assertTrue(deliver!!(receipt(VideoDraftOutcome.REJECTED))) }
+        ui.waitUntil(5_000) { host.state.canSubmit }
         node("video_attachments_remove:$id").performClick()
         ui.waitUntil(5_000) { host.state.items.isEmpty() && !host.state.recovering }
         node("video_attachments").assertDoesNotExist()
@@ -270,7 +272,7 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         node("chat-send").assertIsNotEnabled()
     }
 
-    fun testCompactComposerBlockedVideoNeverSendsCaptionAndConfirmationFreezesText() {
+    fun testCompactComposerBlockedVideoNeverSendsCaptionAndSingleClickFreezesText() {
         show(compact = true)
         ui.onNodeWithContentDescription("附件").performClick()
         node("chat-attachment:ATTACH_VIDEO").performSemanticsAction(
@@ -286,9 +288,8 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         assertNull(handed)
         mainThread { busy.value = false }
         node("chat-send").performClick()
-        node("video_attachments_confirm_text").assertTextEquals("first exact text")
+        node("video_attachments_confirmation").assertDoesNotExist()
         mainThread { text.value = "new caption"; textRevision.value++ }
-        node("video_attachments_confirm").performClick()
         assertEquals("first exact text", handed?.text)
         assertEquals("first exact text", frozenEditor?.text)
     }
@@ -315,11 +316,11 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         return VideoDraftReceipt(request.conversation, request.owner, request.revision + revisionDelta, request.videos,
             outcome, if (outcome == VideoDraftOutcome.ACCEPTED) request.owner.conversationId else null)
     }
-    private fun confirm() {
+    private fun submitVideo() {
         node("video_attachments_send").performClick()
-        node("video_attachments_confirmation").assertIsDisplayed()
-        assertNull(handed)
-        node("video_attachments_confirm").performClick()
+        node("video_attachments_confirmation").assertDoesNotExist()
+        node("video_attachments_fenced").assertDoesNotExist()
+        assertNotNull(handed)
     }
 
     fun testActualSelectionContractAndImportingReadyCoverAndRemoval() {
@@ -389,48 +390,28 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         assertEquals(1, media.imports.get())
     }
 
-    fun testConfirmationCancelKeepsDraftAndNextConfirmationFreezesNewText() {
+    fun testRejectionKeepsDraftAndNextSingleClickFreezesNewText() {
         pick(); val key = awaitReady()
-        node("video_attachments_send").performClick()
-        node("video_attachments_confirm_text").assertTextEquals("first exact text")
-        mainThread { text.value = "edited while confirmation was open"; textRevision.value++ }
-        node("video_attachments_cancel_confirmation").performClick()
-        node("video_attachments_confirmation").assertDoesNotExist()
+        submitVideo()
+        assertEquals("first exact text", handed!!.text)
+        mainThread {
+            text.value = "edited after the first send"; textRevision.value++
+            assertTrue(deliver!!(receipt(VideoDraftOutcome.REJECTED)))
+        }
+        ui.waitUntil(5_000) { host.state.canSubmit }
         node("video_attachments_ready:$key").assertIsDisplayed()
-        node("video_attachments_send").assertIsEnabled()
         assertEquals(1, media.originals.size)
-        assertNull(handed)
-        assertNull(frozenEditor)
-        assertNull(deliver)
-        node("video_attachments_send").performClick()
-        node("video_attachments_confirm_text").assertTextEquals("edited while confirmation was open")
-        node("video_attachments_confirm").performClick()
-        assertEquals("edited while confirmation was open", handed!!.text)
-        assertEquals(VideoDraftText("edited while confirmation was open", 7L, 2L), frozenEditor)
+        submitVideo()
+        assertEquals("edited after the first send", handed!!.text)
+        assertEquals(VideoDraftText("edited after the first send", 7L, 2L), frozenEditor)
     }
 
-    fun testLongFrozenCaptionScrollsToEndAndUploadsOriginalText() {
+    fun testLongCaptionUploadsTheExactTextWithoutASecondConfirmation() {
         val original = (1..60).joinToString("\n") { "Frozen caption line $it" } + "\nFINAL FROZEN CAPTION LINE"
         mainThread { text.value = original; textRevision.value = 2L }
         pick(); awaitReady()
-        node("video_attachments_send").performClick()
-        node("video_attachments_confirm_text").assertTextEquals(original)
-        val before = node("video_attachments_confirm_text").fetchSemanticsNode()
-            .config[SemanticsProperties.VerticalScrollAxisRange]
-        assertTrue("Long caption must overflow its bounded viewport", before.maxValue() > 0f)
-        assertEquals(0f, before.value(), 0.5f)
+        submitVideo()
         mainThread { text.value = "new live editor text"; textRevision.value = 3L }
-        node("video_attachments_confirm_text").performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
-            assertTrue(scroll(0f, 100_000f))
-        }
-        ui.mainClock.advanceTimeByFrame()
-        ui.waitForIdle()
-        val after = node("video_attachments_confirm_text").fetchSemanticsNode()
-            .config[SemanticsProperties.VerticalScrollAxisRange]
-        assertTrue(after.maxValue() > 0f)
-        assertEquals("The final frozen line must be reachable", after.maxValue(), after.value(), 0.5f)
-        node("video_attachments_confirm_text").assertTextEquals(original)
-        node("video_attachments_confirm").assertIsDisplayed().performClick()
         assertEquals(original, handed!!.text)
         assertEquals(VideoDraftText(original, 7L, 2L), frozenEditor)
         assertEquals("new live editor text", text.value)
@@ -446,7 +427,7 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         // The clickable thumbnail merges its descendants in the default tree.
         ui.onNodeWithTag("video_attachments_cover_failed:$ready", useUnmergedTree = true)
             .assertTextContains("原视频仍保留", substring = true)
-        confirm()
+        submitVideo()
         assertEquals(media.originals.values.single(), handed!!.videos.single())
         assertEquals("video/mp4", handed!!.videos.single().mime)
     }
@@ -526,21 +507,21 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
     fun testParentRejectionAndUnknownKeepOriginalsAndTextIsFrozen() {
         pick(); val key = awaitReady()
         node("video_attachments_send").performClick()
-        mainThread { text.value = "edited after confirmation opened"; textRevision.value++ }
-        node("video_attachments_confirm_text").assertTextContains("first exact text")
-        node("video_attachments_confirm").performClick()
+        node("video_attachments_confirmation").assertDoesNotExist()
+        mainThread { text.value = "edited after send"; textRevision.value++ }
         assertEquals("first exact text", handed!!.text)
         assertEquals(VideoDraftText("first exact text", 7L, 1L), frozenEditor)
         assertEquals("video/mp4", handed!!.videos.single().mime)
         mainThread { assertFalse(deliver!!(receipt(VideoDraftOutcome.ACCEPTED, 1))) }
-        node("video_attachments_fenced").assertIsDisplayed()
+        node("video_attachments_fenced").assertDoesNotExist()
         mainThread { assertTrue(deliver!!(receipt(VideoDraftOutcome.UNKNOWN))) }
+        node("video_attachments_fenced").assertIsDisplayed()
         node("video_attachments_remove:$key").assertIsNotEnabled()
         assertEquals(1, media.originals.size)
         mainThread { assertTrue(deliver!!(receipt(VideoDraftOutcome.REJECTED))) }
         node("video_attachments_ready:$key").assertIsDisplayed()
         assertEquals(1, media.originals.size)
-        assertEquals("edited after confirmation opened", text.value)
+        assertEquals("edited after send", text.value)
     }
 
     fun testBusyAndAcceptedAfterDepartureNeverClearEditor() {
@@ -549,7 +530,7 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         node("video_attachments_select").assertIsNotEnabled()
         node("video_attachments_send").assertIsNotEnabled()
         mainThread { busy.value = false }
-        confirm()
+        submitVideo()
         mainThread { mounted.value = false; text.value = "new editor revision" }
         ui.waitForIdle()
         mainThread { assertTrue(deliver!!(receipt(VideoDraftOutcome.ACCEPTED))) }

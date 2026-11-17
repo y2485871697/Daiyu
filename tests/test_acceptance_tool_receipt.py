@@ -17,6 +17,38 @@ producer = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(producer)
 
 
+class MediaSendReceiptScopeTest(unittest.TestCase):
+    def test_frozen_media_scope_keeps_checkout_identity_and_raw_exit(self):
+        previous = Path.cwd()
+        with tempfile.TemporaryDirectory() as directory:
+            try:
+                os.chdir(directory)
+                for code in (0, 3):
+                    env = dict(GITHUB_SHA="b" * 40, GITHUB_RUN_ID="43", GITHUB_RUN_ATTEMPT="2",
+                               EXPECTED_SHA="a" * 40, SMOKE_MODE="smoke",
+                               SMOKE_TEST_CLASSES=",".join(producer.MEDIA_SEND_PLATFORM_CLASSES))
+                    def child(command, stdout, stderr, env=None, cwd=None):
+                        self.assertEqual(ROOT, cwd)
+                        self.assertTrue(env["PYTHONPATH"].startswith(str(ROOT / "tests")))
+                        self.assertNotIn("discover", command)
+                        stdout.write(b"frozen media scope raw output\n")
+                        return code
+                    console = io.BytesIO()
+                    with patch.dict(os.environ, env, clear=True), \
+                            patch.object(producer.subprocess, "check_output", return_value="a" * 40 + "\n"), \
+                            patch.object(producer.subprocess, "call", side_effect=child), \
+                            patch.object(producer.sys, "stdout", SimpleNamespace(buffer=console)):
+                        self.assertEqual(code, producer.record("python3"))
+                    receipt = json.loads(Path("tool-evidence/receipt.json").read_text())
+                    self.assertEqual(code, receipt["exit_code"])
+                    self.assertEqual("a" * 40, receipt["identity"]["sha"])
+                    self.assertEqual("b" * 40, receipt["validation_tools_sha"])
+                    self.assertEqual("media-send-targeted", receipt["scope"])
+                    self.assertEqual(b"frozen media scope raw output\n", Path("tool-evidence/unittest.log").read_bytes())
+            finally:
+                os.chdir(previous)
+
+
 class ChildStopReceiptScopeTest(unittest.TestCase):
     def test_stop_scope_is_explicit_and_preserves_single_source_gate(self):
         classes = "app.daiyu.android.ChildStopChoiceActivityTest,app.daiyu.android.ControllerChildRetentionTest"

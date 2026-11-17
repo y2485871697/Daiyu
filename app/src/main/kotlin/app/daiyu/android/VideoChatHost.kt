@@ -97,6 +97,7 @@ internal class VideoChatHost internal constructor(
         val storageFailed: Boolean,
         val visible: Boolean,
         val recovering: Boolean = false,
+        val submitting: Boolean = false,
     ) {
         val remaining: Int get() = VideoHostDraftStore.MAX_VIDEOS - items.size
         val canSubmit: Boolean get() = visible && !fenced && !storageFailed && !recovering &&
@@ -116,6 +117,7 @@ internal class VideoChatHost internal constructor(
         var fenced: Boolean, val items: MutableList<Item>,
         val pendingDeletes: MutableList<VideoAttachment> = mutableListOf()) {
         val imports = mutableMapOf<String, CancellationSignal>()
+        var submitting = false
     }
 
     private val thread = Thread.currentThread()
@@ -178,7 +180,7 @@ internal class VideoChatHost internal constructor(
     private fun publish() {
         state = Snapshot(selected.slot, selected.owner, selected.revision, visit,
             Collections.unmodifiableList(ArrayList(selected.items)), selected.fenced, storageFailed, visible,
-            selected.owner in recoveringOwners || selected.owner in deletingOwners)
+            selected.owner in recoveringOwners || selected.owner in deletingOwners, selected.submitting)
         runCatching { changed() }
     }
     private fun current(expected: Snapshot): Boolean = visible && !storageFailed && !selected.fenced &&
@@ -425,8 +427,12 @@ internal class VideoChatHost internal constructor(
         val request = VideoDraftRequest(target.slot, target.owner, target.revision, text, videos(target))
         target.fenced = true
         if (!persist()) { publish(); return null }
+        target.submitting = true
         publish()
-        try { handoff(request) } catch (_: Exception) { /* Keep the exact revision fenced as UNKNOWN. */ }
+        try { handoff(request) } catch (_: Exception) {
+            target.submitting = false
+            publish() // The exact revision stays fenced as UNKNOWN.
+        }
         return request
     }
 
@@ -450,7 +456,11 @@ internal class VideoChatHost internal constructor(
         if (!target.fenced) return false
         val request = VideoDraftRequest(target.slot, target.owner, target.revision, "", videos(target))
         if (!videoReceiptMatches(request, receipt)) return false
-        if (receipt.outcome == VideoDraftOutcome.UNKNOWN) return true
+        if (receipt.outcome == VideoDraftOutcome.UNKNOWN) {
+            target.submitting = false
+            publish()
+            return true
+        }
         if (target.revision >= Long.MAX_VALUE - 1) return false
         val accepted = receipt.outcome == VideoDraftOutcome.ACCEPTED
         val destination = if (accepted) receipt.acceptedConversation else target.slot

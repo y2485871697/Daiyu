@@ -103,9 +103,6 @@ fun ImageAttachments(
         if (state.selection != null) {
             StatusText(stringResource(R.string.image_attachments_selecting), "image_attachments_selecting")
         }
-        if (state.submission != null) {
-            StatusText(stringResource(R.string.image_attachments_submitting), "image_attachments_submitting")
-        }
         if (!compact && state.items.isEmpty()) {
             Text(stringResource(R.string.image_attachments_empty), style = MiuixTheme.textStyles.footnote1,
                 color = colors.onSurfaceVariantSummary, modifier = Modifier.padding(bottom = 4.dp))

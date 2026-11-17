@@ -44,6 +44,25 @@ class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
         assertEquals(raw, fixture.database.conversations().single().draft)
     }
 
+    fun testFileReferenceSingleClickSendsTheExactUnexpandedReference() {
+        prepare()
+        val reference = "文件引用（未读取）：content://reference-never-read.invalid/document/send-once"
+        val raw = "$original\n$reference"
+        mainThread { retainedControls(activity).onTextChange(raw) }
+        assertReferenceDraft(raw, original)
+        assertEquals(0, fixture.opens.get())
+        node("chat-send").assertIsEnabled().performClick()
+        node("image-host-cancel").assertDoesNotExist()
+        node("image_attachments_submitting").assertDoesNotExist()
+        awaitControl("file reference accepted once") { fixture.opens.get() == 1 && fixture.controller.active == null }
+        val conversation = fixture.database.conversations().single()
+        val users = fixture.database.messages(conversation.id).map { it.second }
+            .filter { it.role == app.daiyu.android.domain.Message.USER_ROLE }
+        assertEquals(1, users.size)
+        assertEquals(listOf(raw), users.single().blocks.filterIsInstance<app.daiyu.android.domain.MessageBlock.Text>().map { it.text })
+        assertEquals(1, fixture.opens.get())
+    }
+
     fun testReferenceBodyEditingAndRemovalPersistWithoutResurrectingOldReferences() {
         prepare()
         val first = "文件引用（未读取）：content://reference-never-read.invalid/document/one"

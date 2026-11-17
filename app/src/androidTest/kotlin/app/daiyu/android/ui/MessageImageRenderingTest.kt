@@ -95,4 +95,29 @@ class MessageImageRenderingTest : WiredActivityTestCase() {
         assertEquals(listOf(Triple(owner, reference, 1024)), requests.toList())
         ui.onNodeWithTag("message-image-unavailable:1", useUnmergedTree = true).assertDoesNotExist()
     }
+    fun testWarmAcceptedThumbnailStaysReadyWhileFullValidationIsPendingAndFailureRevokesIt() {
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val entered = AtomicInteger()
+        val thumbnail = ImageBitmap(2, 2)
+        val loader = object : MessageImageLoader {
+            override fun cached(expectedOwner: MessageImageOwner, ref: MessageImageReference, maxEdge: Int) =
+                thumbnail.takeIf { expectedOwner == owner && ref == reference }
+            override suspend fun load(expectedOwner: MessageImageOwner, ref: MessageImageReference, maxEdge: Int): ImageBitmap? {
+                entered.incrementAndGet()
+                gate.await()
+                return null
+            }
+        }
+        try {
+            show { MessageImage(image, 1, loader) }
+            ui.waitUntil(5_000) { entered.get() == 1 }
+            ui.onNodeWithContentDescription("消息图片 1").assertExists()
+            ui.onNodeWithContentDescription("图片加载中").assertDoesNotExist()
+            gate.complete(Unit)
+            ui.waitUntil(5_000) {
+                ui.onAllNodesWithTag("message-image-unavailable:1", useUnmergedTree = true).fetchSemanticsNodes().size == 1
+            }
+        } finally { gate.complete(Unit) }
+    }
+
 }

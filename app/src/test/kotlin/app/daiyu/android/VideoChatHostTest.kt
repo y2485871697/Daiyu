@@ -154,7 +154,9 @@ class VideoChatHostTest {
         var callback = 0
         val request = checkNotNull(host.submit("unchanged") { callback++ })
         assertEquals(1, callback)
+        assertTrue(host.state.submitting)
         assertTrue(host.settle(receipt(request, VideoDraftOutcome.UNKNOWN)))
+        assertFalse(host.state.submitting)
         assertEquals(request.revision, host.state.revision)
         host.detach()
         val restored = VideoChatHost(journal, media, dispatcher, dispatcher)

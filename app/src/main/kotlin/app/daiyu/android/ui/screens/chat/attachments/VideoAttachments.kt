@@ -25,7 +25,6 @@ import app.daiyu.android.ui.screens.chat.conversation.ChatIconButton
 import app.daiyu.android.ui.screens.chat.conversation.chatChromeColors
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -124,8 +123,6 @@ internal data class VideoComposerControls(
     val send: () -> Unit,
 )
 
-private data class VideoConfirmation(val snapshot: VideoChatHost.Snapshot, val text: VideoDraftText)
-
 @Composable
 private fun VideoAttachmentsContent(
     host: VideoChatHost,
@@ -140,20 +137,27 @@ private fun VideoAttachmentsContent(
     onControls: (VideoComposerControls?) -> Unit,
     onControlsDisposed: ((VideoComposerControls) -> Unit)?,
 ) {
-    var confirmation by remember { mutableStateOf<VideoConfirmation?>(null) }
     var cover by remember { mutableStateOf<VideoChatHost.Item.Ready?>(null) }
     val canEdit = enabled && state.visible && !state.fenced && !state.storageFailed && !state.recovering
     val controls by rememberUpdatedState(onControls)
     val releaseControls by rememberUpdatedState(onControlsDisposed)
     val canSelect = canEdit && !picker.selecting && state.remaining > 0 && state.items.none { it is VideoChatHost.Item.Importing }
     val canSubmit = enabled && state.canSubmit && !picker.selecting
+    fun send() {
+        if (!canSubmit || !sameVideoVisit(state, host.state)) return
+        host.submit(text.text, state) { request ->
+            onHandoff(request, text) { receipt ->
+                videoReceiptMatches(request, receipt) && host.settle(receipt)
+            }
+        }
+    }
     DisposableEffect(host, picker, state, text, enabled, picker.selecting, pickRequest) {
         var live = true
         val published = VideoComposerControls(canSubmit,
             picker.selecting || state.fenced || state.storageFailed || state.recovering ||
                 state.items.isNotEmpty() && !canSubmit,
             select = { if (live && canSelect && sameVideoVisit(state, host.state)) picker.launch(state) },
-            send = { if (live && canSubmit && sameVideoVisit(state, host.state)) confirmation = VideoConfirmation(state, text) })
+            send = { if (live) send() })
         controls(published)
         onDispose {
             live = false
@@ -171,12 +175,12 @@ private fun VideoAttachmentsContent(
                 enabled = canEdit && !picker.selecting && state.remaining > 0 && state.items.none { it is VideoChatHost.Item.Importing },
                 modifier = Modifier.heightIn(min = 48.dp).testTag("video_attachments_select"))
         }
-        if (!compact) Text("发送的是原视频，不是封面图片；仅上传确认后交给父级处理。",
+        if (!compact) Text("发送的是原视频，不是封面图片。",
             style = MiuixTheme.textStyles.footnote1, color = colors.onSurfaceVariantSummary)
         if (picker.selecting) VideoStatus("正在选择视频…", "video_attachments_selecting")
         picker.notice?.let { VideoStatus(it, "video_attachments_notice") }
         if (state.storageFailed) VideoStatus("视频草稿保存失败，已停止操作；请勿重复发送", "video_attachments_storage_failed")
-        if (state.fenced) VideoStatus("正在确认视频发送结果，请勿重复发送", "video_attachments_fenced")
+        if (state.fenced && !state.submitting && !state.recovering) VideoStatus("发送结果待核实，请勿重复发送", "video_attachments_fenced")
         if (!compact && state.items.isEmpty()) Text("尚未选择视频", style = MiuixTheme.textStyles.footnote1)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             state.items.forEachIndexed { index, item ->
@@ -211,7 +215,7 @@ private fun VideoAttachmentsContent(
             }
         }
         if (!compact) TextButton(text = "发送原视频…", enabled = enabled && state.canSubmit && !picker.selecting,
-            onClick = { confirmation = VideoConfirmation(state, text) },
+            onClick = { send() },
             modifier = Modifier.heightIn(min = 48.dp).testTag("video_attachments_send"))
     }
     cover?.takeIf { state.visible && state.items.contains(it) }?.let { item ->
@@ -226,30 +230,7 @@ private fun VideoAttachmentsContent(
             }
         }
     }
-    confirmation?.takeIf { sameVideoVisit(it.snapshot, state) && state.canSubmit }?.let { frozen ->
-        Dialog(onDismissRequest = { confirmation = null }) {
-            Column(Modifier.fillMaxWidth().background(colors.background).padding(16.dp).testTag("video_attachments_confirmation")) {
-                Text("确认上传原视频？", style = MiuixTheme.textStyles.title3)
-                Text("将上传 ${frozen.snapshot.items.size} 个原视频及以下内容，可能产生流量。")
-                // Bound the viewport before scrolling so long frozen captions remain fully readable.
-                Text(frozen.text.text, modifier = Modifier.heightIn(max = 120.dp)
-                    .verticalScroll(rememberScrollState()).testTag("video_attachments_confirm_text"))
-                TextButton(text = "取消", onClick = { confirmation = null }, modifier = Modifier.heightIn(min = 48.dp)
-                    .testTag("video_attachments_cancel_confirmation"))
-                TextButton(text = "确认上传原视频", enabled = enabled && !picker.selecting,
-                    onClick = {
-                        confirmation = null
-                        host.submit(frozen.text.text, frozen.snapshot) { request ->
-                            // This closure retains only the long-lived host and immutable request.
-                            // It remains valid after disposal; parent owns async work and main dispatch.
-                            onHandoff(request, frozen.text) { receipt ->
-                                videoReceiptMatches(request, receipt) && host.settle(receipt)
-                            }
-                        }
-                    }, modifier = Modifier.heightIn(min = 48.dp).testTag("video_attachments_confirm"))
-            }
-        }
-    }
+
 }
 
 @Composable

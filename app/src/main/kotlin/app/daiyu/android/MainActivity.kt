@@ -5813,13 +5813,6 @@ class MainActivity : ComponentActivity() {
         Column(Modifier.fillMaxWidth()) {
             ImageAttachments(images, imageHost.actions(::launchImagePicker), imageHost.draftLoader,
                 enabled = enabled, compact = true)
-            val attempt = session.attempt
-            if (attempt != null && !session.uncertain) app.daiyu.android.ui.haptics.miuix.TextButton(
-                text = "取消图片准备", modifier = Modifier.heightIn(min = 48.dp).testTag("image-host-cancel"),
-                onClick = {
-                    if (editorGeneration == ownerGeneration && imageHost.session === session)
-                        imageHost.cancelPreparation(session, attempt)
-                })
             if (imageHost.fenced) {
                 top.yukonga.miuix.kmp.basic.Text(
                     "发送结果待核实；保留原草稿，禁止重发", modifier = Modifier.testTag("image-host-unknown"))
@@ -7583,8 +7576,11 @@ class MainActivity : ComponentActivity() {
         if (messageMediaKey == key || messageMediaRead?.isActive == true && messageMediaRequested == key) return
         messageMediaRead?.cancel()
         messageMediaRequested = key
-        // Do not leave a previous visit's grants visible while another owner is being read.
-        messageMediaSnapshot = null
+        // An editor-only change does not revoke this conversation's already verified display.
+        // Dataset changes and other conversations still discard the old grants immediately.
+        if (messageMediaSnapshot?.conversation != key.conversation || messageMediaKey?.data != key.data ||
+            messageMediaKey?.mediaCommit != key.mediaCommit)
+            messageMediaSnapshot = null
         val id = key.conversation
         if (id == null) { messageMediaKey = key; return }
         messageMediaRead = lifecycleScope.launch {
@@ -7857,7 +7853,7 @@ class MainActivity : ComponentActivity() {
                         messageActionSnapshot == null -> "暂时无法核对消息；未保存编辑已保留"
                         else -> "原消息或会话结构已变化；编辑已保留，请复制后重新编辑"
                     };
-                    imageHost.sending -> "正在核实图片发送结果"; else -> null },
+                    else -> null },
                 composer = ComposerUi(text = if (hideSubmittedDraft) "" else inlineMessageEditor?.text ?: draft,
                     selectionStart = if (hideSubmittedDraft) 0 else inlineMessageEditor?.selectionStart ?: selectionStart,
                     selectionEnd = if (hideSubmittedDraft) 0 else inlineMessageEditor?.selectionEnd ?: selectionEnd,

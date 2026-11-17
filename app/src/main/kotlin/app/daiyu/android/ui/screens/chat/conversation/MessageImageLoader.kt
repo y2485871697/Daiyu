@@ -16,6 +16,9 @@ import kotlinx.coroutines.CancellationException
  */
 fun interface MessageImageLoader {
     suspend fun load(expectedOwner: MessageImageOwner, reference: MessageImageReference, maxEdge: Int): ImageBitmap?
+
+    /** Non-blocking, page-scoped, already authorized thumbnail; it may be below maxEdge. */
+    fun cached(expectedOwner: MessageImageOwner, reference: MessageImageReference, maxEdge: Int): ImageBitmap? = null
 }
 
 internal sealed interface MessageImageLoadResult {

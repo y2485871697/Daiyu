@@ -329,6 +329,11 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         target.attachments.finishSubmission(attempt.submission, acceptance)
         target.attempt = null
         if (exact && result is ImageSendResult.Accepted) {
+            if (!closed && target === session && !target.abandoned && thumbnailsVisible) {
+                val thumbnails = lease.acceptedThumbnails(result)
+                if (lease.conversation != result.conversation.id.value) renewPreviews(result.conversation.id.value)
+                lease.installAcceptedThumbnails(thumbnails)
+            }
             // Transfer the provisional new-chat identity to the durable conversation without
             // creating another send identity. Other selected conversations remain untouched.
             if (sessions[null] === target) {
@@ -432,7 +437,38 @@ internal class PreviewLease(private val controller: ChatController, val conversa
     private val open = AtomicBoolean(true)
     private val originals = MessageMediaOriginals()
     fun isOpen(): Boolean = open.get()
-    fun close() { open.set(false); originals.close() }
+    @Synchronized fun close() {
+        open.set(false); originals.close()
+        draftThumbnails.evictAll(); messageThumbnails.evictAll()
+    }
+    private val draftThumbnails = android.util.LruCache<ImageAttachment, androidx.compose.ui.graphics.ImageBitmap>(8)
+    private val messageThumbnails = object : android.util.LruCache<app.daiyu.android.domain.MessageImageReference,
+        androidx.compose.ui.graphics.ImageBitmap>(8 * 1024 * 1024) {
+        override fun sizeOf(key: app.daiyu.android.domain.MessageImageReference,
+            value: androidx.compose.ui.graphics.ImageBitmap) = value.width * value.height * 4
+    }
+
+    @Synchronized fun acceptedThumbnails(receipt: ImageSendResult.Accepted):
+        Map<app.daiyu.android.domain.MessageImageReference, androidx.compose.ui.graphics.ImageBitmap> {
+        if (!open.get()) return emptyMap()
+        val owner = app.daiyu.android.domain.MessageImageOwner(receipt.conversation.id.value, receipt.userId.value)
+        return buildMap {
+            receipt.images.forEach { image ->
+                draftThumbnails.remove(image)?.let { bitmap ->
+                    put(app.daiyu.android.domain.MessageImageReference(owner, image.id, image.mime,
+                        image.bytes, image.sha256, image.width, image.height), bitmap)
+                }
+            }
+        }
+    }
+
+    @Synchronized fun installAcceptedThumbnails(thumbnails:
+        Map<app.daiyu.android.domain.MessageImageReference, androidx.compose.ui.graphics.ImageBitmap>) {
+        if (!open.get()) return
+        thumbnails.forEach { (reference, bitmap) ->
+            if (reference.owner.conversationId == conversation) messageThumbnails.put(reference, bitmap)
+        }
+    }
 
     private fun imageAuthority(image: app.daiyu.android.ui.screens.chat.conversation.MessageImageUi):
         Pair<app.daiyu.android.media.MessageImageOwner, app.daiyu.android.media.MessageImageReference> {
@@ -509,15 +545,42 @@ internal class PreviewLease(private val controller: ChatController, val conversa
         return bitmap.asImageBitmap()
     }
     val draftLoader: ImageAttachmentPreviewLoader = { image, edge ->
-        decode { controller.imageAttachments.decodePreview(image.owner, image, edge) }
+        decode { controller.imageAttachments.decodePreview(image.owner, image, edge) }.also { bitmap ->
+            if (edge <= 256) synchronized(this) {
+                if (open.get()) draftThumbnails.put(image, bitmap)
+            }
+        }
     }
-    val historyLoader = MessageImageLoader { owner, ref, edge ->
-        if (conversation == null) null else decode {
-            val previews = AndroidMessageImagePreviews(controller.messageImageResolver(ConversationId(conversation)))
-            previews.decodePreview(app.daiyu.android.media.MessageImageOwner(owner.conversationId, owner.messageId),
-                app.daiyu.android.media.MessageImageReference(
-                    app.daiyu.android.media.MessageImageOwner(ref.owner.conversationId, ref.owner.messageId),
-                    ref.id, ref.mime, ref.bytes, ref.sha256, ref.width, ref.height), edge)
+    val historyLoader = object : MessageImageLoader {
+        override fun cached(owner: app.daiyu.android.domain.MessageImageOwner,
+            ref: app.daiyu.android.domain.MessageImageReference, maxEdge: Int): androidx.compose.ui.graphics.ImageBitmap? =
+            synchronized(this@PreviewLease) {
+                if (!open.get() || maxEdge <= 0 || conversation == null || owner.conversationId != conversation ||
+                    owner != ref.owner) null else messageThumbnails.get(ref)?.takeIf {
+                    it.width <= maxEdge && it.height <= maxEdge
+                }
+            }
+
+        override suspend fun load(owner: app.daiyu.android.domain.MessageImageOwner,
+            ref: app.daiyu.android.domain.MessageImageReference, maxEdge: Int): androidx.compose.ui.graphics.ImageBitmap? {
+            if (conversation == null || owner.conversationId != conversation || owner != ref.owner) return null
+            // The synchronous handoff is display-only; refinement still revalidates the persisted asset.
+            return try {
+                decode {
+                    val previews = AndroidMessageImagePreviews(controller.messageImageResolver(ConversationId(conversation)))
+                    previews.decodePreview(app.daiyu.android.media.MessageImageOwner(owner.conversationId, owner.messageId),
+                        app.daiyu.android.media.MessageImageReference(
+                            app.daiyu.android.media.MessageImageOwner(ref.owner.conversationId, ref.owner.messageId),
+                            ref.id, ref.mime, ref.bytes, ref.sha256, ref.width, ref.height), maxEdge)
+                }.also { bitmap -> synchronized(this@PreviewLease) {
+                    if (open.get()) messageThumbnails.put(ref, bitmap)
+                } }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                synchronized(this@PreviewLease) { messageThumbnails.remove(ref) }
+                throw failure
+            }
         }
     }
 }

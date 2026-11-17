@@ -54,7 +54,7 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
         val stored = database.messages(done.conversationId).last().second
         val ui = project(stored)
         assertEquals(listOf(WorkStepState.FAILED, WorkStepState.OK), ui.workProcess!!.segments.flatMap { it.steps }.map { it.state })
-        assertEquals("失败", ui.workProcess.summary)
+        assertEquals("已完成", ui.workProcess.summary)
         val tool = stored.blocks.filterIsInstance<MessageBlock.Tool>().first()
         val reader = RetainedToolOutcomes.reader(database, listOf(stored))
         assertEquals(true, reader(stored, tool))
@@ -93,7 +93,19 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
         assertNull(reader(owner.copy(runId = "other"), first))
         assertNull(reader(owner.copy(messageId = "other"), first))
         assertNull(reader(owner, first.copy(result = "changed")))
-        assertNull(snapshot.displayRowReader(key, key.copy(generation = 5))(owner, first))
+        assertEquals(WorkStepState.OK, snapshot.displayRowReader(key, key.copy(generation = 5))(owner, first)?.state)
+        val afterSend = key.copy(generation = 5, data = 4, execution =
+            app.daiyu.android.domain.runtime.ExecutionState(app.daiyu.android.domain.runtime.ExecutionPhase.STREAMING))
+        assertEquals(listOf(WorkStepState.OK, WorkStepState.FAILED, WorkStepState.NOT_EXECUTED),
+            source.tools.map { snapshot.displayRowReader(key, afterSend)(owner, it)?.state })
+        val loadedMessages = database.messages(done.conversationId).map { it.second }
+        val fullKey = key.copy(sources = RetainedToolOutcomes.sources(loadedMessages))
+        val full = RetainedToolOutcomes.Snapshot.read(database, loadedMessages)
+        val afterFullSend = fullKey.copy(generation = 5, data = 4)
+        val original = loadedMessages.last()
+        assertEquals(listOf(WorkStepState.OK, WorkStepState.FAILED, WorkStepState.NOT_EXECUTED),
+            original.blocks.filterIsInstance<MessageBlock.Tool>().map {
+                full.displayReader(fullKey, afterFullSend)(original, it)?.state })
         assertEquals(WorkStepState.OK, snapshot.displayRowReader(key, key.copy(data = 5))(owner, first)?.state)
         assertNull(snapshot.displayRowReader(key, key.copy(data = 2))(owner, first))
         assertNull(snapshot.displayRowReader(key, key.copy(conversation = ConversationId("other")))(owner, first))

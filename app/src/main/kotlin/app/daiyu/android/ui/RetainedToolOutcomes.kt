@@ -51,7 +51,7 @@ internal object RetainedToolOutcomes {
 
         // A newer data revision requests fresh evidence; it does not revoke an identical terminal receipt.
         fun retainedPositions(current: ReadKey): (Message, MessageBlock.Tool) -> Int? {
-            if (conversation != current.conversation || data > current.data || generation != current.generation)
+            if (conversation != current.conversation || data > current.data)
                 return { _, _ -> null }
             val loaded = sources.associateBy { Owner(it.conversation, it.run, it.message) }
             val positions = positions(current.sources)
@@ -108,8 +108,7 @@ internal object RetainedToolOutcomes {
             stopping: (WorkStepOwnerUi) -> Boolean = { false }):
             (WorkStepOwnerUi, MessageBlock.Tool) -> ToolReceiptUi? {
             val compatible = loaded.canDisplayFor(current)
-            if (!compatible && (loaded.conversation != current.conversation || loaded.data > current.data ||
-                    loaded.generation != current.generation)) return { _, _ -> null }
+            if (!compatible && (loaded.conversation != current.conversation || loaded.data > current.data)) return { _, _ -> null }
             val loadedSources = loaded.sources.associateBy { Owner(it.conversation, it.run, it.message) }
             val currentSources = current.sources.associateBy { Owner(it.conversation, it.run, it.message) }
             val currentPositions = positions(current.sources)
@@ -220,7 +219,9 @@ internal object RetainedToolOutcomes {
             ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN)
         else toolReceiptPresentation(ToolDisposition.UNKNOWN, liveOwner = true, phase = liveState.phase,
             pauseRequested = liveState.pauseRequested, stopRequested = stopping, runStatus = status, activeCall = true)
-        if (!receiptPending || projected.activity != ToolActivityUi.UNKNOWN || stopping ||
+        if (!receiptPending || status != RunStatus.RUNNING || liveState == null ||
+            liveState.phase == ExecutionPhase.IDLE || liveState.phase == ExecutionPhase.TERMINAL ||
+            projected.activity != ToolActivityUi.UNKNOWN || stopping ||
             status == RunStatus.STOPPED || status == RunStatus.INTERRUPTED || liveState?.phase == ExecutionPhase.RECONNECTING)
             return projected
         val activity = when {

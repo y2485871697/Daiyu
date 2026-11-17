@@ -32,7 +32,10 @@ class ReceiptSnapshotContract(unittest.TestCase):
         self.assertEqual(2, visible.count('receiptPending = receiptPending'))
         source = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/RetainedToolOutcomes.kt').read_text()
         pending = source.split('fun pendingProjection(', 1)[1].split('fun projectionReader(database:', 1)[0]
-        self.assertIn('!receiptPending || projected.activity != ToolActivityUi.UNKNOWN', pending)
+        for guard in ('!receiptPending', 'status != RunStatus.RUNNING', 'liveState == null',
+                      'liveState.phase == ExecutionPhase.IDLE', 'liveState.phase == ExecutionPhase.TERMINAL',
+                      'projected.activity != ToolActivityUi.UNKNOWN'):
+            self.assertIn(guard, pending)
         self.assertIn('return ToolReceiptUi(WorkStepState.PENDING, activity)', pending)
         self.assertNotIn('WorkStepState.OK', pending)
         self.assertNotIn('读取结果', pending)

@@ -76,6 +76,18 @@ class ReceiptSummaryToolTestsScopeTest(unittest.TestCase):
 
 
 class RecordToolTestsScopeTest(unittest.TestCase):
+    def test_media_send_scope_is_exact_and_preserves_full_fallback(self):
+        classes = recorder.MEDIA_SEND_PLATFORM_CLASSES
+        self.assertEqual(7, len(classes))
+        for selected in (classes, tuple(reversed(classes))):
+            command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))
+            self.assertEqual("media-send-targeted", scope)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.MEDIA_SEND_MODULES, "-v"], command)
+        for selected in (classes[:-1], (classes[0],), (*classes, classes[0]), (*classes, "app.daiyu.android.OtherTest")):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))[1])
+        for mode in ("", "compile", "candidate", "daily", "release", "checks", "build"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=",".join(classes)))[1])
+
     def test_runtime_stop_scope_is_exact_and_preserves_other_coverage(self):
         classes = recorder.RUNTIME_STOP_PLATFORM_CLASSES
         self.assertEqual(("app.daiyu.android.terminal.TerminalRegistryTest",

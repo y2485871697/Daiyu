@@ -132,8 +132,10 @@ class ToolReceiptSourceTest {
             assertEquals(if (index == 20 || index == 33) null else index, position(currentMessage, block))
         }
         assertEquals(0, loaded.retainedPositions(current.copy(data = current.data + 1))(currentMessage, changed.first()))
+        assertEquals(0, loaded.retainedPositions(current.copy(generation = current.generation + 1))
+            (currentMessage, changed.first()))
         for (invalid in listOf(current.copy(conversation = ConversationId("other")),
-            current.copy(data = current.data - 1), current.copy(generation = current.generation + 1)))
+            current.copy(data = current.data - 1)))
             assertNull(loaded.retainedPositions(invalid)(currentMessage, changed.first()))
     }
 
@@ -172,7 +174,7 @@ class ToolReceiptSourceTest {
         assertTrue(source(onlyUser).isEmpty())
     }
 
-    @Test fun exactPendingReceiptReadKeepsReturnedToolsExecutingAfterTheirActiveCallHasCleared() {
+    @Test fun pendingReceiptReadOnlyKeepsTheExactLiveRunExecuting() {
         assertFalse(ToolActivityUi.entries.any { it.label == "确认中" || it.label == "读取结果" })
         for (status in listOf(RunStatus.RUNNING, RunStatus.COMPLETED, RunStatus.FAILED)) {
             for (result in listOf("{\"ok\":true}", "{\"ok\":false}", "not a receipt", "")) {
@@ -181,7 +183,10 @@ class ToolReceiptSourceTest {
                 for (live in listOf(null, ExecutionState(ExecutionPhase.BOUNDARY),
                     ExecutionState(ExecutionPhase.STREAMING), ExecutionState(ExecutionPhase.TERMINAL))) {
                     val pending = RetainedToolOutcomes.pendingProjection(source, returned, live, receiptPending = true)
-                    assertEquals(ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING), pending)
+                    val executing = status == RunStatus.RUNNING && live != null &&
+                        live.phase != ExecutionPhase.TERMINAL
+                    assertEquals(if (executing) ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING)
+                        else ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN), pending)
                     assertEquals(pending, RetainedToolOutcomes.pendingProjection(status, returned, live, receiptPending = true))
                     assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN),
                         RetainedToolOutcomes.pendingProjection(source, returned, live, receiptPending = false))

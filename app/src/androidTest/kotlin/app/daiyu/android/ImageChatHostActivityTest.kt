@@ -198,7 +198,11 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         node("chat-send").performClick()
         assertTrue(entered.await(10, TimeUnit.SECONDS))
         val oldAttempt = checkNotNull(session.attempt)
-        try { node("image-host-cancel").assertIsEnabled().performClick() }
+        node("image-host-cancel").assertDoesNotExist()
+        node("image_attachments_submitting").assertDoesNotExist()
+        node("chat-status").assertDoesNotExist()
+        ui.onNodeWithText("等待发送接受回执，图片仍保留在草稿中").assertDoesNotExist()
+        try { mainThread { assertEquals(true, host().cancelPreparation(session, oldAttempt)) } }
         finally { release.countDown() }
         ui.waitUntil(10_000) { !host().sending }
         assertDraft("取消前的草稿")
@@ -269,6 +273,60 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         return MessageImageUi(reference.owner, reference)
     }
 
+    fun testAcceptedImageWarmsTheNewConversationLoaderWithoutCrossOwnerOrMetadataReuse() {
+        val image = sendImageToHistory()
+        val loader = checkNotNull(host().historyLoader)
+        assertNotNull(loader.cached(image.expectedOwner, image.reference, 1024))
+        assertNull(loader.cached(image.expectedOwner.copy(messageId = "other"), image.reference, 1024))
+        assertNull(loader.cached(image.expectedOwner, image.reference.copy(sha256 = "0".repeat(64)), 1024))
+        assertNull(loader.cached(image.expectedOwner, image.reference, 0))
+        ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction()).performClick()
+        node("drawer-dock-settings").performClick()
+        assertNull(loader.cached(image.expectedOwner, image.reference, 1024))
+    }
+
+    fun testAcceptedDraftThumbnailTransfersBeforeAnyPersistedHistoryDecode() {
+        pick(1); waitImages(1)
+        val attachment = host().session.attachments.state.value.ready.single().attachment
+        val conversation = controller.database.create("default")
+        val receipt = ImageSendResult.Accepted(attachment.owner, 0L, conversation,
+            MessageId("thumbnail-user"), MessageId("thumbnail-assistant"), RunId("thumbnail-run"), listOf(attachment))
+        for (newConversation in listOf(true, false)) {
+            val source = PreviewLease(controller, if (newConversation) null else conversation.id.value)
+            val target = if (newConversation) PreviewLease(controller, conversation.id.value) else source
+            try {
+                val thumbnail = kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                    source.draftLoader(attachment, 192)
+                }
+                val transferred = source.acceptedThumbnails(receipt)
+                assertEquals(1, transferred.size)
+                val reference = transferred.keys.single()
+                if (newConversation) source.close()
+                target.installAcceptedThumbnails(transferred)
+                assertSame(thumbnail, target.historyLoader.cached(reference.owner, reference, 1024))
+                // No persisted message exists: a history decode cannot be masking this handoff.
+                assertTrue(controller.database.messages(conversation.id).isEmpty())
+            } finally { source.close(); if (target !== source) target.close() }
+        }
+    }
+
+    fun testFailedPersistedValidationRevokesTheWarmThumbnail() {
+        val owner = app.daiyu.android.domain.MessageImageOwner("missing-chat", "missing-message")
+        val reference = app.daiyu.android.domain.MessageImageReference(owner,
+            "00000000-0000-0000-0000-000000000001", "image/png", 10, "a".repeat(64), 2, 2)
+        val lease = PreviewLease(controller, owner.conversationId)
+        try {
+            lease.installAcceptedThumbnails(mapOf(reference to androidx.compose.ui.graphics.ImageBitmap(2, 2)))
+            assertNotNull(lease.historyLoader.cached(owner, reference, 1024))
+            assertNull(lease.historyLoader.cached(owner, reference, 1))
+            val failure = kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { lease.historyLoader.load(owner, reference, 1024) }.exceptionOrNull()
+            }
+            assertNotNull(failure)
+            assertNull(lease.historyLoader.cached(owner, reference, 1024))
+        } finally { lease.close() }
+    }
+
     fun testSidebarKeepsHistoryImageAndLoaderAcrossRepeatedOpenAndDismiss() {
         val image = sendImageToHistory()
         val loader = checkNotNull(host().historyLoader)
@@ -289,7 +347,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
                 }
             }
             assertNotNull(bitmap)
-            bitmap?.asAndroidBitmap()?.recycle()
+            // The loader owns the thumbnail; Compose may still be displaying it.
             var pickerOpened = false
             mainThread { host().requestSelection(host().session.attachments.state.value.draft) { pickerOpened = true } }
             assertFalse(pickerOpened)
@@ -687,7 +745,8 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             node("chat-send").performClick()
             ui.waitUntil(10_000) { controller.database.messages(conversation.id).size == 2 }
             assertTrue(host().sending)
-            node("image-host-cancel").assertIsEnabled().performClick()
+            node("image-host-cancel").assertDoesNotExist()
+            mainThread { assertEquals(false, host().cancelPreparation(host().session, checkNotNull(host().session.attempt))) }
             assertTrue(host().sending) // No fabricated Rejected/Cancelled receipt after the gate.
             assertFalse(checkNotNull(host().session.attempt).cancelled)
             assertDraft("仅发送一次")

@@ -818,7 +818,28 @@ PANE_QUESTION_MODULES = (
 )
 
 
+MEDIA_SEND_PLATFORM_CLASSES = (
+    "app.daiyu.android.ImageChatHostActivityTest",
+    "app.daiyu.android.ui.screens.chat.attachments.ImageAttachmentsUiTest",
+    "app.daiyu.android.ui.screens.chat.attachments.VideoAttachmentsUiTest",
+    "app.daiyu.android.ui.MessageImageRenderingTest",
+    "app.daiyu.android.RetainedToolOutcomesTest",
+    "app.daiyu.android.ToolReceiptPauseActivityTest",
+    "app.daiyu.android.ChatReferenceEntryActivityTest",
+)
+MEDIA_SEND_MODULES = (
+    "test_media_send_contract", "test_image_sidebar_visibility_contract",
+    "test_message_composer_edit_contract", "test_tool_receipt_snapshot_contract",
+    "test_tool_receipt_pause_contract", "test_record_tool_tests_scope",
+    "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(MEDIA_SEND_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *MEDIA_SEND_MODULES, "-v"], "media-send-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(SEARCH_BROWSER_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *SEARCH_BROWSER_MODULES, "-v"], "browser-targeted"
@@ -1084,7 +1105,7 @@ def record(python):
         child_env = os.environ.copy()
         child_env["PYTHONPATH"] = str(Path("tests").resolve()) + os.pathsep + child_env.get("PYTHONPATH", "")
     validation_cwd = None
-    if scope in ("receipt-summary-targeted", "runtime-stop-targeted", "workflow-collapse-targeted", "voice-browser-targeted", "browser-targeted", "doubao-motion-targeted", "child-hot-configuration-targeted", "child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted", "page-back-targeted") or (
+    if scope in ("media-send-targeted", "receipt-summary-targeted", "runtime-stop-targeted", "workflow-collapse-targeted", "voice-browser-targeted", "browser-targeted", "doubao-motion-targeted", "child-hot-configuration-targeted", "child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted", "page-back-targeted") or (
             scope == "child-task-cards-targeted" and sorted(os.environ.get("SMOKE_TEST_CLASSES", "").split(","))
             == sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES)):
         validation_cwd = Path(__file__).resolve().parents[2]

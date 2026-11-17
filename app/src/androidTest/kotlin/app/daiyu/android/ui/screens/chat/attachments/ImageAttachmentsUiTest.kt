@@ -216,7 +216,7 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         show(holder)
         lateinit var submission: ImageAttachmentSubmission
         mainThread { submission = requireNotNull(holder.beginSubmission()) }
-        node("image_attachments_submitting").assertIsDisplayed()
+        node("image_attachments_submitting").assertDoesNotExist()
         node("image_attachments_remove:${key.id}").assertIsNotEnabled()
         mainThread { holder.finishSubmission(submission, ImageAttachmentAcceptance.Unknown) }
         node("image_attachments_item:${key.id}").assertIsDisplayed()

@@ -57,4 +57,5 @@ class MediaSendContract(unittest.TestCase):
         smoke = (ROOT / "scripts/smoke_boot.sh").read_text()
         self.assertIn('media_send_only = command_for("", os.environ)[1] == "media-send-targeted"', smoke)
         self.assertIn("media_send_sources if media_send_only", smoke)
-        self.assertIn('discovery_scope="targeted" if media_send_only', smoke)
+        discovery = next(line for line in smoke.splitlines() if 'discovery_scope="targeted" if ' in line)
+        self.assertIn("media_send_only", discovery.split(' else "full"', 1)[0].split(" if ", 1)[1].split(" or "))

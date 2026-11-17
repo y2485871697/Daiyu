@@ -21,6 +21,7 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.semantics.SemanticsActions
 import app.daiyu.android.domain.*
+import app.daiyu.android.media.ImageAttachment
 import app.daiyu.android.media.ImageAttachmentOwner
 import app.daiyu.android.model.images.FrozenMessageImagePlan
 import app.daiyu.android.storage.ConversationDatabase
@@ -310,15 +311,105 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         }
     }
 
+    fun testRealAcceptedFinishTransfersThumbnailBeforeNewConversationUiConsumesReceipt() =
+        realAcceptedFinishTransfersThumbnail(newConversation = true)
+
+    fun testRealAcceptedFinishTransfersThumbnailBeforeExistingConversationUiConsumesReceipt() =
+        realAcceptedFinishTransfersThumbnail(newConversation = false)
+
+    @Suppress("UNCHECKED_CAST")
+    private fun realAcceptedFinishTransfersThumbnail(newConversation: Boolean) {
+        if (!newConversation) {
+            val conversation = controller.database.create("default")
+            mainThread { activity.select(conversation) }
+        }
+        pick(1); waitImages(1); setImageCapability()
+        val currentHost = host()
+        val attachment = currentHost.session.attachments.state.value.ready.single().attachment
+        val source = ImageChatHost::class.java.getDeclaredField("lease")
+            .apply { isAccessible = true }.get(currentHost) as PreviewLease
+        val sourceLoader = currentHost.historyLoader
+        val draftCache = PreviewLease::class.java.getDeclaredField("draftThumbnails")
+            .apply { isAccessible = true }.get(source) as android.util.LruCache<
+                ImageAttachment, androidx.compose.ui.graphics.ImageBitmap>
+        val queue = ReceiptQueue()
+        val handlerField = ChatController::class.java.getDeclaredField("imageReceiptHandler").apply { isAccessible = true }
+        val originalHandler = handlerField.get(controller)
+        val settledField = ImageChatHost::class.java.getDeclaredField("settled").apply { isAccessible = true }
+        val delegate = settledField.get(currentHost) as (ImageSendResult.Accepted, String) -> Unit
+        val observed = CountDownLatch(1)
+        val observations = AtomicInteger()
+        val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        handlerField.set(controller, queue)
+        try {
+            dismissIme()
+            val send = node("chat-send")
+            awaitImeFrame(send, visible = false)
+            awaitNodeTouchReady(send)
+            send.performClick()
+            ui.waitUntil(10_000) {
+                controller.database.messages(ConversationId(attachment.owner.conversationId)).size == 2 &&
+                    calls.get() == 1 && controller.active == null && draftCache.get(attachment) != null
+            }
+            val thumbnail = checkNotNull(draftCache.get(attachment))
+            mainThread {
+                val observer: (ImageSendResult.Accepted, String) -> Unit = { receipt, text ->
+                    try {
+                        try {
+                            assertEquals(Looper.getMainLooper(), Looper.myLooper())
+                            assertEquals(1, observations.incrementAndGet())
+                            assertEquals(listOf(attachment), receipt.images)
+                            val owner = MessageImageOwner(receipt.conversation.id.value, receipt.userId.value)
+                            val reference = MessageImageReference(owner, attachment.id, attachment.mime,
+                                attachment.bytes, attachment.sha256, attachment.width, attachment.height)
+                            val loader = checkNotNull(currentHost.historyLoader)
+                            if (newConversation) {
+                                assertNull(sourceLoader); assertFalse(source.isOpen())
+                            } else {
+                                assertSame(sourceLoader, loader); assertTrue(source.isOpen())
+                            }
+                            // Before Activity settlement: a separate persisted decode cannot supply this bitmap identity.
+                            assertSame(thumbnail, loader.cached(owner, reference, 1024))
+                        } catch (error: Throwable) { failure.compareAndSet(null, error) }
+                        delegate(receipt, text)
+                    } finally { observed.countDown() }
+                }
+                settledField.set(currentHost, observer)
+                queue.release()
+            }
+            assertTrue("real Accepted settlement observed", observed.await(10, TimeUnit.SECONDS))
+            failure.get()?.let { throw it }
+            ui.waitUntil(10_000) { !currentHost.sending && controller.active == null }
+            assertEquals(1, observations.get())
+            assertFalse(currentHost.fenced)
+            assertTrue(currentHost.session.attachments.state.value.items.isEmpty())
+            assertDraft("")
+        } finally {
+            queue.release()
+            handlerField.set(controller, originalHandler)
+            mainThread { settledField.set(currentHost, delegate) }
+        }
+    }
+
     fun testFailedPersistedValidationRevokesTheWarmThumbnail() {
         val owner = MessageImageOwner("missing-chat", "missing-message")
         val reference = MessageImageReference(owner,
             "00000000-0000-0000-0000-000000000001", "image/png", 10, "a".repeat(64), 2, 2)
         val lease = PreviewLease(controller, owner.conversationId)
         try {
-            lease.installAcceptedThumbnails(mapOf(reference to androidx.compose.ui.graphics.ImageBitmap(2, 2)))
-            assertNotNull(lease.historyLoader.cached(owner, reference, 1024))
+            val bitmap = androidx.compose.ui.graphics.ImageBitmap(2, 2)
+            lease.installAcceptedThumbnails(mapOf(reference to bitmap))
+            assertSame(bitmap, lease.historyLoader.cached(owner, reference, 1024))
+            assertSame(bitmap, lease.historyLoader.cached(owner, reference, 2))
             assertNull(lease.historyLoader.cached(owner, reference, 1))
+            assertNull(lease.historyLoader.cached(owner, reference, 0))
+            for ((width, height) in listOf(3 to 2, 2 to 3)) {
+                val largerReference = reference.copy(width = width, height = height)
+                val largerBitmap = androidx.compose.ui.graphics.ImageBitmap(width, height)
+                lease.installAcceptedThumbnails(mapOf(largerReference to largerBitmap))
+                assertNull(lease.historyLoader.cached(owner, largerReference, 2))
+                assertSame(largerBitmap, lease.historyLoader.cached(owner, largerReference, 3))
+            }
             val failure = kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { lease.historyLoader.load(owner, reference, 1024) }.exceptionOrNull()
             }

@@ -74,7 +74,7 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
 
     private fun ink(): Float {
         val before = ui.mainClock.currentTime
-        val pixels = ui.onNodeWithTag("entrance-raster").captureToImage().toPixelMap()
+        val pixels = captureScreenNode(ui.onNodeWithTag("entrance-raster"), advanceAnimationClock = false).toPixelMap()
         assertEquals("sampling must not advance the animation clock", before, ui.mainClock.currentTime)
         var ink = 0f
         for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
@@ -89,16 +89,21 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
         val raster = ui.onNodeWithTag("entrance-raster")
         val bounds = raster.fetchSemanticsNode().boundsInRoot
         val before = ui.mainClock.currentTime
-        val pixels = raster.captureToImage().toPixelMap()
+        val pixels = captureScreenNode(raster, advanceAnimationClock = false).toPixelMap()
         assertEquals(before, ui.mainClock.currentTime)
         // This top-padding patch stays inside every scale, away from text and corners.
         val x = (bubble.right - 24f * density - bounds.left).toInt()
         val y = (bubble.top + 4f * density - bounds.top).toInt()
+        assertTrue("flat bubble sampling patch must stay in the raster", x > 0 && y > 0 &&
+            x + 1 < pixels.width && y + 1 < pixels.height)
+        val backdrop = pixels[2, pixels.height - 3]
         var contrast = 0f
         for (dy in -1..1) for (dx in -1..1) {
             val color = pixels[x + dx, y + dy]
-            contrast += abs(color.red - background.red) + abs(color.green - background.green) + abs(color.blue - background.blue)
+            contrast += abs(color.red - backdrop.red) + abs(color.green - backdrop.green) + abs(color.blue - backdrop.blue)
         }
+        android.util.Log.i("UserEntrancePixels", "clock=$before progress=${progress()} bubble=$bubble " +
+            "patch=$x,$y backdrop=$backdrop sample=${pixels[x, y]} contrast=${contrast / 9f}")
         return contrast / 9f
     }
 
@@ -118,11 +123,17 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
         ui.waitForIdle()
         assertTrue(progress() > initial && progress() < 1f)
         val middleContrast = bubbleBackgroundContrast()
-        assertTrue("background alpha visibly increases independently of scaled area", middleContrast > startContrast + .001f)
+        assertTrue("background alpha visibly increases independently of scaled area: start=$startContrast middle=$middleContrast progress=${progress()}",
+            middleContrast > startContrast + .001f)
+        val middleBubble = ui.onNodeWithTag("message-user-bubble:new-send").fetchSemanticsNode().boundsInRoot
+        assertEquals(startBubble.top, middleBubble.top, .75f)
+        assertEquals(startBubble.right, middleBubble.right, .75f)
         assertEquals(slot, ui.onNodeWithTag("entrance-slot").fetchSemanticsNode().boundsInRoot)
         ui.mainClock.advanceTimeBy(100)
         ui.waitForIdle()
         val reboundBubble = ui.onNodeWithTag("message-user-bubble:new-send").fetchSemanticsNode().boundsInRoot
+        assertEquals(startBubble.top, reboundBubble.top, .75f)
+        assertEquals(startBubble.right, reboundBubble.right, .75f)
         assertEquals(slot, ui.onNodeWithTag("entrance-slot").fetchSemanticsNode().boundsInRoot)
         finish()
         val endBubble = ui.onNodeWithTag("message-user-bubble:new-send").fetchSemanticsNode().boundsInRoot

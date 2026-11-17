@@ -81,8 +81,9 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
         instrumentation.waitForIdleSync()
     }
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-    protected fun captureScreenNode(target: SemanticsNodeInteraction): ImageBitmap {
-        awaitVisualIdle()
+    protected fun captureScreenNode(target: SemanticsNodeInteraction, advanceAnimationClock: Boolean = true): ImageBitmap {
+        if (advanceAnimationClock) awaitVisualIdle()
+        else { ui.waitForIdle(); instrumentation.waitForIdleSync() }
         val node = target.assertIsDisplayed().fetchSemanticsNode()
         val view = (node.root as androidx.compose.ui.platform.ViewRootForTest).view
         awaitNodeWindowFocus(target)

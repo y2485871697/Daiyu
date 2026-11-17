@@ -33,7 +33,7 @@ class MarkdownStreamProgressContract(unittest.TestCase):
                       'turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady',
                       'AssistantTextContent(turn, ordered, bodyVisible, { answerReleased = true }, actions, bodySources, projection, reveal, generationComplete']:
             self.assertIn(token, chat)
-        self.assertIn('val ordered = workflowContent ?: rememberAssistantWorkflowContent(turn)', chat)
+        self.assertIn('val sourceWorkflow = workflowContent ?: rememberAssistantWorkflowContent(turn)', chat)
         assistant = chat.split('private fun AssistantTextContent(', 1)[1].split(
             '\n@Composable\ninternal fun UserMessageText', 1)[0]
         for token in [

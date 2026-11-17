@@ -180,7 +180,8 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         source = (CHAT / 'ChatMessageList.kt').read_text()
         self.assertNotIn('ReportedReasoningCard(', source)
         self.assertEqual(1, source.count('WorkProcessCard('))
-        self.assertIn('val ordered = workflowContent ?: rememberAssistantWorkflowContent(turn)', source)
+        self.assertIn('val sourceWorkflow = workflowContent ?: rememberAssistantWorkflowContent(turn)', source)
+        self.assertIn('val ordered = remember(sourceWorkflow) { sourceWorkflow.withResolvedTerminalCards() }', source)
         self.assertIn('val ordered = remember(turn) { turn.workflowContent() }', (CHAT / 'AssistantWorkflowContent.kt').read_text())
         self.assertIn('MessageContent(steps,', source)
         self.assertIn('ReasoningStepRow(ownerKey, reported, connector,', source)
@@ -189,7 +190,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('key(ownerKey, "reasoning", reported.itemId)', work)
         self.assertNotIn('key(ownerKey, "reasoning", reported.itemId, expanded)', work)
         self.assertIn('reasoningState.SaveableStateProvider(reported.itemId)', work)
-        self.assertIn('val progressSummary = work.progressSummary', work)
+        self.assertIn('val progressSummary = displayedWork.progressSummary', work)
         self.assertIn('reasoningState.SaveableStateProvider("ordered-content")', work)
         self.assertIn('key(block.workflowKey(index))', (CHAT / 'MessageContent.kt').read_text())
 

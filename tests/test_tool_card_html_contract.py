@@ -93,7 +93,7 @@ class ToolCardHtmlContractTest(unittest.TestCase):
         self.assertIn('Text(title, Modifier.fillMaxWidth(), color = colors.text,', shell)
         self.assertIn('if (stacked) Text(progressSummary, Modifier.fillMaxWidth(), color = colors.muted,', shell)
         self.assertIn('Text(toolHeaderText(step.name, step.category in setOf("terminal", "background_job")), color = colors.text,', shell)
-        self.assertIn('val progressSummary = work.progressSummary', shell)
+        self.assertIn('val progressSummary = displayedWork.progressSummary', shell)
         self.assertEqual(2, shell.count('Text(progressSummary'))
 
     def test_environment_dots_share_centered_circle_content_and_preserve_source_text(self):

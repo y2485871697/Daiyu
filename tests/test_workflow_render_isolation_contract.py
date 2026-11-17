@@ -14,7 +14,7 @@ class WorkflowRenderIsolationContract(unittest.TestCase):
         self.assertNotIn('ChatTurnUi.Assistant', signature)
         self.assertNotIn('MarkdownProjection', signature)
         self.assertNotIn('MarkdownReveal', signature)
-        for token in ('val ordered = workflowContent ?: rememberAssistantWorkflowContent(turn)',
+        for token in ('val sourceWorkflow = workflowContent ?: rememberAssistantWorkflowContent(turn)',
                       'val textBody = rememberAssistantTextBody(',
                       'val currentVisibleAdvance = rememberUpdatedState(onVisibleAdvance)',
                       'val notifyVisibleAdvance = remember { { currentVisibleAdvance.value() } }',

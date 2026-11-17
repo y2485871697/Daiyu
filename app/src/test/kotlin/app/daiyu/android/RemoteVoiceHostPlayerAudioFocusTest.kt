@@ -112,7 +112,7 @@ class RemoteVoiceHostPlayerAudioFocusTest {
     @Test fun telephoneCaptionsPrepareTheFullTrackInsteadOfStreamingUnknownDuration() {
         host.closeStrict()
         val transport = object : app.daiyu.android.voice.providers.VoiceHttpStreamingTransport {
-            override fun execute(request: app.daiyu.android.voice.providers.VoiceHttpRequest, maxResponseBytes: Int): VoiceHttpResponse {
+            override suspend fun execute(request: app.daiyu.android.voice.providers.VoiceHttpRequest, maxResponseBytes: Int): VoiceHttpResponse {
                 requests++
                 return VoiceHttpResponse(200, synthesizedContentType, synthesizedAudio)
             }

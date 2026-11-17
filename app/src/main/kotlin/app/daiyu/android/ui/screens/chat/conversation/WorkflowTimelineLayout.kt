@@ -36,8 +36,8 @@ internal class WorkflowItemLayout {
         val incoming = line?.incoming?.fraction() ?: 1f
         val outgoing = line?.outgoing
         val through = line?.through
-        if (entrance?.settled == true || entrance?.progress?.value?.let { it >= 1f } == true ||
-            (entrance == null && (through == null || through.fraction() >= 1f))) fullyVisible = true
+        if (!fullyVisible && (entrance?.settled == true || entrance?.progress?.value?.let { it >= 1f } == true ||
+            (entrance == null && (through == null || through.fraction() >= 1f)))) fullyVisible = true
         val visibleBody = when {
             fullyVisible -> body.toFloat()
             through != null -> body * through.fraction()

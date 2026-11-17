@@ -118,6 +118,24 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
         self.assertIn('fun testFirstFreshNodeReleasesHeightWithItsOwnEntrance()', source)
         self.assertIn('fun testQueuedNodePreventsFollowingNarrationFromReservingHeight()', source)
 
+    def test_queued_connectors_keep_their_duration_without_per_edge_eased_stops(self):
+        motion = (CHAT / 'WorkflowNodeMotion.kt').read_text()
+        lines = motion[motion.index('internal fun rememberWorkflowLineMotions'):motion.index('internal class WorkflowToolAppearance')]
+        self.assertIn('tween(300, easing = LinearEasing)', lines)
+        self.assertIn('snapshotFlow { upstream.value?.fraction() ?: 1f }.first { it >= 1f }', lines)
+        self.assertNotIn('FastOutSlowInEasing', lines)
+        layout = (CHAT / 'WorkflowTimelineLayout.kt').read_text()
+        self.assertIn('if (!fullyVisible && (entrance?.settled == true', layout)
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNodeMotionTest.kt').read_text()
+        for token in ('fun testQueuedConnectorClocksKeepMovingThroughHandoffs()',
+                      'fun testConnectorTailReachesToolWithoutEasedHold()',
+                      'parts[it]?.outgoing?.progress?.value', 'repeat(80) { frame ->',
+                      'upstream > 0f && upstream < 1f', 'moving.zipWithNext()',
+                      'cadence must not bypass real upstream arrival',
+                      'queued connector must take over within two frames',
+                      'painted connector must not linger before the tool springs in'):
+            self.assertIn(token, source)
+
     def test_disabled_motion_consumes_connector_without_replaying_on_enable(self):
         motion = (CHAT / 'WorkflowNodeMotion.kt').read_text()
         lines = motion[motion.index('internal fun rememberWorkflowLineMotions'):motion.index('internal class WorkflowToolAppearance')]

@@ -340,6 +340,65 @@ class WorkflowNarrationCompositionTest {
         } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
     }
 
+    @Test fun toolsAfterTheSamePresentedNarrationDoNotRepeatFrameWaits() = runBlocking {
+        val clock = BroadcastFrameClock()
+        val recomposer = Recomposer(coroutineContext + clock)
+        val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
+        val composition = Composition(NoNodes(), recomposer)
+        val before = MessageContentUi.Text("cadence-before", "前文")
+        val after = MessageContentUi.Text("cadence-after", "后文")
+        val tools = (0..5).map { MessageContentUi.Tool(WorkStepUi("cadence-$it", "lookup", "done", WorkStepState.OK)) }
+        val later = MessageContentUi.Tool(WorkStepUi("cadence-later", "lookup", "done", WorkStepState.OK))
+        val steps = mutableStateOf<List<MessageContentUi>>(listOf(before))
+        val admission = WorkflowVisualAdmission(emptyList(), animateFirstNarration = false)
+        val parser: (String) -> List<MarkdownBlock> = { source ->
+            listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(source))))
+        }
+        projectMarkdown(listOf(before.text), parser)
+        projectMarkdown(listOf(before.text, after.text), parser)
+        var narration: WorkflowNarration? = null
+        var time = 1_000_000_000L
+        suspend fun flush() {
+            repeat(24) { Snapshot.sendApplyNotifications(); yield() }
+        }
+        suspend fun frame() {
+            flush()
+            time += 16_000_000L
+            if (clock.hasAwaiters) clock.sendFrame(time)
+            flush()
+        }
+        suspend fun until(ready: () -> Boolean) = withTimeout(10_000) { while (!ready()) frame() }
+        fun visible(item: MessageContentUi, index: Int) = narration!!.entryVisible(item.workflowKey(index))
+        try {
+            composition.setContent {
+                CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                    val sources = steps.value.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }
+                    WorkflowNarrationContent(steps.value, false, sources, running = true, paused = false,
+                        expanded = true, stopped = false, revealResetEpoch = 0L, reasoningReady = { true },
+                        onVisibleAdvance = {}, admission = admission) { narration = it }
+                }
+            }
+            until { narration?.reveal?.ready(before.itemId, before.text) == true }
+            steps.value = listOf(before) + tools
+            until { visible(tools.first(), 1) }
+            val firstAdmissionTime = time
+            repeat(12) { flush() }
+            assertEquals("ready tools must not consume more frame-clock waits", firstAdmissionTime, time)
+            tools.forEachIndexed { index, tool ->
+                assertTrue("the same presented narration must release every ready tool without another two frames",
+                    visible(tool, index + 1))
+            }
+
+            steps.value = listOf(before) + tools + listOf(after, later)
+            until { narration!!.reveal.ready(after.itemId, after.text) }
+            assertFalse("new narration still requires its own two presented frames", visible(later, tools.size + 2))
+            frame()
+            assertFalse("one presented frame cannot release a tool after new narration", visible(later, tools.size + 2))
+            frame()
+            assertTrue("two presented frames must release the ready tool after new narration", visible(later, tools.size + 2))
+        } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
+    }
+
     @Test fun admittedToolsReleaseFollowingTextWithoutWaitingForLaterTools() {
         val before = MessageContentUi.Text("before", "visible")
         val first = MessageContentUi.Tool(WorkStepUi("first", "lookup", "done", WorkStepState.OK))

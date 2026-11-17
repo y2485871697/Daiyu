@@ -1,7 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.size
@@ -97,7 +97,7 @@ internal fun rememberWorkflowLineMotions(items: List<MessageContentUi>, visible:
                 if (!enabled) progress.snapTo(1f)
                 else if (animate && progress.value < 1f) {
                     snapshotFlow { upstream.value?.fraction() ?: 1f }.first { it >= 1f }
-                    progress.animateTo(1f, tween(300, easing = FastOutSlowInEasing))
+                    progress.animateTo(1f, tween(300, easing = LinearEasing))
                 }
             }
             val middle = visible.filter { it > from && it < to }

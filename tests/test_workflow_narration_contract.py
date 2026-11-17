@@ -70,6 +70,23 @@ class WorkflowNarrationContract(unittest.TestCase):
                        'admittedToolsReleaseFollowingTextWithoutWaitingForLaterTools'):
             self.assertIn(method, tests)
 
+    def test_ready_tools_reuse_only_the_same_presented_text_frontier(self):
+        narration = (BASE / 'WorkflowNarration.kt').read_text()
+        self.assertIn('var presentedText: List<MarkdownTypingSource>? = null', narration)
+        self.assertIn('entry.precedingText != presentedText', narration)
+        self.assertIn('}.collectLatest { entry ->', narration)
+        self.assertIn('val candidate = entry.key', narration)
+        self.assertIn('current.precedingText == entry.precedingText', narration)
+        self.assertIn('if (current.tool) presentedText = current.precedingText', narration)
+        self.assertLess(narration.index('gate.admit(listOf(candidate))'),
+                        narration.index('if (current.tool) presentedText = current.precedingText'))
+        tests = (ROOT / 'app/src/test/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNarrationCompositionTest.kt').read_text()
+        for token in ('toolsAfterTheSamePresentedNarrationDoNotRepeatFrameWaits',
+                      'ready tools must not consume more frame-clock waits',
+                      'new narration still requires its own two presented frames',
+                      'one presented frame cannot release a tool after new narration'):
+            self.assertIn(token, tests)
+
     def test_automatic_close_waits_for_narration_but_manual_close_can_finish(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()
         card = (BASE / 'WorkProcessCard.kt').read_text()

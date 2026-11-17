@@ -115,21 +115,23 @@ internal fun WorkflowNarrationContent(
         LaunchedEffect(admission, baselineOnly, paused, revealResetEpoch) {
             val gate = admission ?: return@LaunchedEffect
             if (baselineOnly || paused) return@LaunchedEffect
+            var presentedText: List<MarkdownTypingSource>? = null
             snapshotFlow {
                 currentPlan.firstOrNull { !gate.contains(it.key) }?.takeIf { entry ->
                     !entry.tool || entry.precedingText.all { currentReveal.ready(it.id, it.text, it.window) }
-                }?.key
-            }.collectLatest { candidate ->
-                if (candidate != null) {
-                    val entry = currentPlan.firstOrNull { it.key == candidate } ?: return@collectLatest
-                    if (entry.tool && entry.precedingText.isNotEmpty()) {
+                }
+            }.collectLatest { entry ->
+                if (entry != null) {
+                    val candidate = entry.key
+                    if (entry.tool && entry.precedingText.isNotEmpty() && entry.precedingText != presentedText) {
                         withFrameNanos { }
                         withFrameNanos { }
                     }
                     val current = currentPlan.firstOrNull { !gate.contains(it.key) }
-                    if (current?.key == candidate &&
+                    if (current?.key == candidate && current.precedingText == entry.precedingText &&
                         (!current.tool || current.precedingText.all { currentReveal.ready(it.id, it.text, it.window) })) {
                         gate.admit(listOf(candidate))
+                        if (current.tool) presentedText = current.precedingText
                     }
                 }
             }

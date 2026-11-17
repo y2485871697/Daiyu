@@ -808,6 +808,99 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         } finally { ui.mainClock.autoAdvance = true }
     }
 
+    private data class ConnectorClockSample(val time: Long, val values: List<Float>)
+
+    fun testQueuedConnectorClocksKeepMovingThroughHandoffs() {
+        val initial: List<MessageContentUi> = listOf(MessageContentUi.Tool(first))
+        var items by mutableStateOf(initial)
+        val motions = WorkflowNodeMotions(initial)
+        var parts: Map<Int, WorkflowLineMotion> = emptyMap()
+        val samples = mutableListOf<ConnectorClockSample>()
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent {
+                CompositionLocalProvider(LocalWorkflowNodeMotions provides motions) {
+                    parts = rememberWorkflowLineMotions(items, items.indices.toList(), continuous = true)
+                }
+            } }
+            ui.waitForIdle()
+            instrumentation.runOnMainSync { items = initial + MessageContentUi.Tool(second) }
+            var appended = 0
+            repeat(80) { frame ->
+                val upstream = parts[appended]?.outgoing?.progress?.value ?: 0f
+                if (appended < 2 && frame >= 6 && upstream > 0f && upstream < 1f) instrumentation.runOnMainSync {
+                    items = items + MessageContentUi.Tool(second.copy(id = "cadence-$frame", renderKey = "cadence-$frame"))
+                    appended++
+                }
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                instrumentation.runOnMainSync {
+                    samples += ConnectorClockSample(ui.mainClock.currentTime,
+                        List(3) { parts[it]?.outgoing?.progress?.value ?: 0f })
+                    for (source in 1..2) {
+                        if ((parts[source]?.incoming?.fraction() ?: 0f) < 1f) {
+                            assertEquals("cadence must not bypass real upstream arrival", 0f,
+                                parts[source]?.outgoing?.fraction() ?: 0f, 0f)
+                        }
+                    }
+                }
+            }
+            assertEquals("both later edges must be appended while their own upstream is moving", 2, appended)
+            val frameMillis = samples[1].time - samples[0].time
+            for (edge in 0..2) {
+                val moving = samples.filter { it.values[edge] > 0f && it.values[edge] < 1f }
+                assertTrue("every queued edge needs a complete intermediate trajectory: $samples", moving.size >= 16)
+                moving.zipWithNext().forEach { (before, after) ->
+                    val expected = (after.time - before.time) / 300f
+                    assertEquals("connector must not brake and restart around a tool: edge=$edge samples=$samples",
+                        expected, after.values[edge] - before.values[edge], .0001f)
+                }
+                assertTrue("connector must start without a catch-up jump",
+                    moving.first().values[edge] <= frameMillis / 300f + .0001f)
+                val arrived = samples.first { it.values[edge] >= 1f }
+                val remainingMillis = (1f - moving.first().values[edge]) * 300f
+                val elapsed = arrived.time - moving.first().time
+                assertTrue("each connector must retain its 300ms window: edge=$edge elapsed=$elapsed samples=$samples",
+                    elapsed >= remainingMillis - .001f && elapsed <= remainingMillis + frameMillis)
+                if (edge > 0) {
+                    val upstream = samples.first { it.values[edge - 1] >= 1f }
+                    assertTrue("queued connector must take over within two frames of its own upstream arrival: $samples",
+                        moving.first().time - upstream.time <= 2 * frameMillis)
+                }
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    private data class ConnectorTailSample(val time: Long, val remaining: Float, val reached: Boolean)
+
+    fun testConnectorTailReachesToolWithoutEasedHold() {
+        rows = listOf(first.copy(state = WorkStepState.OK))
+        ui.mainClock.autoAdvance = false
+        try {
+            show()
+            instrumentation.runOnMainSync { rows = rows + second }
+            val samples = mutableListOf<ConnectorTailSample>()
+            repeat(48) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                val rail = line(pixels())
+                val tip = rail.indexOfLast { it > lineContrast * .35f }
+                samples += ConnectorTailSample(ui.mainClock.currentTime, (rail.lastIndex - tip).toFloat(),
+                    rail.isNotEmpty() && rail.all { it >= lineContrast * .9f })
+            }
+            val tailDistance = with(density) { 4.dp.toPx() }
+            val tail = samples.firstOrNull { !it.reached && it.remaining <= tailDistance }
+            assertNotNull("must sample the painted connector's final four dp: $samples", tail)
+            val arrived = samples.firstOrNull { it.reached }
+            assertNotNull("painted connector must actually reach the tool: $samples", arrived)
+            val frameMillis = samples[1].time - samples[0].time
+            // Incoming is one of two equal clock parts and still uses the original 17dp anchor.
+            val budget = 300f * 4f / (2f * 17f) + 2 * frameMillis
+            assertTrue("painted connector must not linger before the tool springs in: $samples",
+                arrived!!.time - tail!!.time <= budget)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     fun testInitialHistoryIsAlreadyComplete() {
         rows = listOf(first.copy(state = WorkStepState.OK), second)
         ui.mainClock.autoAdvance = false

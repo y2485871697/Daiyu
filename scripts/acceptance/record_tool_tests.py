@@ -1162,8 +1162,7 @@ def record(python):
     validation_cwd = None
     if scope in ("user-message-entrance-targeted", "composer-action-targeted", "error-details-targeted", "media-send-targeted", "receipt-summary-targeted", "runtime-stop-targeted", "workflow-collapse-targeted", "voice-browser-targeted", "browser-targeted", "doubao-motion-targeted", "child-hot-configuration-targeted", "child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted", "page-back-targeted") or (
             scope == "child-task-cards-targeted" and sorted(os.environ.get("SMOKE_TEST_CLASSES", "").split(","))
-            in (sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES),
-                ["app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest"])):
+            == sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES)):
         validation_cwd = Path(__file__).resolve().parents[2]
         child_env["PYTHONPATH"] = str(validation_cwd / "tests") + os.pathsep + os.environ.get("PYTHONPATH", "")
     log = root / "unittest.log"

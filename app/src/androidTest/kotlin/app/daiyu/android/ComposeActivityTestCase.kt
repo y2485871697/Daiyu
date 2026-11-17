@@ -201,7 +201,7 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
                             val root = window.root
                             try {
                                 val owner = root?.packageName?.toString()
-                                if (!owner.isNullOrEmpty() && owner != activity.packageName)
+                                if (!owner.isNullOrEmpty() && owner != instrumentation.targetContext.packageName)
                                     home = HomeFrame(window.id, bounds)
                             } finally { root?.recycle() }
                         }

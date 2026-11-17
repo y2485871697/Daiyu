@@ -122,7 +122,7 @@ class ManagedInputContractTest(unittest.TestCase):
         driver = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ComposeActivityTestCase.kt').read_text()
         background = driver.split('protected fun awaitHomeWindowSettled()', 1)[1].split('protected fun restoreOriginalHost', 1)[0]
         for token in ('window.isFocused', 'TYPE_APPLICATION', 'TYPE_INPUT_METHOD',
-                      '!owner.isNullOrEmpty() && owner != activity.packageName', 'home.takeUnless { imeShown }',
+                      '!owner.isNullOrEmpty() && owner != instrumentation.targetContext.packageName', 'home.takeUnless { imeShown }',
                       'root?.recycle()', 'window.recycle()', 'FLAG_RETRIEVE_INTERACTIVE_WINDOWS',
                       'stable >= 2', 'flags = oldFlags'):
             self.assertIn(token, background)

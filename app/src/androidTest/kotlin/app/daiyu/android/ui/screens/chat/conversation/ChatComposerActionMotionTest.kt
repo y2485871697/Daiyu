@@ -199,8 +199,8 @@ class ChatComposerActionMotionTest private constructor(private val scale: Compos
         node("text-send-cancel").assertContentDescriptionEquals("取消发送").performClick()
         ui.runOnIdle {
             assertEquals(listOf("send:消息", "primary", "append:补充", "primary", "stop", "cancel"), events)
-            assertEquals(3, presses)
-            assertEquals(3, releases)
+            assertEquals(5, presses)
+            assertEquals(5, releases)
         }
     }
 }

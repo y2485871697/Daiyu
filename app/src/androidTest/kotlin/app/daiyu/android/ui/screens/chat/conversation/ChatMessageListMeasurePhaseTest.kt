@@ -197,6 +197,8 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
 
     fun testFollowGateChangeAfterMeasureCannotPublishHalfATailTransform() {
         val state = StreamingTailViewport(initiallyBounded = true)
+        val drawnOrigins = java.util.Collections.synchronizedList(mutableListOf<Float>())
+        var bodyCoordinates: androidx.compose.ui.layout.LayoutCoordinates? = null
         var following = true
         mount {
             val density = androidx.compose.ui.platform.LocalDensity.current
@@ -204,7 +206,12 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
                 StreamingTailContainer(state, { null }, "follow-gate", true,
                     follows = { following }, clearance = { 0 },
                     viewportHeight = { with(density) { 120.dp.roundToPx() } }) {
-                    Box(Modifier.size(100.dp, 1000.dp).testTag("follow-gate-body"))
+                    Box(Modifier.size(100.dp, 1000.dp).testTag("follow-gate-body")
+                        .onPlaced { bodyCoordinates = it }.drawWithContent {
+                            drawContent()
+                            drawnOrigins.add(checkNotNull(state.viewportCoordinates).localPositionOf(
+                                checkNotNull(bodyCoordinates), androidx.compose.ui.geometry.Offset.Zero).y)
+                        })
                 }
             }
         }
@@ -213,6 +220,9 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
             assertEquals("No measure-only follow offset may leak into reading placement", 0f,
                 state.viewportOffset - state.scrollOffset, 0.001f)
         }
+        val draws = synchronized(drawnOrigins) { drawnOrigins.toList() }
+        assertTrue("Must observe the real body draw", draws.isNotEmpty())
+        draws.forEach { assertEquals("A follow gate cannot expose half a placed transform", 0f, it, 1f) }
         val body = ui.onNodeWithTag("follow-gate-body").fetchSemanticsNode()
         val viewport = ui.onNodeWithTag("chat-stream-viewport:follow-gate").fetchSemanticsNode()
         assertEquals("The actual body, not just its outer item, keeps the reading anchor",
@@ -430,7 +440,9 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
 
     fun testCurrentPlacementOriginDefinesTheFirstDrawnTailSlice() {
         val state = StreamingTailViewport(initiallyBounded = true)
-        val origins = java.util.Collections.synchronizedList(mutableListOf<Float>())
+        val origins = java.util.Collections.synchronizedList(mutableListOf<Pair<Float, Float>>())
+        var host: androidx.compose.ui.layout.LayoutCoordinates? = null
+        var body: androidx.compose.ui.layout.LayoutCoordinates? = null
         var expected = 0f
         mainThread { state.itemOrigin = 100f }
         mount {
@@ -438,20 +450,24 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
             val viewportPx = with(density) { 120.dp.roundToPx() }
             val bodyPx = with(density) { 1000.dp.roundToPx() }
             expected = 100f - (bodyPx - viewportPx)
-            Box(Modifier.onPlaced { state.itemOrigin = -100f }.drawWithContent {
-                drawContent()
-                origins.add(state.viewportOffset - state.scrollOffset)
-            }) {
+            Box(Modifier.onPlaced { host = it; state.itemOrigin = -100f }) {
                 StreamingTailContainer(state, { null }, "current-origin", true,
                     follows = { true }, clearance = { 0 }, viewportHeight = { viewportPx }) {
-                    Box(Modifier.size(100.dp, 1000.dp))
+                    Box(Modifier.size(100.dp, 1000.dp).onPlaced { body = it }.drawWithContent {
+                        drawContent()
+                        val actual = checkNotNull(host).localPositionOf(checkNotNull(body),
+                            androidx.compose.ui.geometry.Offset.Zero).y
+                        origins.add(actual to (state.viewportOffset - state.scrollOffset))
+                    })
                 }
             }
         }
         val drawn = synchronized(origins) { origins.toList() }
         assertTrue("Observe the first draw, not only settled state", drawn.isNotEmpty())
-        drawn.forEach { assertEquals("The prior positive origin cannot shrink a new negative-origin slice",
-            expected, it, 1f) }
+        drawn.forEach { (actual, requested) ->
+            assertEquals("The prior positive origin cannot shrink a new negative-origin slice", expected, requested, 1f)
+            assertEquals("The actual body must use the same transform in every draw", requested, actual, 1f)
+        }
     }
 
     private fun rows(): List<ChatTurnUi> = List(20) { ChatTurnUi.User("u$it", "row $it") }

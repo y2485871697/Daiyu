@@ -47,6 +47,22 @@ class StreamingOcclusionContract(unittest.TestCase):
                       'viewport.viewportOffset = 0', 'viewport.boundaryDelta = 0f'):
             self.assertIn(token, collect)
 
+    def test_waiting_question_keeps_live_viewport_without_terminal_migration(self):
+        source = CHAT.read_text()
+        self.assertIn('this == RunStatus.RUNNING || this == RunStatus.WAITING_USER', source)
+        self.assertIn('StreamingTailViewport(turn.status.keepsLiveTailViewport())', source)
+        self.assertIn('tail.status.keepsLiveTailViewport()', source)
+        self.assertIn('tailAssistant?.status?.keepsLiveTailViewport() == true', source)
+        device = DEVICE.read_text()
+        for token in ('testWaitingUserRetainsLiveViewportAndEveryDrawnReadingAnchor',
+                      'testWaitingUserStartsBoundedAndExplicitBottomKeepsItsViewport',
+                      'body.positionInRoot().y', 'anchor.positionInRoot().y',
+                      'WAITING_USER must not take terminal unwrap', 'Completion still unwraps'):
+            self.assertIn(token, device)
+        measure = DEVICE.with_name('ChatMessageListMeasurePhaseTest.kt').read_text()
+        self.assertIn('The actual body must use the same transform in every draw', measure)
+        self.assertIn('A follow gate cannot expose half a placed transform', measure)
+
     def test_unbounded_placement_does_not_observe_unused_item_origin(self):
         source = CHAT.read_text()
         viewport = source.split('internal fun StreamingTailContainer(', 1)[1].split('internal fun ChatMessageList(', 1)[0]

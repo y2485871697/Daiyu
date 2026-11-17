@@ -93,6 +93,10 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 internal val ChatTailClearance = 8.dp
 
+// Waiting for an answer pauses the run, not ownership of its live viewport.
+private fun RunStatus.keepsLiveTailViewport(): Boolean =
+    this == RunStatus.RUNNING || this == RunStatus.WAITING_USER
+
 private class FollowClearanceLayout : RemeasurementModifier {
     var remeasurement: Remeasurement? = null
     var correcting = false
@@ -380,7 +384,7 @@ internal fun ChatMessageList(
     val initialQuestionContent = initialPositionPending || resumeFollowPending || !pageActive || !scrollResumed ||
         !presentationActive || retainingRows
     assistantTurns.forEach { (key, turn) ->
-        val state = nestedStates.getOrPut(key) { StreamingTailViewport(turn.status == RunStatus.RUNNING) }
+        val state = nestedStates.getOrPut(key) { StreamingTailViewport(turn.status.keepsLiveTailViewport()) }
         if (initialQuestionContent) {
             val questions = turn.workflowContent().steps.mapNotNull {
                 (it as? MessageContentUi.Tool)?.step?.takeIf { it.toolName == "ask_user" }?.dedicatedKey
@@ -472,7 +476,7 @@ internal fun ChatMessageList(
                 nestedTail.contentHeight > 0 && nestedTail.contentHeight <= layout.viewportSize.height -
                 currentOcclusionPx - with(density) { 11.dp.roundToPx() + ChatTailClearance.roundToPx() }
             val boundedTerminalReveal = nestedTail.bounded && currentTailKey == assistantOwnerKey &&
-                activeTail != null && activeTail.status != RunStatus.RUNNING && !activeTail.isStreaming &&
+                activeTail != null && !activeTail.status.keepsLiveTailViewport() && !activeTail.isStreaming &&
                 readyTurns[activeTail.listKey] == activeTail &&
                 revealedTurns[activeTail.listKey] != activeTail
             val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal
@@ -588,7 +592,7 @@ internal fun ChatMessageList(
             currentAssistants[tail.listKey] == tail && nestedStates[tail.listKey] === nestedTail &&
             currentScrollSerial == requestSerial && currentScrollSerial == consumedScrollSerial &&
             touchEpoch == migrationTouchEpoch && pageActive && scrollResumed && !exactNavigationOwnsScroll
-        if (!nestedTail.bounded || tail.status == RunStatus.RUNNING || !pageActive || !scrollResumed) return@LaunchedEffect
+        if (!nestedTail.bounded || tail.status.keepsLiveTailViewport() || !pageActive || !scrollResumed) return@LaunchedEffect
         // Only a new request or touch can relinquish an exact navigation, not consumption.
         if (exactNavigationOwnsScroll) return@LaunchedEffect
         if (currentScrollSerial != null && currentScrollSerial != consumedScrollSerial) return@LaunchedEffect
@@ -664,7 +668,7 @@ internal fun ChatMessageList(
                     consumedScrollSerial = request.serial
                 }
             } else if (followBottom && tailIndex >= 0) {
-                if (tailAssistant?.status == RunStatus.RUNNING) {
+                if (tailAssistant?.status?.keepsLiveTailViewport() == true) {
                     nestedTail.boundaryDelta = 0f
                     nestedTail.bounded = true
                 }

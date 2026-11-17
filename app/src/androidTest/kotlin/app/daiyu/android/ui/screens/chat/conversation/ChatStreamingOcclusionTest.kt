@@ -23,6 +23,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.layout.LayoutCoordinates
@@ -46,10 +47,15 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     private var request by mutableStateOf(ChatScrollRequest(1))
 
     private var running by mutableStateOf(true)
+    private var waiting by mutableStateOf(false)
+    private data class BodyDraw(val bodyTop: Float, val anchorTop: Float, val phase: String)
+    private val bodyDraws = java.util.Collections.synchronizedList(mutableListOf<BodyDraw>())
     private var showCompression by mutableStateOf(false)
     private var appendAssistant by mutableStateOf(false)
 
     private fun mount(interactive: Boolean = false, painted: Boolean = false) {
+        var bodyCoordinates: LayoutCoordinates? = null
+        var anchorCoordinates: LayoutCoordinates? = null
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -58,7 +64,11 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                         ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { bottomInset ->
                             ChatMessageList(
                                 List(6) { ChatTurnUi.User("u$it", "history $it") } +
-                                    ChatTurnUi.Assistant("tail", status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running) +
+                                    ChatTurnUi.Assistant("tail", status = when {
+                                        waiting -> RunStatus.WAITING_USER
+                                        running -> RunStatus.RUNNING
+                                        else -> RunStatus.COMPLETED
+                                    }, isStreaming = running && !waiting) +
                                     if (appendAssistant) listOf(ChatTurnUi.Assistant("next", finalText = "next reply")) else emptyList(),
                                 ChatScreenActions(), scrollRequest = request,
                                 compressionActivity = if (showCompression) app.daiyu.android.timeline.CompressionActivity(
@@ -66,10 +76,20 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                                 composerBottomInset = bottomInset, turnExtras = { turn ->
                                   if (turn.id == "tail") {
                                     if (interactive) {
-                                        Column(if (painted) Modifier.background(Color.Cyan) else Modifier) {
+                                        Column((if (painted) Modifier.background(Color.Cyan) else Modifier)
+                                            .onPlaced { bodyCoordinates = it }.drawWithContent {
+                                                drawContent()
+                                                val phase = if (waiting) "waiting" else if (running) "running" else "completed"
+                                                val body = bodyCoordinates
+                                                val anchor = anchorCoordinates
+                                                if (body?.isAttached == true && anchor?.isAttached == true) {
+                                                    bodyDraws.add(BodyDraw(body.positionInRoot().y,
+                                                        anchor.positionInRoot().y, phase))
+                                                }
+                                            }) {
                                             Text("inner content start", Modifier.testTag("inner-start"))
                                             Box(Modifier.height(height - 160.dp))
-                                            Text("manual content anchor", Modifier.testTag("manual-anchor"))
+                                            Text("manual content anchor", Modifier.testTag("manual-anchor").onPlaced { anchorCoordinates = it })
                                             Box(Modifier.height(140.dp))
                                         }
                                     } else Box(Modifier.height(height))
@@ -799,6 +819,62 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         mainThread { request = ChatScrollRequest(2) }
         ui.waitForIdle()
         assertTailClearance()
+    }
+
+    fun testWaitingUserRetainsLiveViewportAndEveryDrawnReadingAnchor() {
+        mount(interactive = true)
+        manualNonzeroPosition()
+        val anchor = anchorTop()
+        val offset = innerOffset()
+        assertTrue("Must exercise a real nonzero inner transform", offset > 1f)
+        fun drain(): List<BodyDraw> = synchronized(bodyDraws) {
+            bodyDraws.toList().also { bodyDraws.clear() }
+        }
+        drain()
+        var observedDraws = 0
+        var waitingDraws = 0
+        fun checkDraws() {
+            val samples = drain()
+            observedDraws += samples.size
+            waitingDraws += samples.count { it.phase == "waiting" }
+            samples.forEach { sample ->
+                android.util.Log.i("WaitingTailDraw", "phase=${sample.phase} body=${sample.bodyTop} anchor=${sample.anchorTop} expected=$anchor")
+                assertEquals("No intermediate body draw may jump to the workflow top", anchor, sample.anchorTop, 2f)
+            }
+        }
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread { waiting = true }
+            repeat(90) {
+                frame()
+                checkDraws()
+                val maximum = ui.onNodeWithTag("chat-stream-viewport:tail").fetchSemanticsNode()
+                    .config[SemanticsProperties.VerticalScrollAxisRange].maxValue()
+                assertTrue("WAITING_USER must not take terminal unwrap", maximum > 1f)
+                assertEquals("Waiting must retain the reader's inner ownership", offset, innerOffset(), 1f)
+            }
+            ui.runOnUiThread { waiting = false }
+            repeat(12) {
+                frame(); checkDraws()
+                assertEquals(offset, innerOffset(), 1f)
+            }
+            ui.runOnUiThread { running = false }
+            repeat(90) { frame(); checkDraws() }
+            assertEquals("Completion still unwraps", 0f, innerOffset(), 1f)
+            assertTrue("Must inspect real body draws", observedDraws > 0)
+            assertTrue("Must inspect actual waiting draws", waitingDraws > 0)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testWaitingUserStartsBoundedAndExplicitBottomKeepsItsViewport() {
+        waiting = true
+        mount(interactive = true)
+        assertTrue("An initially waiting turn owns its bounded viewport", innerOffset() > 1f)
+        manualNonzeroPosition()
+        mainThread { request = ChatScrollRequest(2) }
+        ui.waitForIdle()
+        assertTailClearance()
+        assertTrue("Explicit bottom restoration preserves waiting viewport ownership", innerOffset() > 1f)
     }
 
     fun testCompletionMigratesRealManualAnchorWithoutJumpOrDrift() {

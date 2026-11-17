@@ -115,7 +115,7 @@ jobs:
           path = Path('scripts/smoke_boot.sh')
           source = path.read_text()
           original = source
-          loops = [line for line in source.splitlines() if line.startswith('for path in sorted([rename_presentation_source]')]
+          loops = [line for line in source.splitlines() if line.startswith('for path in sorted(')]
           assert len(loops) == 1
           source = source.replace(loops[0], 'for path in sorted(Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt") for name in requested):', 1)
           marker = 'discovery_scope="targeted" if '
@@ -125,7 +125,7 @@ jobs:
           owner = json.loads(Path('smoke/execution-source.json').read_text())
           Path('smoke/host-script.json').write_text(json.dumps(dict(
               workflow_sha=owner['workflow_sha'], fixture_source_sha=owner['checked_sha'],
-              change='restrict inventory to the four selected source files',
+              change='restrict inventory to the five selected source files',
               original_sha256=hashlib.sha256(original.encode()).hexdigest(),
               executed_sha256=hashlib.sha256(source.encode()).hexdigest(),
               selected_classes=owner['selected_classes'])) + '\n')

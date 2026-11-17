@@ -134,17 +134,16 @@ internal fun ChatIconButton(
         }).then(if (containerColor == null) Modifier else Modifier.size(containerSize).background(containerColor, CircleShape)),
             contentAlignment = Alignment.Center) {
             val imageSize = iconSize ?: if (containerColor == null) 20.dp else 12.dp
-            val imageTint = if (visualEnabled) tint else tint.copy(alpha = 0.38f)
             if (animateChanges) {
-                AnimatedContent(icon, contentAlignment = Alignment.Center,
+                AnimatedContent(icon, modifier = Modifier.testTag("chat-action-icon"), contentAlignment = Alignment.Center,
                     transitionSpec = {
                         ((fadeIn(tween(140)) + scaleIn(tween(140), initialScale = .72f)) togetherWith
                             (fadeOut(tween(90)) + scaleOut(tween(90), targetScale = .72f))).using(null)
                     }, label = "chat-action-icon") { image ->
-                    Icon(image, contentDescription = null, modifier = Modifier.size(imageSize), tint = imageTint)
+                    Icon(image, contentDescription = null, modifier = Modifier.size(imageSize), tint = if (visualEnabled) tint else tint.copy(alpha = 0.38f))
                 }
             } else {
-                Icon(icon, contentDescription = label, modifier = Modifier.size(imageSize), tint = imageTint)
+                Icon(icon, contentDescription = label, modifier = Modifier.size(imageSize), tint = if (visualEnabled) tint else tint.copy(alpha = 0.38f))
             }
         }
     }

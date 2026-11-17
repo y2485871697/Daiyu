@@ -610,6 +610,8 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
                     val graphicNode = if (description == "推理强度，当前为 高") {
                         node("chat-reasoning").assertContentDescriptionEquals(description).assertHasClickAction()
                         ui.onNode(hasParent(hasTestTag("chat-reasoning")) and !hasClickAction(), useUnmergedTree = true)
+                    } else if (description == label) {
+                        ui.onNodeWithTag("chat-action-icon", useUnmergedTree = true)
                     } else ui.onNode(hasContentDescription(description) and !hasClickAction(), useUnmergedTree = true)
                     val graphic = graphicNode.assertIsDisplayed().fetchSemanticsNode().boundsInRoot
                     val slot = button(description).assertIsDisplayed().fetchSemanticsNode().boundsInRoot

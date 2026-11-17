@@ -330,6 +330,101 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testRealDisclosureGateCannotClipSafeTailWithNonzeroFollowTransform() {
+        var count by mutableStateOf(18)
+        var geometry: () -> String = { "" }
+        var pixelsPerDp = 1f
+        fun turn(): ChatTurnUi.Assistant {
+            val blocks = buildList<app.daiyu.android.domain.MessageBlock> {
+                repeat(count) { index ->
+                    add(app.daiyu.android.domain.MessageBlock.Tool(app.daiyu.android.domain.ToolInvocation(
+                        app.daiyu.android.domain.ToolCallId("gate-tool-$index"), "lookup", "{}"), "done"))
+                    if (index % 3 == 2) add(app.daiyu.android.domain.MessageBlock.Text(
+                        "gate-narration-$index", "这是一段夹在工具节点之间的普通叙述。"))
+                }
+            }
+            val message = app.daiyu.android.domain.Message(app.daiyu.android.domain.MessageId("gate-tail"),
+                app.daiyu.android.domain.ConversationId("gate-conversation"), app.daiyu.android.domain.RunId("gate-run"),
+                "assistant", blocks, app.daiyu.android.domain.RunStatus.RUNNING)
+            return (ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant).copy(isStreaming = true)
+        }
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    pixelsPerDp = androidx.compose.ui.platform.LocalDensity.current.density
+                    Box(Modifier.size(320.dp, 420.dp).background(androidx.compose.ui.graphics.Color.White)
+                        .testTag("gate-real-host")) {
+                        ChatConversationLayers(Modifier.size(320.dp, 420.dp), messages = { inset ->
+                            ChatMessageList(List(6) { ChatTurnUi.User("gate-history-$it", "history $it") } + turn(),
+                                ChatScreenActions(), scrollRequest = ChatScrollRequest(1), composerBottomInset = inset,
+                                turnExtras = {
+                                    LocalWorkflowDisclosureContext.current?.viewport?.let { viewport ->
+                                        geometry = { viewport.diagnostics() }
+                                    }
+                                    Box(Modifier.testTag("gate-real-disclosure")) {
+                                        WorkProcessCard(WorkProcessUi(emptyList(), "已完成"), ownerKey = "gate-disclosure",
+                                            content = { Box(Modifier.fillMaxWidth().height(80.dp)) })
+                                    }
+                                    Text("末行应当完整绘制", Modifier.testTag("gate-real-last-line"))
+                                    Box(Modifier.fillMaxWidth().height(2.dp).background(androidx.compose.ui.graphics.Color.Magenta)
+                                        .testTag("gate-real-end"))
+                                })
+                        }, composer = { Box(Modifier.fillMaxWidth().height(96.dp).testTag("gate-real-composer")) })
+                    }
+                }
+            }
+        }
+        ui.waitForIdle()
+        fun number(diagnostic: String, name: String): Float =
+            Regex("\\b$name=([0-9]+(?:\\.[0-9]+)?)").find(diagnostic)?.groupValues?.get(1)?.toFloat()
+                ?: error("Missing $name: $diagnostic")
+        val settled = geometry()
+        assertTrue("Must start as the actual follower: $settled", settled.contains("follow=true canFollow=true"))
+        assertTrue("Must not repeat the old zero-offset fixture: $settled", number(settled, "a") > 1f && number(settled, "q") > 1f)
+        fun physical(tag: String): androidx.compose.ui.geometry.Rect {
+            val c = ui.onNodeWithTag(tag).fetchSemanticsNode().layoutInfo.coordinates
+            val p = c.positionInRoot()
+            return androidx.compose.ui.geometry.Rect(p.x, p.y, p.x + c.size.width, p.y + c.size.height)
+        }
+        var eligibleFrames = 0
+        val failures = mutableListOf<String>()
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.onNode(hasTestTag("work-process-header") and hasAnyAncestor(hasTestTag("gate-real-disclosure")))
+                .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { it() }
+            repeat(64) { index ->
+                if (index == 1) ui.runOnUiThread { count = 19 }
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                val diagnostic = geometry()
+                if (!diagnostic.contains("follow=true canFollow=false") || !diagnostic.contains("catchup=true") ||
+                    number(diagnostic, "a") <= 1f || number(diagnostic, "q") <= 1f) return@repeat
+                val end = physical("gate-real-end")
+                val viewport = physical("chat-stream-viewport:gate-tail")
+                val safeBottom = physical("gate-real-composer").top - ChatTailClearance.value * pixelsPerDp
+                val sampleY = end.center.y
+                val line = "frame=$index end=$end V=$viewport safe=$safeBottom $diagnostic"
+                android.util.Log.i("WorkflowDisclosureGateClip", line)
+                if (end.bottom > safeBottom + 1f || sampleY <= viewport.bottom + 1f) return@repeat
+                eligibleFrames++
+                val root = physical("gate-real-host")
+                val image = captureScreenNode(ui.onNodeWithTag("gate-real-host"))
+                val pixels = image.toPixelMap()
+                val color = pixels[(end.center.x - root.left).toInt(), (sampleY - root.top).toInt()]
+                if (!(color.red > .9f && color.blue > .9f && color.green < .1f)) {
+                    failures += line
+                    val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/workflow-gated-catchup").apply { mkdirs() }
+                    java.io.File(directory, "frame-$index.png").outputStream().use {
+                        image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                }
+            }
+            assertTrue("Must observe real disclosure gating with nonzero a/q and safe content below V", eligibleFrames > 0)
+            assertTrue("A fully measured tail inside the physical safe edge was clipped: $failures", failures.isEmpty())
+        } finally { ui.mainClock.autoAdvance = true }
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testCurrentPlacementOriginDefinesTheFirstDrawnTailSlice() {
         val state = StreamingTailViewport(initiallyBounded = true)
         val origins = java.util.Collections.synchronizedList(mutableListOf<Float>())

@@ -45,6 +45,20 @@ class DoubaoMotionScopeTest(unittest.TestCase):
                 selected.extend(selection["selected_classes"])
             self.assertCountEqual(classes, selected)
 
+    def test_floating_and_real_ime_have_one_exact_non_cancelling_queue(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/build.yml").read_text()
+        group = next(line.strip() for line in workflow.splitlines()
+                     if line.startswith("  group: daiyu-"))
+        floating = "app.daiyu.android.VoiceCallFloatingWindowTest"
+        ime = "app.daiyu.android.ChatComposerImeActivityTest"
+        suffix = ("${{ inputs.mode == 'smoke' && (inputs.smoke_classes == '"
+                  + floating + "," + ime + "' || inputs.smoke_classes == '"
+                  + ime + "," + floating + "') && '-voice-compact' || '' }}")
+        self.assertTrue(group.startswith("group: daiyu-${{ inputs.mode }}-${{ github.ref }}"))
+        self.assertEqual(1, group.count(suffix), group)
+        self.assertEqual(1, group.count("'-voice-compact'"), group)
+        self.assertIn("\n  cancel-in-progress: false\n", workflow)
+
     def fixture(self, root, classes=None):
         helper = discovery.SpeechPlatformDiscoveryTest()
         helper.fixture(root)

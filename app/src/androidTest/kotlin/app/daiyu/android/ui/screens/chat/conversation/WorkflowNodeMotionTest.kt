@@ -256,7 +256,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
 
     private data class ArrivalSample(val connector: List<Float>, val ink: Float, val body: Float, val bodyY: Float)
 
-    private data class PhysicalSample(val bottom: Float, val following: Float, val frontier: Float, val body: Float)
+    private data class PhysicalSample(val bottom: Float, val following: Float, val frontier: Float, val body: Float, val reached: Boolean)
 
     private fun physicalSample(p: PixelMap, fromTag: String, toTag: String): PhysicalSample {
         val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()
@@ -267,15 +267,19 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         val start = ceil(source.top - raster.top + with(density) { 28.dp.toPx() })
         val frontier = if (last < 0) source.bottom else raster.top + start + last + 1f
         val following = ui.onNodeWithTag("motion-following").fetchSemanticsNode().physicalBounds().top
-        return PhysicalSample(raster.bottom, following, minOf(frontier, target.top + with(density) { 17.dp.toPx() }), bodyInk(p, toTag))
+        val reached = rail.isNotEmpty() && rail.all { it >= lineContrast * .9f }
+        return PhysicalSample(raster.bottom, following, minOf(frontier, target.top + with(density) { 17.dp.toPx() }), bodyInk(p, toTag), reached)
     }
 
     private fun assertPhysicalArrival(beforeBottom: Float, samples: List<PhysicalSample>, fullBody: Float, tailPadding: Float = 0f) {
-        val hidden = samples.filter { it.body <= maxOf(.03f, fullBody * .01f) }
+        val waiting = samples.filter { !it.reached }
+        val hidden = waiting.filter { it.body <= maxOf(.03f, fullBody * .01f) }
         val tolerance = with(density) { 2.dp.toPx() }
-        hidden.forEachIndexed { frame, sample ->
+        waiting.forEachIndexed { frame, sample ->
             assertTrue("physical height ran ahead of the painted line at $frame: $sample before=$beforeBottom",
                 sample.bottom <= maxOf(beforeBottom, sample.frontier + tailPadding) + tolerance)
+        }
+        samples.forEach { sample ->
             assertEquals("following content must see the same physical extent", sample.bottom, sample.following, 1f)
         }
         assertTrue("must observe an intermediate physical extension while the target is still hidden",

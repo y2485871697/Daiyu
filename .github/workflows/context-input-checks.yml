@@ -1,0 +1,107 @@
+name: 代鱼上下文输入优化检查
+run-name: 代鱼上下文输入优化检查 ${{ inputs.check_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 本次定向检查的完整源码SHA
+        required: true
+        type: string
+      check_id:
+        description: 调度去重标识
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: daiyu-context-input-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  targeted:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 35
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      SKIP_JDK_VERSION_CHECK: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+      - name: 绑定准确检查源码
+        run: |
+          python3 - <<'PYREV'
+          import os, re, subprocess
+          expected = os.environ['EXPECTED_SHA']
+          assert re.fullmatch(r'[0-9a-f]{40}', expected)
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == expected
+          print('CHECK_SHA=' + expected)
+          PYREV
+      - uses: ./.github/actions/setup-temurin
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
+          log-accepted-android-sdk-licenses: false
+      - name: 准备既有离线语音依赖（不打包）
+        run: ./gradlew --no-daemon -I scripts/cooperation/checks_only.init.gradle :app:prepareOfflineSpeechRuntime
+      - name: 四协议输入去重与尾部预算定向回归（不打包）
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p context-input-checks
+          rm -rf app/build/test-results/testDebugUnitTest
+          python3 scripts/verify_boundaries.py 2>&1 | tee context-input-checks/boundaries.log
+          ./gradlew --no-daemon --parallel --build-cache --console=plain \
+            -I scripts/cooperation/checks_only.init.gradle \
+            -PdaiyuCheckGraph=context-input-checks/task-graph.json \
+            :app:compileDebugKotlin :app:compileDebugAndroidTestKotlin :app:testDebugUnitTest \
+            --tests 'app.daiyu.android.model.TerminalToolResultProjectionTest' \
+            --tests 'app.daiyu.android.model.TerminalProjectionWireTest' \
+            --tests 'app.daiyu.android.context.TokenTailBudgetTest' \
+            --tests 'app.daiyu.android.context.TokenTailEstimateTest' \
+            --tests 'app.daiyu.android.model.RequestInputEstimateTest' \
+            --tests 'app.daiyu.android.model.MessagesHistoryContractTest' \
+            --tests 'app.daiyu.android.model.ResponsesProtocolCompatibilityTest' \
+            --tests 'app.daiyu.android.model.MessagesProtocolCompatibilityTest' \
+            --tests 'app.daiyu.android.model.ResponsesBoundaryRegressionTest' \
+            --tests 'app.daiyu.android.model.ProviderRequestWireTest' \
+            --tests 'app.daiyu.android.model.AllProtocolRequestRetryTest' \
+            --tests 'app.daiyu.android.model.PreparedRequestBodyTest' \
+            --tests 'app.daiyu.android.model.videos.VideoPostApprovalTest' \
+            --tests 'app.daiyu.android.model.ResponsesBackgroundResumeTest' \
+            --tests 'app.daiyu.android.model.MessagesWebSearchTest' \
+            --tests 'app.daiyu.android.model.ScreenToolImageInputTest' 2>&1 | tee context-input-checks/targeted.log
+      - name: 核验精确回归范围及原始XML
+        if: success()
+        run: |
+          python3 - <<'PYREPORT'
+          import json, os, xml.etree.ElementTree as ET
+          from pathlib import Path
+          expected = set(['app.daiyu.android.model.TerminalToolResultProjectionTest', 'app.daiyu.android.model.TerminalProjectionWireTest', 'app.daiyu.android.context.TokenTailBudgetTest', 'app.daiyu.android.context.TokenTailEstimateTest', 'app.daiyu.android.model.RequestInputEstimateTest', 'app.daiyu.android.model.MessagesHistoryContractTest', 'app.daiyu.android.model.ResponsesProtocolCompatibilityTest', 'app.daiyu.android.model.MessagesProtocolCompatibilityTest', 'app.daiyu.android.model.ResponsesBoundaryRegressionTest', 'app.daiyu.android.model.ProviderRequestWireTest', 'app.daiyu.android.model.AllProtocolRequestRetryTest', 'app.daiyu.android.model.PreparedRequestBodyTest', 'app.daiyu.android.model.videos.VideoPostApprovalTest', 'app.daiyu.android.model.ResponsesBackgroundResumeTest', 'app.daiyu.android.model.MessagesWebSearchTest', 'app.daiyu.android.model.ScreenToolImageInputTest'])
+          files = list(Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml'))
+          actual = set()
+          tests = 0
+          for path in files:
+              suite = ET.parse(path).getroot()
+              actual.add(suite.attrib['name'])
+              assert int(suite.attrib['tests']) > 0, path
+              for key in ('failures', 'errors', 'skipped'):
+                  assert int(suite.attrib.get(key, '0')) == 0, (path, key)
+              tests += int(suite.attrib['tests'])
+          assert actual == expected, (sorted(actual), sorted(expected))
+          record = dict(CHECK_SHA=os.environ['EXPECTED_SHA'], classes=sorted(actual), tests=tests, exit_code=0)
+          Path('context-input-checks/record.json').write_text(json.dumps(record, indent=2)+'\n')
+          print(json.dumps(record))
+          PYREPORT
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: always()
+        with:
+          name: 上下文输入优化检查
+          path: |
+            context-input-checks/
+            app/build/test-results/testDebugUnitTest/
+          if-no-files-found: error

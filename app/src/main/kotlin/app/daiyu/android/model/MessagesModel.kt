@@ -140,7 +140,7 @@ class MessagesModel internal constructor(
             )
             val screenInput = ScreenToolImageInput.prepare(request, messages, settings, capability,
                 imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get, sessionContext?.screenImageReader, outputs.map { it.callId.value }.toSet())
-            request = screenInput.request
+            request = TerminalToolResultProjection.request(screenInput.request, settings.protocol)
             ReasoningRequestPolicy.validate(request, ProviderProtocol.MESSAGES, if (summaryRequest) null else settings.reasoningOverride,
                 if (summaryRequest) null else request.opt("model") as? String)
             settings.requestOptions.sessionGateway.requireExecutable()

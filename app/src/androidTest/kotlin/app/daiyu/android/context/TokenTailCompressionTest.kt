@@ -41,7 +41,9 @@ class TokenTailCompressionTest : InstrumentationTestCase() {
         opaque[0] = opaque[0].copy(protocolItems = listOf("""{"type":"reasoning","encrypted_content":"opaque"}"""))
         assertEquals(9, TokenTailCompression.selectStart(opaque, 1000))
         opaque[8] = opaque[8].copy(role = "user")
-        assertEquals(8, TokenTailCompression.selectStart(opaque, 1000))
+        assertEquals(9, TokenTailCompression.selectStart(opaque, 1000))
+        assertEquals(9, TokenTailCompression.selectStart(opaque, 1287))
+        assertEquals(8, TokenTailCompression.selectStart(opaque, 1288))
     }
 
     fun testArchiveEnvelopePreservesPhysicalOwnerAndLegacyArrays() {

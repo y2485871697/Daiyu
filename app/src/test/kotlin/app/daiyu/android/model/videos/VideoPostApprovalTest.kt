@@ -61,9 +61,9 @@ class VideoPostApprovalTest {
         assertNotNull("must refuse before connecting", it)
     }!!
 
-    private fun toolTerminal(): String {
+    private fun toolTerminal(name: String = "lookup"): String {
         val call = JSONObject().put("type", "function_call").put("id", "fc").put("call_id", "call")
-            .put("name", "lookup").put("arguments", "{}")
+            .put("name", name).put("arguments", "{}")
         val terminal = JSONObject().put("type", "response.completed").put("response", JSONObject()
             .put("status", "completed").put("output", JSONArray().put(call)))
         return "data: ${JSONObject().put("type", "response.output_item.done").put("item", call)}\n\n" +
@@ -128,6 +128,36 @@ class VideoPostApprovalTest {
             assertFalse(JSONObject(connection.sent.toString("UTF-8")).has("prompt_cache_key"))
         }
         assertNotEquals(digests[0], digests[1])
+    }
+
+    @Test fun terminalProjectionKeepsVideoHistoryBindingAndApprovalDigestExact() {
+        val text = "terminal source\n"
+        val raw = JSONObject().put("stdout", text).put("stdout_base64",
+            java.util.Base64.getEncoder().encodeToString(text.toByteArray(Charsets.UTF_8))).toString()
+        val digests = mutableListOf<String>()
+        val target = ResponsesModel(settings, {
+            connections++
+            Connection(if (connections == 1) toolTerminal("terminal_exec") else done).also(sent::add)
+        }, null, videoInputCapability = capability, videoPostApprovalProvider = VideoPostApprovalProvider { request ->
+            digests.add(request.requestSha256)
+            request.bindPermitConsumption {}
+        }).open(history, emptyList(), plan)
+        target.next(emptyList()) {}
+        val events = mutableListOf<ModelEvent>()
+        target.next(listOf(ToolOutput(ToolCallId("call"), raw)), events::add)
+        assertEquals(2, connections)
+        assertEquals(2, digests.size)
+        sent.forEachIndexed { index, connection ->
+            val digest = java.security.MessageDigest.getInstance("SHA-256").digest(connection.sent.toByteArray())
+                .joinToString("") { "%02x".format(it.toInt() and 0xff) }
+            assertEquals(digests[index], digest)
+        }
+        val input = JSONObject(sent.last().sent.toString("UTF-8")).getJSONArray("input")
+        val output = (0 until input.length()).map(input::getJSONObject)
+            .single { it.optString("type") == "function_call_output" }.getString("output")
+        assertEquals(text, JSONObject(output).getString("stdout"))
+        assertFalse(JSONObject(output).has("stdout_base64"))
+        assertTrue(events.filterIsInstance<ModelEvent.ProtocolOutput>().last().items.any { it.contains("stdout_base64") })
     }
 
     @Test fun unknownGatewaySemanticsNeverReachVideoApprovalOrConnection() {

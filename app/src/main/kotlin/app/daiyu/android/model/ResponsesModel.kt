@@ -348,9 +348,10 @@ class ResponsesModel internal constructor(
             // on EVERY round, before serialization/connect. Ordinary provider options stay flexible.
             videoPlan?.validateRequest(settings, request, input)
             // Resolve on a small copy: never mutate the session's marker history between rounds.
-            val wireRequest = JSONObject(request.toString())
+            val projectedRequest = TerminalToolResultProjection.request(request, settings.protocol)
+            val wireRequest = JSONObject(projectedRequest.toString())
             if (imagePlan != null && OfficialImageFiles.supported(settings) && backgroundResume == null) {
-                ImageRequestPreflight.prepare(request, settings, imagePlan, cancelled::get, videoPlan).use { }
+                ImageRequestPreflight.prepare(projectedRequest, settings, imagePlan, cancelled::get, videoPlan).use { }
             }
             val uploaded = if (backgroundResume == null) imageFiles.resolve(wireRequest, imagePlan) else emptySet()
             val requestBytes = ImageRequestPreflight.prepare(wireRequest, settings, imagePlan, cancelled::get, videoPlan, uploaded)
@@ -376,7 +377,7 @@ class ResponsesModel internal constructor(
             var completedPost = false
             try {
                 checkCancelled()
-                try { (localSink ?: deliver)(ModelEvent.InputEstimate(RequestInputEstimate.from(request, imagePlan, screenInput.imageSizes, settings.protocol,
+                try { (localSink ?: deliver)(ModelEvent.InputEstimate(RequestInputEstimate.from(projectedRequest, imagePlan, screenInput.imageSizes, settings.protocol,
                     videoBytes = videoPlan?.media.orEmpty().associate { it.token to it.bytes }))) }
                 catch (failure: Exception) { deliveryFailure = failure; throw failure }
                 checkCancelled()

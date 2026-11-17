@@ -2,6 +2,7 @@ package app.daiyu.android.context
 
 import app.daiyu.android.domain.*
 import app.daiyu.android.media.NativeScreenImage
+import app.daiyu.android.model.TerminalToolResultProjection
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.ceil
@@ -55,7 +56,7 @@ internal object TokenTailCompression {
                         else NativeScreenImage.parse(block.invocation.name, block.invocation.arguments, result)?.metadata
                         val image = metadata?.let(::JSONObject)
                         val attached = image != null && block === latestScreen
-                        val output = if (image == null) result else JSONObject(metadata).apply {
+                        val output = if (image == null) TerminalToolResultProjection.output(block.invocation.name, result) else JSONObject(metadata).apply {
                             if (attached) put("image_attached", true) else put("image_omitted", "superseded_screen")
                         }.toString()
                         val pixels = if (image != null && attached)
@@ -146,10 +147,11 @@ internal object TokenTailCompression {
                 var required = newest
                 val user = history.indexOfLast { it.role == Message.USER_ROLE }
                 val userCut = cuts.lastOrNull { it <= user && it < end } ?: 0
-                if (userCut > 0 && userCut <= newest && history.subList(userCut, newest).none(::hasOpaque))
+                if (userCut > 0 && userCut <= newest && history.subList(userCut, newest).none(::hasOpaque) &&
+                    weights.subList(userCut, end).sum() <= budget)
                     required = userCut
                 if (inFlight < end) required = minOf(required, inFlight)
-                if (required in 1 until end && required in cuts) cut = required
+                if (required in 0 until end && required in cuts) cut = required
             }
         }
         return cut

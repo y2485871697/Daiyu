@@ -57,6 +57,12 @@ class ChatComposerActionMotionTest private constructor(private val scale: Compos
     }
 
     private fun frame() = captureScreenNode(node("motion-button"))
+    private fun frameWithoutClockAdvance(tag: String = "motion-button"): ImageBitmap {
+        val before = ui.mainClock.currentTime
+        val image = captureScreenNode(node(tag), advanceAnimationClock = false)
+        assertEquals("capture must not advance the animation clock", before, ui.mainClock.currentTime)
+        return image
+    }
     private fun magentaPixels(image: ImageBitmap): Int {
         val pixels = image.toPixelMap()
         var count = 0
@@ -87,7 +93,7 @@ class ChatComposerActionMotionTest private constructor(private val scale: Compos
         val pressed = frame()
         assertEquals(bounds, node("motion-button").fetchSemanticsNode().boundsInRoot)
         val ratio = magentaPixels(pressed).toFloat() / magentaPixels(rest)
-        assertTrue("pressed area ratio=$ratio", ratio in .76f..0.94f)
+        assertTrue("pressed area ratio=$ratio", ratio in .66f.. .80f)
         assertEquals(0, clicks)
         node("motion-button").performTouchInput { cancel() }
         ui.mainClock.advanceTimeBy(800)
@@ -100,6 +106,70 @@ class ChatComposerActionMotionTest private constructor(private val scale: Compos
         ui.mainClock.advanceTimeBy(800)
         assertEquals(0, differentPixels(rest, frame()))
         assertEquals(bounds, node("motion-button").fetchSemanticsNode().boundsInRoot)
+    }
+
+    fun testSameFrameTapStillHasVisibleFeedbackAfterRelease() {
+        showButton()
+        val bounds = node("motion-button").fetchSemanticsNode().boundsInRoot
+        val rest = frameWithoutClockAdvance()
+        val restArea = magentaPixels(rest)
+        assertTrue(restArea > 0)
+        val before = ui.mainClock.currentTime
+        node("motion-button").performTouchInput { down(center); up() }
+        assertEquals(1, clicks)
+        assertEquals(before, ui.mainClock.currentTime)
+        ui.mainClock.advanceTimeBy(60, ignoreFrameDuration = true)
+        val ratio = magentaPixels(frameWithoutClockAdvance()).toFloat() / restArea
+        assertEquals(before + 60L, ui.mainClock.currentTime)
+        assertTrue("short-tap area ratio at release+60ms=$ratio", ratio in .66f.. .88f)
+        assertEquals(bounds, node("motion-button").fetchSemanticsNode().boundsInRoot)
+        ui.mainClock.advanceTimeBy(800)
+        assertEquals(0, differentPixels(rest, frameWithoutClockAdvance()))
+        assertEquals(1, clicks)
+    }
+
+    fun testComposerFeedbackSurvivesImmediateControlOwnerReplacement() {
+        var state by mutableStateOf(ComposerUi(text = "", phase = ComposerPhase.RUNNING,
+            controlOwnerKey = "first-owner"))
+        val actions = ChatScreenActions(onPrimaryTap = {
+            clicks++
+            state = state.copy(controlOwnerKey = "next-owner")
+        })
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    Box(Modifier.width(320.dp)) { ChatComposer(state, actions) }
+                }
+            }
+        }
+        ui.waitForIdle()
+        ui.mainClock.autoAdvance = false
+        val bounds = node("chat-control").fetchSemanticsNode().boundsInRoot
+        val rest = frameWithoutClockAdvance("chat-control")
+        val container = rest.toPixelMap()[rest.width / 2, rest.height / 6]
+        fun containerPixels(image: ImageBitmap): Int {
+            val pixels = image.toPixelMap()
+            var count = 0
+            for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+                val color = pixels[x, y]
+                if (abs(color.red - container.red) + abs(color.green - container.green) +
+                    abs(color.blue - container.blue) < .05f) count++
+            }
+            return count
+        }
+        val restArea = containerPixels(rest)
+        assertTrue(restArea > 0)
+        node("chat-control").performTouchInput { down(center); up() }
+        assertEquals(1, clicks)
+        assertEquals("next-owner", state.controlOwnerKey)
+        ui.mainClock.advanceTimeBy(60, ignoreFrameDuration = true)
+        val ratio = containerPixels(frameWithoutClockAdvance("chat-control")).toFloat() / restArea
+        assertTrue("owner-replaced feedback area ratio=$ratio", ratio in .66f.. .88f)
+        assertEquals(bounds, node("chat-control").fetchSemanticsNode().boundsInRoot)
+        node("chat-control").assertContentDescriptionEquals("暂停")
+        ui.mainClock.advanceTimeBy(800)
+        assertEquals(0, differentPixels(rest, frameWithoutClockAdvance("chat-control")))
+        assertEquals(1, clicks)
     }
 
     fun testIconCrossfadeHasIntermediatePixelsButOnlyOneCurrentAction() {

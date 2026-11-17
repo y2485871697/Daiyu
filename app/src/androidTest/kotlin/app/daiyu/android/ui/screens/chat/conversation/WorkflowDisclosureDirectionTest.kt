@@ -589,10 +589,10 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         fun textNodes() = ui.onAllNodes(hasAnyAncestor(hasTestTag(category)) and
             SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult),
             useUnmergedTree = true).fetchSemanticsNodes()
-        fun sampleFrame(index: Int) {
+        fun sampleFrame(index: Int, phase: String = "reversal") {
             val body = ui.onAllNodesWithTag(category, useUnmergedTree = true).fetchSemanticsNodes().singleOrNull()
             val next = ui.onNodeWithTag(nextHeader).fetchSemanticsNode()
-            val line = "mixed=$mixed frame=$index version=$version append=$appended " +
+            val line = "mixed=$mixed frame=$index version=$version append=$appended phase=$phase " +
                 "bodyRaw=${body?.let(::raw)} bodyBounds=${body?.boundsInRoot} next=${raw(next)} ${geometry(header)}"
             trace += line
             android.util.Log.i("WorkflowClipFrame", line)
@@ -682,6 +682,15 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                 }
             }
         }
+        fun verifyOpenUpdate(round: Int, phase: String, update: () -> Unit) {
+            ui.runOnUiThread(update)
+            repeat(18) { frame ->
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                sampleFrame(round * 100 + frame, phase)
+                verifyFinalInk()
+            }
+        }
         ui.mainClock.autoAdvance = false
         try {
             repeat(3) { round ->
@@ -695,8 +704,13 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                     ui.mainClock.advanceTimeByFrame(); ui.waitForIdle(); sampleFrame(round * 100 + frame)
                 }
                 verifyFinalInk()
+                if (appended) verifyOpenUpdate(round, "open-tail-removal") { appended = false }
+                verifyOpenUpdate(round, "open-hold") { }
+                verifyOpenUpdate(round, "open-status-update") { version = (round + 1) % versions.size }
+                verifyOpenUpdate(round, "open-append-following-tool") { appended = true }
                 ui.onNodeWithTag(header).performTouchInput { click() }
                 repeat(36) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+                android.util.Log.i("WorkflowClipComplete", "mixed=$mixed round=$round version=$version append=$appended")
             }
         } finally { ui.mainClock.autoAdvance = true }
     }

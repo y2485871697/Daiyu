@@ -128,6 +128,25 @@ class SpeechPlatformDiscoveryTest(unittest.TestCase):
             self.assertNotEqual(0, result.returncode)
             self.assertIn("Unknown instrumentation test class", result.stderr)
 
+    def test_singleton_tool_operation_card_scope_uses_targeted_discovery(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.fixture(root)
+            name = "app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest"
+            path = root / "app/src/androidTest/kotlin" / (name.replace(".", "/") + ".kt")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(
+                "package app.daiyu.android.ui.screens.chat.conversation\n"
+                "class ToolOperationCardTest : TestCase() {\n fun testOne() {}\n}\n")
+            result = self.select(root, classes=name, count=1)
+            self.assertEqual(0, result.returncode, result.stderr)
+            selection = json.loads((root / "smoke/selection.json").read_text())
+            inventory = json.loads((root / "smoke/instrumentation-shards.json").read_text())
+            self.assertEqual("targeted", inventory["discovery_scope"])
+            self.assertEqual({name: 1}, inventory["all_classes"])
+            self.assertEqual([name], selection["selected_classes"])
+            self.assertEqual(1, selection["expected_tests"])
+
     def test_full_inventory_and_legacy_class_remain_unchanged(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

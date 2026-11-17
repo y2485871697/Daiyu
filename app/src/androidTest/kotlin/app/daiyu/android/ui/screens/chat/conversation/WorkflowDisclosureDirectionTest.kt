@@ -555,7 +555,6 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             """{"total_count":4,"status_counts":{"COMPLETED":2,"RUNNING":1,"FAILED":1}}"""
         ).map { step("inspect-live", "inspect_child_tasks", it) }
         val prose = versions.map { requireNotNull(it.categoryDetails?.rich?.prose).text }
-        kotlinx.coroutines.runBlocking { projectMarkdown(prose) }
         val others = List(7) { step("surrounding-$it", "search_apps", """{"count":1}""") }
         var version by mutableStateOf(0)
         var appended by mutableStateOf(false)
@@ -608,7 +607,15 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                 ui.runOnIdle { node.config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult]
                     .action?.invoke(results) }
                 assertEquals("Text must expose its original layout:\n$evidence", 1, results.size)
-                node to results.single()
+                val layout = results.single()
+                android.util.Log.i("WorkflowClipText", "mixed=$mixed version=$version text=${layout.layoutInput.text.text} " +
+                    "raw=${raw(node)} bounds=${node.boundsInRoot} size=${layout.size} constraints=${layout.layoutInput.constraints} " +
+                    "overflow=${layout.hasVisualOverflow}/${layout.didOverflowWidth}/${layout.didOverflowHeight} " +
+                    "lines=${layout.lineCount} maxLines=${layout.layoutInput.maxLines} wrap=${layout.layoutInput.softWrap} " +
+                    "paragraph=${layout.multiParagraph.width}/${layout.multiParagraph.height} " +
+                    "lastEnd=${layout.getLineEnd(layout.lineCount - 1, visibleEnd = true)} " +
+                    "lastBottom=${layout.getLineBottom(layout.lineCount - 1)}")
+                node to layout
             }.filter { it.second.layoutInput.text.text.isNotBlank() }
             fun normalized(s: String) = s.filterNot { it.isWhitespace() }
             assertTrue("Updated prose must reach the real renderer:\n$evidence",
@@ -620,12 +627,17 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             ui.onNodeWithTag(nextHeader).assertIsDisplayed()
             val hostNode = ui.onNodeWithTag("clip-summary-host")
             val host = raw(hostNode.fetchSemanticsNode())
-            val pixels = hostNode.captureToImage().toPixelMap()
+            val image = hostNode.captureToImage()
+            val directory = java.io.File(requireNotNull(activity.getExternalFilesDir(null)), "visual-diagnostics")
+            directory.mkdirs()
+            java.io.File(directory, "child-summary-$mixed-$version.png").outputStream().use {
+                assertTrue("Record the actual final rendered body", image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+            }
+            val pixels = image.toPixelMap()
             fun distance(a: Color, b: Color) = kotlin.math.abs(a.red - b.red) +
                 kotlin.math.abs(a.green - b.green) + kotlin.math.abs(a.blue - b.blue)
             layouts.forEach { (node, layout) ->
                 val full = raw(node)
-                assertFalse("Text measured with overflowing content:\n$evidence", layout.hasVisualOverflow)
                 assertEquals("Ancestor narrowed the settled text:\n$evidence", full.height, node.boundsInRoot.height, 1f)
                 assertTrue("Measured body must retain original line height:\n$evidence",
                     full.height + 1f >= layout.getLineBottom(layout.lineCount - 1))
@@ -660,6 +672,11 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                     assertTrue("Top ink cannot disappear behind an ancestor clip:\n$evidence", count(y0, middle) > 0)
                     assertTrue("Bottom ink cannot be reduced to a narrow strip:\n$evidence", count(middle, y1) > 0)
                 }
+                assertFalse("Text measured with overflowing content: text=${layout.layoutInput.text.text} " +
+                    "size=${layout.size} constraints=${layout.layoutInput.constraints} " +
+                    "overflow=${layout.didOverflowWidth}/${layout.didOverflowHeight} " +
+                    "paragraph=${layout.multiParagraph.width}/${layout.multiParagraph.height} " +
+                    "lastBottom=${layout.getLineBottom(layout.lineCount - 1)}\n$evidence", layout.hasVisualOverflow)
             }
         }
         ui.mainClock.autoAdvance = false

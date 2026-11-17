@@ -141,7 +141,7 @@ internal class RunChildTaskAccess(
         }
     }, object : RegisteredTool {
         override val definition = ToolDefinition("get_child_task", 1,
-            "按完整身份精确读取本会话任意已有子任务的具体进度、结果正文和诊断详情（不限总览20条）。当前可用子代理配置使用list_subagents，任务总数和状态汇总使用inspect_child_tasks。配置变更、暂停或停止不影响读取；offset为字符偏移，可分页读取结果和当前进程保留的进度。max_chars为可选正整数，默认结果和进度各4096字符；超过4096时按4096读取，使用返回的next偏移继续分页。",
+            "按完整身份精确读取本会话任意已有子任务的具体进度、结果正文和诊断详情（不限总览20条）。当前可用子代理配置使用list_subagents，任务总数和状态汇总使用inspect_child_tasks。配置变更、暂停或停止不影响读取；offset为字符偏移，可分页读取结果和当前进程保留的进度。max_chars为可选正整数，默认结果、进度和诊断详情各4096字符；超过4096时按4096读取，使用返回的next偏移继续分页。",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("parent_run_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("task_group_id", ArgumentType.Text(200, minimumLength = 1)),
@@ -176,7 +176,9 @@ internal class RunChildTaskAccess(
                     .put("next_text_offset", if (row.text.length > offset + maxChars) offset + maxChars else JSONObject.NULL)
                     .put("progress", partial.drop(offset).take(maxChars))
                     .put("next_progress_offset", if (partial.length > offset + maxChars) offset + maxChars else JSONObject.NULL)
-                    .put("detail", row.detail).toString())
+                    .put("error_summary", row.detail?.lineSequence()?.firstOrNull())
+                    .put("detail", row.detail?.drop(offset)?.take(maxChars))
+                    .put("next_detail_offset", if ((row.detail?.length ?: 0) > offset + maxChars) offset + maxChars else JSONObject.NULL).toString())
             }
         }
     })

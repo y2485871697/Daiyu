@@ -55,6 +55,31 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
         } finally { super.tearDown() }
     }
 
+    fun testRunningDiagnosticsKeepCompleteDetailsAndDoNotChangeTaskAuthority() {
+        val db = fresh(); val runtime = lease(db); val owner = parent(db)
+        val record = tasks(owner, 1).single(); val store = runtime.childTasks
+        store.enqueue(owner, listOf(record))
+        rejects { store.diagnosed(record, "not running") }
+        store.started(record)
+        val details = "HTTP 503\n请求 ID：req-child\n".padEnd(ChildTaskRecord.MAX_DETAIL_CHARS, '详')
+        store.diagnosed(record, details)
+        val stored = checkNotNull(store.get(record.owner))
+        assertEquals(details, stored.detail)
+        assertEquals(stored, store.list(owner.conversationId.value).single())
+        assertEquals(record.revision, stored.revision)
+        assertEquals(record.assignedProfileId, stored.assignedProfileId)
+        assertEquals(ChildTaskStatus.RUNNING, stored.status)
+        rejects { store.diagnosed(record, details + "x") }
+        rejects { store.diagnosed(record.copy(owner = record.owner.copy(generation = record.owner.generation + 1)), "wrong owner") }
+        store.diagnosed(record, "HTTP 429\n请求 ID：req-latest")
+        assertEquals("HTTP 429\n请求 ID：req-latest", store.get(record.owner)?.detail)
+        store.selected(record, ChildTaskDisplay("代理", "actual-model", "实际模型"))
+        store.finished(record.copy(display = ChildTaskDisplay("代理", "actual-model", "实际模型")),
+            ChildTaskStatus.COMPLETED, "answer")
+        assertNull(store.get(record.owner)?.detail)
+        rejects { store.diagnosed(record, "already completed") }
+    }
+
     fun testCompleteStatusProjectionIncludesOlderTasksAndKeepsConversationsIsolated() {
         val db = fresh(); val runtime = lease(db); val owner = parent(db)
         val records = tasks(owner, 25)

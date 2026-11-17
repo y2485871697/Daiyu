@@ -330,7 +330,7 @@ class ChildModelBatchTest {
             assertEquals(6, rows.map { it.owner.childRunId }.toSet().size)
             rows.take(4).forEach {
                 assertEquals(ChildTaskStatus.FAILED, it.status)
-                assertEquals(ModelFailure.RATE_LIMIT.userMessage, it.detail)
+                assertEquals(ModelRequestException(ModelFailure.RATE_LIMIT).detailedMessage, it.detail)
                 assertTrue(result.payload.contains(it.owner.childRunId))
             }
             rows.drop(4).forEach {
@@ -387,7 +387,7 @@ class ChildModelBatchTest {
                 assertEquals(ChildTaskStatus.UNKNOWN, records.rows.values.single().status)
                 val detail = requireNotNull(records.rows.values.single().detail)
                 assertTrue(detail.startsWith(kind.userMessage + ";phase=MODEL_REQUEST;type="))
-                assertTrue(detail.endsWith(kind.name)); assertTrue(detail.length <= 200); assertEquals(1, calls.get())
+                assertTrue(detail.contains("本地错误码：" + kind.name)); assertTrue(detail.length <= ChildTaskRecord.MAX_DETAIL_CHARS); assertEquals(1, calls.get())
             } finally { batch.close() }
         }
     }

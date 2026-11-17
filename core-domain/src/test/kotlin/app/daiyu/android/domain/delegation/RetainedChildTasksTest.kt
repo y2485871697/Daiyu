@@ -18,6 +18,7 @@ class RetainedChildTasksTest {
         val rows = linkedMapOf<String, ChildTaskRecord>()
         val enqueues = AtomicInteger()
         var beforeEnqueue: (() -> Unit)? = null
+        var beforeFinish: (() -> Unit)? = null
         var failEnqueue = false
         var failStart = false
         var failFinish = false
@@ -34,11 +35,19 @@ class RetainedChildTasksTest {
             check(rows.getValue(task.owner.childRunId).status == ChildTaskStatus.QUEUED)
             rows[task.owner.childRunId] = task.copy(status = ChildTaskStatus.RUNNING)
         }
-        @Synchronized override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) {
+        @Synchronized override fun diagnosed(task: ChildTaskRecord, detail: String) {
+            val old = rows.getValue(task.owner.childRunId)
+            check(old.status == ChildTaskStatus.RUNNING)
+            rows[task.owner.childRunId] = old.copy(detail = detail)
+        }
+        override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) {
+            beforeFinish?.invoke()
+            synchronized(this) {
             check(!failFinish)
             val old = rows.getValue(task.owner.childRunId)
             check(old.status == ChildTaskStatus.QUEUED || old.status == ChildTaskStatus.RUNNING)
             rows[task.owner.childRunId] = task.copy(status = status, text = text, detail = detail)
+            }
         }
         @Synchronized override fun list(conversationId: String, limit: Int) =
             rows.values.filter { it.owner.conversationId == conversationId }.take(limit)
@@ -83,6 +92,30 @@ class RetainedChildTasksTest {
     private fun drained(supervisor: RetainedChildTasks) {
         val done = CountDownLatch(1); supervisor.closeWhenIdle { done.countDown() }
         assertTrue("all real workers exit", done.await(5, TimeUnit.SECONDS))
+    }
+
+    @Test fun runningDiagnosisReachesJournalAndRetainedSnapshotBeforeFinalFailure() {
+        val finishing = CountDownLatch(1); val release = CountDownLatch(1)
+        val journal = Journal().apply { beforeFinish = { finishing.countDown(); check(release.await(5, TimeUnit.SECONDS)) } }
+        val failure = ModelRequestException(ModelFailure.SERVER, ModelRequestDiagnostic(503,
+            providerDetail = ModelProviderDetail.sanitized(code = "vendor_busy", message = "Server overloaded", requestId = "req-child")))
+        val model = ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) { throw failure }
+            override fun cancel() {}
+        } }
+        val parent = Parent(); val supervisor = RetainedChildTasks(journal)
+        val binding = parent.bind(supervisor, mapOf("child" to definition(model)))
+        try {
+            submit(supervisor, binding, parent, "child")
+            assertTrue(finishing.await(5, TimeUnit.SECONDS))
+            val stored = journal.list("conversation").single()
+            assertEquals(ChildTaskStatus.RUNNING, stored.status)
+            assertEquals(failure.detailedMessage, stored.detail)
+            assertEquals(stored.detail, supervisor.snapshots(binding).single().record.detail)
+            assertTrue(stored.detail!!.contains("req-child"))
+        } finally { release.countDown(); drained(supervisor) }
+        assertEquals(ChildTaskStatus.FAILED, journal.list("conversation").single().status)
+        assertEquals(failure.detailedMessage, journal.list("conversation").single().detail)
     }
 
     @Test fun wholeBatchJournalPrecedesAnyNetworkAndAdmissionDoesNotWaitForResults() {

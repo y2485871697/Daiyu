@@ -28,6 +28,8 @@ internal interface ModelHttpConnection {
     val contentType: String?
     val inputStream: InputStream
     val errorStream: InputStream?
+    fun responseHeader(name: String): String? = null
+    val diagnosticRedactions: Collection<String> get() = emptyList()
     fun disconnect()
 }
 
@@ -137,6 +139,8 @@ internal object ModelHttpTransport {
             }
         override val inputStream: InputStream get() = requireNotNull(requireNotNull(response).body).byteStream()
         override val errorStream: InputStream? get() = response?.takeIf { !it.isSuccessful }?.body?.byteStream()
+        override fun responseHeader(name: String): String? = response?.header(name)
+        override val diagnosticRedactions: Collection<String> get() = headers.build().valuesForDiagnostics()
         override fun disconnect() {
             val owned = synchronized(lock) { disconnected = true; call to response }
             owned.first?.cancel()
@@ -147,6 +151,9 @@ internal object ModelHttpTransport {
 
 /** Keeps the existing deterministic connection fixtures; production never opens a platform URLConnection. */
 private class LegacyModelConnection(private val connection: HttpsURLConnection) : ModelHttpConnection {
+    private val redactions = mutableListOf<String>()
+    override val diagnosticRedactions: Collection<String> get() = redactions.toList()
+    override fun responseHeader(name: String): String? = connection.getHeaderField(name)
     override var requestMethod: String
         get() = connection.requestMethod
         set(value) { connection.requestMethod = value }
@@ -162,7 +169,10 @@ private class LegacyModelConnection(private val connection: HttpsURLConnection) 
     override var readTimeout: Int
         get() = connection.readTimeout
         set(value) { connection.readTimeout = value }
-    override fun setRequestProperty(name: String, value: String) = connection.setRequestProperty(name, value)
+    override fun setRequestProperty(name: String, value: String) {
+        redactions += providerHeaderRedactions(name, value)
+        connection.setRequestProperty(name, value)
+    }
     override fun send(size: Long, write: (OutputStream) -> Unit) {
         connection.setFixedLengthStreamingMode(size)
         connection.outputStream.useProviderResource { write(it) }
@@ -172,4 +182,11 @@ private class LegacyModelConnection(private val connection: HttpsURLConnection) 
     override val inputStream: InputStream get() = connection.inputStream
     override val errorStream: InputStream? get() = connection.errorStream
     override fun disconnect() = connection.disconnect()
+}
+
+private fun okhttp3.Headers.valuesForDiagnostics(): List<String> = buildList {
+    for (i in 0 until size) {
+        val value = value(i)
+        addAll(providerHeaderRedactions(name(i), value))
+    }
 }

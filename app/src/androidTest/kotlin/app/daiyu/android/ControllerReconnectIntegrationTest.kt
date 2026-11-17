@@ -119,7 +119,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
                 val rows = f.db.messages(f.db.conversations().single().id).map { it.second }
                 val answer = rows.single { it.role == "assistant" }
                 assertEquals(RunStatus.FAILED, answer.status)
-                assertEquals(ModelFailure.NETWORK.userMessage, answer.error)
+                assertEquals(app.daiyu.android.domain.modelFailureDetails(ModelFailure.NETWORK), answer.error)
                 assertTrue(answer.blocks.filterIsInstance<MessageBlock.Text>().any { "retained partial" in it.text })
             }
         }
@@ -342,7 +342,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
             val initial = line()
             assertEquals("running", initial.status)
             assertNotNull(initial.position)
-            assertTrue(initial.reason.startsWith("SERVER · HTTP 503"))
+            assertTrue(initial.reason.startsWith("服务端错误 · HTTP 503"))
             repeat(2) { index ->
                 controlMain { assertTrue(f.controller.pause(owner)) }
                 val paused = line()

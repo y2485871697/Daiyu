@@ -22,7 +22,8 @@ internal fun providerTransportFailure(failure: Exception, configuringRequest: Bo
     }
     if (classified !is ModelRequestException || trace == null) return classified
     val diagnostic = (classified.diagnostic ?: ModelRequestDiagnostic()).copy(
-        transport = trace.diagnostic(failure, classified.failure))
+        transport = trace.diagnostic(failure, classified.failure),
+        providerDetail = trace.providerDetail(classified.diagnostic?.providerDetail))
     return ModelRequestException(classified.failure, diagnostic)
 }
 

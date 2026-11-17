@@ -347,11 +347,16 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testReconnectDetailsHideStoredTransportDiagnosticsAndCopyOnlyTheError() {
-        val summary = "NETWORK\n\n模型连接中断或暂时无法建立，请检查网络与服务商状态。"
-        val stored = summary + "\n\n诊断：POST · READING_STREAM · SOCKET" +
-            "\n请求 9850ms，流读取 26608ms，完整SSE帧 600" +
-            "\n末帧距中断 321ms，响应头已收到，完成标记未确认"
+    fun testReconnectDetailsShowAndCopyCompleteChineseProviderAndTransportDetails() {
+        val stored = app.daiyu.android.model.reconnect.reconnectErrorDetails(
+            app.daiyu.android.domain.ModelFailure.SERVER,
+            app.daiyu.android.domain.ModelRequestDiagnostic(503,
+                providerDetail = app.daiyu.android.domain.ModelProviderDetail.sanitized(
+                    code = "vendor_overloaded", message = "Server overloaded", requestId = "req-timeline"),
+                transport = app.daiyu.android.domain.ModelTransportDiagnostic(
+                    app.daiyu.android.domain.ModelTransportPhase.READING_STREAM,
+                    app.daiyu.android.domain.ModelTransportCause.SOCKET,
+                    app.daiyu.android.domain.ModelRequestKind.RESUME, 9850L, 9000L, 3L, 321L, true, false)))
         val entry = ChatTimelineEntry.Reconnect("stored-diagnostics", anchor, 1L,
             "succeeded", 12_000L, stored, 0, "main-model")
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -359,17 +364,16 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         } } }
         ui.onNodeWithText("已重连").performClick()
         ui.onNodeWithText("错误详情").assertIsDisplayed()
-        ui.onNodeWithText(summary).assertIsDisplayed()
-        ui.onNodeWithText("诊断：", substring = true).assertDoesNotExist()
+        ui.onNodeWithText(stored).assertExists()
         ui.onNodeWithText("READING_STREAM", substring = true).assertDoesNotExist()
         ui.onNodeWithTag("timeline-copy").performClick()
         mainThread {
             val clipboard = activity.getSystemService(android.content.ClipboardManager::class.java)
-            assertEquals(summary, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+            assertEquals(stored, clipboard.primaryClip?.getItemAt(0)?.text?.toString())
         }
         ui.onNodeWithTag("timeline-close").performClick()
         ui.onNodeWithText("已重连").performClick()
-        ui.onNodeWithText(summary).assertIsDisplayed()
+        ui.onNodeWithText(stored).assertExists()
         assertEquals(stored, entry.reason)
         assertEquals(0, fixture.opens.get())
     }

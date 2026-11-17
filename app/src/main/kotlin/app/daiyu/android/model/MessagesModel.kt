@@ -155,7 +155,7 @@ class MessagesModel internal constructor(
             })
             val deliver: (ModelEvent) -> Unit = eventBuffer::accept
             var ownedConnection: ModelHttpConnection? = null
-            val trace = ProviderRequestTrace()
+            val trace = ProviderRequestTrace().also { it.redactRequest(request) }
             var configuringRequest = true
             try {
                 checkCancelled()
@@ -177,7 +177,7 @@ class MessagesModel internal constructor(
                 conn.send(requestBytes.size.toLong()) { requestBytes.writeTo(it, cancelled::get) }
                 checkCancelled()
                 val status = conn.responseCode { trace.phase = ModelTransportPhase.WAITING_HEADERS }
-                trace.headersReceived()
+                trace.headersReceived(); trace.responseHeaders(conn)
                 checkCancelled()
                 if (status !in 200..299) throw ProviderHttpFailure.from(conn, status, cancelled::get, request = request)
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", ignoreCase = true) != true)

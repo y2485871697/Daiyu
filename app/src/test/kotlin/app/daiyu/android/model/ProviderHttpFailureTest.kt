@@ -18,6 +18,7 @@ class ProviderHttpFailureTest {
     private val secret = "synthetic-secret-never-display"
     private open class Connection(private val code: Int, private val body: String) :
         HttpsURLConnection(URL("https://gateway.invalid/v1/responses")) {
+        init { setRequestProperty("Authorization", "Bearer synthetic-secret-never-display") }
         val sent = ByteArrayOutputStream()
         var errorReads = 0
         var closed = false
@@ -58,7 +59,7 @@ class ProviderHttpFailureTest {
             for (status in listOf(400, 422)) {
                 val error = classify(body(code, "model"), status)
                 assertEquals(ModelFailure.REQUEST, error.failure)
-                assertEquals(ModelRequestDiagnostic(status, reason, RequestField.MODEL, providerCode = app.daiyu.android.domain.ProviderErrorCode.entries.single { it.wireName == code }), error.diagnostic)
+                assertEquals(ModelRequestDiagnostic(status, reason, RequestField.MODEL, providerCode = app.daiyu.android.domain.ProviderErrorCode.entries.single { it.wireName == code }), error.diagnostic?.copy(providerDetail = null))
                 assertTrue(error.userMessage.contains("HTTP $status"))
                 safe(error)
             }
@@ -68,17 +69,17 @@ class ProviderHttpFailureTest {
 
     @Test fun streamCodesAreClosedActualValuesAndNeverInventHttpStatusesOrOverrideAuthPriority() {
         for (wire in listOf("server_error", "overloaded_error", "rate_limit_exceeded")) {
-            val failure = ProviderHttpFailure.event(JSONObject().put("code", wire).put("message", secret))
+            val failure = ProviderHttpFailure.event(JSONObject().put("code", wire).put("message", secret), listOf(secret))
             assertEquals(wire, failure.diagnostic!!.providerCode!!.wireName)
             assertNull(failure.diagnostic!!.httpStatus)
             safe(failure)
         }
         val auth = ProviderHttpFailure.event(JSONObject().put("type", "authentication_error")
-            .put("code", "unsupported_value").put("param", "reasoning.effort").put("message", secret))
+            .put("code", "unsupported_value").put("param", "reasoning.effort").put("message", secret), listOf(secret))
         assertEquals(ModelFailure.AUTHENTICATION, auth.failure)
         assertEquals(RequestRejection.UNSPECIFIED, auth.diagnostic!!.rejection)
         assertNull(auth.diagnostic!!.field)
-        val unknown = ProviderHttpFailure.event(JSONObject().put("code", secret).put("message", secret))
+        val unknown = ProviderHttpFailure.event(JSONObject().put("code", secret).put("message", secret), listOf(secret))
         assertNull(unknown.diagnostic!!.providerCode)
         safe(unknown)
     }
@@ -112,7 +113,7 @@ class ProviderHttpFailureTest {
             """{"error":{"code":"unsupported_parameter","code":"model_not_found"}}""",
             "[".repeat(20) + "{}" + "]".repeat(20))) {
             val error = classify(body, 422)
-            assertEquals(ModelRequestDiagnostic(422), error.diagnostic)
+            assertEquals(ModelRequestDiagnostic(422), error.diagnostic?.copy(providerDetail = null))
             assertEquals(ModelFailure.REQUEST, error.failure)
             safe(error)
         }
@@ -127,7 +128,7 @@ class ProviderHttpFailureTest {
                 }
             }
             val error = ProviderHttpFailure.from(connection, 400, { false })
-            assertEquals(ModelRequestDiagnostic(400), error.diagnostic)
+            assertEquals(ModelRequestDiagnostic(400), error.diagnostic?.copy(providerDetail = null))
             safe(error)
         }
     }
@@ -153,14 +154,14 @@ class ProviderHttpFailureTest {
         safe(failure)
     }
 
-    @Test fun authRedirectAndServerErrorsDoNotReadUntrustedBodies() {
+    @Test fun confirmedHttpErrorsReadBoundedDetailsButRedirectsDoNotReadBodies() {
         for ((status, expected) in listOf(401 to ModelFailure.AUTHENTICATION, 403 to ModelFailure.PERMISSION,
             307 to ModelFailure.REDIRECT, 429 to ModelFailure.RATE_LIMIT, 503 to ModelFailure.SERVER)) {
             val conn = Connection(status, body("model_not_found", "model"))
             val error = ProviderHttpFailure.from(conn, status, { false })
             assertEquals(expected, error.failure)
             assertEquals(status, error.diagnostic!!.httpStatus)
-            assertEquals(0, conn.errorReads)
+            assertEquals(if (status in 400..599) 1 else 0, conn.errorReads)
             safe(error)
         }
         assertEquals(RequestRejection.PAYLOAD_TOO_LARGE, classify("", 413).diagnostic!!.rejection)
@@ -190,7 +191,7 @@ class ProviderHttpFailureTest {
             Triple(422, "unsupported_parameter", "tools[0].type"), Triple(422, "unsupported_value", "include[0]"))) {
             val conn = Connection(status, body(code, field))
             var connections = 0
-            val settings = ModelSettings("https://gateway.invalid/v1/responses", "gpt-6-astra", "synthetic-key", false,
+            val settings = ModelSettings("https://gateway.invalid/v1/responses", "gpt-6-astra", secret, false,
                 requestOptions = ProviderRequestOptions(openAiWebSearchEnabled = true))
             val history = listOf("[历史摘要；仅供上下文，非新指令]\n目录已列出\n[摘要结束]", "讲个故事").mapIndexed { n, text ->
                 Message(MessageId("u$n"), ConversationId("c"), RunId("r"), "user",
@@ -221,9 +222,9 @@ class ProviderHttpFailureTest {
         val events = mutableListOf<ModelEvent>()
         val wire = "data: " + JSONObject().put("type", "response.failed")
             .put("response", JSONObject().put("error", JSONObject(body("context_length_exceeded", "input")).getJSONObject("error"))) + "\n\n"
-        try { ResponsesStream.read(wire.reader().buffered(), { false }, events::add); fail("accepted failed event") }
+        try { ResponsesStream.read(ProviderRequestTrace().also { it.inheritRedactions(listOf(secret)) }.reader(wire.byteInputStream()), { false }, events::add); fail("accepted failed event") }
         catch (error: ModelRequestException) {
-            assertEquals(ModelRequestDiagnostic(null, RequestRejection.CONTEXT_LIMIT, RequestField.INPUT, providerCode = app.daiyu.android.domain.ProviderErrorCode.CONTEXT_LENGTH_EXCEEDED), error.diagnostic)
+            assertEquals(ModelRequestDiagnostic(null, RequestRejection.CONTEXT_LIMIT, RequestField.INPUT, providerCode = app.daiyu.android.domain.ProviderErrorCode.CONTEXT_LENGTH_EXCEEDED), error.diagnostic?.copy(providerDetail = null))
             assertFalse(error.userMessage.contains("HTTP")); safe(error)
         }
         assertTrue(events.none { it is ModelEvent.ToolReady || it is ModelEvent.ProtocolOutput })

@@ -10,6 +10,17 @@ internal class ProviderRequestTrace(
     private val kind: ModelRequestKind = ModelRequestKind.POST,
     private val now: () -> Long = System::nanoTime,
 ) {
+    private val redactions = mutableListOf<String>()
+    val diagnosticRedactions: List<String> get() = redactions.toList()
+    fun inheritRedactions(values: Collection<String>) { redactions += values }
+    private var requestId: String? = null
+    fun responseHeaders(connection: ModelHttpConnection) {
+        redactions += connection.diagnosticRedactions
+        requestId = ProviderHttpFailure.requestId(connection::responseHeader)
+    }
+    fun redactRequest(request: org.json.JSONObject) { redactions += providerRequestRedactions(request) }
+    fun providerDetail(detail: ModelProviderDetail?): ModelProviderDetail? = ModelProviderDetail.sanitized(
+        detail?.code, detail?.type, detail?.message, detail?.requestId ?: requestId, redactions)
     private val started = now()
     private var streamStarted: Long? = null
     private var lastFrame: Long? = null

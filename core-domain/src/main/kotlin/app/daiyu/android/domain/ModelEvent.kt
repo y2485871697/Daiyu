@@ -206,7 +206,7 @@ data class ModelTransportDiagnostic(
     }
 }
 
-/** Only closed values cross the provider boundary; never store a provider message or raw field. */
+/** Closed classification plus bounded, redacted provider diagnostics; never raw bodies or headers. */
 data class ModelRequestDiagnostic(
     val httpStatus: Int? = null,
     val rejection: RequestRejection = RequestRejection.UNSPECIFIED,
@@ -215,6 +215,7 @@ data class ModelRequestDiagnostic(
     val reasoningLevelRejected: Boolean = false,
     val providerCode: ProviderErrorCode? = null,
     val transport: ModelTransportDiagnostic? = null,
+    val providerDetail: ModelProviderDetail? = null,
 ) {
     init {
         require(httpStatus == null || httpStatus in 300..599)
@@ -228,6 +229,7 @@ class ModelRequestException(
     val diagnostic: ModelRequestDiagnostic? = null,
     val transportInterrupted: Boolean = false,
 ) : RuntimeException("Model request failed") {
+    val detailedMessage: String get() = userMessage + "\n\n" + modelFailureDetails(failure, diagnostic)
     val userMessage: String get() {
         val detail = diagnostic ?: return failure.userMessage
         detail.unsupportedReasoningEffort?.let { return it.unsupportedMessage }
@@ -239,9 +241,10 @@ class ModelRequestException(
 }
 
 /** A local reconnect budget expiry, never a retryable provider/network failure. */
-open class TransportReconnectDeadlineException(lateSuccess: Boolean = false) : RuntimeException(
+open class TransportReconnectDeadlineException(lateSuccess: Boolean = false, private val failureDetails: String? = null) : RuntimeException(
     if (lateSuccess) "错误重连期限已到，未接纳迟到的响应；此前正文和工具结果已保留。"
     else "错误重连期限已到，模型请求仍未恢复；此前正文和工具结果已保留。"
 ) {
     val userMessage: String = checkNotNull(message)
+    val detailedMessage: String get() = userMessage + failureDetails?.let { "\n\n$it" }.orEmpty()
 }

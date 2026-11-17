@@ -421,4 +421,20 @@ class RunChildTaskAccessTest {
         assertFalse(body.getBoolean("new_request")); assertFalse(body.has("settled"))
     }
 
+    @Test fun detailedFailureCanBePagedWhileItsShortSummaryIsAlwaysAvailable() {
+        val detail = "服务限制请求（HTTP 429）\n\n" + "中文诊断".repeat(1500)
+        val task = old.copy(status = ChildTaskStatus.FAILED, detail = detail)
+        val access = RunChildTaskAccess("conversation", { listOf(task) }, { task }, { emptyList() }, { "" },
+            { error("no resume") }, { error("no pause") }, { error("no stop") }, { emptySet() })
+        val owner = caller("conversation")
+        var offset = 0; val combined = StringBuilder()
+        do {
+            val body = JSONObject((invoke(access, owner, "get_child_task", queryArguments().put("offset", offset).put("max_chars", 4096).toString()) as DispatchOutcome.Confirmed).payload)
+            assertEquals("服务限制请求（HTTP 429）", body.getString("error_summary"))
+            combined.append(body.getString("detail"))
+            offset = if (body.isNull("next_detail_offset")) -1 else body.getInt("next_detail_offset")
+        } while (offset >= 0)
+        assertEquals(detail, combined.toString())
+    }
+
 }

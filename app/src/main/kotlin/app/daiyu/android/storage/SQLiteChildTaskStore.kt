@@ -100,6 +100,16 @@ internal class SQLiteChildTaskStore(private val database: ConversationDatabase) 
         ChildTaskCommandReceipt.Accepted(successor)
     }
 
+    override fun diagnosed(task: ChildTaskRecord, detail: String) {
+        require(detail.isNotBlank() && detail.length <= ChildTaskRecord.MAX_DETAIL_CHARS)
+        transactions.run { db ->
+            val prior = checkNotNull(find(db, task.owner.childRunId))
+            check(prior.owner == task.owner && prior.status == ChildTaskStatus.RUNNING)
+            check(db.update(TABLE, ContentValues().apply { put("detail", detail) },
+                "task_id=? AND status='RUNNING'", arrayOf(task.owner.childRunId)) == 1)
+        }
+    }
+
     override fun started(task: ChildTaskRecord) = change(task, ChildTaskStatus.RUNNING, "", null)
 
     override fun selected(task: ChildTaskRecord, display: ChildTaskDisplay?) {

@@ -31,6 +31,8 @@ data class ChildTaskRecord(
     val originalRole: ChildModelRole? = null,
     val assignedProfileId: String = profileId
 ) {
+    companion object { const val MAX_DETAIL_CHARS = 8192 }
+
     init {
         require(revision >= 0)
         require((sourceTaskId == null) == (commandKind == null))
@@ -41,7 +43,7 @@ data class ChildTaskRecord(
         require(assignedProfileId.isNotBlank() && assignedProfileId.length <= 200)
         require(prompt.isNotBlank() && prompt.length <= 4096 && prompt.toByteArray(Charsets.UTF_8).size <= 16 * 1024)
         require(text.toByteArray(Charsets.UTF_8).size <= 64 * 1024)
-        require(detail == null || (detail.isNotBlank() && detail.length <= 200))
+        require(detail == null || (detail.isNotBlank() && detail.length <= MAX_DETAIL_CHARS))
         require(status != ChildTaskStatus.FAILED || detail != null)
         require(if (status == ChildTaskStatus.COMPLETED) text.isNotBlank() && detail == null else text.isEmpty())
     }
@@ -57,6 +59,7 @@ interface ChildTaskStore {
     /** Atomically CAS source revision, insert successor and write the call tombstone. */
     fun enqueueCommand(parent: RunExecutionOwner, command: ChildTaskCommand, successor: ChildTaskRecord): ChildTaskCommandReceipt =
         ChildTaskCommandReceipt.Rejected("child_commands_unsupported")
+    fun diagnosed(task: ChildTaskRecord, detail: String) {}
     fun started(task: ChildTaskRecord)
     /** Actual request selection; never overwrites identity or grants replay permission. */
     fun selected(task: ChildTaskRecord, display: ChildTaskDisplay?) {}

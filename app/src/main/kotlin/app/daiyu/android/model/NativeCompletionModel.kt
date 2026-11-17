@@ -130,7 +130,7 @@ class NativeCompletionModel internal constructor(
             })
             val deliver: (ModelEvent) -> Unit = { event -> voiceSearch?.received(event); eventBuffer.accept(event) }
             var owned: ModelHttpConnection? = null
-            val trace = ProviderRequestTrace()
+            val trace = ProviderRequestTrace().also { it.redactRequest(request) }
             var configuringRequest = true
             try {
                 checkCancelled()
@@ -155,7 +155,7 @@ class NativeCompletionModel internal constructor(
                     trace.phase = ModelTransportPhase.WAITING_HEADERS
                     voiceSearch?.sent()
                 }
-                trace.headersReceived()
+                trace.headersReceived(); trace.responseHeaders(conn)
                 checkCancelled()
                 if (status !in 200..299) throw ProviderHttpFailure.from(conn, status, cancelled::get, request = request)
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", true) != true)

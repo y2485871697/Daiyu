@@ -30,7 +30,7 @@ env:
   SOURCE_RUN_ID: ${{ inputs.source_run_id }}
   SOURCE_VARIANT: compile
   SMOKE_MODE: smoke
-  SMOKE_TEST_CLASSES: app.daiyu.android.PlatformTest,app.daiyu.android.ControllerReconnectIntegrationTest,app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest,app.daiyu.android.ui.screens.chat.conversation.ReconnectBoundaryPlacementTest
+  SMOKE_TEST_CLASSES: app.daiyu.android.PlatformTest,app.daiyu.android.ControllerReconnectIntegrationTest,app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest,app.daiyu.android.ui.screens.chat.conversation.ReconnectBoundaryPlacementTest,app.daiyu.android.storage.SQLiteChildTaskStoreTest
   SMOKE_API: all
   SMOKE_SHARD_COUNT: '1'
   SMOKE_SHARD_INDEX: '0'

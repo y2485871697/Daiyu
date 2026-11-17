@@ -429,7 +429,9 @@ internal object ResponsesStream {
                     if (prefix != null) sink(ModelEvent.ProtocolOutput(prefix + checkNotNull(output)))
                 }
                 "response.failed","error" -> throw ProviderHttpFailure.event(
-                    event.optJSONObject("response")?.optJSONObject("error") ?: event.optJSONObject("error") ?: event)
+                    event.optJSONObject("response")?.optJSONObject("error") ?: event.optJSONObject("error") ?: event,
+                    (reader as? ProviderRequestTrace.Reader)?.trace?.diagnosticRedactions.orEmpty(),
+                    event.optString("request_id").takeIf(String::isNotBlank))
                 "response.incomplete" -> throw ModelRequestException(ModelFailure.INCOMPLETE)
             }
             if (base == null) { base = saved; startedNanos = nanoTime() }

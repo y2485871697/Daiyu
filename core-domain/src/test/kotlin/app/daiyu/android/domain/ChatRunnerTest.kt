@@ -21,7 +21,7 @@ class ChatRunnerTest {
                 override fun cancel() {throw IllegalStateException("synthetic-secret")}
             }}
             val result=ChatRunner(port,object:ConversationStore {override fun save(message:Message) {saved.add(message)}},BatteryTool {executed++;"{}"},{}).run(initial(),emptyList())
-            assertEquals(RunStatus.FAILED,result.status);assertEquals(failure.userMessage,result.error)
+            assertEquals(RunStatus.FAILED,result.status);assertEquals(ModelRequestException(failure).detailedMessage,result.error)
             assertEquals("accepted",(result.blocks.first() as MessageBlock.Text).text)
             assertEquals(0,executed);assertEquals(1,opened)
             assertEquals(1,saved.count {it.status==RunStatus.FAILED});assertFalse(result.error!!.contains("synthetic-secret"))

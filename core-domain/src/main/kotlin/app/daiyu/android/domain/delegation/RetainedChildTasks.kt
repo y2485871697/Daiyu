@@ -762,6 +762,17 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             }
             notifyChanged(state.binding)
         }
+        override fun diagnosed(task: ChildTaskRecord, detail: String) {
+            try {
+                store.diagnosed(task, detail)
+                synchronized(gate) {
+                    if (state.record.status == ChildTaskStatus.RUNNING) state.record = state.record.copy(detail = detail)
+                }
+            } catch (_: Exception) {
+                return
+            }
+            notifyChanged(state.binding)
+        }
         override fun selected(task: ChildTaskRecord, display: ChildTaskDisplay?) {
             store.selected(task, display)
             synchronized(gate) { state.record = state.record.copy(display = display) }

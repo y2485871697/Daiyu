@@ -91,6 +91,7 @@ class ResponsesModel internal constructor(
     ) : CheckpointedResumableModelSession, RequestRetryModelSession {
         private var decoder = ResponsesStream.State(bufferDeltas = true)
         private var resumeAllowed = false
+        private var requestRedactions: List<String> = emptyList()
         private var localSink: ((ModelEvent) -> Unit)? = null
         private var consumerFailure = false
         override fun nextAcknowledged(outputs: List<ToolOutput>, localSink: (ModelEvent) -> Unit,
@@ -129,7 +130,7 @@ class ResponsesModel internal constructor(
             }
             val id = requireNotNull(decoder.responseId)
             val sequence = requireNotNull(decoder.acknowledgedSequence)
-            val trace = ProviderRequestTrace(ModelRequestKind.RESUME)
+            val trace = ProviderRequestTrace(ModelRequestKind.RESUME).also { it.inheritRedactions(requestRedactions) }
             var conn: ModelHttpConnection? = null
             var configuringRequest = true
             var voiceSearch: VoiceSearchRequestTrace? = null
@@ -152,12 +153,12 @@ class ResponsesModel internal constructor(
                 configuringRequest = false
                 if (settings.requestOptions.voiceTextOnly || settings.requestOptions.nativeSearchEnabled(ProviderProtocol.RESPONSES, settings.model, settings.endpoint, tools)) voiceSearch = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, null)
                 val status = conn.responseCode { trace.phase = ModelTransportPhase.WAITING_HEADERS }
-                trace.headersReceived()
+                trace.headersReceived(); trace.responseHeaders(conn)
                 voiceSearch?.sent()
                 if (status !in 200..299) {
                     val retryAuth = retryAuthentication(status, authentication)
                     if (retryAuth == null && status != 429 && status !in 500..599) resumeAllowed = false
-                    throw ProviderHttpFailure.from(conn, status, cancelled::get)
+                    throw ProviderHttpFailure.from(conn, status, cancelled::get, extraRedactions = requestRedactions)
                 }
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", true) != true) {
                     resumeAllowed = false
@@ -447,6 +448,9 @@ class ResponsesModel internal constructor(
                 sessionHeaders.forEach { (name, value) -> conn.setRequestProperty(name, value) }
                 checkCancelled()
                 configuringRequest = false
+                trace.redactRequest(wireRequest)
+                trace.inheritRedactions(conn.diagnosticRedactions)
+                requestRedactions = trace.diagnosticRedactions
                 trace.phase = ModelTransportPhase.SENDING
                 if (settings.requestOptions.voiceTextOnly || settings.requestOptions.nativeSearchEnabled(ProviderProtocol.RESPONSES, settings.model, settings.endpoint, tools)) voiceSearch = VoiceSearchRequestTrace(ProviderProtocol.RESPONSES, wireRequest)
                 conn.send(requestBytes.size.toLong()) { requestBytes.writeTo(it, cancelled::get) }
@@ -455,11 +459,11 @@ class ResponsesModel internal constructor(
                     trace.phase = ModelTransportPhase.WAITING_HEADERS
                     voiceSearch?.sent()
                 }
-                trace.headersReceived()
+                trace.headersReceived(); trace.responseHeaders(conn)
                 checkCancelled()
                 if (status !in 200..299) {
                     retryAuthentication(status, authentication)
-                    throw ProviderHttpFailure.from(conn, status, cancelled::get, request = wireRequest)
+                    throw ProviderHttpFailure.from(conn, status, cancelled::get, request = wireRequest, extraRedactions = requestRedactions)
                 }
                 if (conn.contentType?.substringBefore(';')?.trim()?.equals("text/event-stream", ignoreCase = true) != true)
                     throw ModelRequestException(ModelFailure.PROTOCOL)

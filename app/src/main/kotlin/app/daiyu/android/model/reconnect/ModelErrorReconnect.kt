@@ -41,8 +41,9 @@ internal fun interface ReconnectTransportScope { fun cancelTransport() }
 internal data class ReconnectChanged(val round: Int, val reconnectId: String, val status: String,
     val elapsedMs: Long, val reason: ModelFailure, val diagnostic: ModelRequestDiagnostic? = null)
 
-internal class ReconnectDeadlineException(val lastReason: ModelFailure, lateSuccess: Boolean = false) :
-    app.daiyu.android.domain.TransportReconnectDeadlineException(lateSuccess)
+internal class ReconnectDeadlineException(val lastReason: ModelFailure, lateSuccess: Boolean = false,
+    diagnostic: ModelRequestDiagnostic? = null) :
+    app.daiyu.android.domain.TransportReconnectDeadlineException(lateSuccess, reconnectErrorDetails(lastReason, diagnostic))
 
 /** One disconnect, including waits AND in-flight transport reads. Construct at FIRST failure,
  * not before the original request, and do not replace it for every retry. Closing its binding
@@ -158,7 +159,7 @@ internal class ModelErrorReconnect(
             if (expired) transport else null
         }
         cancel?.cancelTransport()
-        if (expired) throw ReconnectDeadlineException(lastReason)
+        if (expired) throw ReconnectDeadlineException(lastReason, diagnostic = lastDiagnostic)
     }
 
     fun remainingMs(): Long? = synchronized(lock) {
@@ -175,7 +176,7 @@ internal class ModelErrorReconnect(
         val finalStatus = if (pausedAtMs != null && !committedOutput) "stopped" else status
         if (finalStatus == "succeeded" && (expired || (windowMs != null && elapsedLocked() >= windowMs))) {
             expired = true
-            throw ReconnectDeadlineException(lastReason, lateSuccess = true)
+            throw ReconnectDeadlineException(lastReason, lateSuccess = true, diagnostic = lastDiagnostic)
         }
         finishLocked(finalStatus)
     }

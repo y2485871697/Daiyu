@@ -106,6 +106,7 @@ internal class SQLiteRuntimeStore private constructor(
         override fun enqueueCommand(parent: RunExecutionOwner, command: ChildTaskCommand, successor: ChildTaskRecord) =
             childAccess { childStore.enqueueCommand(parent, command, successor) }
         override fun started(task: ChildTaskRecord) = childAccess { childStore.started(task) }
+        override fun diagnosed(task: ChildTaskRecord, detail: String) = childAccess { childStore.diagnosed(task, detail) }
         override fun selected(task: ChildTaskRecord, display: ChildTaskDisplay?) = childAccess { childStore.selected(task, display) }
         override fun reassigned(task: ChildTaskRecord, profileId: String, display: ChildTaskDisplay?) =
             childAccess { childStore.reassigned(task, profileId, display) }

@@ -606,6 +606,11 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                         // transport-reported safe continuation may park here.
                                                         trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_FAILED)
                                                         executionFailure = failure
+                                                        if (failure is ModelRequestException) {
+                                                            try { store?.diagnosed(record,
+                                                                failure.detailedMessage.take(ChildTaskRecord.MAX_DETAIL_CHARS)) }
+                                                            catch (_: Exception) { /* Final result persistence remains authoritative. */ }
+                                                        }
                                                         val resumable = transport as? ResumableModelSession
                                                         val kind = (failure as? ModelRequestException)?.failure
                                                         if (rejected == null && failure is ModelRequestException) requestFailure = failure
@@ -692,9 +697,9 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                         val failure = requestFailure
                                         if (result.status == RunStatus.FAILED && definition.role == ChildModelRole.REVIEW &&
                                             assembly == null && failure != null && !failure.transportInterrupted &&
-                                            failure.failure in CONFIRMED_MODEL_FAILURES && result.error == failure.userMessage) {
+                                            failure.failure in CONFIRMED_MODEL_FAILURES && result.error == failure.detailedMessage) {
                                             completion = Completion(index, child, result, "", ChildTaskStatus.FAILED,
-                                                failure.userMessage.take(200))
+                                                failure.detailedMessage.take(ChildTaskRecord.MAX_DETAIL_CHARS))
                                         } else {
                                             check(result.status == RunStatus.COMPLETED)
                                             val text = result.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }

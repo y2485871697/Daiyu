@@ -1,5 +1,6 @@
 package app.daiyu.android.model
 
+import app.daiyu.android.domain.ModelProviderDetail
 import app.daiyu.android.domain.ModelFailure
 import app.daiyu.android.domain.ModelRequestDiagnostic
 import app.daiyu.android.domain.ModelRequestException
@@ -18,15 +19,18 @@ internal object ProviderHttpFailure {
     private val indexedInclude = Regex("include\\[[0-9]{1,4}]")
 
     fun from(connection: HttpURLConnection, status: Int, cancelled: () -> Boolean,
-             diagnosticTimeoutMillis: Long = 1500, request: JSONObject? = null): ModelRequestException =
-        from({ connection.errorStream }, connection::disconnect, status, cancelled, diagnosticTimeoutMillis, request)
+             diagnosticTimeoutMillis: Long = 1500, request: JSONObject? = null, extraRedactions: Collection<String> = emptyList()): ModelRequestException =
+        from({ connection.errorStream }, connection::disconnect, status, cancelled, diagnosticTimeoutMillis, request,
+            connection::getHeaderField, runCatching { connection.requestProperties.flatMap { (name, values) -> values.flatMap { providerHeaderRedactions(name, it) } } }.getOrDefault(emptyList()) + extraRedactions)
 
     fun from(connection: ModelHttpConnection, status: Int, cancelled: () -> Boolean,
-             diagnosticTimeoutMillis: Long = 1500, request: JSONObject? = null): ModelRequestException =
-        from({ connection.errorStream }, connection::disconnect, status, cancelled, diagnosticTimeoutMillis, request)
+             diagnosticTimeoutMillis: Long = 1500, request: JSONObject? = null, extraRedactions: Collection<String> = emptyList()): ModelRequestException =
+        from({ connection.errorStream }, connection::disconnect, status, cancelled, diagnosticTimeoutMillis, request,
+            connection::responseHeader, connection.diagnosticRedactions + extraRedactions)
 
     private fun from(errorStream: () -> java.io.InputStream?, disconnect: () -> Unit, status: Int,
-                     cancelled: () -> Boolean, diagnosticTimeoutMillis: Long, request: JSONObject?): ModelRequestException {
+                     cancelled: () -> Boolean, diagnosticTimeoutMillis: Long, request: JSONObject?,
+                     responseHeader: (String) -> String?, redactions: Collection<String>): ModelRequestException {
         val failure = when (status) {
             401 -> ModelFailure.AUTHENTICATION
             403 -> ModelFailure.PERMISSION
@@ -39,7 +43,7 @@ internal object ProviderHttpFailure {
         var detail = ModelRequestDiagnostic(status, if (status == 413)
             RequestRejection.PAYLOAD_TOO_LARGE else RequestRejection.UNSPECIFIED)
         // A failed diagnostic read must not replace a confirmed HTTP rejection with a network error.
-        if (status in setOf(400, 404, 422)) {
+        if (status in 400..599) {
             checkCancelled(cancelled)
             val expired = AtomicBoolean(false)
             var timer: Timer? = null
@@ -53,6 +57,9 @@ internal object ProviderHttpFailure {
                         try { disconnect() } catch (_: Exception) {}
                     }
                 }, diagnosticTimeoutMillis)
+                val secrets = redactions + providerRequestRedactions(request)
+                val headerId = requestId(responseHeader)
+                detail = detail.copy(providerDetail = ModelProviderDetail.sanitized(requestId = headerId, secrets = secrets))
                 errorStream()?.useProviderResource { stream ->
                     val bytes = ByteArray(MAX_ERROR_BYTES + 1)
                     var count = 0
@@ -68,7 +75,13 @@ internal object ProviderHttpFailure {
                     checkCancelled(cancelled)
                     if (complete && count <= MAX_ERROR_BYTES && !expired.get()) {
                         val root = MessagesRequest.jsonObject(String(bytes, 0, count, Charsets.UTF_8), 16, rejectDuplicateKeys = true)
-                        detail = diagnostic(root.optJSONObject("error"), status, request)
+                        val error = root.optJSONObject("error") ?: root
+                        val parsed = diagnostic(error, status, request)
+                        val semantic = if (status in setOf(400, 404, 422)) parsed
+                            else detail.copy(providerCode = providerCode(error))
+                        detail = semantic.copy(providerDetail = providerDetail(error,
+                            headerId ?: scalar(error, "request_id") ?: scalar(root, "request_id"), secrets,
+                            (root.opt("error") as? String)))
                     }
                 }
             } catch (cancelled: InterruptedException) {
@@ -85,17 +98,20 @@ internal object ProviderHttpFailure {
         return ModelRequestException(failure, detail)
     }
 
-    fun event(error: JSONObject?): ModelRequestException {
-        val kinds = setOf(error?.opt("type") as? String, error?.opt("code") as? String)
+    fun event(error: JSONObject?, secrets: Collection<String> = emptyList(), requestId: String? = null): ModelRequestException {
+        val kinds = setOf(error?.opt("type") as? String, error?.opt("code") as? String, error?.opt("status") as? String)
+        val status = (error?.opt("code") as? Number)?.toInt()
         val failure = when {
-            kinds.any { it in setOf("authentication_error", "invalid_api_key") } -> ModelFailure.AUTHENTICATION
-            kinds.any { it in setOf("permission_error", "permission_denied") } -> ModelFailure.PERMISSION
-            kinds.any { it in setOf("rate_limit_error", "rate_limit_exceeded", "insufficient_quota") } -> ModelFailure.RATE_LIMIT
-            kinds.any { it in setOf("api_error", "server_error", "overloaded_error") } -> ModelFailure.SERVER
+            status == 401 || kinds.any { it in setOf("authentication_error", "invalid_api_key", "UNAUTHENTICATED") } -> ModelFailure.AUTHENTICATION
+            status == 403 || kinds.any { it in setOf("permission_error", "permission_denied", "PERMISSION_DENIED") } -> ModelFailure.PERMISSION
+            status == 429 || kinds.any { it in setOf("rate_limit_error", "rate_limit_exceeded", "insufficient_quota", "RESOURCE_EXHAUSTED") } -> ModelFailure.RATE_LIMIT
+            status != null && status in 500..599 || kinds.any { it in setOf("api_error", "server_error", "overloaded_error", "UNAVAILABLE", "INTERNAL") } -> ModelFailure.SERVER
             else -> ModelFailure.REQUEST
         }
-        return ModelRequestException(failure, if (failure == ModelFailure.REQUEST) diagnostic(error, null)
-            else ModelRequestDiagnostic(providerCode = providerCode(error)))
+        val detail = if (failure == ModelFailure.REQUEST) diagnostic(error, null)
+            else ModelRequestDiagnostic(providerCode = providerCode(error))
+        return ModelRequestException(failure, detail.copy(providerDetail = providerDetail(error,
+            requestId ?: scalar(error, "request_id"), secrets)))
     }
 
     private fun diagnostic(error: JSONObject?, status: Int?, request: JSONObject? = null): ModelRequestDiagnostic {
@@ -132,6 +148,28 @@ internal object ProviderHttpFailure {
             unsupportedReasoningEffort = effort, reasoningLevelRejected = reasoningRejected,
             providerCode = providerCode(error))
     }
+
+    internal fun requestId(header: (String) -> String?): String? {
+        for (name in listOf("x-request-id", "request-id", "anthropic-request-id", "x-goog-request-id")) {
+            val value = try { header(name) }
+            catch (failure: InterruptedException) { throw failure }
+            catch (failure: java.util.concurrent.CancellationException) { throw failure }
+            catch (_: Exception) { null }
+            if (!value.isNullOrBlank() && value.length <= 128) return value
+        }
+        return null
+    }
+
+    private fun scalar(error: JSONObject?, key: String): String? = when (val value = error?.opt(key)) {
+        is String -> value
+        is Number -> value.toString()
+        else -> null
+    }
+
+    private fun providerDetail(error: JSONObject?, requestId: String?, secrets: Collection<String> = emptyList(), fallbackMessage: String? = null) =
+        ModelProviderDetail.sanitized(code = scalar(error, "code"), type = scalar(error, "type") ?: scalar(error, "status"),
+            message = scalar(error, "message") ?: scalar(error, "msg") ?: scalar(error, "error_description") ?: fallbackMessage,
+            requestId = requestId, secrets = secrets)
 
     private fun providerCode(error: JSONObject?): ProviderErrorCode? =
         sequenceOf(error?.opt("code"), error?.opt("type"))

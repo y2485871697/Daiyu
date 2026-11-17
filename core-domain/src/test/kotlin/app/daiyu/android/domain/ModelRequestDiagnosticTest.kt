@@ -19,7 +19,7 @@ class ModelRequestDiagnosticTest {
             override fun save(message: Message) { saved.add(message) }
         }, BatteryTool { executed++; "{}" }, {}).run(initial, emptyList())
         assertEquals(RunStatus.FAILED, result.status)
-        assertEquals(failure.userMessage, result.error)
+        assertEquals(failure.detailedMessage, result.error)
         assertTrue(result.error!!.contains("HTTP 422"))
         assertTrue(result.error!!.contains("tools"))
         assertEquals(1, opened); assertEquals(0, executed)
@@ -68,7 +68,8 @@ class ModelRequestDiagnosticTest {
         val result = ChatRunner(model, object : ConversationStore {
             override fun save(message: Message) { rows += message }
         }, BatteryTool { fail("no tool"); "" }, {}).run(initial, emptyList())
-        assertEquals("模型不支持超高思考", result.error)
+        assertEquals("模型不支持超高思考", result.error!!.lineSequence().first())
+        assertTrue(result.error!!.contains("错误分类：请求被拒绝"))
         assertEquals(RunStatus.FAILED, result.status)
         assertEquals(1, requests)
     }

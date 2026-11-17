@@ -290,7 +290,8 @@ class ProviderFailureBoundaryTest {
         val rejected = failure { session.resumeAcknowledged { ModelDeliveryAck.ACCEPTED } } as ModelRequestException
         sanitized(rejected, ModelFailure.REQUEST)
         assertEquals(ModelRequestDiagnostic(422, RequestRejection.UNSUPPORTED_PARAMETER, RequestField.INCLUDE,
-            providerCode = ProviderErrorCode.UNSUPPORTED_PARAMETER), rejected.diagnostic?.copy(transport = null))
+            providerCode = ProviderErrorCode.UNSUPPORTED_PARAMETER), rejected.diagnostic?.copy(transport = null, providerDetail = null))
+        assertEquals("unsupported_parameter", rejected.diagnostic?.providerDetail?.code)
         assertEquals(ModelRequestKind.RESUME, rejected.diagnostic?.transport?.requestKind)
         assertEquals(ModelTransportCause.HTTP, rejected.diagnostic?.transport?.cause)
         assertEquals("GET", get.requestMethod)

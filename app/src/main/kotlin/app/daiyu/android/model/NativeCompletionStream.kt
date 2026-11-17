@@ -74,7 +74,8 @@ internal object NativeCompletionStream {
             if (data == "[DONE]") { protocol(reason != null); done = true; return@frame false }
             if (data.trim() == "null") return@frame true
             val chunk = MessagesRequest.jsonObject(data)
-            if (chunk.has("error")) throw ProviderHttpFailure.event(chunk.optJSONObject("error"))
+            if (chunk.has("error")) throw ProviderHttpFailure.event(chunk.optJSONObject("error"),
+                (reader as? ProviderRequestTrace.Reader)?.trace?.diagnosticRedactions.orEmpty(), chunk.optString("request_id").takeIf(String::isNotBlank))
             val searchMetadata = searchSources.chat(chunk)
             if (searchMetadata) account(data.length)
             val hasSearchInfo = nativeSearchFamily == NativeSearchPolicy.Family.HUNYUAN && !chunk.isNull("search_info")
@@ -271,7 +272,8 @@ internal object NativeCompletionStream {
             if (cancelled()) throw InterruptedException()
             if (data == "[DONE]") { protocol(reason != null); return@frame false }
             val chunk = MessagesRequest.jsonObject(data)
-            if (chunk.has("error")) throw ProviderHttpFailure.event(chunk.optJSONObject("error"))
+            if (chunk.has("error")) throw ProviderHttpFailure.event(chunk.optJSONObject("error"),
+                (reader as? ProviderRequestTrace.Reader)?.trace?.diagnosticRedactions.orEmpty(), chunk.optString("request_id").takeIf(String::isNotBlank))
             chunk.optJSONObject("promptFeedback")?.let { if (it.has("blockReason")) throw ModelRequestException(ModelFailure.INCOMPLETE) }
             chunk.optJSONObject("usageMetadata")?.let { value ->
                 val input = ProviderUsage.count(value, "promptTokenCount")

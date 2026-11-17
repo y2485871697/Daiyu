@@ -63,7 +63,8 @@ internal object MessagesStream {
                             "rate_limit_error" -> ModelFailure.RATE_LIMIT
                             "api_error", "overloaded_error" -> ModelFailure.SERVER
                             else -> ModelFailure.REQUEST
-                        }, ProviderHttpFailure.event(event.optJSONObject("error")).diagnostic)
+                        }, ProviderHttpFailure.event(event.optJSONObject("error"),
+                            (reader as? ProviderRequestTrace.Reader)?.trace?.diagnosticRedactions.orEmpty(), event.optString("request_id").takeIf(String::isNotBlank)).diagnostic)
                     }
                     "message_start" -> {
                         protocol(id == null)

@@ -14,7 +14,7 @@ on:
       check_scope:
         description: 展示增量、完整重连链路或无轮数限制的工具续轮
         type: choice
-        options: [full, presentation, tool-rounds]
+        options: [full, presentation, tool-rounds, error-details]
         default: full
 permissions:
   contents: read
@@ -97,6 +97,25 @@ jobs:
               2>&1 | tee reconnect-checks/domain-gradle.log
             exit 0
           fi
+          if [ "$CHECK_SCOPE" = error-details ]; then
+            ./gradlew --no-daemon --parallel --build-cache --console=plain \
+              -I scripts/cooperation/checks_only.init.gradle \
+              -PdaiyuCheckGraph=reconnect-checks/domain-task-graph.json \
+              :core-domain:test \
+              --tests 'app.daiyu.android.domain.ModelFailureDetailsTest' \
+              --tests 'app.daiyu.android.domain.ModelRequestDiagnosticTest' \
+              --tests 'app.daiyu.android.domain.ModelFailureProtocolNeutralTest' \
+              --tests 'app.daiyu.android.domain.delegation.ChildFailureDiagnosticsTest' \
+              --tests 'app.daiyu.android.domain.delegation.RetainedChildTasksTest' \
+              --tests 'app.daiyu.android.domain.ChatRunnerRequestRetryTest' \
+              --tests 'app.daiyu.android.domain.ChatRunnerTest' \
+              --tests 'app.daiyu.android.domain.delegation.RetainedChildTasksPauseTest' \
+              --tests 'app.daiyu.android.domain.delegation.ChildTaskHotConfigurationTest' \
+              --tests 'app.daiyu.android.domain.ChatRunnerTransportResumeTest' \
+              --tests 'app.daiyu.android.domain.delegation.ChildModelBatchTest' \
+              2>&1 | tee reconnect-checks/domain-gradle.log
+            exit 0
+          fi
           ./gradlew --no-daemon --parallel --build-cache --console=plain \
             -I scripts/cooperation/checks_only.init.gradle \
             -PdaiyuCheckGraph=reconnect-checks/domain-task-graph.json \
@@ -131,6 +150,22 @@ jobs:
               --tests 'app.daiyu.android.backup.RunCheckpointCodecTest' \
               --tests 'app.daiyu.android.storage.SQLiteRuntimeSnapshotTest' \
               --tests 'app.daiyu.android.storage.RuntimeCheckpointReuseTest' \
+              2>&1 | tee reconnect-checks/app-gradle.log
+            exit 0
+          fi
+          if [ "$CHECK_SCOPE" = error-details ]; then
+            ./gradlew --no-daemon --parallel --build-cache --console=plain \
+              -I scripts/cooperation/checks_only.init.gradle \
+              -PdaiyuCheckGraph=reconnect-checks/app-task-graph.json \
+              :app:compileDebugKotlin :app:testDebugUnitTest \
+              --tests 'app.daiyu.android.model.ProviderDetailedFailureTest' \
+              --tests 'app.daiyu.android.model.ProviderHttpFailureTest' \
+              --tests 'app.daiyu.android.model.ProviderRequestTraceTest' \
+              --tests 'app.daiyu.android.model.ProviderFailureBoundaryTest' \
+              --tests 'app.daiyu.android.model.ProviderFailureBoundaryTest' \
+              --tests 'app.daiyu.android.model.reconnect.*' \
+              --tests 'app.daiyu.android.integration.tools.RunChildTaskAccessTest' \
+              :app:compileDebugAndroidTestKotlin \
               2>&1 | tee reconnect-checks/app-gradle.log
             exit 0
           fi
@@ -190,6 +225,9 @@ jobs:
           if os.environ['CHECK_SCOPE'] == 'tool-rounds':
               required = {'domain': {'ChatRunnerContinuationTest', 'ChatRunnerTest', 'ChatRunnerLiveToolsTest', 'RunnerCheckpointTest', 'RunnerReceiptBatchTest', 'RunnerToolBoundaryTest', 'ChildModelBatchTest', 'ChildModelExecutionToolsTest', 'ToolEnabledChildRunTest'},
                           'app': {'RunCheckpointCodecTest', 'SQLiteRuntimeSnapshotTest', 'RuntimeCheckpointReuseTest'}}
+          if os.environ['CHECK_SCOPE'] == 'error-details':
+              required = {'domain': {'ModelFailureDetailsTest', 'ModelRequestDiagnosticTest', 'ModelFailureProtocolNeutralTest', 'ChildFailureDiagnosticsTest', 'ChildModelBatchTest'},
+                          'app': {'ProviderDetailedFailureTest', 'ProviderHttpFailureTest', 'ProviderRequestTraceTest', 'ProviderFailureBoundaryTest', 'ReconnectErrorDetailsTest', 'ModelErrorReconnectTest', 'RunChildTaskAccessTest'}}
           reports = {}
           for scope, root in roots.items():
               suites = [ET.parse(p).getroot() for p in root.glob('TEST-*.xml')]

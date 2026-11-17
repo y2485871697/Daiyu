@@ -119,7 +119,7 @@ class ControllerReconnectIntegrationTest : InstrumentationTestCase() {
                 val rows = f.db.messages(f.db.conversations().single().id).map { it.second }
                 val answer = rows.single { it.role == "assistant" }
                 assertEquals(RunStatus.FAILED, answer.status)
-                assertEquals(app.daiyu.android.domain.modelFailureDetails(ModelFailure.NETWORK), answer.error)
+                assertEquals(ModelRequestException(ModelFailure.NETWORK).detailedMessage, answer.error)
                 assertTrue(answer.blocks.filterIsInstance<MessageBlock.Text>().any { "retained partial" in it.text })
             }
         }

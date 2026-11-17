@@ -566,6 +566,14 @@ class ChildTaskCardScopeTest(unittest.TestCase):
                 self.assertEqual("child-task-cards-targeted", scope)
                 self.assertEqual([python, "-B", "-m", "unittest", *self.MODULES, "-v"], command)
 
+    def test_test_refresh_singleton_uses_one_complete_shard_only_for_explicit_zero(self):
+        workflow = (ROOT / ".github/workflows/test-refresh-regression.yml").read_text()
+        smoke = workflow.split("  smoke:", 1)[1]
+        counts = [line.strip() for line in smoke.splitlines()
+                  if line.strip().startswith("SMOKE_SHARD_COUNT:")]
+        expected = "SMOKE_SHARD_COUNT: ${{ (inputs.smoke_classes == 'app.daiyu.android.VoiceCallFloatingWindowTest' || (inputs.smoke_classes == 'app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest' && inputs.smoke_shard == '0')) && '1' || '4' }}"
+        self.assertEqual([expected], counts)
+
     def test_only_tool_operation_card_keeps_exact_targeted_command(self):
         classes = "app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest"
         for python in ("python", "python3"):

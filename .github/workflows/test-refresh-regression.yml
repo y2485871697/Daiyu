@@ -277,7 +277,7 @@ jobs:
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
           EMULATOR_RAM_MB: ${{ matrix.ram }}
-          SMOKE_SHARD_COUNT: ${{ inputs.smoke_classes == 'app.daiyu.android.VoiceCallFloatingWindowTest' && '1' || '4' }}
+          SMOKE_SHARD_COUNT: ${{ (inputs.smoke_classes == 'app.daiyu.android.VoiceCallFloatingWindowTest' || (inputs.smoke_classes == 'app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest' && inputs.smoke_shard == '0')) && '1' || '4' }}
           DAILY_API: ${{ matrix.api }}
           SMOKE_API: all
           SMOKE_SHARD_INDEX: ${{ matrix.shard }}

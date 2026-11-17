@@ -168,7 +168,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertEqual(1, content.count('dedicatedTool(block.step)'))
         self.assertIn('key(block.step.renderKey)', content)
         self.assertIn('val dedicated = dedicatedTool(block.step)', content)
-        self.assertIn('if (visible && !dedicated) SpacedMessageEntry(index, content, (connectors[index] ?: WorkflowConnector(false, false, false)), entryBody, fillWidth, lineMotion = lineMotions[index]) {', content)
+        self.assertIn('if (visible && !dedicated) SpacedMessageEntry(index, content, (connectors[index] ?: WorkflowConnector(false, false, false)), entryBody, fillWidth, lastVisibleIndex = visibleIndices.lastOrNull() ?: -1, lineMotion = lineMotions[index]) {', content)
         self.assertEqual(1, content.count('WorkStepRow('))
         self.assertLess(content.index('val dedicated = dedicatedTool(block.step)'),
                         content.index('if (visible && !dedicated) SpacedMessageEntry'))

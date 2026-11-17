@@ -198,6 +198,11 @@ class ManagedInputContractTest(unittest.TestCase):
         self.assertIn('image[it % width + inset, it / width + inset]', text)
         self.assertIn('testNativeFieldsKeepDraftAndSelectionWhenOutsideTapClearsFocus', text)
         self.assertNotIn('performTouchInput', text)
+        tap = text.split('private fun realTap(tag: String)', 1)[1].split('private fun realLongPress', 1)[0]
+        self.assertIn('screenBounds(tag) { full ->', tap)
+        self.assertIn('Rect(full.center.x - 1f, full.center.y - 1f,', tap)
+        self.assertIn('full.center.x + 1f, full.center.y + 1f)', tap)
+        self.assertIn('injectGesture(listOf(0L to center, 40L to center))', tap)
         gesture = text.split('fun testLongPressAndDragDoNotDismissEditing()', 1)[1].split(
             'fun testNativeFieldsKeepDraftAndSelectionWhenOutsideTapClearsFocus()', 1)[0]
         self.assertLess(gesture.index('assertFalse("Real long press selects text"'),

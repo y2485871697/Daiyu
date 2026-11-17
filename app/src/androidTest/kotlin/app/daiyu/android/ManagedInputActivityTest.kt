@@ -249,7 +249,10 @@ class ManagedInputActivityTest : WiredActivityTestCase() {
     }
 
     private fun realTap(tag: String) {
-        val center = screenBounds(tag).center
+        val center = screenBounds(tag) { full ->
+            androidx.compose.ui.geometry.Rect(full.center.x - 1f, full.center.y - 1f,
+                full.center.x + 1f, full.center.y + 1f)
+        }.center
         injectGesture(listOf(0L to center, 40L to center))
     }
 

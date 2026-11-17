@@ -428,7 +428,16 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             } }
             val node = ui.onNodeWithText(expected, useUnmergedTree = true).assertIsDisplayed()
             val measured = layout(node)
-            assertFalse("width=$width fontScale=$fontScale", measured.hasVisualOverflow)
+            val diagnostic = "width=$width fontScale=$fontScale size=${measured.size} " +
+                "constraints=${measured.layoutInput.constraints} " +
+                "paragraph=${measured.multiParagraph.width}x${measured.multiParagraph.height} " +
+                "overflowWidth=${measured.didOverflowWidth} overflowHeight=${measured.didOverflowHeight} " +
+                "lines=${measured.lineCount} maxLines=${measured.layoutInput.maxLines} " +
+                "softWrap=${measured.layoutInput.softWrap} " +
+                "lineEnds=${(0 until measured.lineCount).map { measured.getLineEnd(it, visibleEnd = true) }} " +
+                "lineRights=${(0 until measured.lineCount).map { measured.getLineRight(it) }}"
+            android.util.Log.i("DaiyuWorkflowHeader", diagnostic)
+            assertFalse(diagnostic, measured.hasVisualOverflow)
             for (line in 0 until measured.lineCount) assertFalse(measured.isLineEllipsized(line))
             assertEquals(expected.length, measured.getLineEnd(measured.lineCount - 1, visibleEnd = true))
             val titleBounds = ui.onNodeWithText("工作流程", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot

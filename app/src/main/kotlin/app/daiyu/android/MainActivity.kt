@@ -956,6 +956,7 @@ class MainActivity : ComponentActivity() {
         if (videoSending || videoUi.editor() != original || !videoComposerAvailable()) { settle(VideoDraftReceipt(request.conversation, request.owner, request.revision,
                 request.videos, VideoDraftOutcome.REJECTED)); return }
         videoSending = true
+        userEntranceVideoRequest = request
         videoReceiptRequest = request; videoReceiptEditor = original
         val queued = controller.sendVideos(selected, request, original) { receipt, _ ->
             // Settle the retained host even when the originating Activity has been destroyed.
@@ -963,6 +964,7 @@ class MainActivity : ComponentActivity() {
             if (activityUsable()) { settleRetainedVideoReceipt(); publishChat() }
         }
         if (!queued) {
+            userEntranceVideoRequest = null
             videoSending = false
             videoReceiptRequest = null; videoReceiptEditor = null
             settle(VideoDraftReceipt(request.conversation, request.owner, request.revision, request.videos,
@@ -973,6 +975,7 @@ class MainActivity : ComponentActivity() {
         if (!activityUsable() || !selectionReady) return
         val sending = controller.videoSendState() ?: return
         val request = sending.request
+        val liveSubmission = userEntranceVideoRequest === request
         val now = videoUi.editor()
         videoSending = sending.receipt == null
         if (videoReceiptRequest !== request) {
@@ -998,12 +1001,13 @@ class MainActivity : ComponentActivity() {
                 receipt.outcome == VideoDraftOutcome.ACCEPTED)
         val conversation = sending.conversation
         controller.acknowledgeVideoSend(request)
+        if (userEntranceVideoRequest === request) userEntranceVideoRequest = null
         videoSending = false
         if (accepted && conversation != null) {
             selected = conversation; editorGeneration++; draftRevision++
             draft = ""; selectionStart = 0; selectionEnd = 0
             controller.preferences.edit().putString("selected", conversation.id.value).apply()
-            publishChat(); loadAcceptedHistory(conversation)
+            publishChat(); loadAcceptedHistory(conversation, animateUserMessage = liveSubmission)
         }
     }
     // A mount is an editor capability, never saved across Activity recreation or A -> A entry.
@@ -1626,6 +1630,9 @@ class MainActivity : ComponentActivity() {
         val editorOwner: ChatController.TextSendOwner = owner)
     private var pendingTextSend by mutableStateOf<PendingTextSend?>(null)
     private var acceptedTextPreview: Pair<ConversationId, app.daiyu.android.ui.screens.chat.conversation.ChatSubmissionPreview>? = null
+    private var userMessageEntrance: UserMessageEntrance? = null
+    private var userEntranceVideoRequest: VideoDraftRequest? = null
+    private var userEntranceSupplementId: MessageId? = null
     private class TerminalEditor(val conversation: Conversation?, val draft: TerminalDraftSnapshot) {
         var command by mutableStateOf("")
         var linux by mutableStateOf<app.daiyu.android.terminal.LinuxGenerationRef?>(null)
@@ -4362,7 +4369,7 @@ class MainActivity : ComponentActivity() {
                     selected = saved; editorGeneration++; draftRevision++
                     draft = ""; selectionStart = 0; selectionEnd = 0
                     controller.preferences.edit().putString("selected", saved.id.value).apply()
-                    publishChat(); loadAcceptedHistory(saved)
+                    publishChat(); loadAcceptedHistory(saved, animateUserMessage = true)
                 }
             })
     }
@@ -5107,7 +5114,7 @@ class MainActivity : ComponentActivity() {
         }
         if (accepted) {
             generationReceiptNotice = null
-            publishChat(); selected?.let(::loadAcceptedHistory)
+            publishChat(); selected?.let { loadAcceptedHistory(it, animateUserMessage = true) }
         }
     }
 
@@ -5801,7 +5808,7 @@ class MainActivity : ComponentActivity() {
         draft = ""; selectionStart = 0; selectionEnd = 0
         // Controller already atomically consumed exactly the submitted DB draft. Never write it again.
         controller.preferences.edit().putString("selected", saved.id.value).apply()
-        publishChat(); loadAcceptedHistory(saved)
+        publishChat(); loadAcceptedHistory(saved, animateUserMessage = true)
     }
 
     @Composable private fun ImageComposerPanel() {
@@ -5856,7 +5863,7 @@ class MainActivity : ComponentActivity() {
         draft = ""; selectionStart = 0; selectionEnd = 0
         controller.preferences.edit().putString("selected", receipt.conversation.id.value).apply()
         publishChat()
-        loadAcceptedHistory(receipt.conversation)
+        loadAcceptedHistory(receipt.conversation, animateUserMessage = true)
     }
 
     private val streamingHistoryRefresh = app.daiyu.android.ui.screens.chat.conversation.StreamingHistoryRefresh()
@@ -5953,7 +5960,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun loadAcceptedHistory(conversation: Conversation) {
+    private fun loadAcceptedHistory(conversation: Conversation, animateUserMessage: Boolean = false) {
         val generation = editorGeneration
         val request = ++historyRequestSerial
         val content = chatState.contentRevision
@@ -5969,8 +5976,15 @@ class MainActivity : ComponentActivity() {
             if (!activityUsable() || !controller.ready || controller.dataBusy ||
                 selected?.id != conversation.id || editorGeneration != generation || request != historyRequestSerial) return@launch
             if (data != controller.dataRevision || owner != loadedHistoryOwner(conversation.id)) {
-                loadAcceptedHistory(conversation)
+                loadAcceptedHistory(conversation, animateUserMessage)
                 return@launch
+            }
+            if (chatState.contentRevision != content) {
+                loadAcceptedHistory(conversation, animateUserMessage)
+                return@launch
+            }
+            if (animateUserMessage) rows?.lastOrNull { it.second.role == Message.USER_ROLE }?.second?.let {
+                userMessageEntrance = UserMessageEntrance(it.id.value)
             }
             applyAcceptedHistory(conversation, generation, request, content, rows)
         }
@@ -7068,6 +7082,9 @@ class MainActivity : ComponentActivity() {
     private fun select(conversation: Conversation?, prepared: PaneConversationSnapshot?) {
         requireActivityUsable()
         acceptedTextPreview = null
+        userMessageEntrance = null
+        userEntranceVideoRequest = null
+        userEntranceSupplementId = null
         gptSpeedSaveOwner?.revoke(); gptSpeedSaveOwner = null
         revokeCommandApproval()
         check(!selectionReady || (pendingTextSend == null && controller.textSendState() == null)) { "请等待本次发送结果" }
@@ -7198,6 +7215,7 @@ class MainActivity : ComponentActivity() {
             pendingTextSend = null
             toast(if (unknown) "发送结果未确认" else "本次发送未受理")
         }
+        if (queued) userMessageEntrance = UserMessageEntrance(pending.ticket.previewKey)
         publishChat()
         if (queued) jumpToBottom()
     }
@@ -7244,6 +7262,9 @@ class MainActivity : ComponentActivity() {
         when (result) {
             is ChatController.TextSendResult.Accepted -> {
                 val saved = result.conversation
+                userMessageEntrance?.takeIf { it.key == pending.ticket.previewKey }?.let { entrance ->
+                    result.userId?.let { entrance.messageId = it }
+                }
                 acceptedTextPreview = result.assistant?.let { assistant ->
                     saved.id to app.daiyu.android.ui.screens.chat.conversation.ChatSubmissionPreview(
                         pending.ticket.previewKey, pending.text, settledAssistantId = assistant.id.value, settledUserId = result.userId)
@@ -7287,10 +7308,14 @@ class MainActivity : ComponentActivity() {
         if (ticket.editor == current && (sidebarVisible || controller.dataBusy || !controller.ready ||
                 controller.textSendState() != null || pendingTextSend != null || imageHost.sending || shizukuWritesBlocked)) return
         if (result is SupplementAdmission.Accepted && ticket.editor == current) {
+            if (userEntranceSupplementId == result.messageId) {
+                userMessageEntrance = UserMessageEntrance(result.messageId.value)
+            }
             updateDraft("")
             if (draft.isNotEmpty()) return
         }
         val clear = supplementDraft.finish(ticket, result, current)
+        if (userEntranceSupplementId == result.messageId) userEntranceSupplementId = null
         restoredSupplementEditor = null; supplementMountEditor = null
         if (clear) {
             selectionStart = 0; selectionEnd = 0; editorGeneration++
@@ -7315,6 +7340,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         val ticket = supplementDraft.begin(MessageId(java.util.UUID.randomUUID().toString()), supplementEditor()) ?: return
+        userEntranceSupplementId = ticket.messageId
         publishChat()
         try {
             val queued = controller.admitSupplement(owner, ticket.messageId, text) {
@@ -7837,6 +7863,7 @@ class MainActivity : ComponentActivity() {
                     stopRequested = controlOwner?.let(controller::runStopping) == true,
                     terminalTargets = state?.terminalTargets.orEmpty()),
                 submissionPreview = submissionPreview,
+                userMessageEntrance = userMessageEntrance,
                 statusText = controller.problem ?: when {
                     controller.dataBusy -> controller.dataStatus; !controller.ready -> "恢复会话中";
                     !selectionReady -> "加载会话中";

@@ -19,6 +19,8 @@ import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.TransformOrigin
 import kotlin.math.abs
 import androidx.compose.ui.semantics.ScrollAxisRange
 import androidx.compose.ui.semantics.semantics
@@ -279,6 +281,7 @@ internal fun ChatMessageList(
     historyReady: Boolean = true,
     retainUnconfirmedRows: Boolean = false,
     onTurnComposed: ((String) -> Unit)? = null,
+    userMessageEntrance: UserMessageEntranceMotion? = null,
 ) {
     val incomingTurns = turns
     var retainedTurns by remember { mutableStateOf(turns, androidx.compose.runtime.referentialEqualityPolicy()) }
@@ -969,7 +972,7 @@ internal fun ChatMessageList(
                 val turnContent: @Composable () -> Unit = {
                     if (onTurnComposed != null) SideEffect { onTurnComposed(turn.listKey) }
                     when (turn) {
-                        is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader)
+                        is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader, userMessageEntrance)
                         is ChatTurnUi.Assistant -> androidx.compose.runtime.CompositionLocalProvider(
                             LocalWorkflowVisualScope provides workflowAdmissions.scope(turn.listKey, initialPositionPending),
                             LocalWorkflowDisclosureContext provides remember(turn.listKey, disclosureViewport) {
@@ -1049,15 +1052,27 @@ internal fun ChatMessageList(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLoader: MessageImageLoader? = null) {
+internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLoader: MessageImageLoader? = null,
+    entrance: UserMessageEntranceMotion? = null) {
     val pageActive = app.daiyu.android.ui.navigation.LocalPageContentActive.current
     var showMenu by remember(pageActive) { mutableStateOf(false) }
+    val entering = entrance?.takeIf {
+        it.request.messageId == turn.id || it.request.messageId == turn.listKey ||
+            it.request.key == turn.id || it.request.key == turn.listKey
+    }
     Column(Modifier.fillMaxWidth().then(if (turn.pending) Modifier.testTag("chat-send-preview") else Modifier),
         horizontalAlignment = Alignment.End) {
         BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
             val bubbleWidth = maxWidth * 0.9f
             Box {
             Column(Modifier.widthIn(max = bubbleWidth)
+                .then(if (entering == null) Modifier else Modifier.graphicsLayer {
+                    val progress = entering.progress.value
+                    alpha = (progress * 3f).coerceIn(0f, 1f)
+                    transformOrigin = TransformOrigin(1f, 0f)
+                    scaleX = userMessageEntranceScale(progress)
+                    scaleY = scaleX
+                })
                 .testTag("message-user-bubble:${turn.listKey}")
                 .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 5.dp, bottomStart = 16.dp))
                 .background(conversationColors().bubble)

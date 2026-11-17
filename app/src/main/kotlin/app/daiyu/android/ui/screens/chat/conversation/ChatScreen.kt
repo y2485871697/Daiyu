@@ -163,6 +163,7 @@ internal fun DaiyuChatScreen(
     val callCoordinates = remember(state.conversationKey) { ChatCallAnchorCoordinates() }
     val latestCallAnchorChanged by rememberUpdatedState(onCallAnchorChanged)
     val displayedTurns = submissionTurns(state.turns, state.submissionPreview)
+    val userMessageEntrance = rememberUserMessageEntrance(state.userMessageEntrance, presentationActive)
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current
@@ -237,7 +238,7 @@ internal fun DaiyuChatScreen(
                     state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset, state.timeline, state.compressionActivity,
                     speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId, compressionActivities = state.compressionActivities,
                     onPresentationReady = onPresentationReady, historyReady = state.historyReady,
-                    retainUnconfirmedRows = !state.historyReady)
+                    retainUnconfirmedRows = !state.historyReady, userMessageEntrance = userMessageEntrance)
             }
         }, composer = { backdrop ->
             ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop,

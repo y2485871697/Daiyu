@@ -8,6 +8,31 @@ class ChatSubmissionPreviewTest {
     private val answer = ChatTurnUi.Assistant("answer", finalText = "old answer")
     private val history = listOf(user, answer)
 
+    @Test fun entranceIsClaimedOnlyOnceAcrossPreviewSettlementAndRemount() {
+        val entrance = UserMessageEntrance("preview-ticket")
+        assertEquals("preview-ticket", entrance.messageId)
+        assertTrue(entrance.claim())
+        entrance.messageId = "durable-user"
+        assertEquals("durable-user", entrance.messageId)
+        assertFalse(entrance.claim())
+    }
+
+    @Test fun equalTextOnDifferentSendsDoesNotShareEntranceAdmission() {
+        val first = UserMessageEntrance("ticket-a")
+        val second = UserMessageEntrance("ticket-b")
+        assertTrue(first.claim())
+        assertTrue(second.claim())
+        assertFalse(first.claim())
+        assertFalse(second.claim())
+    }
+
+    @Test fun entranceScalesUpWithASmallReboundAndExactRest() {
+        assertEquals(.82f, userMessageEntranceScale(0f), .001f)
+        assertTrue(userMessageEntranceScale(.6f) > 1f)
+        assertTrue(userMessageEntranceScale(.6f) < 1.03f)
+        assertEquals(1f, userMessageEntranceScale(1f), 0f)
+    }
+
     @Test fun pendingSendAppearsWithoutMutatingHistoryOrInventingReceipt() {
         val preview = ChatSubmissionPreview("ticket-a", "  exact\ntext  ")
         val displayed = submissionTurns(history, preview)

@@ -20,6 +20,7 @@ data class ChatScreenState(
     val compressionActivity: app.daiyu.android.timeline.CompressionActivity? = null,
     val compressionActivities: List<app.daiyu.android.timeline.CompressionActivity> = emptyList(),
     val submissionPreview: ChatSubmissionPreview? = null,
+    val userMessageEntrance: UserMessageEntrance? = null,
     val historyReady: Boolean = true,
 )
 

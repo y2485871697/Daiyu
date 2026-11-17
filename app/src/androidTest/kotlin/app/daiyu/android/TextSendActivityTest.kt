@@ -63,6 +63,9 @@ class TextSendActivityTest : WiredActivityTestCase() {
             val state = getter.invoke(activity) as app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
             val preview = checkNotNull(state.submissionPreview)
             assertEquals(checkNotNull(fixture.controller.textSendState()).text, preview.text)
+            val entrance = checkNotNull(state.userMessageEntrance)
+            assertEquals(preview.key, entrance.key)
+            assertEquals(preview.key, entrance.messageId)
             assertNull("preparation is not a durable receipt", preview.settledAssistantId)
             assertFalse("the preview never enters authoritative history", state.turns.any { it.id == preview.key })
         }
@@ -105,6 +108,9 @@ class TextSendActivityTest : WiredActivityTestCase() {
         node("chat-send").performClick()
         awaitPreparing()
         assertPendingDraftRetained(text, 2, 5)
+        val entrance = MainActivity::class.java.getDeclaredField("userMessageEntrance")
+            .apply { isAccessible = true }.get(activity)
+        assertNotNull(entrance)
         assertEquals(text, fixture.database.draft())
         assertTrue("preparation is not a database receipt", fixture.database.conversations().isEmpty())
 
@@ -115,6 +121,15 @@ class TextSendActivityTest : WiredActivityTestCase() {
         node("chat-draft").assertIsEnabled()
         val owner = checkNotNull(fixture.controller.active)
         assertUserText(owner.conversationId, text)
+        mainThread {
+            val current = MainActivity::class.java.getDeclaredField("userMessageEntrance")
+                .apply { isAccessible = true }.get(activity)
+                as app.daiyu.android.ui.screens.chat.conversation.UserMessageEntrance
+            assertSame("preview and durable row share one entrance", entrance, current)
+            assertEquals(fixture.database.messages(owner.conversationId).single {
+                it.second.role == "user"
+            }.second.id.value, current.messageId)
+        }
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-send-preview").fetchSemanticsNodes().isEmpty() }
         assertEquals("", fixture.database.draft())
         assertEquals("", fixture.database.conversations().single().draft)

@@ -35,6 +35,20 @@ class ComposerActionScopeTest(unittest.TestCase):
             self.assertEqual('full', recorder.command_for('python3', dict(
                 SMOKE_MODE=mode, SMOKE_TEST_CLASSES=','.join(target)))[1])
 
+    def test_motion_lane_suffix_requires_exact_ordered_smoke_classes(self):
+        root = Path(recorder.__file__).resolve().parents[2]
+        workflow = (root / '.github/workflows/build.yml').read_text(encoding='utf-8')
+        suffix = '-composer-action-motion'
+        groups = [line.strip() for line in workflow.splitlines()
+                  if line.lstrip().startswith('group:') and suffix in line]
+        self.assertEqual(1, len(groups))
+        classes = ','.join(recorder.COMPOSER_ACTION_PLATFORM_CLASSES)
+        expected = ("${{ inputs.mode == 'smoke' && inputs.smoke_classes == '"
+                    + classes + "' && '-composer-action-motion' || '' }}")
+        self.assertTrue(groups[0].endswith(expected), groups[0])
+        self.assertEqual(1, workflow.count(suffix))
+        self.assertIn('  cancel-in-progress: false', workflow)
+
     def test_frozen_tools_cwd_failure_code_and_source_identity_are_preserved(self):
         old = Path.cwd()
         tools = Path(recorder.__file__).resolve().parents[2]

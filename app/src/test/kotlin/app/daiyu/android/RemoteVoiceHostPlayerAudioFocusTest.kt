@@ -120,7 +120,7 @@ class RemoteVoiceHostPlayerAudioFocusTest {
                 kotlinx.coroutines.flow.Flow<app.daiyu.android.voice.providers.VoiceHttpChunk> = error("telephone must prepare full audio")
         }
         host = RemoteVoiceHostPlayer(context, scope, runtime, FrozenVoiceSpeech(config), transport,
-            pcmFactory = { _, _ -> error("telephone must not stream PCM") }, temporaryVoiceOwner = "caption-test")
+            pcmFactory = { _, _ -> error("telephone must not stream PCM") }, temporaryVoiceOwner = "voice-call-00000000-0000-0000-0000-000000000001")
             .also { it.bindOwner("owner") }
         val (player, shadow) = preparing("call-caption")
         assertEquals(1, requests)

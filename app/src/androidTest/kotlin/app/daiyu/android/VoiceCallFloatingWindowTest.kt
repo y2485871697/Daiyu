@@ -466,8 +466,12 @@ class VoiceCallFloatingWindowTest {
         val motion = app.daiyu.android.ui.screens.chat.conversation.DoubaoCallMotionState()
         var ready = false
         var minimizes = 0
-        val callbacks = actions.copy(onPresentationReady = { if (it == state.sessionKey) ready = true },
-            onMinimize = { minimizes++ })
+        val callbacks = actions.copy(onPresentationReady = {
+            if (it == state.sessionKey && !ready) {
+                ready = true
+                windows.added.singleOrNull()?.invalidate()
+            }
+        }, onMinimize = { minimizes++ })
         val drawnOrigins = mutableListOf<Pair<Int, Int>>()
         var drewIntermediateGenie = false
         var settledFrame: android.graphics.Rect? = null
@@ -486,10 +490,19 @@ class VoiceCallFloatingWindowTest {
                 val params = root.layoutParams as WindowManager.LayoutParams
                 if (origin[0] != params.x || origin[1] != params.y)
                     invalidDraw = "a native frame was drawn before placement was committed"
-                if (!motion.transforming && motion.progress.value == 1f &&
+                val panel = root.javaClass.getDeclaredMethod("getPanelBounds").apply { isAccessible = true }
+                    .invoke(root) as androidx.compose.ui.geometry.Rect
+                val shadow = (28 * context.resources.displayMetrics.density).roundToInt().toFloat()
+                val bounded = panel.inflate(shadow)
+                settledFrame = if (ready && !motion.transforming && motion.progress.value == 1f &&
+                    params.x == bounded.left.roundToInt().coerceAtLeast(0) &&
+                    params.y == bounded.top.roundToInt().coerceAtLeast(0) &&
+                    params.x + params.width == bounded.right.roundToInt() &&
+                    params.y + params.height == bounded.bottom.roundToInt() &&
                     params.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE == 0 &&
-                    root.width == params.width && root.height == params.height)
-                    settledFrame = android.graphics.Rect(params.x, params.y, params.x + params.width, params.y + params.height)
+                    root.width == params.width && root.height == params.height) {
+                    android.graphics.Rect(params.x, params.y, params.x + params.width, params.y + params.height)
+                } else null
                 if (root.alpha != 1f || params.alpha != 1f || root.scaleX != 1f || root.scaleY != 1f)
                     invalidDraw = "native alpha or scale changed during Genie"
                 if (kotlin.math.abs(composition.translationX + origin[0]) > .5f ||

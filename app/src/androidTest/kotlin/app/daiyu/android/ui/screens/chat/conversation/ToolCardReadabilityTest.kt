@@ -417,6 +417,7 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             WorkStepUi("outcome-$index", "operation", "", state)
         })), "已暂停", running = true, controlActivity = ToolActivityUi.PAUSED)
         val expected = "已完成5步 · 已暂停"
+        val checkedLayouts = mutableSetOf<String>()
         for (width in listOf(272, 300, 360)) for (fontScale in listOf(1f, 1.3f)) {
             mainThread { activity.setContent {
                 CompositionLocalProvider(LocalDensity provides Density(phoneDensity, fontScale)) {
@@ -432,10 +433,18 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             assertEquals(expected.length, measured.getLineEnd(measured.lineCount - 1, visibleEnd = true))
             val titleBounds = ui.onNodeWithText("工作流程", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
             val statusBounds = node.fetchSemanticsNode().boundsInRoot
-            if (width >= 300 && fontScale < 1.2f) {
-                assertTrue(statusBounds.left >= titleBounds.right - 1f)
-                assertTrue(kotlin.math.abs(statusBounds.center.y - titleBounds.center.y) <= 1f)
-            } else assertTrue(statusBounds.top >= titleBounds.bottom - 1f)
+            val header = ui.onNodeWithTag("work-process-header", useUnmergedTree = true).fetchSemanticsNode()
+            val actualWidth = with(measured.layoutInput.density) { header.size.width.toDp() }
+            val case = "requestedWidth=$width actualWidth=$actualWidth fontScale=$fontScale"
+            if (actualWidth >= 300.dp && fontScale < 1.2f) {
+                checkedLayouts += "inline"
+                assertTrue(case, statusBounds.left >= titleBounds.right - 1f)
+                assertTrue(case, kotlin.math.abs(statusBounds.center.y - titleBounds.center.y) <= 1f)
+            } else {
+                checkedLayouts += if (fontScale >= 1.2f) "large" else "narrow"
+                assertTrue(case, statusBounds.top >= titleBounds.bottom - 1f)
+            }
         }
+        assertEquals(setOf("inline", "narrow", "large"), checkedLayouts)
     }
 }

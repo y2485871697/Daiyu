@@ -3,6 +3,8 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.CompositionLocalProvider
@@ -11,6 +13,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.Color
@@ -53,13 +58,14 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
     private var mounted by mutableStateOf(true)
     private var motionEnabled by mutableStateOf(true)
     private var narrationText by mutableStateOf<String?>(null)
+    private var narrationAfter by mutableStateOf(0)
     private var nextAdmitted by mutableStateOf(true)
     private val visibleAdvances = java.util.concurrent.atomic.AtomicInteger()
 
     private fun content(): List<MessageContentUi> = buildList {
         rows.forEachIndexed { index, step ->
             add(MessageContentUi.Tool(step))
-            if (index == 0) narrationText?.let { add(MessageContentUi.Text("motion-narration", it)) }
+            if (index == narrationAfter) narrationText?.let { add(MessageContentUi.Text("motion-narration", it)) }
         }
     }
 
@@ -72,7 +78,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             lineContrast = distance(conversationColors().line.compositeOver(background), background)
             success = conversationColors().success
             error = conversationColors().error
-            Box(Modifier.safeDrawingPadding()) {
+            Column(Modifier.safeDrawingPadding()) {
                 Box(Modifier.width(300.dp).background(background).testTag("motion-raster")) {
                     CompositionLocalProvider(LocalWorkflowNodeMotions provides motions, LocalWorkflowNodeMotionEnabled provides motionEnabled) {
                         if (mounted) {
@@ -88,6 +94,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                         }
                     }
                 }
+                Box(Modifier.width(1.dp).height(1.dp).testTag("motion-following"))
             }
         } } }
         ui.waitForIdle()
@@ -98,6 +105,15 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         repeat(2) { ui.mainClock.advanceTimeByFrame() }
         ui.waitForIdle()
     }
+
+    private fun SemanticsNode.physicalBounds(): Rect {
+        val coordinates = layoutInfo.coordinates
+        val top = coordinates.positionInRoot()
+        return Rect(top.x, top.y, top.x + coordinates.size.width, top.y + coordinates.size.height)
+    }
+
+    private fun pixel(p: PixelMap, x: Int, y: Int): Color =
+        if (x in 0 until p.width && y in 0 until p.height) p[x, y] else background
 
     private fun pixels() = ui.onNodeWithTag("motion-raster").captureToImage().toPixelMap()
     private fun heldPixels(name: String): PixelMap {
@@ -112,33 +128,33 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
     private fun distance(a: Color, b: Color) = maxOf(abs(a.red - b.red), abs(a.green - b.green), abs(a.blue - b.blue))
     private fun green(p: PixelMap) = coverage(p, success)
     private fun coverage(p: PixelMap, color: Color, tag: String = "tool-step:motion-a"): Float {
-        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().boundsInRoot
-        val row = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()
+        val row = ui.onNodeWithTag(tag).fetchSemanticsNode().physicalBounds()
         val x = row.left - raster.left
         val y = row.top - raster.top + with(density) { 17.dp.toPx() }
         val size = with(density) { 10.dp.toPx() }
         var count = 0f
         for (j in ceil(y).toInt() until floor(y + size).toInt())
             for (i in ceil(x).toInt() until floor(x + size).toInt())
-                count += (1f - distance(p[i, j], color) / distance(background, color)).coerceIn(0f, 1f)
+                count += (1f - distance(pixel(p, i, j), color) / distance(background, color)).coerceIn(0f, 1f)
         return count
     }
 
     private fun bodyInk(p: PixelMap, tag: String = "tool-step:motion-b"): Float {
-        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().boundsInRoot
-        val row = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()
+        val row = ui.onNodeWithTag(tag).fetchSemanticsNode().physicalBounds()
         val left = ceil(row.left - raster.left + with(density) { 18.dp.toPx() }).toInt()
         val right = floor(row.right - raster.left).toInt().coerceAtMost(p.width)
         val top = ceil(row.top - raster.top).toInt()
         val bottom = floor(row.bottom - raster.top).toInt().coerceAtMost(p.height)
         var ink = 0f
-        for (y in top until bottom) for (x in left until right) ink += distance(p[x, y], background)
+        for (y in top until bottom) for (x in left until right) ink += distance(pixel(p, x, y), background)
         return ink
     }
 
     private fun operationY(p: PixelMap): Float {
-        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().boundsInRoot
-        val row = ui.onNodeWithTag("tool-step:motion-b").fetchSemanticsNode().boundsInRoot
+        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()
+        val row = ui.onNodeWithTag("tool-step:motion-b").fetchSemanticsNode().physicalBounds()
         val left = ceil(row.left - raster.left + with(density) { 18.dp.toPx() }).toInt()
         val right = floor(row.left - raster.left + with(density) { 36.dp.toPx() }).toInt()
         val top = ceil(row.top - raster.top).toInt()
@@ -146,7 +162,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         var ink = 0f
         var weightedY = 0f
         for (y in top until bottom) for (x in left until right) {
-            val amount = distance(p[x, y], background)
+            val amount = distance(pixel(p, x, y), background)
             ink += amount
             weightedY += amount * (y - top)
         }
@@ -154,26 +170,26 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
     }
 
     private fun operationPixels(p: PixelMap, tag: String = "tool-step:motion-b"): List<Color> {
-        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().boundsInRoot
-        val row = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()
+        val row = ui.onNodeWithTag(tag).fetchSemanticsNode().physicalBounds()
         val left = ceil(row.left - raster.left + with(density) { 18.dp.toPx() }).toInt()
         val right = floor(row.left - raster.left + with(density) { 36.dp.toPx() }).toInt()
         val top = ceil(row.top - raster.top).toInt()
         val bottom = floor(row.bottom - raster.top).toInt().coerceAtMost(p.height)
-        return (top until bottom).flatMap { y -> (left until right).map { x -> p[x, y] } }
+        return (top until bottom).flatMap { y -> (left until right).map { x -> pixel(p, x, y) } }
     }
 
     private fun line(p: PixelMap, fromTag: String = "tool-step:motion-a", toTag: String = "tool-step:motion-b"): List<Float> {
-        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().boundsInRoot
-        val a = ui.onNodeWithTag(fromTag).fetchSemanticsNode().boundsInRoot
-        val b = ui.onNodeWithTag(toTag).fetchSemanticsNode().boundsInRoot
+        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()
+        val a = ui.onNodeWithTag(fromTag).fetchSemanticsNode().physicalBounds()
+        val b = ui.onNodeWithTag(toTag).fetchSemanticsNode().physicalBounds()
         val x = a.left - raster.left + with(density) { 5.dp.toPx() }
         val from = ceil(a.top - raster.top + with(density) { 28.dp.toPx() }).toInt()
         val to = floor(b.top - raster.top + with(density) { 16.dp.toPx() }).toInt()
         val stroke = with(density) { 1.dp.toPx() }
         return (from..to).map { y ->
             (floor(x - stroke / 2f).toInt()..ceil(x + stroke / 2f).toInt())
-                .sumOf { i -> distance(p[i, y], background).toDouble() }.toFloat() / stroke
+                .sumOf { i -> distance(pixel(p, i, y), background).toDouble() }.toFloat() / stroke
         }
     }
 
@@ -198,7 +214,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         ui.mainClock.autoAdvance = false
         try {
             show()
-            val height = ui.onNodeWithTag("tool-step:motion-a").fetchSemanticsNode().boundsInRoot.height
+            val height = ui.onNodeWithTag("tool-step:motion-a").fetchSemanticsNode().physicalBounds().height
             change(rows + second)
             ui.mainClock.advanceTimeBy(48)
             val middle = line(pixels())
@@ -215,7 +231,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             val last = partial.indexOfLast { it }
             assertTrue("line must grow downward without gaps", partial.take((last - 2).coerceAtLeast(0)).all { it })
             assertTrue("endpoint must advance downward", mask(later).count { it } > count)
-            assertEquals(height, ui.onNodeWithTag("tool-step:motion-a").fetchSemanticsNode().boundsInRoot.height, 0f)
+            assertEquals(height, ui.onNodeWithTag("tool-step:motion-a").fetchSemanticsNode().physicalBounds().height, 0f)
             instrumentation.runOnMainSync { mounted = false }
             ui.mainClock.advanceTimeByFrame()
             ui.waitForIdle()
@@ -232,6 +248,33 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
     fun testAppendedFailureWaitsForIncomingConnector() = verifyAppendedTerminalWaitsForConnector(true)
 
     private data class ArrivalSample(val connector: List<Float>, val ink: Float, val body: Float, val bodyY: Float)
+
+    private data class PhysicalSample(val bottom: Float, val following: Float, val frontier: Float, val body: Float)
+
+    private fun physicalSample(p: PixelMap, fromTag: String, toTag: String): PhysicalSample {
+        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()
+        val source = ui.onNodeWithTag(fromTag).fetchSemanticsNode().physicalBounds()
+        val target = ui.onNodeWithTag(toTag).fetchSemanticsNode().physicalBounds()
+        val rail = line(p, fromTag, toTag)
+        val last = rail.indexOfLast { it > lineContrast * .35f }
+        val start = ceil(source.top - raster.top + with(density) { 28.dp.toPx() })
+        val frontier = if (last < 0) source.bottom else raster.top + start + last + 1f
+        val following = ui.onNodeWithTag("motion-following").fetchSemanticsNode().physicalBounds().top
+        return PhysicalSample(raster.bottom, following, minOf(frontier, target.top + with(density) { 17.dp.toPx() }), bodyInk(p, toTag))
+    }
+
+    private fun assertPhysicalArrival(beforeBottom: Float, samples: List<PhysicalSample>, fullBody: Float, tailPadding: Float = 0f) {
+        val hidden = samples.filter { it.body <= maxOf(.03f, fullBody * .01f) }
+        val tolerance = with(density) { 2.dp.toPx() }
+        hidden.forEachIndexed { frame, sample ->
+            assertTrue("physical height ran ahead of the painted line at $frame: $sample before=$beforeBottom",
+                sample.bottom <= maxOf(beforeBottom, sample.frontier + tailPadding) + tolerance)
+            assertEquals("following content must see the same physical extent", sample.bottom, sample.following, 1f)
+        }
+        assertTrue("must observe an intermediate physical extension while the target is still hidden",
+            hidden.any { it.bottom > beforeBottom + tolerance && it.frontier > beforeBottom + tolerance })
+    }
+
 
     private fun terminalInk(p: PixelMap, color: Color): Float {
         val red = (color.red - color.green) - (background.red - background.green)
@@ -253,13 +296,16 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         ui.mainClock.autoAdvance = false
         try {
             show()
+            val beforeBottom = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds().bottom
             instrumentation.runOnMainSync { rows = rows + terminal }
+            val physical = mutableListOf<PhysicalSample>()
             val color = if (failed) error else success
             val samples = mutableListOf<ArrivalSample>()
             repeat(64) {
                 ui.mainClock.advanceTimeByFrame()
                 ui.waitForIdle()
                 val frame = pixels()
+                physical += physicalSample(frame, "tool-step:motion-a", "tool-step:motion-b")
                 samples += ArrivalSample(line(frame), terminalInk(frame, color), bodyInk(frame), operationY(frame))
             }
             ui.mainClock.advanceTimeBy(1_000)
@@ -268,6 +314,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             val finalInk = terminalInk(complete, color)
             val finalBody = bodyInk(complete)
             val finalY = operationY(complete)
+            assertPhysicalArrival(beforeBottom, physical, finalBody)
             assertTrue("tool body must be visible after arrival", finalBody > 1f)
             assertTrue("final connector must reach the target", end.isNotEmpty() && end.all { it > .005f })
             assertTrue("terminal glyph must appear after connector arrival", finalInk > 1f)
@@ -304,6 +351,47 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             ui.mainClock.advanceTimeBy(64)
             assertEquals(finalInk, terminalInk(pixels(), color), .03f)
             assertEquals(finalBody, bodyInk(pixels()), .03f)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testFirstFreshNodeReleasesHeightWithItsOwnEntrance() {
+        ui.mainClock.autoAdvance = false
+        try {
+            show(baseline = false)
+            val heights = mutableListOf<Float>()
+            repeat(48) {
+                heights += ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds().height
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+            }
+            val full = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds().height
+            assertTrue("a fresh first node must not reserve its full body before entering", heights.first() < full)
+            assertTrue("first-node height must have an intermediate entrance frame", heights.any { it > 0f && it < full - 1f })
+            assertEquals("following content must receive the released height",
+                ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds().bottom,
+                ui.onNodeWithTag("motion-following").fetchSemanticsNode().physicalBounds().top, 1f)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testQueuedNodePreventsFollowingNarrationFromReservingHeight() {
+        rows = listOf(first.copy(state = WorkStepState.OK))
+        ui.mainClock.autoAdvance = false
+        try {
+            show()
+            val beforeBottom = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds().bottom
+            instrumentation.runOnMainSync {
+                narrationAfter = 1
+                narrationText = "Narration behind a queued tool.\nIt must not reserve the lower rows early."
+                rows = rows + second + second.copy(id = "motion-c", renderKey = "motion-c")
+            }
+            val samples = mutableListOf<PhysicalSample>()
+            repeat(64) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                samples += physicalSample(pixels(), "tool-step:motion-a", "tool-step:motion-b")
+            }
+            assertPhysicalArrival(beforeBottom, samples, bodyInk(pixels()))
+            ui.onNodeWithTag("message-content-text:2").assertIsDisplayed()
         } finally { ui.mainClock.autoAdvance = true }
     }
 
@@ -362,20 +450,27 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             instrumentation.runOnMainSync {
                 narrationText = "Narration first line.\nA second stable line.\nA final line before the next tool."
                 nextAdmitted = false
-                rows = rows + second
             }
             repeat(2) { ui.mainClock.advanceTimeByFrame() }
             ui.mainClock.advanceTimeBy(1_000)
+            val heightWithoutSuccessor = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds().height
+            instrumentation.runOnMainSync { rows = rows + second }
+            repeat(8) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                assertEquals("unadmitted successor must not reserve a bottom gap", heightWithoutSuccessor,
+                    ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds().height, 1f)
+            }
             ui.onNodeWithTag("tool-step:motion-b").assertDoesNotExist()
-            val textBefore = ui.onNodeWithTag("message-content-text:1").fetchSemanticsNode().boundsInRoot
-            val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().boundsInRoot
-            val a = ui.onNodeWithTag("tool-step:motion-a").fetchSemanticsNode().boundsInRoot
+            val textBefore = ui.onNodeWithTag("message-content-text:1").fetchSemanticsNode().physicalBounds()
+            val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()
+            val a = ui.onNodeWithTag("tool-step:motion-a").fetchSemanticsNode().physicalBounds()
             val p = pixels()
             val x = a.left - raster.left + with(density) { 5.dp.toPx() }
             val from = ceil(a.top - raster.top + with(density) { 28.dp.toPx() }).toInt()
             val to = p.height
             for (y in from until to) for (i in floor(x - 1).toInt()..ceil(x + 1).toInt()) {
-                assertTrue("waiting for a tool must not leave a dangling line", distance(p[i, y], background) < .005f)
+                assertTrue("waiting for a tool must not leave a dangling line", distance(pixel(p, i, y), background) < .005f)
             }
             instrumentation.runOnMainSync { nextAdmitted = true }
             val samples = mutableListOf<ArrivalSample>()
@@ -388,7 +483,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                 val frame = image.toPixelMap()
                 samples += ArrivalSample(line(frame), terminalInk(frame, success), bodyInk(frame), operationY(frame))
                 assertEquals("tool entrance must not move already displayed narration", textBefore,
-                    ui.onNodeWithTag("message-content-text:1").fetchSemanticsNode().boundsInRoot)
+                    ui.onNodeWithTag("message-content-text:1").fetchSemanticsNode().physicalBounds())
             }
             ui.mainClock.advanceTimeBy(1_000)
             val endImage = ui.onNodeWithTag("motion-raster").captureToImage()
@@ -410,7 +505,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                 }
                 java.io.File(directory, "narration-frame$failureIndex.txt").writeText(buildString {
                     appendLine("density=${density.density} background=$background raster=$raster first=$a narration=$textBefore")
-                    appendLine("target=${ui.onNodeWithTag("tool-step:motion-b").fetchSemanticsNode().boundsInRoot} fullBody=$fullBody lineContrast=$lineContrast")
+                    appendLine("target=${ui.onNodeWithTag("tool-step:motion-b").fetchSemanticsNode().physicalBounds()} fullBody=$fullBody lineContrast=$lineContrast")
                     samples.forEachIndexed { index, sample ->
                         val missing = sample.connector.zip(fullLine).mapIndexedNotNull { row, (now, full) ->
                             if (now < lineContrast * .9f) "$row:$now/$full" else null
@@ -507,8 +602,12 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                 .fetchSemanticsNodes().flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty() }
                 .joinToString("") { it.text }
         }
-        fun observe(tags: List<String>) {
+        fun observe(tags: List<String>, beforeBottom: Float? = null) {
             val target = tags.last()
+            val physical = mutableListOf<PhysicalSample>()
+            val tailPadding = beforeBottom?.let {
+                (it - ui.onNodeWithTag(tags[tags.lastIndex - 1]).fetchSemanticsNode().physicalBounds().bottom).coerceAtLeast(0f)
+            } ?: 0f
             val feedback = advances.get()
             var partial = false
             var arrived = false
@@ -517,6 +616,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                 val present = ui.onAllNodesWithTag(target).fetchSemanticsNodes().isNotEmpty()
                 val image = ui.onNodeWithTag("motion-raster").captureToImage()
                 val p = image.toPixelMap()
+                if (present && beforeBottom != null) physical += physicalSample(p, tags[tags.lastIndex - 1], target)
                 val visibleTags = if (present) tags else tags.dropLast(1)
                 for ((from, to) in visibleTags.zipWithNext()) {
                     val rail = line(p, from, to)
@@ -541,9 +641,9 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                             java.io.File(directory, "$name.png").outputStream().use {
                                 image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
                             }
-                            val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().boundsInRoot
-                            val sourceBounds = ui.onNodeWithTag(tags[tags.lastIndex - 1]).fetchSemanticsNode().boundsInRoot
-                            val targetBounds = ui.onNodeWithTag(target).fetchSemanticsNode().boundsInRoot
+                            val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()
+                            val sourceBounds = ui.onNodeWithTag(tags[tags.lastIndex - 1]).fetchSemanticsNode().physicalBounds()
+                            val targetBounds = ui.onNodeWithTag(target).fetchSemanticsNode().physicalBounds()
                             val lineStart = ceil(sourceBounds.top - raster.top + with(density) { 28.dp.toPx() }).toInt()
                             val glyphLeft = ceil(targetBounds.left - raster.left).toInt()
                             val glyphTop = ceil(targetBounds.top - raster.top + with(density) { 17.dp.toPx() }).toInt()
@@ -557,7 +657,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                                     if (value < contrast * .9f) appendLine("line y=${lineStart + offset - targetBounds.top + raster.top} value=$value")
                                 }
                                 for (y in glyphTop until glyphBottom) for (x in glyphLeft until glyphRight) {
-                                    val color = p[x, y]; val value = distance(color, background)
+                                    val color = pixel(p, x, y); val value = distance(color, background)
                                     if (value > 0f) appendLine("glyph x=${x - targetBounds.left + raster.left} y=${y - targetBounds.top + raster.top} rgba=${color.red},${color.green},${color.blue},${color.alpha} value=$value")
                                 }
                             })
@@ -572,7 +672,9 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             assertTrue("incoming must arrive", arrived)
             val p = pixels()
             assertTrue("target node must eventually appear", nodeInk(p, target) > 1f)
-            assertTrue("target header must eventually appear", bodyInk(p, target) > 1f)
+            val finalBody = bodyInk(p, target)
+            assertTrue("target header must eventually appear", finalBody > 1f)
+            beforeBottom?.let { assertPhysicalArrival(it, physical, finalBody, tailPadding) }
         }
         fun type(id: String, seed: String, full: String, update: () -> Unit) {
             ui.waitUntil(5_000) { frame(); text(id) == seed }
@@ -602,27 +704,32 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                 val colors = conversationColors()
                 background = colors.surface.copy(alpha = 1f)
                 contrast = distance(colors.line.compositeOver(background), background)
+                lineContrast = contrast
                 val turn = ChatTurnMapper.map(listOf(source)).single() as ChatTurnUi.Assistant
-                Box(Modifier.safeDrawingPadding()) {
+                Column(Modifier.safeDrawingPadding()) {
                     Box(Modifier.width(300.dp).background(background).testTag("motion-raster")) {
                         AssistantTurn(if (legacy) turn.copy(content = emptyList(), isStreaming = true)
                             else turn.copy(isStreaming = true), ChatScreenActions(),
                             onVisibleAdvance = { advances.incrementAndGet() })
                     }
+                    Box(Modifier.width(1.dp).height(1.dp).testTag("motion-following"))
                 }
             } } }
             ui.mainClock.advanceTimeBy(1_000)
             ui.onNodeWithTag(t1).assertIsDisplayed()
             assertTrue("line must contrast with background", contrast > .01f)
+            val beforeFirstReasoning = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds().bottom
             instrumentation.runOnMainSync { source = source.copy(reportedReasoning = listOf(r1)) }
-            observe(listOf(t1, a))
+            observe(listOf(t1, a), beforeFirstReasoning)
             val full1 = r1.copy(text = r1.text + "乙".repeat(24))
             type(r1.itemId, r1.text, full1.text) { source = source.copy(reportedReasoning = listOf(full1)) }
+            val beforeSecondTool = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds().bottom
             instrumentation.runOnMainSync { source = source.copy(blocks = source.blocks + tool("live-t2"),
                 reportedReasoning = listOf(full1.copy(activeSinceNanos = null))) }
-            observe(listOf(t1, a, t2))
+            observe(listOf(t1, a, t2), beforeSecondTool)
+            val beforeSecondReasoning = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds().bottom
             instrumentation.runOnMainSync { source = source.copy(reportedReasoning = source.reportedReasoning + r2) }
-            observe(listOf(t1, a, t2, b))
+            observe(listOf(t1, a, t2, b), beforeSecondReasoning)
             val full2 = r2.copy(text = r2.text + "丁".repeat(24))
             type(r2.itemId, r2.text, full2.text) { source = source.copy(
                 reportedReasoning = listOf(full1.copy(activeSinceNanos = null), full2)) }
@@ -705,13 +812,13 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
     }
 
     private fun glyph(p: PixelMap, tag: String = "tool-step:motion-a"): List<Color> {
-        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().boundsInRoot
-        val row = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()
+        val row = ui.onNodeWithTag(tag).fetchSemanticsNode().physicalBounds()
         val x = row.left - raster.left
         val y = row.top - raster.top + with(density) { 17.dp.toPx() }
         val size = with(density) { 10.dp.toPx() }
         return (ceil(y).toInt() until floor(y + size).toInt()).flatMap { j ->
-            (ceil(x).toInt() until floor(x + size).toInt()).map { i -> p[i, j] }
+            (ceil(x).toInt() until floor(x + size).toInt()).map { i -> pixel(p, i, j) }
         }
     }
 

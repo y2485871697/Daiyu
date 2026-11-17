@@ -12,7 +12,9 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
         self.assertNotIn('Arrangement.spacedBy(10.dp)', main)
         entry = source[source.index('private fun SpacedMessageEntry('):source.index('internal fun MessageImage(')]
         self.assertIn('entryBody(current.workflowKey(index)) {', entry)
-        self.assertIn('spacingAfter = if (lastIndex < content.lastIndex) 10.dp else 0.dp', entry)
+        self.assertIn('val spacingAfter = if (lastIndex < lastVisibleIndex) 10.dp else 0.dp', entry)
+        self.assertIn('WorkflowTimelineItem(current, lineMotion, spacingAfter)', entry)
+        self.assertIn('lastVisibleIndex = visibleIndices.lastOrNull() ?: -1', main)
         self.assertIn('leadingConnector = connector.before', entry)
         self.assertIn('trailingConnector = connector.after', entry)
         self.assertIn('throughConnector = connector.through', entry)
@@ -64,8 +66,37 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
         self.assertEqual(2, source.count('SpacedMessageEntry(index, content, (connectors[index] ?: WorkflowConnector(false, false, false)), entryBody, fillWidth'))
         self.assertIn('fillWidth = fillWidth,', source)
         self.assertIn('Modifier.then(if (fillWidth) Modifier.fillMaxWidth() else Modifier).drawBehind', wrapper)
-        self.assertIn('Column {', source)
+        self.assertIn('WorkflowTimelineColumn(workflowTimeline) {', source)
         self.assertNotIn('IntrinsicSize', source)
+        layout = (CHAT / 'WorkflowTimelineLayout.kt').read_text()
+        self.assertIn('child.height, item.spacingAfter.roundToPx(), 17.dp.toPx(), 27.dp.toPx()', layout)
+        self.assertIn('line?.incoming?.fraction() ?: 1f', layout)
+        self.assertIn('entrance?.progress?.value ?: 0f', layout)
+        self.assertIn('if (allocated > 0) extent = maxOf(extent, naturalTop + allocated)', layout)
+        self.assertIn('child.placeRelative(0, top)', layout)
+        self.assertIn('!prefixVisible -> 0', layout)
+        self.assertIn('prefixVisible = prefixVisible && allocated >= child.height', layout)
+        self.assertIn('releasedGap = maxOf(', layout)
+        self.assertIn('if (!LocalWorkflowTimelineLayout.current)', layout)
+        self.assertNotIn('val arriving:', layout)
+        self.assertNotIn('Animatable', layout)
+        self.assertNotIn('animateContentSize', layout)
+        self.assertIn('LocalWorkflowItemLayout.current?.appearance = appearance',
+            (CHAT / 'WorkflowNodeMotion.kt').read_text())
+
+
+    def test_motion_regression_requires_physical_extent_and_following_content(self):
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNodeMotionTest.kt').read_text()
+        chain = source[source.index('private fun verifyLiveChain('):source.index('fun testNewEdgesWaitForUpstreamIncoming(')]
+        self.assertIn('val beforeSecondTool =', chain)
+        self.assertIn('observe(listOf(t1, a, t2), beforeSecondTool)', chain)
+        self.assertIn('testTag("motion-following")', chain)
+        physical = source[source.index('private fun physicalSample('):source.index('private fun terminalInk(')]
+        self.assertIn('ui.onNodeWithTag("motion-following").fetchSemanticsNode()', physical)
+        self.assertNotIn('singleOrNull()', physical)
+        self.assertNotIn('following?.let', physical)
+        self.assertIn('fun testFirstFreshNodeReleasesHeightWithItsOwnEntrance()', source)
+        self.assertIn('fun testQueuedNodePreventsFollowingNarrationFromReservingHeight()', source)
 
     def test_android_regression_samples_every_join_and_rejects_stray_end_segments(self):
         source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkTimelineConnectorTest.kt').read_text()

@@ -72,7 +72,7 @@ internal fun MessageContent(
     val lineMotions = rememberWorkflowLineMotions(content, timelineIndices, workflowTimeline)
     // This column deliberately has no width derived from media. Long text measures against
     // the bubble's normal constraints, even when a narrow portrait is its only attachment.
-    Column {
+    WorkflowTimelineColumn(workflowTimeline) {
         var precedingReady = true
         ranges.forEach { range ->
             val index = range.first
@@ -84,12 +84,12 @@ internal fun MessageContent(
                     key(block.step.renderKey) {
                         // Keep the dedicated interaction's callsite while a prior thought closes.
                         val dedicated = dedicatedTool(block.step)
-                        if (visible && !dedicated) SpacedMessageEntry(index, content, (connectors[index] ?: WorkflowConnector(false, false, false)), entryBody, fillWidth, lineMotion = lineMotions[index]) {
+                        if (visible && !dedicated) SpacedMessageEntry(index, content, (connectors[index] ?: WorkflowConnector(false, false, false)), entryBody, fillWidth, lastVisibleIndex = visibleIndices.lastOrNull() ?: -1, lineMotion = lineMotions[index]) {
                             WorkStepRow(block.step, showConnector = (connectors[index] ?: WorkflowConnector(false, false, false)).after, toolContent = toolContent, flowRunning = flowRunning)
                         }
                     }
                 } else if (visible && (block !is MessageContentUi.Text || block.text.isNotBlank())) {
-                    SpacedMessageEntry(index, content, (connectors[index] ?: WorkflowConnector(false, false, false)), entryBody, fillWidth, lastIndex = range.last, lineMotion = lineMotions[index]) {
+                    SpacedMessageEntry(index, content, (connectors[index] ?: WorkflowConnector(false, false, false)), entryBody, fillWidth, lastIndex = range.last, lastVisibleIndex = visibleIndices.lastOrNull() ?: -1, lineMotion = lineMotions[index]) {
                         when (block) {
                             is MessageContentUi.Text -> textBody(block, Modifier.testTag("message-content-text:$index")
                                 .then(if (workflowTimeline) Modifier.padding(start = 18.dp) else Modifier))
@@ -117,20 +117,24 @@ private fun SpacedMessageEntry(
     entryBody: @Composable (String, @Composable () -> Unit) -> Unit,
     fillWidth: Boolean,
     lastIndex: Int = index,
+    lastVisibleIndex: Int = content.lastIndex,
     lineMotion: WorkflowLineMotion? = null,
     body: @Composable () -> Unit,
 ) {
     val current = content[index]
-    entryBody(current.workflowKey(index)) {
-        WorkflowLineScope(lineMotion, if (lastIndex < content.lastIndex) 10.dp else 0.dp) {
-        WorkTimelineEntry(
-            leadingConnector = connector.before,
-            trailingConnector = connector.after,
-            throughConnector = connector.through,
-            spacingAfter = if (lastIndex < content.lastIndex) 10.dp else 0.dp,
-            fillWidth = fillWidth,
-            content = body,
-        )
+    val spacingAfter = if (lastIndex < lastVisibleIndex) 10.dp else 0.dp
+    WorkflowTimelineItem(current, lineMotion, spacingAfter) {
+        entryBody(current.workflowKey(index)) {
+            WorkflowLineScope(lineMotion, spacingAfter) {
+                WorkTimelineEntry(
+                    leadingConnector = connector.before,
+                    trailingConnector = connector.after,
+                    throughConnector = connector.through,
+                    spacingAfter = spacingAfter,
+                    fillWidth = fillWidth,
+                    content = body,
+                )
+            }
         }
     }
 }

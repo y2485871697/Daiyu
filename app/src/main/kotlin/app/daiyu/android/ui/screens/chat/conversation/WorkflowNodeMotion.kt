@@ -127,6 +127,7 @@ internal fun rememberWorkflowToolAppearance(key: String): WorkflowToolAppearance
     val enabled = LocalWorkflowNodeMotionEnabled.current
     val incoming = rememberUpdatedState(LocalWorkflowLineMotion.current.incoming)
     val appearance = remember(owner, key) { WorkflowToolAppearance(owner.appear(key) && enabled) }
+    LocalWorkflowItemLayout.current?.appearance = appearance
     LaunchedEffect(appearance, enabled) {
         if (!appearance.settled) {
             if (enabled) {

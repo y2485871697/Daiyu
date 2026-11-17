@@ -8,27 +8,46 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.ui.app.AgentAppTheme
 import top.yukonga.miuix.kmp.basic.Text
+import java.util.concurrent.CopyOnWriteArrayList
 
 class ChatStreamingFollowTest : WiredActivityTestCase() {
     private var height by mutableStateOf(600.dp)
     private var request by mutableStateOf(ChatScrollRequest(1))
+    private var body by mutableStateOf("")
+    private var windowHeight by mutableStateOf(240.dp)
+    private var sampledTail: LayoutCoordinates? = null
+    private var sampledHistory: LayoutCoordinates? = null
+    private val draws = CopyOnWriteArrayList<Pair<Float, Float>>()
 
-    private fun mount() {
+    private fun mount(initialHeight: Dp = 600.dp, viewportHeight: Dp = 240.dp) {
         mainThread {
+            height = initialHeight
+            windowHeight = viewportHeight
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    Box(Modifier.size(320.dp, 240.dp)) {
+                    Box(Modifier.size(320.dp, windowHeight).drawWithContent {
+                        drawContent()
+                        sampledTail?.let { tail ->
+                            val history = checkNotNull(sampledHistory)
+                            check(tail.isAttached && history.isAttached)
+                            draws += tail.positionInRoot().y to history.positionInRoot().y
+                        }
+                    }) {
                         ChatMessageList(
                             List(6) { ChatTurnUi.User("u$it", "history $it") } +
-                                ChatTurnUi.Assistant("tail", status = RunStatus.RUNNING, isStreaming = true),
+                                ChatTurnUi.Assistant("tail", finalText = body,
+                                    status = RunStatus.RUNNING, isStreaming = true),
                             ChatScreenActions(), scrollRequest = request, composerBottomInset = 64.dp, turnExtras = {
                                 Box(Modifier.height(height))
                                 Text("stream tail marker")
@@ -79,6 +98,57 @@ class ChatStreamingFollowTest : WiredActivityTestCase() {
             }
             assertTrue("Continuous growth cannot starve follow", firstMovement + 5f * density < origin - previous)
         } finally {
+            ui.mainClock.autoAdvance = true
+        }
+        ui.waitForIdle()
+        ui.onNodeWithText("stream tail marker").assertIsDisplayed()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testShortStreamingBodyLinesUseSeveralDrawnFramesAfterEachIdleBurst() {
+        body = "稳定前文。"
+        mount(initialHeight = 0.dp, viewportHeight = 400.dp)
+        val density = activity.resources.displayMetrics.density
+        val tail = ui.onNodeWithTag("chat-turn:tail").fetchSemanticsNode().layoutInfo.coordinates
+        val history = ui.onNodeWithTag("chat-turn:u5").fetchSemanticsNode().layoutInfo.coordinates
+        ui.runOnIdle {
+            sampledTail = tail
+            sampledHistory = history
+        }
+        ui.mainClock.autoAdvance = false
+        try {
+            for (suffix in listOf("\n\n第一行新增正文。", "\n\n第二行新增正文。")) {
+                val origin = tailTop()
+                draws.clear()
+                draws += origin to history.positionInRoot().y
+                ui.runOnUiThread { body += suffix }
+                repeat(90) { frame() }
+                assertTrue("Each short-body burst must produce actual draw samples", draws.size > 2)
+                var movingDraws = 0
+                for ((before, after) in draws.zipWithNext()) {
+                    val movement = before.first - after.first
+                    assertTrue("Short body cannot reverse the history: $movement", movement >= -1f)
+                    assertTrue("Short body cannot pay an entire line in one draw: $movement",
+                        movement <= 14f * density)
+                    assertEquals("History and the assistant move as one outer list",
+                        movement, before.second - after.second, 1f)
+                    if (movement > .5f) movingDraws++
+                }
+                assertTrue("Short body must move through multiple drawn positions", movingDraws > 1)
+                assertTrue("Later bursts must wake the same follower", origin - tailTop() > density)
+                assertTrue("Regression must stay in the short bounded-tail branch",
+                    tail.size.height < (400f - 64f - 11f - ChatTailClearance.value) * density)
+            }
+            ui.runOnUiThread { windowHeight = 360.dp }
+            frame()
+            val list = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().layoutInfo.coordinates
+            val bottom = tail.positionInRoot().y + tail.size.height
+            val safeBottom = list.positionInRoot().y + list.size.height - 64f * density
+            assertEquals("Viewport resize retains the original immediate clearance alignment",
+                ChatTailClearance.value, (safeBottom - bottom) / density, 2f / density)
+        } finally {
+            sampledTail = null
+            sampledHistory = null
             ui.mainClock.autoAdvance = true
         }
         ui.waitForIdle()

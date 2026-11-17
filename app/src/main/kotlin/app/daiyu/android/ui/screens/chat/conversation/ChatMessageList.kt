@@ -100,6 +100,7 @@ private class FollowClearanceLayout : RemeasurementModifier {
     var correcting = false
     var active = false
     var coordinates: LayoutCoordinates? = null
+    var followViewport: Triple<androidx.compose.ui.unit.IntSize, Int, Int>? = null
 
     override fun onRemeasurementAvailable(remeasurement: Remeasurement) {
         this.remeasurement = remeasurement
@@ -511,6 +512,12 @@ internal fun ChatMessageList(
                         it.index == currentTailIndex && it.key == currentTailKey
                     } ?: return
                 }
+                // Ordinary live text uses the frame follower, not a line-sized layout correction.
+                if (shortBoundedTail && activeTail?.status == RunStatus.RUNNING && activeTail.isStreaming &&
+                    activeTail.hasBodyTextActions() && activeTail.workflowContent().work == null &&
+                    !resumeFollowPending && !nestedTail.followCatchup &&
+                    clearanceLayout.followViewport == Triple(layout.viewportSize,
+                        layout.beforeContentPadding, layout.afterContentPadding)) return
                 if (!listState.canScrollForward) return
                 // Keep measured text above the editor while terminal reveal is still advancing.
                 // Move the outer list, not a header-clipping inner offset.
@@ -733,7 +740,7 @@ internal fun ChatMessageList(
     }
     // Keep a single motion across target-height updates instead of snapping each new line.
     LaunchedEffect(listState, revealResetEpoch) {
-        var previousViewport: Triple<androidx.compose.ui.unit.IntSize, Int, Int>? = null
+        clearanceLayout.followViewport = null
         var alignViewport = false
         val motion = BottomFollowMotion()
         // Process each measured target update through a frame; collectLatest would cancel a
@@ -753,7 +760,7 @@ internal fun ChatMessageList(
         }.collect { target ->
             if (target == null) { motion.reset(); return@collect }
             currentNestedTail.followDiagnostic = "target"
-            var observedViewport = previousViewport
+            var observedViewport = clearanceLayout.followViewport
             while (canFollowBottom()) {
                 val index = currentTailIndex
                 if (index < 0) { motion.reset(); return@collect }
@@ -821,7 +828,7 @@ internal fun ChatMessageList(
                     motion.reset()
                     resumeFollowPending = false
                     alignViewport = false
-                    previousViewport = observedViewport
+                    clearanceLayout.followViewport = observedViewport
                     return@collect
                 }
                 val alignment = alignViewport || resumeFollowPending
@@ -870,7 +877,7 @@ internal fun ChatMessageList(
                     return@collect
                 }
             }
-            previousViewport = observedViewport
+            clearanceLayout.followViewport = observedViewport
             motion.reset()
         }
     }

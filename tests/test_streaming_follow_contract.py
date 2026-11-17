@@ -104,6 +104,29 @@ class StreamingFollowContract(unittest.TestCase):
             self.assertIn(token, device)
 
 
+    def test_short_live_body_defers_layout_scroll_to_the_existing_frame_follower(self):
+        correction = self.source.split("fun correctFollowClearance()", 1)[1].split(
+            "// A non-following viewport", 1)[0]
+        live = correction.split("// Ordinary live text", 1)[1].split(
+            "if (!listState.canScrollForward)", 1)[0]
+        for token in ("shortBoundedTail", "activeTail?.status == RunStatus.RUNNING",
+                      "activeTail.isStreaming", "activeTail.hasBodyTextActions()",
+                      "activeTail.workflowContent().work == null", "!resumeFollowPending",
+                      "!nestedTail.followCatchup", "clearanceLayout.followViewport",
+                      "layout.beforeContentPadding, layout.afterContentPadding", ")) return"):
+            self.assertIn(token, live)
+        self.assertLess(correction.index("remeasurement.forceRemeasure()"),
+                        correction.index("// Ordinary live text"))
+        self.assertLess(correction.index("// Ordinary live text"),
+                        correction.index("listState.dispatchRawDelta"))
+        device = DEVICE.read_text()
+        for token in ("testShortStreamingBodyLinesUseSeveralDrawnFramesAfterEachIdleBurst",
+                      "initialHeight = 0.dp", "viewportHeight = 400.dp", "drawWithContent",
+                      "draws.zipWithNext()", "movingDraws > 1", "tail.size.height",
+                      "History and the assistant move as one outer list",
+                      "Viewport resize retains the original immediate clearance alignment"):
+            self.assertIn(token, device)
+
     def test_manual_clock_mutations_do_not_implicitly_advance_an_extra_frame(self):
         device = DEVICE.read_text()
         controlled = False
@@ -117,7 +140,7 @@ class StreamingFollowContract(unittest.TestCase):
                 self.assertNotIn("mainThread {", line)
                 if "ui.runOnUiThread {" in line:
                     mutations += 1
-        self.assertEqual(6, mutations)
+        self.assertEqual(8, mutations)
         frame = device.split("private fun frame(): Float {", 1)[1].split("\n    }", 1)[0]
         self.assertEqual(1, frame.count("advanceTimeByFrame()"))
         self.assertIn("movement <= 14f * density", device)

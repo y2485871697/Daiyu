@@ -54,7 +54,7 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
         source = (CHAT / "ChatMessageList.kt").read_text()
         self.assertNotIn('Text("正在思考…"', source)
         card = (CHAT / "ReportedReasoningCard.kt").read_text()
-        self.assertIn('if (isThinking) "正在思考…" else "已思考"', card)
+        self.assertIn('if (displayThinking) "正在思考…" else "已思考"', card)
 
     def test_reply_identity_waits_for_content_without_blocking_readiness(self):
         source = (CHAT / "ChatMessageList.kt").read_text()

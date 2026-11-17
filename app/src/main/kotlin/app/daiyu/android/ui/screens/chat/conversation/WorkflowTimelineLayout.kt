@@ -36,6 +36,8 @@ internal class WorkflowItemLayout {
         val incoming = line?.incoming?.fraction() ?: 1f
         val outgoing = line?.outgoing
         val through = line?.through
+        // Once the connector arrives, fade the complete row rather than slicing its ink at the bottom.
+        if (!fullyVisible && line?.incoming != null && entrance?.arrived == true) fullyVisible = true
         if (!fullyVisible && (entrance?.settled == true || entrance?.progress?.value?.let { it >= 1f } == true ||
             (entrance == null && (through == null || through.fraction() >= 1f)))) fullyVisible = true
         val visibleBody = when {

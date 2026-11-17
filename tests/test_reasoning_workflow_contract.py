@@ -54,7 +54,10 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertNotIn('delay(', appearance)
         self.assertIn('appearance?.takeUnless { it.settled }', motion)
         self.assertIn('sharedAppearance?.progress?.value ?: progress.value', motion)
-        self.assertIn('translationY = 4.dp.toPx() * (1f - fraction)', motion)
+        body = motion[motion.index('internal fun Modifier.workflowToolAppearance'):motion.index('internal fun Modifier.workflowCompletion')]
+        self.assertNotIn('translationY', body)
+        self.assertIn('alpha = fraction', body)
+        self.assertIn('if (incoming.value != null) appearance.progress.snapTo(.12f)', appearance)
         self.assertIn('val appearance = rememberWorkflowToolAppearance("tool:${step.renderKey}")', work)
         self.assertIn('failed = step.state == WorkStepState.FAILED, appearance = appearance', work)
         self.assertIn('testTag("tool-step-body:${step.toolCallId}").workflowToolAppearance(appearance)', work)

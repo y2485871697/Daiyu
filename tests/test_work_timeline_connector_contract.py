@@ -136,6 +136,22 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
                       'painted connector must not linger before the tool springs in'):
             self.assertIn(token, source)
 
+    def test_connector_handoff_requires_prompt_complete_tool_pixels(self):
+        motion = (CHAT / 'WorkflowNodeMotion.kt').read_text()
+        layout = (CHAT / 'WorkflowTimelineLayout.kt').read_text()
+        self.assertIn('line?.incoming != null && entrance?.arrived == true', layout)
+        appearance = motion[motion.index('internal fun rememberWorkflowToolAppearance'):motion.index('internal fun Modifier.workflowToolAppearance')]
+        self.assertLess(appearance.index('first { it >= 1f }'), appearance.index('appearance.progress.snapTo(.12f)'))
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNodeMotionTest.kt').read_text()
+        for token in ('testPendingToolEntersWithinTwoFramesWithoutBottomClipping',
+                      'testTerminalToolEntersWithinTwoFramesWithoutBottomClipping',
+                      'sampling must not advance the animation clock',
+                      'samples[visible].time - samples[arrived].time <= 2 * frameMillis',
+                      'sample.bodyBottom <= sample.timelineBottom + 1f',
+                      'sample.lowerInk > fullLowerInk * .01f',
+                      'fullInk > 1f && fullLowerInk > 1f'):
+            self.assertIn(token, source)
+
     def test_disabled_motion_consumes_connector_without_replaying_on_enable(self):
         motion = (CHAT / 'WorkflowNodeMotion.kt').read_text()
         lines = motion[motion.index('internal fun rememberWorkflowLineMotions'):motion.index('internal class WorkflowToolAppearance')]

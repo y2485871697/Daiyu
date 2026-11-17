@@ -136,6 +136,8 @@ internal fun rememberWorkflowToolAppearance(key: String): WorkflowToolAppearance
             if (enabled) {
                 snapshotFlow { incoming.value?.fraction() ?: 1f }.first { it >= 1f }
                 appearance.arrived = true
+                // A connected row is ready to paint now, not after another zero-alpha spring frame.
+                if (incoming.value != null) appearance.progress.snapTo(.12f)
                 appearance.progress.animateTo(1f, spring(dampingRatio = .7f, stiffness = 600f))
             } else appearance.progress.snapTo(1f)
             appearance.arrived = true
@@ -150,7 +152,6 @@ internal fun Modifier.workflowToolAppearance(appearance: WorkflowToolAppearance?
     return graphicsLayer {
         val fraction = appearance.progress.value.coerceIn(0f, 1f)
         alpha = fraction
-        translationY = 4.dp.toPx() * (1f - fraction)
     }
 }
 

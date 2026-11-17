@@ -355,13 +355,89 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             assertTrue("tool body must fade in after arrival", samples.drop(arrivalFrame).any {
                 it.body > bodyEpsilon && it.body < finalBody * .98f
             })
-            assertTrue("tool card must gently rise while fading in", samples.drop(arrivalFrame).any {
-                it.body > finalBody * .05f && it.body < finalBody * .9f &&
-                    it.bodyY > finalY + with(density) { .25.dp.toPx() }
-            })
+            samples.filter { it.body > finalBody * .05f }.forEach {
+                assertEquals("tool fade must not slide its ink through the timeline bottom", finalY, it.bodyY, 1f)
+            }
             ui.mainClock.advanceTimeBy(64)
             assertEquals(finalInk, terminalInk(pixels(), color), .03f)
             assertEquals(finalBody, bodyInk(pixels()), .03f)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testPendingToolEntersWithinTwoFramesWithoutBottomClipping() =
+        verifyToolHandoff(second.copy(state = WorkStepState.PENDING, activity = ToolActivityUi.PENDING))
+
+    fun testTerminalToolEntersWithinTwoFramesWithoutBottomClipping() = verifyToolHandoff(second)
+
+    private data class ToolHandoffSample(
+        val time: Long, val reached: Boolean, val ink: Float, val lowerInk: Float,
+        val bodyBottom: Float, val timelineBottom: Float,
+    )
+
+    private fun lowerOperationInk(p: PixelMap): Float {
+        val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()
+        val row = ui.onNodeWithTag("tool-step:motion-b").fetchSemanticsNode().physicalBounds()
+        val left = ceil(row.left - raster.left + with(density) { 18.dp.toPx() }).toInt()
+        val right = floor(row.left - raster.left + with(density) { 36.dp.toPx() }).toInt()
+        val top = ceil(row.top - raster.top + with(density) { 22.dp.toPx() }).toInt()
+        val bottom = floor(row.top - raster.top + with(density) { 31.dp.toPx() }).toInt()
+        var ink = 0f
+        for (y in top until bottom) for (x in left until right) ink += distance(pixel(p, x, y), background)
+        return ink
+    }
+
+    private fun verifyToolHandoff(target: WorkStepUi) {
+        rows = listOf(first.copy(state = WorkStepState.OK))
+        ui.mainClock.autoAdvance = false
+        try {
+            show()
+            instrumentation.runOnMainSync { rows = rows + target }
+            val samples = mutableListOf<ToolHandoffSample>()
+            var arrivalImage: androidx.compose.ui.graphics.ImageBitmap? = null
+            var entryImage: androidx.compose.ui.graphics.ImageBitmap? = null
+            repeat(48) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                val time = ui.mainClock.currentTime
+                val image = ui.onNodeWithTag("motion-raster").captureToImage()
+                assertEquals("sampling must not advance the animation clock", time, ui.mainClock.currentTime)
+                val frame = image.toPixelMap()
+                val rail = line(frame)
+                val reached = rail.isNotEmpty() && rail.all { it >= lineContrast * .9f }
+                val ink = bodyInk(frame)
+                samples += ToolHandoffSample(time, reached, ink, lowerOperationInk(frame),
+                    ui.onNodeWithTag("tool-step-body:motion-b").fetchSemanticsNode().physicalBounds().bottom,
+                    ui.onNodeWithTag("workflow-timeline-extent").fetchSemanticsNode().physicalBounds().bottom)
+                if (reached && arrivalImage == null) arrivalImage = image
+                if (ink > .03f && entryImage == null) entryImage = image
+            }
+            ui.mainClock.advanceTimeBy(1_000)
+            val endImage = ui.onNodeWithTag("motion-raster").captureToImage()
+            val end = endImage.toPixelMap()
+            val fullInk = bodyInk(end)
+            val fullLowerInk = lowerOperationInk(end)
+            val epsilon = maxOf(.03f, fullInk * .01f)
+            val arrived = samples.indexOfFirst { it.reached }
+            val visible = samples.indexOfFirst { it.ink > epsilon }
+            val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/workflow-arrival").apply { mkdirs() }
+            val name = "handoff-${target.state}"
+            for ((suffix, image) in listOf("arrival" to arrivalImage, "entry" to entryImage, "final" to endImage)) {
+                image?.let { bitmap -> java.io.File(directory, "$name-$suffix.png").outputStream().use {
+                    bitmap.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                } }
+            }
+            java.io.File(directory, "$name.txt").writeText("fullInk=$fullInk fullLowerInk=$fullLowerInk\n" + samples.joinToString("\n"))
+            assertTrue("final tool and lower operation pixels must be nonempty", fullInk > 1f && fullLowerInk > 1f)
+            assertTrue("must observe both connector arrival and tool entry: $samples", arrived >= 0 && visible >= 0)
+            val frameMillis = samples[1].time - samples[0].time
+            assertTrue("tool must paint within two frames of connector arrival: $samples",
+                visible >= arrived && samples[visible].time - samples[arrived].time <= 2 * frameMillis)
+            samples.filter { it.ink > epsilon }.forEach { sample ->
+                assertTrue("visible tool must fit above the timeline bottom: $sample",
+                    sample.bodyBottom <= sample.timelineBottom + 1f)
+                assertTrue("first visible tool must include its lower operation pixels: $sample full=$fullLowerInk",
+                    sample.lowerInk > fullLowerInk * .01f)
+            }
         } finally { ui.mainClock.autoAdvance = true }
     }
 

@@ -100,20 +100,51 @@ class TerminalRegistryTest:InstrumentationTestCase() {
         val owner=UUID.randomUUID().toString()
         val context=isolatedContext(root)
         val registry=fakeRegistry(context,owner)
+        val release=CountDownLatch(1)
+        val process=FakeProcess(waiting=release)
+        registry.processStartReader={ "owned" }
         try {
-            registry.startProcess={ FakeProcess() }
+            registry.startProcess={ process }
             val dispatched=registry.execute("terminal_exec",command(open(registry)))
             val id=dispatched.getString("job_id")
             val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
             while(!registry.inspectJob(id).optBoolean("output_complete") && System.nanoTime()<deadline) Thread.sleep(5)
             assertTrue(registry.inspectJob(id).getBoolean("output_complete"))
+            assertTrue(process.isAlive)
+            assertEquals("running",registry.inspectJob(id).getString("state"))
             val original=TerminalJobHistoryReader(context).list(owner).records.single()
             val page=TerminalJobHistoryReader(context).page(owner,original)
             assertEquals(id,original.jobId)
             assertEquals("actual-output",page.getString("stdout"))
             assertEquals("unknown_after_process_restart",page.getString("state"))
             assertTrue(page.isNull("exit_code")); assertEquals("unknown",page.getString("execution"))
-        } finally { registry.close(); root.deleteRecursively() }
+        } finally { release.countDown(); registry.close(); assertTrue(registry.awaitOrdinaryTermination(2000)); root.deleteRecursively() }
+    }
+    fun testIndependentHistoryReaderPreservesConfirmedExitAfterOutputDrain() {
+        val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }
+        val owner=UUID.randomUUID().toString()
+        val context=isolatedContext(root)
+        val registry=fakeRegistry(context,owner)
+        try {
+            registry.startProcess={ FakeProcess() }
+            val id=registry.execute("terminal_exec",command(open(registry))).getString("job_id")
+            val reader=TerminalJobHistoryReader(context)
+            val deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5)
+            var page=JSONObject()
+            while(System.nanoTime()<deadline) {
+                val record=reader.list(owner).records.singleOrNull()
+                if(record!=null) {
+                    page=reader.page(owner,record)
+                    if(page.optString("state")=="exited") break
+                }
+                Thread.sleep(5)
+            }
+            assertTrue(page.toString(),page.getBoolean("ok"))
+            assertEquals(id,page.getString("job_id"))
+            assertEquals("actual-output",page.getString("stdout"))
+            assertEquals("exited",page.getString("state"))
+            assertEquals(0,page.getInt("exit_code")); assertEquals("executed",page.getString("execution"))
+        } finally { registry.close(); assertTrue(registry.awaitOrdinaryTermination(2000)); root.deleteRecursively() }
     }
     fun testOriginalRegistryRetriesCancellationAfterThrowingClose() {
         val root=File(instrumentation.targetContext.cacheDir,UUID.randomUUID().toString()).apply { mkdirs() }

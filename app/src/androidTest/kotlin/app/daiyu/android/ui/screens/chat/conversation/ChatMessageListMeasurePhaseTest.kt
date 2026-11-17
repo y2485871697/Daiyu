@@ -400,7 +400,7 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
                 if (!diagnostic.contains("follow=true canFollow=false") || !diagnostic.contains("catchup=true") ||
                     number(diagnostic, "a") <= 1f || number(diagnostic, "q") <= 1f) return@repeat
                 val end = physical("gate-real-end")
-                val viewport = physical("chat-stream-viewport:gate-tail")
+                val viewport = physical("chat-stream-viewport:${turn().listKey}")
                 val safeBottom = physical("gate-real-composer").top - ChatTailClearance.value * pixelsPerDp
                 val sampleY = end.center.y
                 val line = "frame=$index end=$end V=$viewport safe=$safeBottom $diagnostic"

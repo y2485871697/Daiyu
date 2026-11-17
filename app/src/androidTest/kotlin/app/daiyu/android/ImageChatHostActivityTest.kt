@@ -382,7 +382,10 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             // Revoked reads remain cancellation, not a persisted unavailable image.
         }
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-        ui.waitForIdle()
+        ui.waitUntil(10_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.runOnIdle { host().historyLoader != null }
+        }
         assertNotNull(host().historyLoader)
         assertNotSame(loader, host().historyLoader)
     }

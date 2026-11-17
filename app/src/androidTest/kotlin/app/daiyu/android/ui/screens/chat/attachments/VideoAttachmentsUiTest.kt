@@ -246,8 +246,14 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         val empty = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
         ui.onNodeWithContentDescription("附件").performClick()
         node("chat-attachment:ATTACH_VIDEO").performClick()
-        assertEquals(1, picker.launches.size)
-        mainThread { picker.result(picker.launches.single()) }
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.runOnIdle { picker.launches.isNotEmpty() }
+        }
+        mainThread {
+            assertEquals(1, picker.launches.size)
+            picker.result(picker.launches.single())
+        }
         val id = awaitReady()
         node("video_attachments_select").assertDoesNotExist()
         node("video_attachments_send").assertDoesNotExist()

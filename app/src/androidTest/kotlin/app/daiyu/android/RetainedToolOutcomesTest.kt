@@ -104,7 +104,7 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
         val afterFullSend = fullKey.copy(generation = 5, data = 4)
         val original = loadedMessages.last()
         assertEquals(listOf(WorkStepState.OK, WorkStepState.FAILED, WorkStepState.NOT_EXECUTED),
-            original.blocks.filterIsInstance<MessageBlock.Tool>().map {
+            fullKey.sources.single().tools.map {
                 full.displayReader(fullKey, afterFullSend)(original, it)?.state })
         assertEquals(WorkStepState.OK, snapshot.displayRowReader(key, key.copy(data = 5))(owner, first)?.state)
         assertNull(snapshot.displayRowReader(key, key.copy(data = 2))(owner, first))
@@ -240,6 +240,28 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
             assertNull(snapshot.displayReader(loaded, current.copy(sources = RetainedToolOutcomes.sources(listOf(changed))))(
                 changed, changed.blocks.single() as MessageBlock.Tool))
             assertEquals(tools, checkNotNull(SQLiteRuntimeStore.readCheckpointSnapshot(database.readableDatabase, assistant.id.value)).tools)
+        }
+    }
+
+    fun testPendingReadRequiresAnActiveLiveOwnerAndKeepsPausePresentation() {
+        val returned = MessageBlock.Tool(ToolInvocation(ToolCallId("pending-read"), "read", "{}"), "done")
+        for (status in listOf(RunStatus.RUNNING, RunStatus.COMPLETED)) {
+            for (phase in listOf(ExecutionPhase.IDLE, ExecutionPhase.BOUNDARY,
+                ExecutionPhase.STREAMING, ExecutionPhase.TERMINAL)) {
+                val live = ExecutionState(phase)
+                val executing = status == RunStatus.RUNNING &&
+                    phase != ExecutionPhase.IDLE && phase != ExecutionPhase.TERMINAL
+                assertEquals(ToolReceiptUi(if (executing) WorkStepState.PENDING else WorkStepState.UNKNOWN,
+                    if (executing) ToolActivityUi.RUNNING else ToolActivityUi.UNKNOWN),
+                    RetainedToolOutcomes.pendingProjection(status, returned, live, receiptPending = true))
+            }
+            assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN),
+                RetainedToolOutcomes.pendingProjection(status, returned, receiptPending = true))
+        }
+        for ((live, activity) in listOf(ExecutionState(ExecutionPhase.PAUSED) to ToolActivityUi.PAUSED,
+            ExecutionState(ExecutionPhase.BOUNDARY, pauseRequested = true) to ToolActivityUi.PAUSING)) {
+            assertEquals(ToolReceiptUi(WorkStepState.PENDING, activity),
+                RetainedToolOutcomes.pendingProjection(RunStatus.RUNNING, returned, live, receiptPending = true))
         }
     }
 

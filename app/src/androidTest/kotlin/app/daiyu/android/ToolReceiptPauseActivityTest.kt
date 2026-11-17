@@ -348,10 +348,10 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
             val key = checkNotNull(loadedKey())
             val snapshot = checkNotNull(field("toolReceiptSnapshot").get(activity))
             for (stale in listOf(key.copy(conversation = ConversationId("other")),
-                key.copy(data = key.data + 1), key.copy(generation = key.generation - 1),
-                key.copy(sources = emptyList()))) {
+                key.copy(data = key.data + 1), key.copy(sources = emptyList()))) {
                 pendingFrame(stale, snapshot, List(4) { WorkStepState.UNKNOWN })
             }
+            pendingFrame(key.copy(generation = key.generation - 1), snapshot, expected)
         }
         awaitReceipts()
     }
@@ -448,7 +448,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         awaitReceipts()
     }
 
-    fun testNormalReturnedResultsStayExecutingAcrossBothHostProjectionPathsUntilTheirExactReadCompletes() {
+    fun testReturnedResultsWithoutLiveOwnerStayUnknownAcrossBothHostProjectionPathsUntilTheirExactReadCompletes() {
         mainThread { activity.select(fixture.database.conversations().single()) }
         awaitReceipts()
         for (useDisplay in listOf(false, true)) for (status in listOf(RunStatus.RUNNING, RunStatus.COMPLETED)) {
@@ -475,8 +475,8 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
                     field("toolReceiptRequest").set(activity, Any())
                     repeat(3) {
                         call("publishChat")
-                        assertEquals(List(3) { WorkStepState.PENDING }, steps().take(3).map { it.state })
-                        assertEquals(List(3) { ToolActivityUi.RUNNING }, steps().take(3).map { it.activity })
+                        assertEquals(List(3) { WorkStepState.UNKNOWN }, steps().take(3).map { it.state })
+                        assertEquals(List(3) { ToolActivityUi.UNKNOWN }, steps().take(3).map { it.activity })
                         assertTrue(pending.isActive)
                     }
                     assertEquals(if (status == RunStatus.RUNNING) WorkStepState.PENDING else WorkStepState.UNKNOWN,

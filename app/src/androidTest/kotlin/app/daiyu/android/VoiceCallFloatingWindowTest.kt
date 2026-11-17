@@ -1059,12 +1059,16 @@ class VoiceCallFloatingWindowTest {
         val fullHeight = panel(root).height
         val samples = mutableMapOf<Int, Map<String, androidx.compose.ui.geometry.Rect>>()
         var baselineInk = 0L
-        fun ink(): Long {
+        val diagnostics = java.io.File(context.getExternalFilesDir(null), "visual-diagnostics/native-call-content-motion")
+            .apply { mkdirs() }
+        val pixelRecords = mutableListOf<String>()
+        fun ink(name: String): Long {
             var area = androidx.compose.ui.geometry.Rect.Zero
             main {
                 val bounds = checkNotNull(tagBounds(root)["doubao-call-status"])
-                val params = root.layoutParams as WindowManager.LayoutParams
-                area = bounds.translate(androidx.compose.ui.geometry.Offset(params.x.toFloat(), params.y.toFloat()))
+                val location = IntArray(2)
+                root.getLocationOnScreen(location)
+                area = bounds.translate(androidx.compose.ui.geometry.Offset(location[0].toFloat(), location[1].toFloat()))
             }
             val image = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
             try {
@@ -1075,6 +1079,11 @@ class VoiceCallFloatingWindowTest {
                         result += (240 - maxOf(android.graphics.Color.red(c), android.graphics.Color.green(c),
                             android.graphics.Color.blue(c))).coerceAtLeast(0)
                     }
+                java.io.File(diagnostics, "$name.png").outputStream().use {
+                    check(image.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                }
+                pixelRecords += "$name area=$area ink=$result"
+                java.io.File(diagnostics, "samples.txt").writeText(pixelRecords.joinToString("\n"))
                 return result
             } finally { image.recycle() }
         }
@@ -1115,12 +1124,21 @@ class VoiceCallFloatingWindowTest {
                 records += "$index p=$percent displayed=$compression orb=${local["doubao-call-orb"]} controls=${local["doubao-call-controls"]}"
             }
             if (index == 0) {
-                baselineInk = ink()
+                baselineInk = ink("baseline")
                 assertTrue("full status has real dark glyph pixels", baselineInk > 1000L)
             } else if (percent == 25) {
-                val faded = ink()
+                val deadline = SystemClock.uptimeMillis() + 2_000
+                var faded: Long
+                var consecutive = 0
+                do {
+                    faded = ink("sample-$index")
+                    consecutive = if (faded > baselineInk / 5 && faded < baselineInk * 4 / 5) consecutive + 1 else 0
+                    if (consecutive < 2 && SystemClock.uptimeMillis() < deadline) {
+                        awaitCommittedDraw(root)
+                    }
+                } while (consecutive < 2 && SystemClock.uptimeMillis() < deadline)
                 assertTrue("status has genuinely partially transparent pixels, not just a retained tag: $faded/$baselineInk",
-                    faded > baselineInk / 5 && faded < baselineInk * 4 / 5)
+                    consecutive == 2)
             }
             previous = percent
         }
@@ -1229,17 +1247,22 @@ class VoiceCallFloatingWindowTest {
         val viewports = mutableSetOf<Pair<Int, Int>>()
         var layouts = 0
         var failure: Throwable? = null
+        var driving = false
+        val moveMethod = host.javaClass.declaredMethods.single { it.name.startsWith("move-") }.apply { isAccessible = true }
+        val panelGetter = root.javaClass.getDeclaredMethod("getPanelBounds").apply { isAccessible = true }
+        val enteredFrames = java.util.concurrent.atomic.AtomicInteger()
+        val inputCount = java.util.concurrent.atomic.AtomicInteger()
+        val startedAt = SystemClock.uptimeMillis()
         val listener = View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ -> layouts++ }
-        main {
-            child.addOnLayoutChangeListener(listener)
-            windows.recordFrames = true
-            android.view.Choreographer.getInstance().postFrameCallback(object : android.view.Choreographer.FrameCallback {
+        val driver = object : android.view.Choreographer.FrameCallback {
                 var index = 0
                 override fun doFrame(time: Long) {
+                    if (!driving) return
+                    enteredFrames.incrementAndGet()
                     try {
                         val p = root.layoutParams as WindowManager.LayoutParams
                         viewports += p.width to p.height
-                        val bounds = panel(root).inflate(shadow.toFloat())
+                        val bounds = (panelGetter.invoke(root) as androidx.compose.ui.geometry.Rect).inflate(shadow.toFloat())
                         assertEquals("complete left shadow including negative viewport origin", bounds.left.roundToInt(), p.x)
                         assertEquals(bounds.top.roundToInt(), p.y)
                         assertEquals(bounds.right.roundToInt(), p.x + p.width)
@@ -1248,15 +1271,25 @@ class VoiceCallFloatingWindowTest {
                         if (index == 72) { completed.countDown(); return }
                         inputFrames += time
                         val sign = if ((index / 6) % 2 == 0) -1f else 1f
-                        repeat(6) { move(root, sign * 2f * density, sign * .5f * density) }
+                        repeat(6) {
+                            moveMethod.invoke(host, root, androidx.compose.ui.geometry.Offset(sign * 2f * density, sign * .5f * density).packedValue)
+                        }
                         index++
-                        android.view.Choreographer.getInstance().postFrameCallback(this)
+                        inputCount.set(index)
+                        if (driving) android.view.Choreographer.getInstance().postFrameCallback(this)
                     } catch (t: Throwable) { failure = t; completed.countDown() }
                 }
-            })
         }
         try {
-            assertTrue("continuous vsync input completes without per-move draw waits", completed.await(8, java.util.concurrent.TimeUnit.SECONDS))
+            main {
+                child.addOnLayoutChangeListener(listener)
+                windows.recordFrames = true
+                driving = true
+                android.view.Choreographer.getInstance().postFrameCallback(driver)
+            }
+            val finished = completed.await(30, java.util.concurrent.TimeUnit.SECONDS)
+            android.util.Log.i("NativeCallDragContinuous", "finished=$finished entered=${enteredFrames.get()} inputs=${inputCount.get()} elapsedMs=${SystemClock.uptimeMillis() - startedAt}; structural watchdog, not a presentation FPS measurement")
+            assertTrue("72-vsync structural input completes without per-move draw waits: callbacks=${enteredFrames.get()} inputs=${inputCount.get()}", finished)
             failure?.let { throw it }
             await("last continuous drag displacement consumed") {
                 root.javaClass.getDeclaredMethod("getMovePending").apply { isAccessible = true }.invoke(root) == false
@@ -1274,7 +1307,15 @@ class VoiceCallFloatingWindowTest {
                 assertTrue(windows.removals.isEmpty())
                 android.util.Log.i("NativeCallDragContinuous", "inputFrames=${inputFrames.size} wmFrames=${windows.updatesPerFrame.size} viewportSizes=$viewports childBoundsChanges=$layouts intervalsNs=${inputFrames.zipWithNext { a, b -> b - a }}")
             }
-        } finally { main { windows.recordFrames = false; child.removeOnLayoutChangeListener(listener) } }
+        } finally {
+            main {
+                driving = false
+                android.view.Choreographer.getInstance().removeFrameCallback(driver)
+                android.util.Log.i("NativeCallDragContinuous", "cleanup inputs=${inputFrames.size} wmFrames=${windows.updatesPerFrame.size} viewportSizes=$viewports childBoundsChanges=$layouts intervalsNs=${inputFrames.zipWithNext { a, b -> b - a }}")
+                windows.recordFrames = false
+                child.removeOnLayoutChangeListener(listener)
+            }
+        }
     }
 
     @Test fun stableNativeDragReusesLocalContentAcrossCommittedWindowMoves() {

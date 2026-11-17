@@ -1,6 +1,12 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -212,6 +218,116 @@ class ChatMessageListMeasurePhaseTest : WiredActivityTestCase() {
         assertEquals("The actual body, not just its outer item, keeps the reading anchor",
             viewport.layoutInfo.coordinates.positionInRoot().y,
             body.layoutInfo.coordinates.positionInRoot().y, 1f)
+    }
+
+    fun testFollowingCatchupKeepsGrowingCardAndLastLineInsidePhysicalSafeEdge() {
+        val state = StreamingTailViewport(initiallyBounded = true)
+        var following by mutableStateOf(false)
+        var protect by mutableStateOf(true)
+        var phase by mutableStateOf(0)
+        var hostCoordinates: androidx.compose.ui.layout.LayoutCoordinates? = null
+        var pixelsPerDp = 1f
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    pixelsPerDp = androidx.compose.ui.platform.LocalDensity.current.density
+                    Box(Modifier.size(320.dp, 240.dp)
+                        .background(androidx.compose.ui.graphics.Color.White).clipToBounds()
+                        .onPlaced { hostCoordinates = it }.testTag("catchup-clip-host")) {
+                        StreamingTailContainer(state, { hostCoordinates }, "catchup-clip", false,
+                            follows = { following }, protectClearance = { protect },
+                            clearance = { (ChatTailClearance.value * pixelsPerDp).toInt() },
+                            viewportHeight = { (120f * pixelsPerDp).toInt() },
+                            listViewportHeight = { (240f * pixelsPerDp).toInt() }) {
+                            WorkProcessCard(WorkProcessUi(emptyList(), summary = "进行中", running = true),
+                                ownerKey = "catchup-clip-card", content = {
+                                    Box(Modifier.fillMaxWidth().height((104 + phase * 16).dp)
+                                        .background(androidx.compose.ui.graphics.Color.Cyan),
+                                        contentAlignment = androidx.compose.ui.Alignment.BottomStart) {
+                                        Text(List(phase + 1) { "新增末行文字完整显示" }.joinToString("\n"),
+                                            Modifier.padding(8.dp).testTag("catchup-last-lines"),
+                                            color = androidx.compose.ui.graphics.Color.Black)
+                                    }
+                                })
+                            Box(Modifier.fillMaxWidth().height(160.dp)
+                                .background(androidx.compose.ui.graphics.Color.Cyan))
+                        }
+                    }
+                }
+            }
+        }
+        ui.waitForIdle()
+        fun physical(tag: String): androidx.compose.ui.geometry.Rect {
+            val coordinates = ui.onNodeWithTag(tag).fetchSemanticsNode().layoutInfo.coordinates
+            val origin = coordinates.positionInRoot()
+            return androidx.compose.ui.geometry.Rect(origin.x, origin.y,
+                origin.x + coordinates.size.width, origin.y + coordinates.size.height)
+        }
+        fun save(name: String, image: androidx.compose.ui.graphics.ImageBitmap) {
+            val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/workflow-catchup")
+                .apply { mkdirs() }
+            java.io.File(directory, "$name.png").outputStream().use {
+                image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+            }
+        }
+        val failures = mutableListOf<String>()
+        repeat(3) { next ->
+            mainThread { following = false; protect = true; phase = next }
+            ui.waitForIdle()
+            mainThread { following = true }
+            ui.waitForIdle()
+            val host = physical("catchup-clip-host")
+            val viewport = physical("chat-stream-viewport:catchup-clip")
+            val card = physical("work-process-surface")
+            val text = physical("catchup-last-lines")
+            val safeBottom = host.bottom - ChatTailClearance.value * pixelsPerDp
+            assertTrue("fixture must keep a real protected catchup", state.followCatchup && following && protect)
+            assertEquals(0f, state.scrollOffset, .001f)
+            assertEquals(0, state.viewportOffset)
+            assertTrue("full content must still be awaiting outer catchup", state.contentHeight > host.height)
+            assertTrue("the new last line must cross the measured boundary", text.bottom > viewport.bottom + 8f * pixelsPerDp)
+            assertTrue("the complete card must fit inside the physical safe edge", card.bottom < safeBottom - 4f * pixelsPerDp)
+            val observed = captureScreenNode(ui.onNodeWithTag("catchup-clip-host"))
+            save("phase-$next-following", observed)
+            mainThread { following = false; protect = false }
+            ui.waitForIdle()
+            assertEquals("reference must keep the same card position", card, physical("work-process-surface"))
+            assertEquals("reference must keep the same text layout", text, physical("catchup-last-lines"))
+            val reference = captureScreenNode(ui.onNodeWithTag("catchup-clip-host"))
+            save("phase-$next-reference", reference)
+            val actual = observed.toPixelMap()
+            val expected = reference.toPixelMap()
+            fun mismatches(region: androidx.compose.ui.geometry.Rect): Int {
+                var count = 0
+                for (y in kotlin.math.ceil(region.top - host.top).toInt() until kotlin.math.floor(region.bottom - host.top).toInt()) {
+                    for (x in kotlin.math.ceil(region.left - host.left).toInt() until kotlin.math.floor(region.right - host.left).toInt()) {
+                        val a = actual[x, y]
+                        val b = expected[x, y]
+                        if (maxOf(kotlin.math.abs(a.red - b.red), kotlin.math.abs(a.green - b.green),
+                                kotlin.math.abs(a.blue - b.blue)) > .025f) count++
+                    }
+                }
+                return count
+            }
+            val missingText = mismatches(text)
+            val missingBorder = mismatches(androidx.compose.ui.geometry.Rect(card.left, card.bottom - 3f * pixelsPerDp,
+                card.right, card.bottom))
+            var clearanceInk = 0
+            for (y in kotlin.math.ceil(safeBottom - host.top + 1f).toInt() until actual.height) {
+                for (x in 0 until actual.width) {
+                    val color = actual[x, y]
+                    if (minOf(color.red, color.green, color.blue) < .98f) clearanceInk++
+                }
+            }
+            android.util.Log.i("WorkflowCatchupClip", "phase=$next measuredBottom=${viewport.bottom} " +
+                "textBottom=${text.bottom} cardBottom=${card.bottom} safeBottom=$safeBottom " +
+                "missingText=$missingText missingBorder=$missingBorder clearanceInk=$clearanceInk")
+            if (missingText != 0 || missingBorder != 0 || clearanceInk != 0) {
+                failures += "phase=$next missingText=$missingText missingBorder=$missingBorder clearanceInk=$clearanceInk"
+            }
+        }
+        assertTrue("Following catchup must not cut new text or the rounded card inside the safe edge: $failures", failures.isEmpty())
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testCurrentPlacementOriginDefinesTheFirstDrawnTailSlice() {

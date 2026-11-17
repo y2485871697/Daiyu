@@ -94,6 +94,11 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
         self.assertIn('testTag("motion-following")', chain)
         body = source[source.index('private fun bodyInk('):source.index('private fun operationY(')]
         self.assertIn('timeline?.intersect(raster) ?: raster', body)
+        glyph = source[source.index('private fun glyph('):source.index('private fun changed(')]
+        self.assertIn('timeline?.intersect(raster) ?: raster', glyph)
+        self.assertIn('raster.top + j >= clip.bottom) background', glyph)
+        self.assertIn('else pixel(p, i, j)', glyph)
+        self.assertIn('(ceil(x).toInt() until floor(x + size).toInt()).map', glyph)
         self.assertIn('maxOf(row.top, clip.top)', body)
         self.assertIn('minOf(row.bottom, clip.bottom)', body)
         self.assertIn('row.left + with(density) { 18.dp.toPx() }', body)

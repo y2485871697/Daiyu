@@ -671,6 +671,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                             val glyphBottom = floor(targetBounds.top - raster.top + with(density) { 27.dp.toPx() }).toInt()
                             java.io.File(directory, "$name.txt").writeText(buildString {
                                 appendLine("density=${density.density} raster=$raster source=$sourceBounds target=$targetBounds")
+                                appendLine("timeline=${ui.onNodeWithTag("workflow-timeline-extent").fetchSemanticsNode().physicalBounds()}")
                                 appendLine("contrast=$contrast threshold=${contrast * .9f} reached=$reached everReached=$arrived node=$nodeAmount body=$bodyAmount advances=${advances.get() - feedback}")
                                 appendLine("lineX=${sourceBounds.left - raster.left + with(density) { 5.dp.toPx() }} glyphCenterX=${targetBounds.left - raster.left + with(density) { 5.dp.toPx() }} glyph=[$glyphLeft,$glyphTop,$glyphRight,$glyphBottom]")
                                 incoming.forEachIndexed { offset, value ->
@@ -837,8 +838,15 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         val x = row.left - raster.left
         val y = row.top - raster.top + with(density) { 17.dp.toPx() }
         val size = with(density) { 10.dp.toPx() }
+        val timeline = ui.onAllNodesWithTag("workflow-timeline-extent").fetchSemanticsNodes()
+            .singleOrNull()?.physicalBounds()
+        val clip = timeline?.intersect(raster) ?: raster
         return (ceil(y).toInt() until floor(y + size).toInt()).flatMap { j ->
-            (ceil(x).toInt() until floor(x + size).toInt()).map { i -> pixel(p, i, j) }
+            (ceil(x).toInt() until floor(x + size).toInt()).map { i ->
+                if (raster.left + i < clip.left || raster.left + i >= clip.right ||
+                    raster.top + j < clip.top || raster.top + j >= clip.bottom) background
+                else pixel(p, i, j)
+            }
         }
     }
 

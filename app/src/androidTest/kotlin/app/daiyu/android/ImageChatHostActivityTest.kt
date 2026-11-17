@@ -311,8 +311,8 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
     }
 
     fun testFailedPersistedValidationRevokesTheWarmThumbnail() {
-        val owner = app.daiyu.android.domain.MessageImageOwner("missing-chat", "missing-message")
-        val reference = app.daiyu.android.domain.MessageImageReference(owner,
+        val owner = MessageImageOwner("missing-chat", "missing-message")
+        val reference = MessageImageReference(owner,
             "00000000-0000-0000-0000-000000000001", "image/png", 10, "a".repeat(64), 2, 2)
         val lease = PreviewLease(controller, owner.conversationId)
         try {

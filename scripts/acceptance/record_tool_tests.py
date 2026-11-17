@@ -421,6 +421,12 @@ CHILD_STOP_MODULES = (
     "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
 )
 
+RUNTIME_STOP_PLATFORM_CLASSES = ("app.daiyu.android.terminal.TerminalRegistryTest",) + CHILD_STOP_PLATFORM_CLASSES
+RUNTIME_STOP_MODULES = tuple(dict.fromkeys((
+    "test_terminal_job_status_contract", "test_terminal_reference_contract",
+    "test_chroot_workspace_command_contract", "test_terminal_command_pager_smoke_scope",
+) + CHILD_STOP_MODULES))
+
 
 POPUP_SCROLL_PLATFORM_CLASSES = ('app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest', 'app.daiyu.android.PreviewDialogStatusBarActivityTest', 'app.daiyu.android.AssistantPickerAdmissionTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingFollowTest')
 POPUP_SCROLL_MODULES = ('test_streaming_occlusion_contract', 'test_streaming_follow_contract', 'test_chat_resume_scroll_contract', 'test_preview_dialog_status_bar_contract', 'test_assistant_picker_frame_contract', 'test_chat_menu_scroll_isolation_contract', 'test_popup_performance_contract', 'test_record_tool_tests_scope', 'test_acceptance_tool_receipt', 'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')
@@ -826,6 +832,9 @@ def command_for(python, env):
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(PANE_QUESTION_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *PANE_QUESTION_MODULES, "-v"], "pane-question-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(RUNTIME_STOP_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *RUNTIME_STOP_MODULES, "-v"], "runtime-stop-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(CHILD_STOP_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *CHILD_STOP_MODULES, "-v"], "child-stop-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
@@ -1062,7 +1071,7 @@ def record(python):
         child_env = os.environ.copy()
         child_env["PYTHONPATH"] = str(Path("tests").resolve()) + os.pathsep + child_env.get("PYTHONPATH", "")
     validation_cwd = None
-    if scope in ("workflow-collapse-targeted", "voice-browser-targeted", "browser-targeted", "doubao-motion-targeted", "child-hot-configuration-targeted", "child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted", "page-back-targeted") or (
+    if scope in ("runtime-stop-targeted", "workflow-collapse-targeted", "voice-browser-targeted", "browser-targeted", "doubao-motion-targeted", "child-hot-configuration-targeted", "child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted", "page-back-targeted") or (
             scope == "child-task-cards-targeted" and sorted(os.environ.get("SMOKE_TEST_CLASSES", "").split(","))
             == sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES)):
         validation_cwd = Path(__file__).resolve().parents[2]

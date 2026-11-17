@@ -374,10 +374,10 @@ class RunChildTaskAccessTest {
         assertEquals(1, summary().getJSONObject("status_counts").getInt("UNKNOWN"))
     }
     @Test fun historicalUnknownWithoutHandleStaysReadableAndStopNeverClaimsSuccess() {
-        val historical = old.copy(status = ChildTaskStatus.UNKNOWN, detail = "child_result_unconfirmed", text = "saved partial")
+        val historical = old.copy(status = ChildTaskStatus.UNKNOWN, detail = "child_result_unconfirmed")
         var stops = 0
         val access = RunChildTaskAccess("conversation", { listOf(historical) }, { historical.takeIf { row -> row.owner == it } },
-            { emptyList() }, { "" }, { error("must not resume") }, { error("must not pause") },
+            { emptyList() }, { "saved partial" }, { error("must not resume") }, { error("must not pause") },
             { stops++; ChildTaskStop.NOT_FOUND }, { emptySet() })
         val owner = caller("conversation")
         for (body in listOf(
@@ -394,7 +394,9 @@ class RunChildTaskAccessTest {
         assertEquals("child_owner_handle_unavailable", stopped.code); assertEquals(1, stops)
         assertEquals(ChildTaskStatus.UNKNOWN, historical.status)
         assertEquals("child_result_unconfirmed", historical.detail)
-        assertEquals("saved partial", JSONObject((invoke(access, owner, "get_child_task", queryArguments().toString()) as DispatchOutcome.Confirmed).payload).getString("text"))
+        val detailed = JSONObject((invoke(access, owner, "get_child_task", queryArguments().toString()) as DispatchOutcome.Confirmed).payload)
+        assertEquals("", detailed.getString("text"))
+        assertEquals("saved partial", detailed.getString("progress"))
     }
 
     @Test fun missingHandleDoesNotEraseAConfirmedHistoricalResult() {

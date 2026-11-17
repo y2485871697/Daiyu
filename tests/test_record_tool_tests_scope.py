@@ -17,6 +17,25 @@ SPEC.loader.exec_module(recorder)
 
 
 class RecordToolTestsScopeTest(unittest.TestCase):
+    def test_runtime_stop_scope_is_exact_and_preserves_other_coverage(self):
+        classes = recorder.RUNTIME_STOP_PLATFORM_CLASSES
+        self.assertEqual(("app.daiyu.android.terminal.TerminalRegistryTest",
+                          "app.daiyu.android.ChildStopChoiceActivityTest",
+                          "app.daiyu.android.ControllerChildRetentionTest"), classes)
+        for selected in (classes, tuple(reversed(classes))):
+            command, scope = recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))
+            self.assertEqual("runtime-stop-targeted", scope)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.RUNTIME_STOP_MODULES, "-v"], command)
+        self.assertTrue(set(recorder.CHILD_STOP_MODULES) <= set(recorder.RUNTIME_STOP_MODULES))
+        self.assertTrue({"test_terminal_job_status_contract", "test_terminal_reference_contract",
+                         "test_chroot_workspace_command_contract", "test_terminal_command_pager_smoke_scope"} <= set(recorder.RUNTIME_STOP_MODULES))
+        for selected in (classes[:-1], (classes[0],), (*classes, classes[0]), (*classes, "app.daiyu.android.OtherTest")):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))[1])
+        for mode in ("", "compile", "candidate", "daily", "release", "checks", "build"):
+            self.assertEqual("full", recorder.command_for("python3", dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=",".join(classes)))[1])
+        self.assertEqual("child-stop-targeted", recorder.command_for("python3", dict(
+            SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(recorder.CHILD_STOP_PLATFORM_CLASSES)))[1])
+
     def test_timeline_divider_scope_is_exact_and_keeps_full_fallback(self):
         target = "app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest"
         workflow = (ROOT / ".github/workflows/build.yml").read_text()

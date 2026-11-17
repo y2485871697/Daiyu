@@ -14,6 +14,16 @@ from verify_test_refresh import validate_changes, validate_graph, verify_archive
 
 
 class TestRefreshContract(unittest.TestCase):
+    def test_task_scroll_complement_refresh_has_its_own_non_cancelling_queue(self):
+        workflow = (ROOT / '.github/workflows/test-refresh-regression.yml').read_text()
+        concurrency = workflow.split('\nconcurrency:\n', 1)[1].split('\nenv:', 1)[0]
+        lines = concurrency.splitlines()
+        group = [line for line in lines if line.startswith('  group: ')]
+        self.assertEqual(1, len(group))
+        self.assertTrue(group[0].startswith('  group: daiyu-test-refresh-${{ github.ref }}'))
+        self.assertEqual(1, group[0].count("${{ inputs.smoke_classes == 'app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest,app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest,app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest' && '-task-scroll-complement' || '' }}"))
+        self.assertIn('  cancel-in-progress: false', lines)
+
     def test_workspace_gesture_refresh_has_its_own_non_cancelling_queue(self):
         workflow = (ROOT / '.github/workflows/test-refresh-regression.yml').read_text()
         concurrency = workflow.split('\nconcurrency:\n', 1)[1].split('\nenv:', 1)[0]

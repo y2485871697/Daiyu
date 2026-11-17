@@ -1226,3 +1226,79 @@ class TaskScrollFrozenCheckToolsTest(unittest.TestCase):
             finally:
                 os.chdir(old)
 
+class UserMessageEntranceToolTestsScopeTest(unittest.TestCase):
+    CLASSES = (
+        'app.daiyu.android.ui.screens.chat.conversation.UserMessageEntranceTest',
+        'app.daiyu.android.TextSendActivityTest',
+        'app.daiyu.android.ChatSubmissionActivityTest',
+        'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
+    )
+    MODULES = (
+        'test_chat_submission_preview_contract', 'test_composer_surface_color_contract',
+        'test_compression_send_gate_contract', 'test_delegation_batch_and_send_contract',
+        'test_streaming_follow_contract', 'test_streaming_occlusion_contract',
+        'test_reasoning_stream_cost_contract', 'test_workflow_render_isolation_contract',
+        'test_markdown_typing_contract', 'test_chat_resume_scroll_contract',
+        'test_diagnostic_smoke_source', 'test_record_tool_tests_scope',
+        'test_acceptance_tool_receipt', 'test_task_scroll_smoke_scope',
+        'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope',
+    )
+
+    def test_exact_permutations_keep_send_and_scroll_contracts(self):
+        self.assertEqual(self.CLASSES, recorder.USER_MESSAGE_ENTRANCE_PLATFORM_CLASSES)
+        self.assertEqual(self.MODULES, recorder.USER_MESSAGE_ENTRANCE_MODULES)
+        for selected in itertools.permutations(self.CLASSES):
+            command, scope = recorder.command_for('python3', dict(
+                SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=','.join(selected)))
+            self.assertEqual('user-message-entrance-targeted', scope)
+            self.assertEqual(['python3', '-B', '-m', 'unittest', *self.MODULES, '-v'], command)
+            self.assertNotIn('discover', command)
+
+    def test_inexact_filters_and_other_modes_keep_full_fallback(self):
+        raw = ','.join(self.CLASSES)
+        invalid = ['', 'unknown', ' ' + raw, raw + ' ', raw + ',',
+                   raw + ',app.daiyu.android.OtherTest']
+        invalid += [','.join(self.CLASSES[:i] + self.CLASSES[i + 1:]) for i in range(len(self.CLASSES))]
+        invalid += [raw + ',' + name for name in self.CLASSES]
+        full = (['python3', '-B', '-m', 'unittest', 'discover', '-s', 'tests', '-v'], 'full')
+        for selected in invalid:
+            self.assertEqual(full, recorder.command_for('python3', dict(
+                SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=selected)))
+        for mode in ('', 'compile', 'candidate', 'daily', 'release', 'checks', 'build', 'synthetic', 'performance'):
+            self.assertEqual(full, recorder.command_for('python3', dict(
+                SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw)))
+
+    def test_receipt_keeps_exit_code_checked_revision_and_frozen_tool_cwd(self):
+        old = Path.cwd()
+        for code in (0, 9):
+            with tempfile.TemporaryDirectory() as directory:
+                try:
+                    os.chdir(directory)
+                    env = dict(GITHUB_SHA='b' * 40, EXPECTED_SHA='a' * 40,
+                               GITHUB_RUN_ID='42', GITHUB_RUN_ATTEMPT='1', SMOKE_MODE='smoke',
+                               SMOKE_TEST_CLASSES=','.join(self.CLASSES))
+                    with patch.dict(os.environ, env, clear=True), patch.object(
+                            recorder.subprocess, 'check_output', return_value='a' * 40 + '\n'), patch.object(
+                            recorder.subprocess, 'call', return_value=code) as call, patch.object(
+                            recorder.sys, 'stdout', SimpleNamespace(buffer=io.BytesIO())):
+                        self.assertEqual(code, recorder.record('python3'))
+                    receipt = json.loads(Path('tool-evidence/receipt.json').read_text())
+                    self.assertEqual(dict(sha='a' * 40, run_id=42, attempt=1), receipt['identity'])
+                    self.assertEqual('user-message-entrance-targeted', receipt['scope'])
+                    self.assertEqual(code, receipt['exit_code'])
+                    self.assertEqual('b' * 40, receipt['validation_tools_sha'])
+                    call.assert_called_once()
+                    self.assertEqual(receipt['command'], call.call_args.args[0])
+                    base = Path(recorder.__file__).resolve().parents[2]
+                    self.assertEqual(base, call.call_args.kwargs['cwd'])
+                    self.assertEqual(str(base / 'tests') + os.pathsep,
+                                     call.call_args.kwargs['env']['PYTHONPATH'])
+                finally:
+                    os.chdir(old)
+
+    def test_frozen_smoke_gate_runs_this_scope_contract(self):
+        source = (ROOT / '.github/workflows/build.yml').read_text()
+        step = source.split('      - name: 验证冻结补检工具\n', 1)[1].split('      - name:', 1)[0]
+        command = next(line.strip()[len('run: '):] for line in step.splitlines()
+                       if line.strip().startswith('run: '))
+        self.assertIn('test_record_tool_tests_scope.UserMessageEntranceToolTestsScopeTest', command.split())

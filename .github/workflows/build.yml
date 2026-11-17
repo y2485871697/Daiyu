@@ -569,7 +569,7 @@ jobs:
       - name: 验证冻结补检工具
         if: inputs.mode == 'smoke'
         working-directory: .smoke-validation-tools
-        run: PYTHONPATH=tests python3 -B -m unittest test_frozen_smoke_source test_diagnostic_smoke_source test_acceptance_tool_receipt test_cloud_revision test_record_tool_tests_scope.RecordToolTestsScopeTest.test_workflow_node_motion_scope_is_exact_and_retains_full_fallback test_smoke_boot.SourceTests test_usage_statistics_smoke_scope test_child_hot_configuration_scope -v
+        run: PYTHONPATH=tests python3 -B -m unittest test_frozen_smoke_source test_diagnostic_smoke_source test_acceptance_tool_receipt test_cloud_revision test_record_tool_tests_scope.RecordToolTestsScopeTest.test_workflow_node_motion_scope_is_exact_and_retains_full_fallback test_record_tool_tests_scope.UserMessageEntranceToolTestsScopeTest test_smoke_boot.SourceTests test_usage_statistics_smoke_scope test_child_hot_configuration_scope -v
       - name: 核对启动验证源码身份
         env:
           EXPECTED_SHA: ${{ inputs.expected_sha }}

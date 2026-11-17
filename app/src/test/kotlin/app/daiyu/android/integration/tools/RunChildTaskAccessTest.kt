@@ -166,7 +166,7 @@ class RunChildTaskAccessTest {
     @Test fun controlRefusalsKeepTheirDistinctReasonsAndNeverClaimExecution() {
         val owner = caller("conversation")
         for ((outcome, expected) in listOf(ChildTaskStop.ALREADY_SETTLED to "child_task_already_settled",
-                ChildTaskStop.NOT_FOUND to "child_task_not_found")) {
+                ChildTaskStop.NOT_FOUND to "child_owner_handle_unavailable")) {
             val access = RunChildTaskAccess("conversation", { listOf(old) }, { old }, { emptyList() }, { "" },
                 { ChildTaskControlReceipt.STALE }, { ChildTaskControlReceipt.STALE }, { outcome }, { emptySet() })
             val stopped = invoke(access, owner, "control_child_task", arguments("stop").toString()) as DispatchOutcome.NotExecuted
@@ -373,4 +373,50 @@ class RunChildTaskAccessTest {
         state = state.copy(journalUnconfirmed = true)
         assertEquals(1, summary().getJSONObject("status_counts").getInt("UNKNOWN"))
     }
+    @Test fun historicalUnknownWithoutHandleStaysReadableAndStopNeverClaimsSuccess() {
+        val historical = old.copy(status = ChildTaskStatus.UNKNOWN, detail = "child_result_unconfirmed", text = "saved partial")
+        var stops = 0
+        val access = RunChildTaskAccess("conversation", { listOf(historical) }, { historical.takeIf { row -> row.owner == it } },
+            { emptyList() }, { "" }, { error("must not resume") }, { error("must not pause") },
+            { stops++; ChildTaskStop.NOT_FOUND }, { emptySet() })
+        val owner = caller("conversation")
+        for (body in listOf(
+            JSONObject((invoke(access, owner, "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed).payload).getJSONArray("tasks").getJSONObject(0),
+            JSONObject((invoke(access, owner, "get_child_task", queryArguments().toString()) as DispatchOutcome.Confirmed).payload))) {
+            assertEquals("child_owner_handle_unavailable", body.getString("control_unavailable_reason"))
+            assertEquals(0, body.getJSONArray("available_actions").length())
+            assertTrue(body.getBoolean("execution_unconfirmed"))
+            assertFalse(body.getBoolean("live_state_available"))
+            assertTrue(body.isNull("settled")); assertTrue(body.isNull("journal_unconfirmed"))
+            assertEquals("UNKNOWN", body.getString("status"))
+        }
+        val stopped = invoke(access, owner, "control_child_task", arguments("stop").toString()) as DispatchOutcome.NotExecuted
+        assertEquals("child_owner_handle_unavailable", stopped.code); assertEquals(1, stops)
+        assertEquals(ChildTaskStatus.UNKNOWN, historical.status)
+        assertEquals("child_result_unconfirmed", historical.detail)
+        assertEquals("saved partial", JSONObject((invoke(access, owner, "get_child_task", queryArguments().toString()) as DispatchOutcome.Confirmed).payload).getString("text"))
+    }
+
+    @Test fun missingHandleDoesNotEraseAConfirmedHistoricalResult() {
+        val completed = old.copy(status = ChildTaskStatus.COMPLETED, text = "done")
+        val access = RunChildTaskAccess("conversation", { listOf(completed) }, { completed }, { emptyList() }, { "" },
+            { error("must not resume") }, { error("must not pause") }, { error("must not stop") }, { emptySet() })
+        val body = JSONObject((invoke(access, caller("conversation"), "get_child_task", queryArguments().toString()) as DispatchOutcome.Confirmed).payload)
+        assertEquals(0, body.getJSONArray("available_actions").length())
+        assertFalse(body.getBoolean("execution_unconfirmed"))
+        assertEquals("COMPLETED", body.getString("status")); assertEquals("done", body.getString("text"))
+    }
+
+    @Test fun liveOldParentStillReceivesExactlyOneStopRequestWithoutClaimingDrain() {
+        val running = old.copy(status = ChildTaskStatus.RUNNING)
+        var stops = 0
+        val access = RunChildTaskAccess("conversation", { listOf(running) }, { running },
+            { listOf(RetainedChildTask(running, false, false, false)) }, { "" },
+            { error("must not resume") }, { error("must not pause") }, { stops++; ChildTaskStop.REQUESTED }, { emptySet() })
+        val result = invoke(access, caller("conversation"), "control_child_task", arguments("stop").toString()) as DispatchOutcome.Confirmed
+        val body = JSONObject(result.payload)
+        assertEquals("REQUESTED", body.getString("outcome")); assertEquals(1, stops)
+        assertFalse(body.getBoolean("new_request")); assertFalse(body.has("settled"))
+    }
+
 }

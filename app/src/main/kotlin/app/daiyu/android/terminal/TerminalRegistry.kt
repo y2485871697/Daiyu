@@ -220,8 +220,9 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             if(!completed) job.unknown=true
             if(completed) job.reader?.join(200)
             try { saveJob(job) } catch(_:Exception) { job.unknown=true; return dispatchedError(job,"job_metadata_commit_unknown_not_replayed") }
-            return page(job,0,16384).put("ok",completed).put("execution",if(completed && !job.unknown && job.outputComplete) "executed" else "unknown")
-                .apply { if(!completed) put("error","timeout_outcome_unknown_not_replayed") }
+            return page(job,0,16384).put("ok",completed).apply {
+                if(!completed) put("execution","unknown").put("error","timeout_outcome_unknown_not_replayed")
+            }
         } catch(_:Exception) {
             if(job.handle!=null || job.startupCleanup!=null) { job.unknown=true; return dispatchedError(job,"command_delivery_unknown_not_replayed") }
             // No Process was returned: retain the journal, but allow this original registry to drain.
@@ -254,11 +255,16 @@ class TerminalRegistry(context: Context) : AutoCloseable {
                 if (process is RootScopeCommandProcess && process.outputTruncated) job.truncated = true
                 job.script.delete(); job.outputComplete=true
             }
-            try { process.waitFor() }
-            catch (_: InterruptedException) { job.unknown = true; Thread.currentThread().interrupt() }
+            try {
+                // Drain ownership without demanding an exit code: a root scope may close without X.
+                while (!process.waitFor(30_000, TimeUnit.MILLISECONDS)) { }
+            } catch (_: InterruptedException) { job.unknown = true; Thread.currentThread().interrupt() }
+            catch (_: Exception) { job.unknown = true }
             finally {
                 job.pumpFinished = true
-                synchronized(jobs) { releaseFinishedResources(job) }
+                try { synchronized(jobs) { releaseFinishedResources(job) } }
+                catch (_: InterruptedException) { job.unknown = true; Thread.currentThread().interrupt() }
+                catch (_: Exception) { job.unknown = true }
             }
         }.apply { isDaemon=true; name="terminal-log-${job.id}"; start() }
     }

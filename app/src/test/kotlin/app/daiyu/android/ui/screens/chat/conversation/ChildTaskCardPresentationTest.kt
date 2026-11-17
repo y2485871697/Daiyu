@@ -83,6 +83,7 @@ class ChildTaskCardPresentationTest {
                 "child_not_live" to "目标任务已结束，本次未执行停止",
                 "child_task_already_settled" to "目标任务已结束，本次未执行停止",
                 "child_task_not_found" to "未找到目标子任务，本次未执行控制",
+                "child_owner_handle_unavailable" to "子任务记录仍在，但运行句柄已不可用；本次未执行控制，历史请求结果仍需核实",
                 "child_control_unavailable" to "子任务当前无法控制，本次未执行",
                 "child_source_stale" to "子任务引用已过期，本次未执行控制")) {
             val value = ToolCategoryDetails.project("child_control", JSONObject().put("action", "stop").toString(),

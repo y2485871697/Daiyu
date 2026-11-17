@@ -356,6 +356,7 @@ internal object ToolRichDetails {
                 "child_source_stale" -> "子任务引用已过期，本次未执行控制"
                 "child_control_unavailable" -> "子任务当前无法控制，本次未执行"
                 "child_task_not_found" -> "未找到目标子任务，本次未执行控制"
+                "child_owner_handle_unavailable" -> "子任务记录仍在，但运行句柄已不可用；本次未执行控制，历史请求结果仍需核实"
                 "child_not_live", "child_task_already_settled" -> "目标任务已结束，本次未执行" + when (args?.optString("action")) {
                     "stop" -> "停止"
                     "pause" -> "暂停"

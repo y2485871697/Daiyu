@@ -21,7 +21,7 @@ import java.util.concurrent.CountDownLatch
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [35])
 class TerminalRegistryRetentionTest {
-    private class TestProcess(active: Boolean = false, private val output: InputStream = ByteArrayInputStream("actual output".toByteArray())) : Process() {
+    private open class TestProcess(active: Boolean = false, private val output: InputStream = ByteArrayInputStream("actual output".toByteArray())) : Process() {
         private val stopped = CountDownLatch(if (active) 1 else 0)
         override fun getInputStream() = output
         override fun getErrorStream() = ByteArrayInputStream(ByteArray(0))
@@ -289,6 +289,135 @@ class TerminalRegistryRetentionTest {
         assertFalse(JSONObject(File(root, "terminal-jobs/$id.json").readText()).has("completion"))
         assertEquals("executed", registry.inspectJob(id).getString("execution"))
         assertResourcesReleased(id)
+    }
+
+    @Test fun rootExitKnowledgeNeverCrashesOrReplaysInAnyMode() = fixture { root, registry, session ->
+        for ((index, case) in listOf("sync" to null, "async" to null, "daemon" to null, "sync" to 7).withIndex()) {
+            val (mode, exitCode) = case
+            val scope = "daiyu-" + "c".repeat(32)
+            fun frame(type: Char, text: String) = ByteArrayOutputStream().also {
+                val bytes = text.toByteArray()
+                java.io.DataOutputStream(it).apply { writeByte(type.code); writeInt(bytes.size); write(bytes) }
+            }.toByteArray()
+            val exit = if (exitCode == null) ByteArray(0) else ByteArrayOutputStream().also {
+                java.io.DataOutputStream(it).apply { writeByte('X'.code); writeInt(4); writeInt(exitCode shl 8) }
+            }.toByteArray()
+            val frames = frame('S', scope) + frame('H', "DPTY2") + frame('O', "retained output") + exit +
+                frame('D', "DROOT1 scope=$scope kill=1 populated=0 reaped=1 removed=1")
+            val release = CountDownLatch(1)
+            val input = object : ByteArrayInputStream(frames) {
+                override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
+                    release.await()
+                    return super.read(bytes, offset, length)
+                }
+                override fun read(): Int { release.await(); return super.read() }
+            }
+            val process = RootScopeCommandProcess(PtySession(TestProcess(output = input),
+                hostJournal(File(root, "pty-$index"), "command"), true))
+            var starts = 0
+            registry.startProcess = { starts++; process }
+            val result = java.util.concurrent.atomic.AtomicReference<JSONObject>()
+            val failure = java.util.concurrent.atomic.AtomicReference<Throwable>()
+            val worker = Thread {
+                try { result.set(registry.execute("terminal_exec", command(session, index, mode))) }
+                catch (error: Throwable) { failure.set(error) }
+            }.apply { start() }
+            val uncaught = java.util.concurrent.atomic.AtomicReference<Throwable>()
+            try {
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                var pump: Thread? = null
+                while (pump == null && System.nanoTime() < deadline) {
+                    val ids = File(root, "terminal-jobs").listFiles().orEmpty().filter { it.extension == "log" }.map { it.nameWithoutExtension }.toSet()
+                    pump = Thread.getAllStackTraces().keys.firstOrNull { it.isAlive && it.name.removePrefix("terminal-log-") in ids }
+                    if (pump == null) Thread.yield()
+                }
+                assertNotNull("log pump must exist before releasing the root receipt", pump)
+                pump!!.uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, error -> uncaught.set(error) }
+                release.countDown()
+                worker.join(5000)
+                assertFalse(worker.isAlive); assertNull(failure.get())
+                val response = checkNotNull(result.get())
+                val id = response.getString("job_id")
+                awaitPump(id)
+                assertNull("terminal log pump must not leak an exception", uncaught.get())
+                if (mode == "sync") {
+                    assertEquals(response.toString(), if (exitCode == null) "unknown" else "executed", response.getString("execution"))
+                    if (exitCode == null) assertTrue(response.isNull("exit_code")) else assertEquals(exitCode, response.getInt("exit_code"))
+                }
+                val page = registry.inspectJob(id)
+                assertEquals("retained output", page.getString("stdout"))
+                assertEquals(if (exitCode == null) "unknown" else "executed", page.getString("execution"))
+                if (exitCode == null) assertTrue(page.isNull("exit_code")) else assertEquals(exitCode, page.getInt("exit_code"))
+                assertTrue(page.getBoolean("scope_drain_confirmed"))
+                assertResourcesReleased(id)
+                assertEquals(exitCode != null, JSONObject(File(root, "terminal-jobs/$id.json").readText()).has("completion"))
+                assertEquals(id, registry.execute("terminal_exec", command(session, index, mode)).getString("job_id"))
+                assertEquals(1, starts)
+            } finally { release.countDown(); worker.join(5000); process.destroy() }
+        }
+    }
+
+    @Test fun interruptedPumpCleanupKeepsUnknownOwnershipWithoutUncaughtException() = fixture { _, registry, session ->
+        val uncaught = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        val process = object : TestProcess(output = object : InputStream() {
+            override fun read(): Int {
+                Thread.currentThread().uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, error -> uncaught.set(error) }
+                return -1
+            }
+        }) {
+            override fun waitFor(timeout: Long, unit: TimeUnit): Boolean {
+                if (Thread.currentThread().name.startsWith("terminal-log-")) throw InterruptedException("injected wait interruption")
+                return true
+            }
+            override fun isAlive(): Boolean {
+                if (Thread.currentThread().isInterrupted) throw InterruptedException("interrupted cleanup")
+                return false
+            }
+        }
+        registry.startProcess = { process }
+        val result = registry.execute("terminal_exec", command(session, 0, "async"))
+        val id = result.getString("job_id")
+        awaitPump(id)
+        assertNull(uncaught.get())
+        assertEquals("unknown", registry.inspectJob(id).getString("execution"))
+        registry.close()
+        assertTrue(registry.awaitOrdinaryTermination(5000))
+        assertResourcesReleased(id)
+    }
+
+    @Test fun failedOutputRetainsPrefixAndOwnershipUntilProcessActuallyEnds() = fixture { root, registry, session ->
+        val failed = CountDownLatch(1)
+        val uncaught = java.util.concurrent.atomic.AtomicReference<Throwable>()
+        val input = object : InputStream() {
+            private var sent = false
+            override fun read(): Int = throw java.io.IOException("use bulk read")
+            override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
+                Thread.currentThread().uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, error -> uncaught.set(error) }
+                if (!sent) {
+                    sent = true
+                    val prefix = "saved prefix".toByteArray()
+                    prefix.copyInto(bytes, offset)
+                    return prefix.size
+                }
+                failed.countDown()
+                throw java.io.IOException("injected output failure")
+            }
+        }
+        val process = TestProcess(active = true, output = input)
+        registry.startProcess = { process }
+        val id = registry.execute("terminal_exec", command(session, 0, "async")).getString("job_id")
+        try {
+            assertTrue(failed.await(5, TimeUnit.SECONDS))
+            assertTrue(process.isAlive)
+            val pending = registry.inspectJob(id)
+            assertEquals("saved prefix", pending.getString("stdout")); assertEquals("unknown", pending.getString("execution"))
+            process.destroy()
+            awaitPump(id)
+            val completed = registry.inspectJob(id)
+            assertEquals("saved prefix", completed.getString("stdout")); assertEquals("unknown", completed.getString("execution"))
+            assertNull(uncaught.get()); assertResourcesReleased(id)
+            assertFalse(JSONObject(File(root, "terminal-jobs/$id.json").readText()).has("completion"))
+        } finally { process.destroy() }
     }
 
 }

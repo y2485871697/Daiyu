@@ -577,18 +577,33 @@ class TerminalRegistryTest:InstrumentationTestCase() {
         }.toByteArray()
         val bytes = frame('S', scope) + frame('H', "DPTY2") +
             frame('D', "DROOT1 scope=$scope kill=1 populated=0 reaped=1 removed=1")
-        val process = RootScopeCommandProcess(PtySession(FakeProcess(ByteArrayInputStream(bytes)),
+        val release = CountDownLatch(1)
+        val input = object : ByteArrayInputStream(bytes) {
+            override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
+                release.await()
+                return super.read(bytes, offset, length)
+            }
+            override fun read(): Int { release.await(); return super.read() }
+        }
+        val process = RootScopeCommandProcess(PtySession(FakeProcess(input),
             OperationJournal(File(root, "pty"), "command"), true))
+        val uncaught = AtomicReference<Throwable>()
         try {
             registry.startRootProcess = { _, _, _ -> process }
             val id = registry.execute("terminal_exec", command(open(registry))).getString("job_id")
+            val pump = Thread.getAllStackTraces().keys.single { it.name == "terminal-log-$id" }
+            pump.uncaughtExceptionHandler = Thread.UncaughtExceptionHandler { _, error -> uncaught.set(error) }
+            release.countDown()
             assertTrue(process.waitFor(2000, TimeUnit.MILLISECONDS))
+            pump.join(2000)
+            assertFalse("log pump must terminate", pump.isAlive)
+            assertNull("unknown exit must not crash the application", uncaught.get())
             val page = registry.inspectJob(id)
             assertTrue(page.isNull("exit_code")); assertEquals("unknown", page.getString("execution"))
             assertTrue(page.getBoolean("scope_drain_confirmed"))
             assertTrue(registry.stopOwnedJob(id).getBoolean("stopped"))
             registry.close(); assertTrue(registry.awaitOrdinaryTermination(2000))
-        } finally { registry.close(); root.deleteRecursively() }
+        } finally { release.countDown(); registry.close(); root.deleteRecursively() }
     }
 
 }

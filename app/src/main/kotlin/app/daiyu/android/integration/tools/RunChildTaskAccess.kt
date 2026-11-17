@@ -42,7 +42,7 @@ internal class RunChildTaskAccess(
         }
     }, object : RegisteredTool {
         override val definition = ToolDefinition("inspect_child_tasks", 1,
-            "查询本会话已有子任务的总数和状态汇总，附近期任务的完整身份供定向读取或控制。总数与状态覆盖完整会话，不限身份列表的近期窗口。不返回子代理配置，配置使用list_subagents；不读取单任务进度、结果正文或诊断详情，这些内容使用get_child_task。无参数，只读，不自动继续或重派。",
+            "查询本会话已有子任务的总数和状态汇总，附近期任务的完整身份供定向读取或控制。总数与状态覆盖完整会话，不限身份列表的近期窗口。snapshot_available=false表示没有可用运行快照，available_actions为空时仅可读取历史，不要反复停止或自动重派。不能据此确认远端请求已停止。不返回子代理配置，配置使用list_subagents；不读取单任务进度、结果正文或诊断详情，这些内容使用get_child_task。无参数，只读，不自动继续或重派。",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(emptyList()))
         override fun prepare(arguments: ToolArguments) = PreparedTool.contextual { context ->
             if (context.owner.conversationId.value != conversationId || context.cancelled())
@@ -72,6 +72,7 @@ internal class RunChildTaskAccess(
                     .put("task_group_id", row.owner.taskGroupId).put("generation", row.owner.generation)
                     .put("child_run_id", row.owner.childRunId).put("assistant_message_id", row.owner.assistantMessageId)
                     .put("parent_message_id", row.parentMessageId).put("parent_owner_id", row.parentOwnerId)
+                    .withControlState(row, state)
                     .put("expected_revision", row.revision).put("original_role", row.originalRole?.name ?: JSONObject.NULL)
                     .put("assigned_profile_id", row.assignedProfileId).put("agent_name", row.display?.agentName ?: JSONObject.NULL).put("profile_id", row.profileId).put("status", row.status.name)
                     .put("queue_state", state?.let { if (it.settled) ChildTaskQueueState.FINISHED.name else it.queueState.name }).put("pause_state", state?.let { if (it.settled) ChildTaskPauseState.FINISHED.name else it.pauseState.name }).put("snapshot_available", state != null).put("live_state_available", state != null && !state.settled)
@@ -89,7 +90,7 @@ internal class RunChildTaskAccess(
         }
     }, object : RegisteredTool {
         override val definition = ToolDefinition("control_child_task", 1,
-            "定向继续、暂停或停止本会话的现存子任务，允许控制旧主回复和旧配置的任务。继续不新建任务，不更换任务ID；已停止或排空任务不能重启。必须先inspect取得完整身份与修订，恢复主代理本身不会自动调用。配置暂停后可在continue中指定当前配置内同原职责的target_profile_id接手；无同职责候选则保持暂停。图片和视频生成不支持继续或接手，切组后即使模型相同也只能明确重新委派。若放弃暂停任务而重新委派，先stop对应旧任务；REQUESTED不是停止完成，须inspect确认settled且journal_unconfirmed=false后，才可用最新修订新派。不得留下暂停旧任务；同职责接手则保留原任务，不停止。",
+            "定向继续、暂停或停止本会话的现存子任务，允许控制旧主回复和旧配置的任务。继续不新建任务，不更换任务ID；已停止或排空任务不能重启。必须先inspect取得完整身份与修订，恢复主代理本身不会自动调用。配置暂停后可在continue中指定当前配置内同原职责的target_profile_id接手；无同职责候选则保持暂停。图片和视频生成不支持继续或接手，切组后即使模型相同也只能明确重新委派。若放弃暂停任务而重新委派，先stop对应旧任务；无运行句柄时返回child_owner_handle_unavailable，表示记录仍在但本次未发送停止，不能确认历史请求已停止，不得自动重派。REQUESTED不是停止完成，须inspect确认settled且journal_unconfirmed=false后，才可用最新修订新派。不得留下暂停旧任务；同职责接手则保留原任务，不停止。",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("parent_run_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("task_group_id", ArgumentType.Text(200, minimumLength = 1)),
@@ -123,7 +124,7 @@ internal class RunChildTaskAccess(
                 }
                 if (outcome in setOf("STALE", "NOT_FOUND", "ALREADY_SETTLED", "CONFIGURATION_REQUIRED", "ROLE_MISMATCH")) ExecutionReceipt.NotExecuted(when (outcome) {
                     "STALE" -> "child_control_unavailable"
-                    "NOT_FOUND" -> "child_task_not_found"
+                    "NOT_FOUND" -> "child_owner_handle_unavailable"
                     "CONFIGURATION_REQUIRED" -> "child_matching_profile_required"
                     "ROLE_MISMATCH" -> "child_takeover_role_mismatch"
                     else -> "child_task_already_settled"
@@ -163,6 +164,7 @@ internal class RunChildTaskAccess(
                 ExecutionReceipt.Confirmed(JSONObject().put("child_run_id", owner.childRunId)
                     .put("parent_message_id", row.parentMessageId).put("parent_owner_id", row.parentOwnerId)
                     .put("expected_revision", row.revision).put("profile_id", row.profileId)
+                    .withControlState(row, state)
                     .put("assigned_profile_id", row.assignedProfileId).put("original_role", row.originalRole?.name ?: JSONObject.NULL)
                     .put("agent_name", row.display?.agentName ?: JSONObject.NULL).put("status", row.status.name)
                     .put("queue_state", state?.let { if (it.settled) ChildTaskQueueState.FINISHED.name else it.queueState.name }).put("pause_state", state?.let { if (it.settled) ChildTaskPauseState.FINISHED.name else it.pauseState.name }).put("settled", state?.settled ?: JSONObject.NULL)
@@ -178,5 +180,17 @@ internal class RunChildTaskAccess(
             }
         }
     })
+    private fun JSONObject.withControlState(row: ChildTaskRecord, state: RetainedChildTask?): JSONObject {
+        val reason = when {
+            state == null -> "child_owner_handle_unavailable"
+            state.settled -> "child_task_already_settled"
+            else -> null
+        }
+        put("control_unavailable_reason", reason ?: JSONObject.NULL)
+        if (reason != null) put("available_actions", JSONArray())
+        put("execution_unconfirmed", row.status == ChildTaskStatus.UNKNOWN || state?.journalUnconfirmed == true ||
+            (state == null && row.status in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING)))
+        return this
+    }
     companion object { const val CAPABILITY = "delegation.text.retained_control" }
 }

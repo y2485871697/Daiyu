@@ -618,10 +618,10 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     fun testUnifiedHeaderKeepsFailureStopAndUnknownVisible() {
         prepare()
         for ((status, state, label) in listOf(
-            Triple(RunStatus.COMPLETED, WorkStepState.UNKNOWN, "1步待确认"),
-            Triple(RunStatus.COMPLETED, WorkStepState.FAILED, "1步失败"),
-            Triple(RunStatus.STOPPED, WorkStepState.UNKNOWN, "1步待确认 · 已停止"),
-            Triple(RunStatus.INTERRUPTED, WorkStepState.UNKNOWN, "1步待确认 · 已中断"))) {
+            Triple(RunStatus.COMPLETED, WorkStepState.UNKNOWN, "结果未确认"),
+            Triple(RunStatus.COMPLETED, WorkStepState.FAILED, "失败"),
+            Triple(RunStatus.STOPPED, WorkStepState.UNKNOWN, "已停止"),
+            Triple(RunStatus.INTERRUPTED, WorkStepState.UNKNOWN, "已中断"))) {
             val source = message(listOf(tool("t1")), listOf(ReportedReasoning("r1", "first summary"))).copy(status = status)
             val turn = ChatTurnMapper.map(listOf(source), toolState = { _, _ -> state }).single() as ChatTurnUi.Assistant
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -629,7 +629,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             } } }
             awaitHeader()
             ui.onNodeWithText("工作流程").assertIsDisplayed()
-            ui.onNodeWithText("已完成1步 · $label").assertIsDisplayed()
+            ui.onNodeWithText("已完成2步 · $label").assertIsDisplayed()
             ui.onNodeWithText("已完成2步").assertDoesNotExist()
         }
     }
@@ -651,18 +651,18 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             AssistantTurn(turn, ChatScreenActions())
         } } }
         awaitHeader()
-        ui.onNodeWithText("已完成3步 · 1步待确认").assertIsDisplayed()
+        ui.onNodeWithText("已完成5步 · 结果未确认").assertIsDisplayed()
         assertDisclosure("work-process-header", expanded = false)
         mainThread { turn = project(WorkStepState.UNKNOWN, WorkStepState.FAILED) }
-        ui.onNodeWithText("已完成3步 · 1步失败 · 1步待确认").assertIsDisplayed()
+        ui.onNodeWithText("已完成5步 · 失败").assertIsDisplayed()
         assertDisclosure("work-process-header", expanded = false)
         ui.onNodeWithTag("work-process-header").performClick()
         ui.onNodeWithTag("tool-step-header:unknown").assertIsDisplayed()
         ui.onNodeWithTag("tool-step-header:failed").assertIsDisplayed()
         ui.onNodeWithTag("work-process-header").performClick()
         mainThread { turn = project(WorkStepState.NOT_EXECUTED, WorkStepState.FAILED) }
-        ui.onNodeWithText("已完成3步 · 1步失败").assertIsDisplayed()
-        ui.onNodeWithText("已完成3步 · 1步失败 · 1步待确认").assertDoesNotExist()
+        ui.onNodeWithText("已完成5步 · 失败").assertIsDisplayed()
+        ui.onNodeWithText("已完成5步 · 结果未确认").assertDoesNotExist()
         assertDisclosure("work-process-header", expanded = false)
     }
     fun testToolOnlyRunningWorkflowStartsExpanded() {

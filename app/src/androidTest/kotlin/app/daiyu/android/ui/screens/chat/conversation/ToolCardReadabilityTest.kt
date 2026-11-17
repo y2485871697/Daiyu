@@ -416,7 +416,7 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
         val work = WorkProcessUi(listOf(WorkSegmentUi(steps = states.mapIndexed { index, state ->
             WorkStepUi("outcome-$index", "operation", "", state)
         })), "已暂停", running = true, controlActivity = ToolActivityUi.PAUSED)
-        val expected = "已完成3步 · 1步失败 · 1步待确认 · 已暂停"
+        val expected = "已完成5步 · 已暂停"
         for (width in listOf(272, 300, 360)) for (fontScale in listOf(1f, 1.3f)) {
             mainThread { activity.setContent {
                 CompositionLocalProvider(LocalDensity provides Density(phoneDensity, fontScale)) {
@@ -431,7 +431,11 @@ class ToolCardReadabilityTest : WiredActivityTestCase() {
             for (line in 0 until measured.lineCount) assertFalse(measured.isLineEllipsized(line))
             assertEquals(expected.length, measured.getLineEnd(measured.lineCount - 1, visibleEnd = true))
             val titleBounds = ui.onNodeWithText("工作流程", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            assertTrue(node.fetchSemanticsNode().boundsInRoot.top >= titleBounds.bottom - 1f)
+            val statusBounds = node.fetchSemanticsNode().boundsInRoot
+            if (width >= 300 && fontScale < 1.2f) {
+                assertTrue(statusBounds.left >= titleBounds.right - 1f)
+                assertTrue(kotlin.math.abs(statusBounds.center.y - titleBounds.center.y) <= 1f)
+            } else assertTrue(statusBounds.top >= titleBounds.bottom - 1f)
         }
     }
 }

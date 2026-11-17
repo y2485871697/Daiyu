@@ -219,14 +219,15 @@ class ToolCardHtmlContractTest(unittest.TestCase):
 
     def test_outcome_count_headers_wrap_and_have_real_layout_regression(self):
         shell = (CHAT / "WorkProcessCard.kt").read_text()
-        self.assertIn('val stacked = work.failedStepCount > 0 || work.unconfirmedStepCount > 0 ||', shell)
+        self.assertIn('val stacked = maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f', shell)
+        self.assertNotIn('val stacked = work.failedStepCount', shell)
         readability = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolCardReadabilityTest.kt').read_text()
         self.assertIn('fun testFailedAndUnconfirmedHeaderCountsNeverEllipsize', readability)
         self.assertIn('measured.hasVisualOverflow', readability)
         self.assertIn('measured.isLineEllipsized(line)', readability)
         regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ReasoningWorkflowTest.kt').read_text()
         self.assertIn('fun testMixedResultCountsUpdateWithoutReopeningOrDuplicatingRows', regression)
-        self.assertIn('已完成3步 · 1步失败 · 1步待确认', regression)
+        self.assertIn('已完成5步 · 失败', regression)
 
 if __name__ == "__main__":
     unittest.main()

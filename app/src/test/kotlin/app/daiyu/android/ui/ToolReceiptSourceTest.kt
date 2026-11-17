@@ -87,7 +87,7 @@ class ToolReceiptSourceTest {
                 assertEquals(WorkStepState.UNKNOWN, step.state)
                 assertEquals(ToolActivityUi.UNKNOWN, step.activity)
                 assertEquals(1, flow.unconfirmedStepCount)
-                assertEquals(0, flow.completedStepCount)
+                assertEquals(1, flow.completedStepCount)
             }
         }
     }
@@ -170,6 +170,44 @@ class ToolReceiptSourceTest {
         val onlyUser = historical.copy(historySegments = listOf(MessageHistorySegment(
             MessageId("user"), Message.USER_ROLE, listOf(MessageBlock.Text("user", "supplement")))))
         assertTrue(source(onlyUser).isEmpty())
+    }
+
+    @Test fun exactPendingReceiptReadKeepsReturnedToolsExecutingAfterTheirActiveCallHasCleared() {
+        assertFalse(ToolActivityUi.entries.any { it.label == "确认中" || it.label == "读取结果" })
+        for (status in listOf(RunStatus.RUNNING, RunStatus.COMPLETED, RunStatus.FAILED)) {
+            for (result in listOf("{\"ok\":true}", "{\"ok\":false}", "not a receipt", "")) {
+                val returned = (message.blocks.single() as MessageBlock.Tool).copy(result = result)
+                val source = message.copy(status = status, blocks = listOf(returned))
+                for (live in listOf(null, ExecutionState(ExecutionPhase.BOUNDARY),
+                    ExecutionState(ExecutionPhase.STREAMING), ExecutionState(ExecutionPhase.TERMINAL))) {
+                    val pending = RetainedToolOutcomes.pendingProjection(source, returned, live, receiptPending = true)
+                    assertEquals(ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING), pending)
+                    assertEquals(pending, RetainedToolOutcomes.pendingProjection(status, returned, live, receiptPending = true))
+                    assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN),
+                        RetainedToolOutcomes.pendingProjection(source, returned, live, receiptPending = false))
+                }
+            }
+        }
+    }
+
+    @Test fun pendingReadCannotHideStoppedInterruptedReconnectingOrUnreturnedUnknownResults() {
+        val returned = (message.blocks.single() as MessageBlock.Tool).copy(result = "done")
+        for (status in listOf(RunStatus.STOPPED, RunStatus.INTERRUPTED)) {
+            assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN),
+                RetainedToolOutcomes.pendingProjection(status, returned, receiptPending = true))
+        }
+        assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN),
+            RetainedToolOutcomes.pendingProjection(RunStatus.RUNNING, returned,
+                ExecutionState(ExecutionPhase.RECONNECTING), receiptPending = true))
+        assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN),
+            RetainedToolOutcomes.pendingProjection(RunStatus.RUNNING, returned, stopping = true, receiptPending = true))
+        assertNull(RetainedToolOutcomes.pendingProjection(message, returned.copy(result = null), receiptPending = true))
+        assertNull(RetainedToolOutcomes.pendingProjection(message.copy(role = Message.USER_ROLE), returned, receiptPending = true))
+        for ((live, activity) in listOf(ExecutionState(ExecutionPhase.PAUSED) to ToolActivityUi.PAUSED,
+            ExecutionState(ExecutionPhase.BOUNDARY, pauseRequested = true) to ToolActivityUi.PAUSING)) {
+            assertEquals(ToolReceiptUi(WorkStepState.PENDING, activity),
+                RetainedToolOutcomes.pendingProjection(message, returned, live, receiptPending = true))
+        }
     }
 
 }

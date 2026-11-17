@@ -24,6 +24,19 @@ class ReceiptSnapshotContract(unittest.TestCase):
         self.assertIn('status != RunStatus.RUNNING', pending)
         self.assertNotIn('WorkStepState.OK', pending)
         self.assertNotIn('JSONObject', pending)
+    def test_pending_io_is_explicit_and_fenced_for_both_display_paths(self):
+        host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
+        visible = host.split('val currentReceipts =', 1)[1].split('val visibleChildNames', 1)[0]
+        self.assertIn('val receiptPending = !toolReceiptReadFailed && toolReceiptRead?.isActive == true', visible)
+        self.assertIn('toolReceiptRequested?.canDisplayFor(currentReceipts) == true', visible)
+        self.assertEqual(2, visible.count('receiptPending = receiptPending'))
+        source = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/RetainedToolOutcomes.kt').read_text()
+        pending = source.split('fun pendingProjection(', 1)[1].split('fun projectionReader(database:', 1)[0]
+        self.assertIn('!receiptPending || projected.activity != ToolActivityUi.UNKNOWN', pending)
+        self.assertIn('return ToolReceiptUi(WorkStepState.PENDING, activity)', pending)
+        self.assertNotIn('WorkStepState.OK', pending)
+        self.assertNotIn('读取结果', pending)
+
     def test_display_fallback_uses_same_exact_live_aware_unknown_projection(self):
         activity = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolActivityUi.kt').read_text()
         self.assertNotIn('READING', activity)

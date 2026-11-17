@@ -448,4 +448,70 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         awaitReceipts()
     }
 
+    fun testNormalReturnedResultsStayExecutingAcrossBothHostProjectionPathsUntilTheirExactReadCompletes() {
+        mainThread { activity.select(fixture.database.conversations().single()) }
+        awaitReceipts()
+        for (useDisplay in listOf(false, true)) for (status in listOf(RunStatus.RUNNING, RunStatus.COMPLETED)) {
+            val pending = Job()
+            mainThread {
+                @Suppress("UNCHECKED_CAST")
+                val previous = field("shown").get(activity) as List<Pair<Long, Message>>
+                @Suppress("UNCHECKED_CAST")
+                val displayState = field("displayWindow\$delegate").get(activity) as androidx.compose.runtime.MutableState<MessageDisplayWindow?>
+                val previousDisplay = displayState.value
+                try {
+                    val normal = previous.map { (row, message) ->
+                        row to if (message.id == historical.id) message.copy(status = status) else message }
+                    field("shown").set(activity, normal)
+                    displayState.value = if (useDisplay) MessageDisplayWindow(normal.map { (row, message) ->
+                        row to MessageDisplayRow(message.id, message.conversationId, message.runId, message.role,
+                            message.blocks, message.status, message.error, message.createdAt, emptyList()) }) else null
+                    field("toolReceiptRead").get(activity)?.let { (it as Job).cancel() }
+                    field("toolReceiptKey").set(activity, null)
+                    field("toolReceiptSnapshot").set(activity, null)
+                    field("toolReceiptReadFailed").set(activity, false)
+                    field("toolReceiptRead").set(activity, pending)
+                    field("toolReceiptRequested").set(activity, currentKey())
+                    field("toolReceiptRequest").set(activity, Any())
+                    repeat(3) {
+                        call("publishChat")
+                        assertEquals(List(3) { WorkStepState.PENDING }, steps().take(3).map { it.state })
+                        assertEquals(List(3) { ToolActivityUi.RUNNING }, steps().take(3).map { it.activity })
+                        assertTrue(pending.isActive)
+                    }
+                    assertEquals(if (status == RunStatus.RUNNING) WorkStepState.PENDING else WorkStepState.UNKNOWN,
+                        steps().last().state)
+                    val snapshot = RetainedToolOutcomes.Snapshot.read(fixture.database, normal.map { it.second }, displayState.value)
+                    val request = checkNotNull(field("toolReceiptRequest").get(activity))
+                    val complete = MainActivity::class.java.declaredMethods.single { it.name == "completeToolReceipts" }
+                        .apply { isAccessible = true }
+                    complete.invoke(activity, request, currentKey(), snapshot)
+                    assertEquals(expected, steps().map { it.state })
+                    assertEquals(listOf(ToolActivityUi.SUCCESS, ToolActivityUi.FAILED, ToolActivityUi.NOT_EXECUTED,
+                        ToolActivityUi.UNKNOWN), steps().map { it.activity })
+                    field("toolReceiptKey").set(activity, null)
+                    field("toolReceiptSnapshot").set(activity, null)
+                    field("toolReceiptRead").set(activity, pending)
+                    field("toolReceiptRequested").set(activity, currentKey())
+                    field("toolReceiptRequest").set(activity, Any())
+                    field("toolReceiptReadFailed").set(activity, true)
+                    call("publishChat")
+                    assertEquals(List(3) { WorkStepState.UNKNOWN }, steps().take(3).map { it.state })
+                    assertEquals(List(3) { ToolActivityUi.UNKNOWN }, steps().take(3).map { it.activity })
+                    assertEquals(0, fixture.opens.get())
+                } finally {
+                    pending.cancel()
+                    field("shown").set(activity, previous)
+                    displayState.value = previousDisplay
+                    field("toolReceiptReadFailed").set(activity, false)
+                    field("toolReceiptRead").set(activity, null)
+                    field("toolReceiptRequested").set(activity, null)
+                    field("toolReceiptRequest").set(activity, null)
+                    call("publishChat")
+                }
+            }
+            awaitReceipts()
+        }
+    }
+
 }

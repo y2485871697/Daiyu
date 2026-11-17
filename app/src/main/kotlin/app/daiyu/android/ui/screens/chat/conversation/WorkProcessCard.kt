@@ -108,8 +108,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     }.border(1.dp, colors.line, shape).testTag("work-process-surface")) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val summaryWidth = maxWidth * .56f
-            val stacked = work.failedStepCount > 0 || work.unconfirmedStepCount > 0 ||
-                maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f
+            val stacked = maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f
             Row(Modifier.fillMaxWidth().testTag("work-process-header").then(disclosure.headerModifier).heightIn(min = 44.dp).conversationClickable {
                 disclosure.toggle(opening = !expanded)
                 overrideFinished = finishing; overrideStopped = stopped; expandedOverride = !expanded
@@ -127,8 +126,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                         style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 17.sp))
                 }
                 if (!stacked) Text(progressSummary, Modifier.widthIn(max = summaryWidth),
-                    color = colors.muted, style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 17.sp),
-                    maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    color = colors.muted, style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 17.sp))
                 Icon(DaiyuIcons.ChevronRight,
                     if (expanded) "收起$title" else "展开$title", Modifier.size(14.dp).settingsDisclosureRotation(expanded), tint = colors.muted)
             }

@@ -7608,6 +7608,7 @@ class MainActivity : ComponentActivity() {
     private var toolReceiptKey: ToolReceiptKey? = null
     private var toolReceiptSnapshot: app.daiyu.android.ui.RetainedToolOutcomes.Snapshot? = null
     private var toolReceiptRead: kotlinx.coroutines.Job? = null
+    private var toolReceiptReadFailed = false
     private var toolReceiptRequested: ToolReceiptKey? = null
     private var toolReceiptRequest: Any? = null
     private fun currentToolReceiptKey() = ToolReceiptKey(selected?.id, controller.dataRevision, editorGeneration,
@@ -7644,6 +7645,7 @@ class MainActivity : ComponentActivity() {
         val rows = shown.map { it.second }
         val display = displayWindow
         val read = toolReceiptReader
+        toolReceiptReadFailed = false
         toolReceiptRead = lifecycleScope.launch {
             try {
                 val snapshot = withContext(Dispatchers.IO) {
@@ -7652,7 +7654,10 @@ class MainActivity : ComponentActivity() {
                 completeToolReceipts(request, key, snapshot)
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) {
-                // Keep unproven results pending; a later publication can retry the read.
+                if (activityUsable() && toolReceiptRequest === request && key.canDisplayFor(currentToolReceiptKey())) {
+                    toolReceiptReadFailed = true
+                    publishChat()
+                }
             } finally {
                 if (toolReceiptRequest === request) {
                     toolReceiptRead = null; toolReceiptRequested = null; toolReceiptRequest = null
@@ -7781,6 +7786,8 @@ class MainActivity : ComponentActivity() {
             val reconnects = visibleTimeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
             val oldReconnects = chatState.timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
             val currentReceipts = currentToolReceiptKey()
+            val receiptPending = !toolReceiptReadFailed && toolReceiptRead?.isActive == true &&
+                toolReceiptRequested?.canDisplayFor(currentReceipts) == true
             val retainedReceipts = toolReceiptKey?.let { loaded ->
                 toolReceiptSnapshot?.displayReader(loaded, currentReceipts, controller::runState, controller::runStopping)
             }
@@ -7791,7 +7798,8 @@ class MainActivity : ComponentActivity() {
                 retainedReceipts?.invoke(message, block) ?: if (receiptsReady) null else {
                     val live = displayLiveOwner(WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value))
                     app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(message, block,
-                        liveState = live?.let(controller::runState), stopping = live?.let(controller::runStopping) == true)
+                        liveState = live?.let(controller::runState), stopping = live?.let(controller::runStopping) == true,
+                        receiptPending = receiptPending)
                 }
             }
             val retainedDisplayReceipts = toolReceiptKey?.let { loaded ->
@@ -7807,7 +7815,8 @@ class MainActivity : ComponentActivity() {
                     val live = displayLiveOwner(owner)
                     displayReceiptSources[owner]?.let { source ->
                         app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(source.status, block,
-                            liveState = live?.let(controller::runState), stopping = live?.let(controller::runStopping) == true)
+                            liveState = live?.let(controller::runState), stopping = live?.let(controller::runStopping) == true,
+                            receiptPending = receiptPending)
                     }
                 }
             }

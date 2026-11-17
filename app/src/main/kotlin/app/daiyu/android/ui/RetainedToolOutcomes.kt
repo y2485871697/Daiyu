@@ -206,19 +206,29 @@ internal object RetainedToolOutcomes {
         }
     }
 
-    /** Missing evidence is not execution; only an exact live active call can supply activity. */
+    /** Receipt IO is presentation-only; only exact durable evidence can confirm an outcome. */
     fun pendingProjection(message: Message, block: MessageBlock.Tool,
-        liveState: ExecutionState? = null, stopping: Boolean = false): ToolReceiptUi? =
-        if (message.role != Message.ASSISTANT_ROLE) null else pendingProjection(message.status, block, liveState, stopping)
+        liveState: ExecutionState? = null, stopping: Boolean = false, receiptPending: Boolean = false): ToolReceiptUi? =
+        if (message.role != Message.ASSISTANT_ROLE) null else
+            pendingProjection(message.status, block, liveState, stopping, receiptPending)
 
     // The caller must match conversation/run/message before supplying liveState.
     fun pendingProjection(status: RunStatus, block: MessageBlock.Tool,
-        liveState: ExecutionState? = null, stopping: Boolean = false): ToolReceiptUi? {
+        liveState: ExecutionState? = null, stopping: Boolean = false, receiptPending: Boolean = false): ToolReceiptUi? {
         if (block.result == null) return null
-        if (status != RunStatus.RUNNING || liveState == null || block.invocation.id !in liveState.activeToolCalls)
-            return ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN)
-        return toolReceiptPresentation(ToolDisposition.UNKNOWN, liveOwner = true, phase = liveState.phase,
+        val projected = if (status != RunStatus.RUNNING || liveState == null || block.invocation.id !in liveState.activeToolCalls)
+            ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN)
+        else toolReceiptPresentation(ToolDisposition.UNKNOWN, liveOwner = true, phase = liveState.phase,
             pauseRequested = liveState.pauseRequested, stopRequested = stopping, runStatus = status, activeCall = true)
+        if (!receiptPending || projected.activity != ToolActivityUi.UNKNOWN || stopping ||
+            status == RunStatus.STOPPED || status == RunStatus.INTERRUPTED || liveState?.phase == ExecutionPhase.RECONNECTING)
+            return projected
+        val activity = when {
+            liveState?.phase == ExecutionPhase.PAUSED -> ToolActivityUi.PAUSED
+            liveState?.pauseRequested == true -> ToolActivityUi.PAUSING
+            else -> ToolActivityUi.RUNNING
+        }
+        return ToolReceiptUi(WorkStepState.PENDING, activity)
     }
 
     fun projectionReader(database: ConversationDatabase, messages: List<Message>,

@@ -29,11 +29,11 @@ class WorkProcessProgressTest {
         assertEquals("工作流程", WorkProcessUi(emptyList(), "已完成").title)
     }
 
-    @Test fun onlySuccessfulToolReceiptsContributeToCompletedSteps() {
+    @Test fun allSettledToolReceiptsContributeWithoutChangingTheirOutcomes() {
         val work = WorkProcessUi(listOf(WorkSegmentUi(narration = "not a step",
             steps = WorkStepState.entries.map { step(it) }, reasoning = before)), "失败")
-        assertEquals(2, work.completedStepCount)
-        assertEquals("已完成2步 · 1步失败 · 1步待确认", work.progressSummary)
+        assertEquals(5, work.completedStepCount)
+        assertEquals("已完成5步 · 失败", work.progressSummary)
         assertEquals(1, work.failedStepCount)
         assertEquals(1, work.unconfirmedStepCount)
     }
@@ -58,7 +58,7 @@ class WorkProcessProgressTest {
     @Test fun returnedTextWithoutTrustedReceiptDoesNotBecomeSuccessful() {
         val work = process(source(RunStatus.COMPLETED))
         assertEquals(WorkStepState.UNKNOWN, work.segments.flatMap { it.steps }.single().state)
-        assertEquals("已完成1步 · 1步待确认", work.progressSummary)
+        assertEquals("已完成2步 · 结果未确认", work.progressSummary)
     }
 
     @Test fun liveSequenceCountsOnlyClosedStepsAndSwitchesCurrentPhase() {
@@ -89,7 +89,7 @@ class WorkProcessProgressTest {
         }
         val unknown = toolReceiptPresentation(ToolDisposition.UNKNOWN, true, ExecutionPhase.TOOL_EXECUTING,
             activeCall = false)
-        assertEquals("已完成1步 · 1步待确认 · 进行中", process(source(), unknown).progressSummary)
+        assertEquals("已完成2步 · 进行中", process(source(), unknown).progressSummary)
         val stoppedUnknown = toolReceiptPresentation(ToolDisposition.UNKNOWN, true, ExecutionPhase.TOOL_EXECUTING,
             stopRequested = true, activeCall = false)
         assertEquals(ToolActivityUi.UNKNOWN, stoppedUnknown.activity)
@@ -125,13 +125,13 @@ class WorkProcessProgressTest {
         for ((status, label) in listOf(RunStatus.FAILED to "流程失败", RunStatus.STOPPED to "已停止",
             RunStatus.INTERRUPTED to "已中断")) {
             val work = process(source(status), ToolReceiptUi(WorkStepState.UNKNOWN))
-            assertEquals("已完成1步 · 1步待确认 · $label", work.progressSummary)
+            assertEquals("已完成2步 · $label", work.progressSummary)
             assertFalse(work.running)
         }
         val failed = process(source(RunStatus.COMPLETED), ToolReceiptUi(WorkStepState.FAILED))
-        assertEquals("已完成1步 · 1步失败", failed.progressSummary)
+        assertEquals("已完成2步 · 失败", failed.progressSummary)
         val skipped = process(source(RunStatus.COMPLETED), ToolReceiptUi(WorkStepState.NOT_EXECUTED))
-        assertEquals("已完成1步 · 含未执行步骤", skipped.progressSummary)
+        assertEquals("已完成2步 · 含未执行步骤", skipped.progressSummary)
     }
 
     @Test fun unfinishedStepsInTerminalMessagesDoNotClaimAllCompleted() {
@@ -166,7 +166,7 @@ class WorkProcessProgressTest {
         assertEquals("已完成0步 · 执行中", process(emptyReasoning,
             ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING)).progressSummary)
         for ((status, label) in listOf(RunStatus.FAILED to "流程失败", RunStatus.STOPPED to "已停止", RunStatus.INTERRUPTED to "已中断")) {
-            assertEquals("已完成0步 · 1步待确认 · $label", process(emptyReasoning.copy(status = status), ToolReceiptUi(WorkStepState.UNKNOWN)).progressSummary)
+            assertEquals("已完成1步 · $label", process(emptyReasoning.copy(status = status), ToolReceiptUi(WorkStepState.UNKNOWN)).progressSummary)
             assertEquals("已完成1步 · $label", process(emptyReasoning.copy(status = status), ToolReceiptUi(WorkStepState.OK)).progressSummary)
         }
     }
@@ -203,27 +203,28 @@ class WorkProcessProgressTest {
     }
 
 
-    @Test fun screenshotShapeCountsOnlyThreeClosedReasoningSteps() {
+    @Test fun screenshotShapeAddsSettledUnknownToClosedReasoningSteps() {
         val reports = (1..3).map { before.copy(itemId = "reasoning-$it") }
         val work = WorkProcessUi(reports.map { WorkSegmentUi(reasoning = it) } + WorkSegmentUi(steps = listOf(
             step(WorkStepState.NOT_EXECUTED), step(WorkStepState.NOT_EXECUTED).copy(id = "skipped-other"),
             step(WorkStepState.UNKNOWN))), "结果未确认")
-        assertEquals(3, work.completedStepCount)
+        assertEquals(6, work.completedStepCount)
         assertEquals(0, work.failedStepCount)
         assertEquals(1, work.unconfirmedStepCount)
-        assertEquals("已完成3步 · 1步待确认", work.progressSummary)
+        assertEquals("已完成6步 · 结果未确认", work.progressSummary)
     }
 
     @Test fun finishedResultCountsHaveIndependentSingleAndMixedSummaries() {
         for ((states, suffix) in listOf(
-            listOf(WorkStepState.UNKNOWN) to "1步待确认",
-            listOf(WorkStepState.FAILED) to "1步失败",
-            listOf(WorkStepState.FAILED, WorkStepState.UNKNOWN) to "1步失败 · 1步待确认")) {
+            listOf(WorkStepState.UNKNOWN) to "结果未确认",
+            listOf(WorkStepState.FAILED) to "失败",
+            listOf(WorkStepState.FAILED, WorkStepState.UNKNOWN) to "失败")) {
             val work = WorkProcessUi(listOf(WorkSegmentUi(reasoning = before, steps =
                 listOf(step(WorkStepState.OK), step(WorkStepState.OK).copy(id = "other-ok")) + states.map { step(it) })),
                 if (WorkStepState.FAILED in states) "失败" else "结果未确认")
-            assertEquals(3, work.completedStepCount)
-            assertEquals("已完成3步 · $suffix", work.progressSummary)
+            val completed = 3 + states.size
+            assertEquals(completed, work.completedStepCount)
+            assertEquals("已完成${completed}步 · $suffix", work.progressSummary)
         }
     }
 
@@ -231,10 +232,10 @@ class WorkProcessProgressTest {
         val work = WorkProcessUi((1..2).map { index -> WorkSegmentUi(reasoning = before.copy(itemId = "r$index"),
             steps = listOf(step(WorkStepState.OK), step(WorkStepState.FAILED), step(WorkStepState.UNKNOWN))
                 .map { it.copy(id = "${it.id}-$index") }) }, "失败")
-        assertEquals(4, work.completedStepCount)
+        assertEquals(8, work.completedStepCount)
         assertEquals(2, work.failedStepCount)
         assertEquals(2, work.unconfirmedStepCount)
-        assertEquals("已完成4步 · 2步失败 · 2步待确认", work.progressSummary)
+        assertEquals("已完成8步 · 失败", work.progressSummary)
     }
 
     @Test fun failedAndUnknownReceiptsRemainVisibleDuringAllControlStates() {
@@ -254,9 +255,9 @@ class WorkProcessProgressTest {
             Controls(ExecutionPhase.STREAMING, false, true, ToolActivityUi.STOPPING.label))) {
             val controlled = ChatTurnMapper.withStreamingOwner(turns, message, phase, pause, stop)
             val work = (controlled.single() as ChatTurnUi.Assistant).workProcess!!
-            assertEquals("已完成2步 · 1步失败 · 1步待确认 · $label", work.progressSummary)
+            assertEquals("已完成4步 · $label", work.progressSummary)
             val resumed = ChatTurnMapper.withStreamingOwner(controlled, message, ExecutionPhase.STREAMING)
-            assertEquals("已完成2步 · 1步失败 · 1步待确认 · 进行中",
+            assertEquals("已完成4步 · 进行中",
                 (resumed.single() as ChatTurnUi.Assistant).workProcess!!.progressSummary)
             assertEquals(listOf(WorkStepState.OK, WorkStepState.FAILED, WorkStepState.UNKNOWN), work.segments.flatMap { it.steps }.map { it.state })
         }
@@ -267,7 +268,7 @@ class WorkProcessProgressTest {
     @Test fun actualToolFailureDoesNotHideStoppedOrInterruptedLifecycle() {
         for ((status, label) in listOf(RunStatus.STOPPED to "已停止", RunStatus.INTERRUPTED to "已中断")) {
             val work = process(source(status), ToolReceiptUi(WorkStepState.FAILED))
-            assertEquals("已完成1步 · 1步失败 · $label", work.progressSummary)
+            assertEquals("已完成2步 · $label", work.progressSummary)
             assertEquals(0, work.unconfirmedStepCount)
         }
     }
@@ -281,7 +282,7 @@ class WorkProcessProgressTest {
             assertTrue(work.progressSummary.endsWith("流程失败"))
             assertEquals(message.error, turn.error)
             assertEquals(RunStatus.FAILED, turn.status)
-            if (state == WorkStepState.UNKNOWN) assertEquals("已完成1步 · 1步待确认 · 流程失败", work.progressSummary)
+            if (state == WorkStepState.UNKNOWN) assertEquals("已完成2步 · 流程失败", work.progressSummary)
         }
     }
 
@@ -291,8 +292,8 @@ class WorkProcessProgressTest {
         val resolved = work.copy(segments = work.segments.map { segment -> segment.copy(steps = segment.steps.map {
             if (it.state == WorkStepState.UNKNOWN) it.copy(state = WorkStepState.OK, activity = ToolActivityUi.SUCCESS) else it
         }) })
-        assertEquals("已完成1步 · 1步失败 · 1步待确认", work.progressSummary)
-        assertEquals("已完成2步 · 1步失败", resolved.progressSummary)
+        assertEquals("已完成3步 · 失败", work.progressSummary)
+        assertEquals("已完成3步 · 失败", resolved.progressSummary)
         assertEquals(1, resolved.failedStepCount)
         assertEquals(0, resolved.unconfirmedStepCount)
     }
@@ -300,9 +301,21 @@ class WorkProcessProgressTest {
     @Test fun pendingAndUnexecutedStepsAreNotCountedAsFailedOrUnconfirmed() {
         val work = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step(WorkStepState.PENDING),
             step(WorkStepState.NOT_EXECUTED)))), "执行中", true)
-        assertEquals(0, work.completedStepCount)
+        assertEquals(1, work.completedStepCount)
         assertEquals(0, work.failedStepCount)
         assertEquals(0, work.unconfirmedStepCount)
-        assertEquals("已完成0步 · 执行中", work.progressSummary)
+        assertEquals("已完成1步 · 执行中", work.progressSummary)
     }
+    @Test fun onlySettledUnknownActivitiesJoinTheCompletedCountAndNeverRewriteTheSuffix() {
+        for (activity in ToolActivityUi.entries) {
+            val work = WorkProcessUi(listOf(WorkSegmentUi(reasoning = before,
+                steps = listOf(step(WorkStepState.UNKNOWN, activity)))), "原始状态", running = true)
+            val ended = activity in setOf(ToolActivityUi.UNKNOWN, ToolActivityUi.STOPPED, ToolActivityUi.INTERRUPTED)
+            assertEquals(if (ended) 2 else 1, work.completedStepCount)
+            assertEquals("已完成${if (ended) 2 else 1}步 · 原始状态", work.progressSummary)
+            assertEquals(WorkStepState.UNKNOWN, work.segments.single().steps.single().state)
+            assertFalse(work.progressSummary.contains("步待确认"))
+        }
+    }
+
 }

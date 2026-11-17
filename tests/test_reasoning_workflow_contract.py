@@ -193,7 +193,8 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
     def test_outer_workflow_uses_one_title_icon_and_completed_progress(self):
         model = (CHAT / 'ChatScreenModels.kt').read_text()
         self.assertIn('val title: String get() = "工作流程"', model)
-        self.assertIn('segment.steps.count { it.state == WorkStepState.OK }', model)
+        self.assertIn('segment.steps.count { it.state in setOf(WorkStepState.OK, WorkStepState.FAILED, WorkStepState.NOT_EXECUTED)', model)
+        self.assertNotIn('步待确认', model)
         self.assertIn('it.activeSinceNanos == null && hasReportedReasoningText(it.text)', model)
         work = (CHAT / 'WorkProcessCard.kt').read_text()
         self.assertIn('val title = work.title', work)
@@ -217,21 +218,22 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('controlOwner, phase = state?.phase ?: ExecutionPhase.IDLE, pauseRequested = state?.pauseRequested == true', host)
         self.assertIn('stopRequested = controlOwner?.let(controller::runStopping) == true', host)
 
-    def test_failed_and_unconfirmed_counts_are_independent_and_do_not_replace_controls(self):
+    def test_settled_counts_are_unified_without_replacing_real_outcomes_or_controls(self):
         model = (CHAT / 'ChatScreenModels.kt').read_text()
         self.assertIn('val failedStepCount: Int get()', model)
         self.assertIn('val unconfirmedStepCount: Int get()', model)
         self.assertIn('segment.steps.count { it.state == WorkStepState.FAILED }', model)
         self.assertIn('segment.steps.count { it.state == WorkStepState.UNKNOWN && !(running && it.activity.inFlight) }', model)
-        self.assertIn('if (failed > 0) add("${failed}步失败")', model)
-        self.assertIn('if (unconfirmed > 0) add("${unconfirmed}步待确认")', model)
+        self.assertNotIn('步失败', model)
+        self.assertNotIn('步待确认', model)
+        self.assertIn('if (running || status != "已完成") add(status)', model)
         self.assertIn('val status = controlActivity?.label ?: summary', model)
         mapper = (CHAT / 'ChatTurnMapper.kt').read_text()
         self.assertIn('message.status == RunStatus.FAILED -> "流程失败"', mapper)
         self.assertLess(mapper.index('message.status == RunStatus.STOPPED -> "已停止"'),
                         mapper.index('segments.any { segment -> segment.steps.any { it.state == WorkStepState.FAILED } } -> "失败"'))
         regression = (ROOT / 'app/src/test/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkProcessProgressTest.kt').read_text()
-        for name in ('screenshotShapeCountsOnlyThreeClosedReasoningSteps',
+        for name in ('screenshotShapeAddsSettledUnknownToClosedReasoningSteps',
                      'failedAndUnknownReceiptsRemainVisibleDuringAllControlStates',
                      'failedRunWithoutFailedToolIsNotInventedAsToolFailure',
                      'resultCountsAccumulateAcrossSegmentsRatherThanBecomingFlags'):

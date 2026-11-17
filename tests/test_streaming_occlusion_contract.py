@@ -47,13 +47,11 @@ class StreamingOcclusionContract(unittest.TestCase):
                       'viewport.viewportOffset = 0', 'viewport.boundaryDelta = 0f'):
             self.assertIn(token, collect)
 
-    def test_waiting_question_keeps_live_viewport_without_terminal_migration(self):
-        source = CHAT.read_text()
-        self.assertIn('this == RunStatus.RUNNING || this == RunStatus.WAITING_USER', source)
-        self.assertIn('StreamingTailViewport(turn.status.keepsLiveTailViewport())', source)
-        self.assertIn('tail.status.keepsLiveTailViewport()', source)
-        self.assertIn('tailAssistant?.status?.keepsLiveTailViewport() == true', source)
+    def test_waiting_phase_keeps_running_status_and_draws_real_body_coordinates(self):
         device = DEVICE.read_text()
+        self.assertIn('status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED,', device)
+        self.assertIn('isStreaming = running && !waiting', device)
+        self.assertNotIn('RunStatus.WAITING_USER', CHAT.read_text())
         for token in ('testWaitingUserRetainsLiveViewportAndEveryDrawnReadingAnchor',
                       'testWaitingUserStartsBoundedAndExplicitBottomKeepsItsViewport',
                       'body.positionInRoot().y', 'anchor.positionInRoot().y',
@@ -341,7 +339,8 @@ class StreamingOcclusionContract(unittest.TestCase):
             self.assertIn(token, correction)
         self.assertIn("coordinates.isAttached && turn.listKey == currentTailKey", source)
         self.assertIn("status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running", (DEVICE.parent / "ChatMessageSpacingTest.kt").read_text())
-        self.assertIn("status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running", DEVICE.read_text())
+        device = ' '.join(DEVICE.read_text().split())
+        self.assertIn("status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running && !waiting", device)
 
     def test_device_sources_use_real_composer_measure_and_unclipped_tail_geometry(self):
         source = DEVICE.read_text()

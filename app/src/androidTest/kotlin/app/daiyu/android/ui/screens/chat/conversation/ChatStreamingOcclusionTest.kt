@@ -64,11 +64,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                         ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { bottomInset ->
                             ChatMessageList(
                                 List(6) { ChatTurnUi.User("u$it", "history $it") } +
-                                    ChatTurnUi.Assistant("tail", status = when {
-                                        waiting -> RunStatus.WAITING_USER
-                                        running -> RunStatus.RUNNING
-                                        else -> RunStatus.COMPLETED
-                                    }, isStreaming = running && !waiting) +
+                                    ChatTurnUi.Assistant("tail", status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED,
+                                        isStreaming = running && !waiting) +
                                     if (appendAssistant) listOf(ChatTurnUi.Assistant("next", finalText = "next reply")) else emptyList(),
                                 ChatScreenActions(), scrollRequest = request,
                                 compressionActivity = if (showCompression) app.daiyu.android.timeline.CompressionActivity(

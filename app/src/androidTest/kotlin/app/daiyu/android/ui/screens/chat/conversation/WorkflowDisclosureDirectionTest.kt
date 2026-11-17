@@ -538,6 +538,149 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
     fun testBoundedUpwardToolAndDownwardCollapseKeepTheLowerReadingBoundaryStill() =
         assertLowerReadingBoundaryIsStationary(RunStatus.RUNNING, streaming = true)
 
+    fun testBoundedMixedChildSummaryDuringOutputAndFastReversal() = verifyBoundedChildSummary(true)
+
+    fun testBoundedLegacyChildSummaryDuringOutputAndFastReversal() = verifyBoundedChildSummary(false)
+
+    private fun verifyBoundedChildSummary(mixed: Boolean) {
+        fun step(id: String, tool: String, result: String): WorkStepUi {
+            val p = ToolCardPresentations.present(tool, "{}", result)
+            return WorkStepUi(id, p.title, p.summary, WorkStepState.OK, toolName = tool,
+                category = p.category, sections = p.sections, categoryDetails = p.details,
+                operationGlyph = p.operationGlyph, renderKey = "clip:$id")
+        }
+        val versions = listOf(
+            """{"total_count":2,"status_counts":{"UNKNOWN":2}}""",
+            """{"total_count":3,"status_counts":{"COMPLETED":2,"RUNNING":1}}""",
+            """{"total_count":4,"status_counts":{"COMPLETED":2,"RUNNING":1,"FAILED":1}}"""
+        ).map { step("inspect-live", "inspect_child_tasks", it) }
+        val prose = versions.map { requireNotNull(it.categoryDetails?.rich?.prose).text }
+        kotlinx.coroutines.runBlocking { projectMarkdown(prose) }
+        val others = List(7) { step("surrounding-$it", "search_apps", """{"count":1}""") }
+        var version by mutableStateOf(0)
+        var appended by mutableStateOf(false)
+        val header = "tool-step-header:inspect-live"
+        val nextHeader = "tool-step-header:surrounding-4"
+        val category = "tool-category:child_control"
+        val trace = mutableListOf<String>()
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            density = LocalDensity.current.density
+            Box(Modifier.safeDrawingPadding()) {
+                BoxWithConstraints(Modifier.size(320.dp, 420.dp).testTag("clip-summary-host")) {
+                    val steps = others.take(3) + versions[version] + others.subList(4, if (appended) 7 else 6)
+                    val work = WorkProcessUi(listOf(WorkSegmentUi(steps = steps)), "进行中", running = true)
+                    ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { inset ->
+                        ChatMessageList(List(8) { ChatTurnUi.User("clip-history-$it", "history $it") } +
+                            ChatTurnUi.Assistant("clip-tail", workProcess = if (mixed) null else work,
+                                content = if (mixed) steps.map { MessageContentUi.Tool(it) } else emptyList(),
+                                status = RunStatus.RUNNING, isStreaming = true), ChatScreenActions(),
+                            composerBottomInset = inset, scrollRequest = ChatScrollRequest(1))
+                    }, composer = { Box(Modifier.fillMaxWidth().height(96.dp).testTag("clip-summary-composer")) })
+                }
+            }
+        } } }
+        ui.waitForIdle()
+        ui.onNodeWithTag(header).assertIsDisplayed()
+        assertTrue("Must retain the bounded stream, not exact-target navigation: ${geometry(header)}",
+            "bounded=true" in geometry(header))
+        fun raw(node: androidx.compose.ui.semantics.SemanticsNode): Rect {
+            val c = node.layoutInfo.coordinates
+            return Rect(c.positionInRoot(), Size(c.size.width.toFloat(), c.size.height.toFloat()))
+        }
+        fun textNodes() = ui.onAllNodes(hasAnyAncestor(hasTestTag(category)) and
+            SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult),
+            useUnmergedTree = true).fetchSemanticsNodes()
+        fun sampleFrame(index: Int) {
+            val body = ui.onAllNodesWithTag(category, useUnmergedTree = true).fetchSemanticsNodes().singleOrNull()
+            val next = ui.onNodeWithTag(nextHeader).fetchSemanticsNode()
+            val line = "mixed=$mixed frame=$index version=$version append=$appended " +
+                "bodyRaw=${body?.let(::raw)} bodyBounds=${body?.boundsInRoot} next=${raw(next)} ${geometry(header)}"
+            trace += line
+            android.util.Log.i("WorkflowClipFrame", line)
+        }
+        fun verifyFinalInk() {
+            val evidence = trace.joinToString("\n")
+            assertTrue("Stream unexpectedly unbounded:\n$evidence", "bounded=true" in geometry(header))
+            val nodes = textNodes()
+            assertTrue("Real summary must expose drawable text:\n$evidence", nodes.isNotEmpty())
+            val layouts = nodes.map { node ->
+                val results = mutableListOf<androidx.compose.ui.text.TextLayoutResult>()
+                ui.runOnIdle { node.config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult]
+                    .action?.invoke(results) }
+                assertEquals("Text must expose its original layout:\n$evidence", 1, results.size)
+                node to results.single()
+            }.filter { it.second.layoutInput.text.text.isNotBlank() }
+            fun normalized(s: String) = s.filterNot { it.isWhitespace() }
+            assertTrue("Updated prose must reach the real renderer:\n$evidence",
+                normalized(layouts.joinToString("") { it.second.layoutInput.text.text }).contains(normalized(prose[version])))
+            val stream = raw(ui.onNodeWithTag("chat-stream-viewport:clip-tail").fetchSemanticsNode())
+            val list = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot
+            val safeBottom = ui.onNodeWithTag("clip-summary-composer").fetchSemanticsNode().boundsInRoot.top - ChatTailClearance.value * density
+            val next = raw(ui.onNodeWithTag(nextHeader).fetchSemanticsNode())
+            ui.onNodeWithTag(nextHeader).assertIsDisplayed()
+            val hostNode = ui.onNodeWithTag("clip-summary-host")
+            val host = raw(hostNode.fetchSemanticsNode())
+            val pixels = hostNode.captureToImage().toPixelMap()
+            fun distance(a: Color, b: Color) = kotlin.math.abs(a.red - b.red) +
+                kotlin.math.abs(a.green - b.green) + kotlin.math.abs(a.blue - b.blue)
+            layouts.forEach { (node, layout) ->
+                val full = raw(node)
+                assertFalse("Text measured with overflowing content:\n$evidence", layout.hasVisualOverflow)
+                assertEquals("Ancestor narrowed the settled text:\n$evidence", full.height, node.boundsInRoot.height, 1f)
+                assertTrue("Measured body must retain original line height:\n$evidence",
+                    full.height + 1f >= layout.getLineBottom(layout.lineCount - 1))
+                assertTrue("Fixture must fully expose text inside the actual drawable viewport:\n$evidence",
+                    full.top >= maxOf(stream.top, list.top) - 1f && full.bottom <= minOf(stream.bottom, list.bottom, safeBottom) + 1f)
+                assertTrue("Following row must not overwrite the original body:\n$evidence", full.bottom <= next.top + 1f)
+                val color = layout.layoutInput.style.color
+                assertTrue("Need actual resolved text color:\n$evidence", color != Color.Unspecified)
+                val lines = (0 until layout.lineCount).filter {
+                    layout.getLineEnd(it, visibleEnd = true) > layout.getLineStart(it)
+                }
+                assertTrue("Summary cannot be a blank line:\n$evidence", lines.isNotEmpty())
+                for (line in listOf(lines.first(), lines.last()).distinct()) {
+                    val x0 = kotlin.math.floor((full.left + layout.getLineLeft(line) - host.left).toDouble()).toInt().coerceIn(0, pixels.width - 1)
+                    val x1 = kotlin.math.ceil((full.left + layout.getLineRight(line) - host.left).toDouble()).toInt().coerceIn(x0 + 1, pixels.width)
+                    val y0 = kotlin.math.floor((full.top + layout.getLineTop(line) - host.top).toDouble()).toInt().coerceIn(0, pixels.height - 2)
+                    val y1 = kotlin.math.ceil((full.top + layout.getLineBottom(line) - host.top).toDouble()).toInt().coerceIn(y0 + 2, pixels.height)
+                    val background = pixels[x0, y0]
+                    val ink = Color(color.red * color.alpha + background.red * (1f - color.alpha),
+                        color.green * color.alpha + background.green * (1f - color.alpha),
+                        color.blue * color.alpha + background.blue * (1f - color.alpha))
+                    assertTrue("Ink must contrast with background:\n$evidence", distance(ink, background) > .4f)
+                    fun count(from: Int, end: Int): Int {
+                        var count = 0
+                        for (y in from until end) for (x in x0 until x1) {
+                            val pixel = pixels[x, y]
+                            if (distance(pixel, ink) < .32f && distance(pixel, background) > .18f) count++
+                        }
+                        return count
+                    }
+                    val middle = (y0 + y1) / 2
+                    assertTrue("Top ink cannot disappear behind an ancestor clip:\n$evidence", count(y0, middle) > 0)
+                    assertTrue("Bottom ink cannot be reduced to a narrow strip:\n$evidence", count(middle, y1) > 0)
+                }
+            }
+        }
+        ui.mainClock.autoAdvance = false
+        try {
+            repeat(3) { round ->
+                ui.onNodeWithTag(header).performTouchInput { click() }
+                repeat(48) { frame ->
+                    when (frame) {
+                        2 -> ui.runOnUiThread { version = (round + 1) % versions.size; appended = round != 1 }
+                        4, 7 -> ui.onNodeWithTag(header).performTouchInput { click() }
+                        10 -> ui.runOnUiThread { version = round }
+                    }
+                    ui.mainClock.advanceTimeByFrame(); ui.waitForIdle(); sampleFrame(round * 100 + frame)
+                }
+                verifyFinalInk()
+                ui.onNodeWithTag(header).performTouchInput { click() }
+                repeat(36) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     fun testNestedWorkflowAndToolMoveTheirReadingWindowInsteadOfClippingTheIdentity() {
         val step = WorkStepUi("nested-tool", "fixture", "", WorkStepState.OK)
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {

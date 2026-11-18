@@ -15,6 +15,24 @@ import subprocess
 import sys
 
 
+HARNESS_PLATFORM_CLASSES = (
+    'app.daiyu.android.storage.CloudContextUsageStoreTest',
+    'app.daiyu.android.ControllerVideoFilesEntryTest',
+    'app.daiyu.android.ControllerLongHistoryRequestTest',
+    'app.daiyu.android.ChatContextUsageRestoreTest',
+)
+HARNESS_MODULES = (
+    'test_child_auto_compression_contract',
+    'test_cloud_context_scope',
+    'test_context_usage_wiring_contract',
+    'test_summary_compression_chain_contract',
+    'test_summary_reasoning_contract',
+    'test_record_tool_tests_scope',
+    'test_acceptance_tool_receipt',
+    'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope',
+)
+
+
 BROWSER_PLATFORM_CLASSES = (
     "app.daiyu.android.BrowserPageLifecycleActivityTest",
     "app.daiyu.android.browser.BrowserProductionCompositionTest",
@@ -919,6 +937,9 @@ ERROR_DETAILS_MODULES = (
 
 def command_for(python, env):
     if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(HARNESS_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *HARNESS_MODULES, "-v"], "harness-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(VIDEO_PICKER_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *VIDEO_PICKER_MODULES, "-v"], "video-picker-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
@@ -1206,7 +1227,7 @@ def record(python):
         child_env = os.environ.copy()
         child_env["PYTHONPATH"] = str(Path("tests").resolve()) + os.pathsep + child_env.get("PYTHONPATH", "")
     validation_cwd = None
-    if scope in ("user-message-entrance-targeted", "composer-action-targeted", "error-details-targeted", "video-picker-targeted", "media-send-targeted", "receipt-summary-targeted", "runtime-stop-targeted", "workflow-collapse-targeted", "voice-browser-targeted", "browser-targeted", "doubao-motion-targeted", "child-hot-configuration-targeted", "child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted", "page-back-targeted") or (
+    if scope in ("harness-targeted", "user-message-entrance-targeted", "composer-action-targeted", "error-details-targeted", "video-picker-targeted", "media-send-targeted", "receipt-summary-targeted", "runtime-stop-targeted", "workflow-collapse-targeted", "voice-browser-targeted", "browser-targeted", "doubao-motion-targeted", "child-hot-configuration-targeted", "child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted", "page-back-targeted") or (
             scope == "child-task-cards-targeted" and sorted(os.environ.get("SMOKE_TEST_CLASSES", "").split(","))
             == sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES)):
         validation_cwd = Path(__file__).resolve().parents[2]

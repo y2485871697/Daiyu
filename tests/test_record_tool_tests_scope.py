@@ -16,6 +16,65 @@ recorder = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(recorder)
 
 
+class HarnessToolTestsScopeTest(unittest.TestCase):
+    CLASSES = ('app.daiyu.android.storage.CloudContextUsageStoreTest', 'app.daiyu.android.ControllerVideoFilesEntryTest', 'app.daiyu.android.ControllerLongHistoryRequestTest', 'app.daiyu.android.ChatContextUsageRestoreTest')
+    MODULES = ('test_child_auto_compression_contract', 'test_cloud_context_scope', 'test_context_usage_wiring_contract', 'test_summary_compression_chain_contract', 'test_summary_reasoning_contract', 'test_record_tool_tests_scope', 'test_acceptance_tool_receipt', 'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')
+
+    def test_exact_permutations_keep_only_explicit_contracts(self):
+        self.assertEqual(self.CLASSES, recorder.HARNESS_PLATFORM_CLASSES)
+        self.assertEqual(self.MODULES, recorder.HARNESS_MODULES)
+        for selected in itertools.permutations(self.CLASSES):
+            command, scope = recorder.command_for("python3", dict(
+                SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))
+            self.assertEqual("harness-targeted", scope)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *self.MODULES, "-v"], command)
+            self.assertNotIn("discover", command)
+
+    def test_inexact_and_other_modes_keep_full_fallback(self):
+        raw = ",".join(self.CLASSES)
+        invalid = ["", "unknown", " " + raw, raw + " ", raw + ",", "," + raw,
+                   raw + ",app.daiyu.android.OtherTest"]
+        invalid += [",".join(self.CLASSES[:i] + self.CLASSES[i + 1:])
+                    for i in range(len(self.CLASSES))]
+        invalid += [raw + "," + name for name in self.CLASSES]
+        full = (["python3", "-B", "-m", "unittest", "discover", "-s", "tests", "-v"], "full")
+        for selected in invalid:
+            self.assertEqual(full, recorder.command_for("python3", dict(
+                SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=selected)))
+        for mode in ("", "compile", "candidate", "daily", "release"):
+            self.assertEqual(full, recorder.command_for("python3", dict(
+                SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw)))
+
+    def test_receipt_keeps_exit_code_identity_and_frozen_tool_cwd(self):
+        old = Path.cwd()
+        for code in (0, 9):
+            with tempfile.TemporaryDirectory() as directory:
+                try:
+                    os.chdir(directory)
+                    env = dict(GITHUB_SHA="b" * 40, EXPECTED_SHA="a" * 40,
+                               GITHUB_RUN_ID="42", GITHUB_RUN_ATTEMPT="1", SMOKE_MODE="smoke",
+                               SMOKE_TEST_CLASSES=",".join(self.CLASSES))
+                    with patch.dict(os.environ, env, clear=True), patch.object(
+                            recorder.subprocess, "check_output", return_value="a" * 40 + "\n"), patch.object(
+                            recorder.subprocess, "call", return_value=code) as call, patch.object(
+                            recorder.sys, "stdout", SimpleNamespace(buffer=io.BytesIO())):
+                        self.assertEqual(code, recorder.record("python3"))
+                    receipt = json.loads(Path("tool-evidence/receipt.json").read_text())
+                    self.assertEqual(dict(sha="a" * 40, run_id=42, attempt=1), receipt["identity"])
+                    self.assertEqual("harness-targeted", receipt["scope"])
+                    self.assertEqual(code, receipt["exit_code"])
+                    self.assertEqual("b" * 40, receipt["validation_tools_sha"])
+                    call.assert_called_once()
+                    self.assertEqual(receipt["command"], call.call_args.args[0])
+                    base = Path(recorder.__file__).resolve().parents[2]
+                    self.assertEqual(base, call.call_args.kwargs["cwd"])
+                    self.assertEqual(str(base / "tests") + os.pathsep,
+                                     call.call_args.kwargs["env"]["PYTHONPATH"])
+                finally:
+                    os.chdir(old)
+
+
+
 class ErrorDetailsToolTestsScopeTest(unittest.TestCase):
     CLASSES = ('app.daiyu.android.PlatformTest', 'app.daiyu.android.ControllerReconnectIntegrationTest', 'app.daiyu.android.ui.screens.chat.conversation.ChatTimelineDividerTest', 'app.daiyu.android.ui.screens.chat.conversation.ReconnectBoundaryPlacementTest', 'app.daiyu.android.storage.SQLiteChildTaskStoreTest')
     MODULES = ('test_error_details_smoke_scope', 'test_chat_timeline_contract', 'test_reasoning_flow_stability_contract', 'test_platform_smoke_scope', 'test_test_refresh_contract', 'test_record_tool_tests_scope', 'test_acceptance_tool_receipt', 'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope')

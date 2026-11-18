@@ -20,10 +20,14 @@ import java.util.concurrent.atomic.AtomicReference
  * 通过阻塞模型初始化及指定的主线程消息投递控制测试时序。
  */
 private class TextSendMotionScale : androidx.compose.ui.MotionDurationScale {
-    override val scaleFactor = 1f
+    override var scaleFactor = 0f
 }
 
-class TextSendActivityTest : WiredActivityTestCase(TextSendMotionScale()) {
+class TextSendActivityTest private constructor(
+    private val motionScale: TextSendMotionScale,
+) : WiredActivityTestCase(motionScale) {
+    constructor() : this(TextSendMotionScale())
+
     private val preparing = CountDownLatch(1)
     private val releasePreparation = CountDownLatch(1)
     private val preparationCalls = AtomicInteger()
@@ -754,8 +758,8 @@ class TextSendActivityTest : WiredActivityTestCase(TextSendMotionScale()) {
         val clock = ui.mainClock.currentTime
         val viewport = ui.onNodeWithTag("chat-messages")
         val origin = viewport.fetchSemanticsNode().boundsInRoot
-        val bubble = ui.onNodeWithTag("message-user-bubble:$key").fetchSemanticsNode().boundsInRoot
-        val actions = ui.onNodeWithTag("message-user-actions:$key").fetchSemanticsNode().boundsInRoot
+        val bubble = ui.onNodeWithTag("message-user-bubble:$key", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val actions = ui.onNodeWithTag("message-user-actions:$key", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
         val bitmap = captureScreenNode(viewport, advanceAnimationClock = false)
         val pixels = bitmap.toPixelMap()
         assertEquals(clock, ui.mainClock.currentTime)
@@ -783,6 +787,7 @@ class TextSendActivityTest : WiredActivityTestCase(TextSendMotionScale()) {
     }
 
     fun testRealTouchSendPaintsBubbleAndActionIntermediateFramesBeforeReceipt() {
+        mainThread { motionScale.scaleFactor = 1f }
         setDraft("真实发送动画回归")
         dismissIme()
         awaitImeFrame(node("chat-draft"), visible = false)
@@ -811,6 +816,7 @@ class TextSendActivityTest : WiredActivityTestCase(TextSendMotionScale()) {
     }
 
     fun testFastRealReceiptKeepsTheSamePaintedEntranceAcrossNewConversationPage() {
+        mainThread { motionScale.scaleFactor = 1f }
         val session = fixture.session(holdSeconds = 120)
         setDraft("新会话快速回执入场")
         dismissIme()
@@ -820,18 +826,20 @@ class TextSendActivityTest : WiredActivityTestCase(TextSendMotionScale()) {
             node("chat-send").performTouchInput { click(center) }
             assertTrue(preparing.await(5, TimeUnit.SECONDS))
             val preview = checkNotNull(currentSendState().submissionPreview)
+            val entrance = checkNotNull(currentSendState().userMessageEntrance)
             val before = sendFrame(preview.key, 48)
             releasePreparation.countDown()
             assertTrue(session.entered.await(5, TimeUnit.SECONDS))
             ui.waitUntil(5_000) { currentSendState().turns.any { it is app.daiyu.android.ui.screens.chat.conversation.ChatTurnUi.User } }
             val user = currentSendState().turns.filterIsInstance<app.daiyu.android.ui.screens.chat.conversation.ChatTurnUi.User>().single()
+            assertSame("accepted page must retain the same send entrance", entrance, currentSendState().userMessageEntrance)
             val after = sendFrame(user.listKey, 96)
             val end = sendFrame(user.listKey, 400)
             assertNotNull(currentSendState().conversationKey)
             assertTrue("page handoff must not reset the animated extent", after.bubble.width >= before.bubble.width - .75f)
             assertTrue("the newly committed page must still contain painted intermediate frames", end.contrast > after.contrast + 1f / 255f)
             assertTrue(after.contrast >= before.contrast - 1f / 255f)
-            ui.onAllNodesWithTag("message-user-bubble:${preview.key}").assertCountEquals(0)
+            ui.onAllNodesWithTag("message-user-bubble:${preview.key}", useUnmergedTree = true).assertCountEquals(0)
             assertEquals(1, fixture.opens.get())
             assertUserText(checkNotNull(fixture.controller.active).conversationId, "新会话快速回执入场")
         } finally {
@@ -843,6 +851,7 @@ class TextSendActivityTest : WiredActivityTestCase(TextSendMotionScale()) {
 
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testRealSendAutomaticallyClosesImeWithoutRebuildingOrJumpingTheActionButton() {
+        mainThread { motionScale.scaleFactor = 1f }
         val keys = listOf("animator_duration_scale", "window_animation_scale", "transition_animation_scale")
         val previous = keys.associateWith { android.provider.Settings.Global.getString(activity.contentResolver, it) }
         fun setAnimation(key: String, value: String?) {
@@ -919,7 +928,7 @@ class TextSendActivityTest : WiredActivityTestCase(TextSendMotionScale()) {
             }
             assertTrue("the action row must travel down as the keyboard closes", frames.last().rowBottom > first.rowBottom + 24f)
             val key = checkNotNull(currentSendState().submissionPreview).key
-            ui.onNodeWithTag("message-user-bubble:$key").assertIsDisplayed()
+            ui.onNodeWithTag("message-user-bubble:$key", useUnmergedTree = true).assertIsDisplayed()
             val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/real-send-$name").apply { mkdirs() }
             java.io.File(directory, "native-frames.txt").writeText(frames.joinToString("\n"))
             sendFrame(key, 16)

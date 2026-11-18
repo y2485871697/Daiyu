@@ -288,7 +288,8 @@ class RecordToolTestsScopeTest(unittest.TestCase):
         command, scope = recorder.command_for("python3", dict(
             SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=target))
         self.assertEqual("media-send-targeted", scope)
-        self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.MEDIA_SEND_MODULES, "-v"], command)
+        self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.MEDIA_SEND_MODULES,
+                          "test_test_refresh_contract.TestRefreshContract.test_video_controls_refresh_uses_only_shard_zero", "-v"], command)
         for selected in (" " + target, target + " ", target + ",", target + "," + target,
                          target + ",app.daiyu.android.OtherTest"):
             self.assertEqual("full", recorder.command_for("python3", dict(

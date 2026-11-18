@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.test.*
@@ -248,15 +249,20 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
     }
 
     private fun assertAccentInk(target: SemanticsNodeInteraction, accent: Color) {
-        val pixels = target.captureToImage().toPixelMap()
-        var matches = 0
-        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
-            val pixel = pixels[x, y]
-            if (kotlin.math.abs(pixel.red - accent.red) < 0.06f &&
-                kotlin.math.abs(pixel.green - accent.green) < 0.06f &&
-                kotlin.math.abs(pixel.blue - accent.blue) < 0.06f) matches++
+        val image = captureScreenNode(target)
+        try {
+            val pixels = image.toPixelMap()
+            var matches = 0
+            for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+                val pixel = pixels[x, y]
+                if (kotlin.math.abs(pixel.red - accent.red) < 0.06f &&
+                    kotlin.math.abs(pixel.green - accent.green) < 0.06f &&
+                    kotlin.math.abs(pixel.blue - accent.blue) < 0.06f) matches++
+            }
+            assertTrue("Expected progress accent in control, matching pixels=$matches", matches >= 8)
+        } finally {
+            image.asAndroidBitmap().recycle()
         }
-        assertTrue("Expected progress accent in control, matching pixels=$matches", matches >= 8)
     }
 
 }

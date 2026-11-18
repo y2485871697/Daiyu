@@ -78,6 +78,27 @@ class TestRefreshContract(unittest.TestCase):
         self.assertIn("${{ inputs.smoke_classes == 'app.daiyu.android.ConversationWorkspaceActivityTest' && '-workspace-gesture' || '' }}", group[0])
         self.assertIn('  cancel-in-progress: false', lines)
 
+    def test_video_controls_refresh_uses_only_shard_zero(self):
+        workflow = (ROOT / '.github/workflows/test-refresh-regression.yml').read_text()
+        smoke = workflow.split('\n  smoke:\n', 1)[1]
+        matrix = smoke.split('\n      matrix:\n', 1)[1].split('\n    steps:\n', 1)[0]
+        self.assertIn(
+            "        shard: ${{ fromJSON(inputs.smoke_classes == "
+            "'app.daiyu.android.ChatMediaPreviewVideoControlsUiTest' && '[0]' || "
+            "inputs.smoke_shard != 'all' && format('[{0}]', inputs.smoke_shard) || "
+            "'[0,1,2,3]') }}",
+            matrix)
+        self.assertIn(
+            "        api: ${{ fromJSON(inputs.smoke_api == '26' && '[\"26\"]' || "
+            "inputs.smoke_api == '37.2' && '[\"37.2\"]' || '[\"26\",\"37.2\"]') }}",
+            matrix)
+        count = next(line.strip() for line in smoke.splitlines()
+                     if line.strip().startswith('SMOKE_SHARD_COUNT:'))
+        self.assertTrue(count.startswith(
+            "SMOKE_SHARD_COUNT: ${{ (inputs.smoke_classes == "
+            "'app.daiyu.android.ChatMediaPreviewVideoControlsUiTest' || "))
+        self.assertTrue(count.endswith("&& '1' || '4' }}"))
+
     def build_group_fixture(self):
         before = (b'name: build\nconcurrency:\n'
                   b'  group: daiyu-${{ inputs.mode }}-${{ github.ref }}\n'
@@ -323,6 +344,7 @@ class TestRefreshContract(unittest.TestCase):
         self.assertIn("subprocess.check_call(['python3', 'scripts/verify_test_refresh.py', 'check'], env=env)", workflow)
         self.assertIn('source-delivery', workflow)
         self.assertIn("SMOKE_SHARD_COUNT: ${{ (inputs.smoke_classes == "
+                      "'app.daiyu.android.ChatMediaPreviewVideoControlsUiTest' || inputs.smoke_classes == "
                       "'app.daiyu.android.VoiceCallFloatingWindowTest' || "
                       "(inputs.smoke_classes == 'app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest' "
                       "&& inputs.smoke_shard == '0')) && '1' || '4' }}", workflow)

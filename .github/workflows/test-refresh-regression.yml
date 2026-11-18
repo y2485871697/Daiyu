@@ -174,7 +174,7 @@ jobs:
       fail-fast: false
       matrix:
         api: ${{ fromJSON(inputs.smoke_api == '26' && '["26"]' || inputs.smoke_api == '37.2' && '["37.2"]' || '["26","37.2"]') }}
-        shard: ${{ fromJSON(inputs.smoke_shard != 'all' && format('[{0}]', inputs.smoke_shard) || '[0,1,2,3]') }}
+        shard: ${{ fromJSON(inputs.smoke_classes == 'app.daiyu.android.ChatMediaPreviewVideoControlsUiTest' && '[0]' || inputs.smoke_shard != 'all' && format('[{0}]', inputs.smoke_shard) || '[0,1,2,3]') }}
         include: ${{ fromJSON(inputs.smoke_api == '26' && '[{"api":"26","target":"google_apis","ram":4096}]' || inputs.smoke_api == '37.2' && '[{"api":"37.2","target":"google_apis_ps16k","ram":6144}]' || '[{"api":"26","target":"google_apis","ram":4096},{"api":"37.2","target":"google_apis_ps16k","ram":6144}]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -277,7 +277,7 @@ jobs:
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
           EMULATOR_RAM_MB: ${{ matrix.ram }}
-          SMOKE_SHARD_COUNT: ${{ (inputs.smoke_classes == 'app.daiyu.android.VoiceCallFloatingWindowTest' || (inputs.smoke_classes == 'app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest' && inputs.smoke_shard == '0')) && '1' || '4' }}
+          SMOKE_SHARD_COUNT: ${{ (inputs.smoke_classes == 'app.daiyu.android.ChatMediaPreviewVideoControlsUiTest' || inputs.smoke_classes == 'app.daiyu.android.VoiceCallFloatingWindowTest' || (inputs.smoke_classes == 'app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest' && inputs.smoke_shard == '0')) && '1' || '4' }}
           DAILY_API: ${{ matrix.api }}
           SMOKE_API: all
           SMOKE_SHARD_INDEX: ${{ matrix.shard }}

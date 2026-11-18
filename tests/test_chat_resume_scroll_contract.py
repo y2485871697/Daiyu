@@ -48,7 +48,10 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn('Triple(canFollowBottom(),', follow)
         self.assertIn('if (target == null) { motion.reset(); return@collect }', follow)
         self.assertIn('listState.scrollToItem(index)', follow)
-        self.assertIn('layout.viewportSize, layout.beforeContentPadding to layout.afterContentPadding, resumeReady to currentNestedTail.contentHeight', ' '.join(follow.split()))
+        self.assertIn('layout.viewportSize, Triple(layout.beforeContentPadding, layout.afterContentPadding, currentOcclusionPx + currentFollowClearancePx), resumeReady to currentNestedTail.contentHeight', ' '.join(follow.split()))
+        self.assertIn('val viewport = Triple(layout.viewportSize, layout.beforeContentPadding, currentOcclusionPx + currentFollowClearancePx)', ' '.join(follow.split()))
+        self.assertNotIn('val viewport = Triple(layout.viewportSize, layout.beforeContentPadding, layout.afterContentPadding)', ' '.join(follow.split()))
+        self.assertIn('internal val ChatTailClearance = 8.dp', self.chat)
         self.assertIn('readyTurns[tail.listKey] == tail && revealedTurns[tail.listKey] == tail', follow)
         self.assertIn('if (followDistance <= 0f)', follow)
         self.assertIn('val alignment = alignViewport || resumeFollowPending', follow)
@@ -78,9 +81,19 @@ class ChatResumeScrollContract(unittest.TestCase):
             'rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming, '
             'terminal = generationComplete, resetEpoch = revealResetEpoch, '
             'onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources, '
-            'live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true)',
+            'live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true, '
+            'initialBaseline = initialBaseline)',
             ' '.join(self.chat.split()),
         )
+        self.assertIn(
+            'val initialBaseline = remember(turn.listKey, visualScope, revealResetEpoch) { '
+            'visualScope?.bodyBaseline(turn.listKey, bodySources, '
+            'turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty()) }',
+            ' '.join(self.chat.split()),
+        )
+        narration = (BASE / 'WorkflowNarration.kt').read_text()
+        self.assertIn('private val bodyOwners = mutableSetOf<String>()', narration)
+        self.assertIn('if (bodyOwners.add(key) && !baseline && live) emptyList() else sources.toList()', narration)
         self.assertIn('remember(identity, resetEpoch) { (initialBaseline ?: sources).toList() }', self.typing)
         self.assertIn('remember(identity, resetEpoch) { MarkdownTypingState(baseline) }', self.typing)
         self.assertIn(

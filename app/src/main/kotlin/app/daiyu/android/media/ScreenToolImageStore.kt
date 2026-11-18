@@ -104,6 +104,7 @@ internal class ScreenToolImageStore(root: File) {
                 check(Files.isRegularFile(file.toPath(), NOFOLLOW_LINKS) && file.delete()) { "操作临时截图清理失败" }
             }
         }
+        mediaDirectory(root, hash(conversation.toByteArray(Charsets.UTF_8)), create = true)
         val marker = clearedMarker(conversation, run)
         checkMediaPath(marker)
         check(marker.createNewFile() || (Files.isRegularFile(marker.toPath(), NOFOLLOW_LINKS) && marker.length() == 0L)) { "截图清理状态保存失败" }

@@ -153,8 +153,14 @@ class ScreenToolImageStoreTest {
         assertNull(NativeScreenImage.parse("read_image", args, receipt) { store.read("c", "frame", it, "r") })
         assertNull(ScreenToolImageStore(root).read("c", "frame", receipt, "r"))
         assertEquals(1, store.finishRun("c", "r"))
+        assertEquals(0, store.finishRun("c", "r"))
         assertNull(store.read("c", "frame", receipt, "r"))
-        assertEquals(0, root.walkTopDown().count { it.extension == "png" })
+        val reopened = ScreenToolImageStore(root)
+        assertTrue(reopened.wasCleared("c", "r"))
+        assertNull(reopened.read("c", "frame", receipt, "r"))
+        assertThrows(IllegalStateException::class.java) { reopened.fileReceipt("c", "r", "late", bytes) }
+        assertEquals(1, root.walkTopDown().count { it.extension == "cleared" && it.length() == 0L })
+        assertEquals(0, root.walkTopDown().count { it.extension == "png" || it.extension == "pending" })
     }
 
     @Test fun fileImageMetadataRejectsInlineDataForeignFieldsAndInvalidPngHeaders() {

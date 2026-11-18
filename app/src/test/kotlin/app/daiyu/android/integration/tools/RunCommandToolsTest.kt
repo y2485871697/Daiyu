@@ -162,7 +162,7 @@ class RunCommandToolsTest {
                 assertTrue(fixture.dispatch("install-python", environment = "linux", command = "apt-get install -y python3") is DispatchOutcome.Confirmed)
                 fixture.imageFailure = null
                 fixture.afterImageRead = { fixture.cancelled = true }
-                assertTrue(fixture.image("cancelled", "/tmp/daiyu-video-test/second.png") is DispatchOutcome.NotExecuted)
+                assertTrue(fixture.image("cancelled", "/tmp/daiyu-video-test/second.png") is DispatchOutcome.Unknown)
                 assertEquals(3, fixture.imageReads)
                 assertEquals(1, fixture.imageReceipts)
             } finally {

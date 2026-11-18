@@ -27,6 +27,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
     private var screen by mutableStateOf(ChatScreenState("间距回归"))
     private var attachmentHeight by mutableStateOf(0.dp)
     private var density = 1f
+    private var liveGeometry: () -> String = { "not sampled" }
 
     private fun answer(marker: String, lines: Int = 60) =
         List(lines) { "正文第${it + 1}行，检查长回复末尾与输入区的间距。" }.joinToString("\n") + "\n\n$marker"
@@ -34,6 +35,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
     private fun show(scale: Float, dark: Boolean = false, running: Boolean = false, plainText: Boolean = false) {
         mainThread {
             attachmentHeight = 0.dp
+            liveGeometry = { "not sampled" }
             screen = ChatScreenState("间距回归", turns = listOf(
                 ChatTurnUi.User("question", "请写一篇长回复"),
                 ChatTurnUi.Assistant("tail", finalText = answer("初始末尾"),
@@ -46,7 +48,13 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     val currentDensity = LocalDensity.current.density
                     SideEffect { density = currentDensity }
                     Box(Modifier.requiredWidth(320.dp).fillMaxHeight().testTag("spacing-host")) {
-                        DaiyuChatScreen(screen, ChatScreenActions(), hasTurnExtras = { !plainText }, composerAttachments = {
+                        DaiyuChatScreen(screen, ChatScreenActions(), hasTurnExtras = { !plainText }, turnExtras = { turn ->
+                            if (turn.id == "start-reply") {
+                                val viewport = LocalWorkflowDisclosureContext.current?.viewport
+                                val clearance = LocalStreamingTextClearance.current
+                                SideEffect { liveGeometry = { "held=${clearance?.held} ${viewport?.diagnostics()}" } }
+                            }
+                        }, composerAttachments = {
                             if (attachmentHeight > 0.dp) Box(Modifier.height(attachmentHeight).testTag("spacing-attachment"))
                         })
                     }
@@ -238,12 +246,13 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             val users = mutableListOf(top("start-user"))
             val histories = mutableListOf(top("tail"))
             val lengths = mutableListOf<Int>()
+            val geometryFrames = mutableListOf<String>()
             var paintedPartial = false
             ui.runOnUiThread {
                 screen = screen.copy(turns = history + pending.copy(pending = false) +
                     ChatTurnUi.Assistant("start-reply", finalText = first, status = RunStatus.RUNNING, isStreaming = true))
             }
-            repeat(90) {
+            repeat(90) { frame ->
                 ui.mainClock.advanceTimeByFrame()
                 ui.waitForIdle()
                 users += top("start-user")
@@ -253,6 +262,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                 val texts = textNodes.flatMap { it.config[SemanticsProperties.Text] }.map { it.text }
                     .filter { it.isNotEmpty() && first.startsWith(it) }
                 lengths += texts.maxOfOrNull { it.length } ?: 0
+                if (frame % 10 == 0 || frame == 89) geometryFrames += "frame=$frame ${liveGeometry()}"
                 val partial = textNodes.firstOrNull { node ->
                     node.config[SemanticsProperties.Text].any { it.text.length in 1 until first.length && first.startsWith(it.text) }
                 }
@@ -282,7 +292,8 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             val historySteps = histories.zipWithNext { before, after -> before - after }
             assertTrue("The first chunk must actually type, not become a full baseline: $lengths",
                 lengths.any { it in 1 until first.length })
-            assertEquals(first.length, lengths.last())
+            assertEquals("First chunk must finish: lengths=$lengths userSteps=$userSteps " +
+                "historySteps=$historySteps geometry=$geometryFrames", first.length, lengths.last())
             assertTrue("A partial prefix must actually paint inside the body ROI", paintedPartial)
             ui.onNode(hasText(first) and hasAnyAncestor(hasTestTag("chat-turn:start-reply")),
                 useUnmergedTree = true).assertIsDisplayed()

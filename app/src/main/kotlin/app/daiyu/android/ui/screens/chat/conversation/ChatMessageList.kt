@@ -216,6 +216,7 @@ internal fun StreamingTailContainer(
         }, modifier = Modifier
             .testTag("chat-stream-viewport:$itemKey")
             .onPlaced { state.viewportCoordinates = it }
+            .onGloballyPositioned { state.viewportCoordinates = it }
             .drawWithContent {
                 // Following content stops at the safe edge; detached reading retains the editor backdrop.
                 val protect = protectClearance()

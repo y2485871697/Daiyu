@@ -4277,13 +4277,14 @@ class ChatController internal constructor(private val application:Application,
             } else if (videoPlan == null) coordinator.prepare(frozen) else {
                 // A video run must not silently replace physical/retained history with a text summary.
                 // Keep the same policy/budget and acceptance revision, but send every physical row.
-                val estimate = app.daiyu.android.domain.context.estimateTokens(physicalVideoHistory.rows + user)
+                val modelHistory = videoPlan.modelHistory()
+                val estimate = app.daiyu.android.context.estimateSendContextTokens(frozen.policy, modelHistory)
                 val budget = frozen.policy.sendBudgetTokens
                 if (budget != null && !frozen.policy.fitsSendBudget(estimate))
                     throw app.daiyu.android.context.ContextCapacityExceededException(estimate, budget)
                 app.daiyu.android.context.PreparedSendContext(frozen,
                     app.daiyu.android.context.PreparedContext(physicalVideoHistory.rows,
-                        app.daiyu.android.domain.context.estimateTokens(physicalVideoHistory.rows), null),
+                        app.daiyu.android.context.estimateSendContextTokens(frozen.policy, modelHistory.dropLast(1)), null),
                     app.daiyu.android.domain.context.ContextRevision.digest(contextService.displayHistory(conversationId)))
             }
         } catch (failure: Exception) {

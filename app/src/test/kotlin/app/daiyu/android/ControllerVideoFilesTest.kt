@@ -174,6 +174,7 @@ class ControllerVideoFilesTest {
             override fun open(history: List<Message>): ModelSession = error("definitions must be forwarded")
             override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
                 opens++; seenTools = definitions
+                assertEquals(plan.modelHistory(), history)
                 val manifest = (history.first().blocks.last() as MessageBlock.Text).text
                 assertTrue(manifest.contains("Linux 路径:")); assertFalse(manifest.contains("data:video/"))
                 assertArrayEquals(bytes, File(plan.files.single().hostPath).readBytes())
@@ -200,4 +201,23 @@ class ControllerVideoFilesTest {
         assertArrayEquals(bytes, File(original.hostPath).readBytes())
         assets.openOriginal(original.owner, original.reference).use { assertArrayEquals(bytes, it.readBytes()) }
     }
+    @Test fun videoBudgetIncludesTheExactFileManifestAndStillRejectsAnOversizedInput() {
+        val value = prepared(request()).second
+        val files = exporter().export(value.inputs) { false }
+        val physical = listOf(value.user)
+        val plan = ControllerVideoModelPlan(physical, null, images.freeze(physical, provider), value.inputs, files)
+        val projected = plan.modelHistory()
+        assertEquals(physical, plan.history)
+        assertEquals(videoFileModelHistory(physical, files), projected)
+        val policy = app.daiyu.android.domain.context.CompressionPolicy(
+            contextTokens = 272000, reserveTokens = 4096, tokenTail = true)
+        val estimate = app.daiyu.android.context.estimateSendContextTokens(policy, projected)
+        assertTrue(estimate > app.daiyu.android.context.estimateSendContextTokens(policy, physical))
+        val atLimit = policy.copy(contextTokens = estimate + 4096)
+        assertTrue(atLimit.fitsSendBudget(estimate))
+        assertFalse(atLimit.copy(contextTokens = estimate + 4095).fitsSendBudget(estimate))
+        val nativeTextView = ControllerVideoModelPlan(physical, null, plan.images, value.inputs)
+        assertEquals(physical, nativeTextView.modelHistory())
+    }
+
 }

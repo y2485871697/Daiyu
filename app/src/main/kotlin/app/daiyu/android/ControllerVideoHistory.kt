@@ -127,6 +127,9 @@ internal class ControllerVideoModelPlan internal constructor(
     internal val files: List<ControllerVideoFile> = emptyList(),
 ) {
     internal val inputs = Collections.unmodifiableList(inputs.map { MessageVideoInput(it.owner, it.references) })
+
+    internal fun modelHistory(): List<Message> =
+        if (files.isEmpty()) history else videoFileModelHistory(history, files)
 }
 
 /** Mandatory for ALL sends on a video-bearing conversation, including ordinary text continuation.

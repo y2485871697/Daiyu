@@ -200,7 +200,7 @@ internal class ControllerVideoFiles(private val database: ConversationDatabase,
             }
             DatabaseTransactions { database.readableDatabase }.run { history.assertCurrent(it, snapshot) }
             check(!cancelled()) { "video_file_cancelled" }
-            val projected = videoFileModelHistory(plan.history, plan.files)
+            val projected = plan.modelHistory()
             val imagePlan = plan.images.withAppendedUserText(projected)
             val session = if (imagePlan.hasImages) delegate.open(projected, definitions, imagePlan)
                 else delegate.open(projected, definitions)

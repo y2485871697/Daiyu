@@ -23,6 +23,11 @@ fun interface ContextSummarizer {
     fun summarize(input: CompressionInput): String
     val displayIdentity: app.daiyu.android.timeline.SummaryModelIdentity? get() = null
 }
+internal fun estimateSendContextTokens(policy: CompressionPolicy, messages: List<Message>): Long =
+    if (policy.tokenTail) TokenTailCompression.historyTokens(
+        MessageHistory.expand(ModelHistory.project(messages)), includeLatestScreen = false)
+    else estimateTokens(messages)
+
 data class PreparedContext(val messages: List<Message>, val estimatedTokens: Long, val archiveId: String?)
 data class ArchivePage(val messages: List<Message>, val nextOffset: Int?, val total: Int)
 class ContextCapacityExceededException(val estimatedTokens: Long, val budgetTokens: Long) :
@@ -118,7 +123,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     private fun requireCapacity(policy: CompressionPolicy, messages: List<Message>) {
         val budget = policy.sendBudgetTokens ?: return
         RuntimeDiagnostics.measure(Stage.CONTEXT_PREFLIGHT, size = messages.size.toLong()) {
-            val estimate = if (policy.tokenTail) TokenTailCompression.historyTokens(MessageHistory.expand(ModelHistory.project(messages)), includeLatestScreen = false) else estimateTokens(messages)
+            val estimate = estimateSendContextTokens(policy, messages)
             if (!policy.fitsSendBudget(estimate))
                 throw ContextCapacityExceededException(estimate, budget)
         }

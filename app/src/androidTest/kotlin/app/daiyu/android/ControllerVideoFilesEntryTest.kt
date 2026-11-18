@@ -76,4 +76,56 @@ class ControllerVideoFilesEntryTest : InstrumentationTestCase() {
             fixture.close()
         }
     }
+    fun testVideoPreparationUsesProductionTokensForRetainedHistory() {
+        val fixture = RunControlFixture(instrumentation.targetContext)
+        val clip = File(fixture.application.filesDir, "budget-fixture-video.mp4")
+        var ui: ControllerVideoUi? = null
+        try {
+            awaitControl("controller ready") { fixture.controller.ready }
+            app.daiyu.android.context.ProductionCompressionSettingsStore(fixture.application).save(
+                app.daiyu.android.context.ProductionCompressionSettings(contextWindowTokens = 20000))
+            val conversation = fixture.database.create("default")
+            val run = RunId(UUID.randomUUID().toString())
+            val oldUser = Message(MessageId(UUID.randomUUID().toString()), conversation.id, run, "user",
+                listOf(MessageBlock.Text("history", "历史记录".repeat(1600))), RunStatus.COMPLETED)
+            val oldAssistant = Message(MessageId(UUID.randomUUID().toString()), conversation.id, run, "assistant",
+                emptyList(), RunStatus.RUNNING)
+            fixture.database.send(oldUser, oldAssistant)
+            fixture.database.save(oldAssistant.copy(status = RunStatus.COMPLETED))
+            assertTrue(app.daiyu.android.domain.context.estimateTokens(listOf(oldUser)) > 20000 - 4096)
+            fixture.controller.reasoningPreference.set(conversation.id.value, ReasoningEffort.HIGH)
+            encodeOfflineBackupMp4(clip)
+            val owner = VideoAttachmentOwner(conversation.id.value, UUID.randomUUID().toString())
+            val video = fixture.controller.videoAttachments.store.import(owner, clip.inputStream())
+            val text = "能看到视频吗"
+            fixture.database.draft(conversation.id, text)
+            val request = VideoDraftRequest(conversation.id.value, owner, 1, text, listOf(video))
+            val editor = ControllerVideoEditor(conversation.id.value, 1, 1, text, true)
+            val receipt = AtomicReference<VideoDraftReceipt?>()
+            ui = object : ControllerVideoUi { override fun editor() = editor }
+            val session = fixture.session(holdSeconds = 60)
+            controlMain {
+                fixture.controller.attachVideoUi(checkNotNull(ui))
+                assertTrue(fixture.controller.sendVideos(conversation, request, editor) { result, _ -> receipt.set(result) })
+            }
+            awaitControl("video receipt") { receipt.get() != null }
+            assertEquals(fixture.controller.problem, VideoDraftOutcome.ACCEPTED, receipt.get()?.outcome)
+            assertTrue(session.entered.await(20, TimeUnit.SECONDS))
+            val projected = fixture.histories.single()
+            assertEquals(oldUser, projected.first())
+            assertTrue(projected.last().blocks.filterIsInstance<MessageBlock.Text>().last().text.contains("Linux 路径:"))
+            assertEquals(ReasoningEffort.HIGH, fixture.controller.reasoningPreference.snapshot(owner.conversationId))
+            val stored = ControllerVideoHistory(fixture.database).capture(conversation.id)
+            assertEquals(4, stored.rows.size)
+            assertFalse(stored.rows.any { row -> row.blocks.filterIsInstance<MessageBlock.Text>().any {
+                it.text.contains("Linux 路径:") } })
+            controlMain { fixture.controller.acknowledgeVideoSend(request) }
+            session.release.countDown()
+            awaitControl("video complete") { fixture.controller.active == null }
+        } finally {
+            controlMain { ui?.let(fixture.controller::detachVideoUi) }
+            fixture.close()
+        }
+    }
+
 }

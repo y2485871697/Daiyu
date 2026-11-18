@@ -66,4 +66,20 @@ class TokenTailEstimateTest {
         assertEquals(baseline, TokenTailCompression.messageTokens(row.copy(protocolItems = listOf(redacted.toString()))))
     }
 
+    @Test fun sendPreparationUsesTheFrozenPolicyForHistoricalImages() {
+        val owner = app.daiyu.android.media.MessageImageOwner("c", "u")
+        val image = app.daiyu.android.media.MessageImageReference(owner, "image", "image/jpeg",
+            385198, "a".repeat(64), 1216, 2640)
+        val row = Message(MessageId("u"), ConversationId("c"), RunId("r"), "user",
+            listOf(MessageBlock.Image(image)), RunStatus.COMPLETED)
+        val policy = app.daiyu.android.domain.context.CompressionPolicy(
+            contextTokens = 272000, reserveTokens = 4096, tokenTail = true)
+        val local = estimateSendContextTokens(policy, listOf(row))
+        assertEquals(3L + TokenTailCompression.imageTokens(1216, 2640), local)
+        assertTrue(policy.fitsSendBudget(local))
+        val legacy = policy.copy(tokenTail = false)
+        assertEquals(385214L, estimateSendContextTokens(legacy, listOf(row)))
+        assertFalse(legacy.fitsSendBudget(estimateSendContextTokens(legacy, listOf(row))))
+    }
+
 }

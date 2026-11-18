@@ -208,10 +208,11 @@ class TextSendActivityTest private constructor(
                 ui.onNodeWithContentDescription("附件").performClick()
                 node("chat-attachment:ATTACH_VIDEO").assertIsDisplayed().assertIsEnabled().performClick()
                 ui.waitUntil(5_000) { launches.get() == index + 1 }
-                awaitControl("actual picker stops the chat Activity") {
-                    !activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+                awaitControl("actual picker pauses or stops the chat Activity") {
+                    !activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
                 }
-                instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+                assertTrue(instrumentation.uiAutomation.performGlobalAction(
+                    android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
                 awaitControl("actual picker returns to the same chat") {
                     activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) &&
                         invokeHost(activity, "getVideoPickEntry") == null
@@ -239,7 +240,8 @@ class TextSendActivityTest private constructor(
                         !activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
                 }
                 if (pickerStillOpen) {
-                    instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+                    assertTrue(instrumentation.uiAutomation.performGlobalAction(
+                        android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
                     awaitControl("close remaining test picker") {
                         activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
                     }

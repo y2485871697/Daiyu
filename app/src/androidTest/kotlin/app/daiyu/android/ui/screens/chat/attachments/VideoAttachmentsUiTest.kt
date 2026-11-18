@@ -289,6 +289,7 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         ui.waitUntil(5_000) { picker.launches.size == 1 }
         mainThread { picker.result(picker.launches.single()) }
         val id = awaitReady()
+        val expectedVideo = media.originals.values.single()
         node("video_attachments_item:$id").assertIsDisplayed()
         node("chat-send").assertIsNotEnabled()
         assertNull(handed)
@@ -296,7 +297,7 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         node("chat-send").assertIsEnabled().performClick()
         assertNotNull(handed)
         assertEquals("first exact text", checkNotNull(handed).text)
-        assertEquals(listOf(id), checkNotNull(handed).videos.map { it.id })
+        assertEquals(listOf(expectedVideo), checkNotNull(handed).videos)
     }
 
     fun testCompactComposerBlockedVideoNeverSendsCaptionAndSingleClickFreezesText() {

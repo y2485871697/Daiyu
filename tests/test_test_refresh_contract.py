@@ -14,6 +14,17 @@ from verify_test_refresh import validate_changes, validate_graph, verify_archive
 
 
 class TestRefreshContract(unittest.TestCase):
+    def test_video_picker_failed_shards_have_independent_non_cancelling_queues(self):
+        workflow = (ROOT / '.github/workflows/test-refresh-regression.yml').read_text()
+        concurrency = workflow.split('\nconcurrency:\n', 1)[1].split('\nenv:', 1)[0]
+        lines = concurrency.splitlines()
+        group = [line for line in lines if line.startswith('  group: ')]
+        self.assertEqual(1, len(group))
+        self.assertTrue(group[0].startswith('  group: daiyu-test-refresh-${{ github.ref }}'))
+        self.assertEqual(1, group[0].count("${{ inputs.smoke_classes == 'app.daiyu.android.TextSendActivityTest,app.daiyu.android.ChatReferenceEntryActivityTest,app.daiyu.android.ui.screens.chat.attachments.VideoAttachmentsUiTest' && format('-video-picker-{0}', inputs.smoke_shard) || '' }}"))
+        self.assertEqual(['  cancel-in-progress: false'],
+                         [line for line in lines if line.startswith('  cancel-in-progress:')])
+
     def test_user_bubble_refresh_has_its_own_non_cancelling_queue(self):
         workflow = (ROOT / '.github/workflows/test-refresh-regression.yml').read_text()
         concurrency = workflow.split('\nconcurrency:\n', 1)[1].split('\nenv:', 1)[0]

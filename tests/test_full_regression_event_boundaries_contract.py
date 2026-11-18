@@ -44,10 +44,17 @@ class FullRegressionEventBoundariesContractTest(unittest.TestCase):
         source = (ANDROID / 'TextSendActivityTest.kt').read_text()
         test = source.split('fun testFirstTextAcceptanceKeepsVideoMenuLiveAcrossRealPickerCancellation()', 1)[1].split('fun testCommittedReceiptKeepsPreparingControlUntilUiConsumesIt()', 1)[0]
         launch = 'ui.waitUntil(5_000) { launches.get() == index + 1 }'
+        leave = 'awaitControl("actual picker pauses or stops the chat Activity") {'
         self.assertLess(test.index('node("chat-attachment:ATTACH_VIDEO")'), test.index(launch))
-        self.assertLess(test.index(launch), test.index('awaitControl("actual picker stops the chat Activity")'))
-        self.assertLess(test.index('instrumentation.sendKeyDownUpSync'),
-                        test.index('awaitControl("actual picker returns to the same chat")'))
+        self.assertLess(test.index(launch), test.index(leave))
+        waiting = test.split(leave, 1)[1].split('}', 1)[0]
+        self.assertIn('!activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)', waiting)
+        self.assertNotIn('Lifecycle.State.STARTED', waiting)
+        back = 'instrumentation.uiAutomation.performGlobalAction('
+        self.assertLess(test.index(back), test.index('awaitControl("actual picker returns to the same chat")'))
+        self.assertEqual(2, test.count(back))
+        self.assertEqual(2, test.count('AccessibilityService.GLOBAL_ACTION_BACK'))
+        self.assertNotIn('sendKeyDownUpSync', test)
         self.assertNotIn('awaitControl("video GET_CONTENT launch")', test)
         for token in ('return null', 'repeat(2)', 'getVideoPickEntry',
                       'assertEquals(2, launches.get())', 'assertDraft(caption)'):

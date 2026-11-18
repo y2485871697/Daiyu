@@ -96,17 +96,18 @@ internal fun VideoAttachments(
     pickRequest: Any? = null,
     onControls: (VideoComposerControls?) -> Unit = {},
     onControlsDisposed: ((VideoComposerControls) -> Unit)? = null,
+    pickerBinding: VideoPickerBinding? = null,
 ) {
     val registry = checkNotNull(LocalActivityResultRegistryOwner.current).activityResultRegistry
-    val picker = remember(host, registry, conversation, viewLifecycleOwner) { VideoPickerBinding(host, registry) }
-    DisposableEffect(host, picker, conversation, viewLifecycleOwner, manageLifecycle) {
+    val picker = pickerBinding ?: remember(host, registry, conversation, viewLifecycleOwner, manageLifecycle) { VideoPickerBinding(host, registry) }
+    DisposableEffect(host, picker, conversation, viewLifecycleOwner, manageLifecycle, pickerBinding) {
         val binding = if (manageLifecycle) {
             host.enter(conversation)
             host.bindLifecycle(viewLifecycleOwner)
         } else null
         onDispose {
             binding?.close()
-            picker.close()
+            if (pickerBinding == null) picker.close()
         }
     }
     val state = host.state

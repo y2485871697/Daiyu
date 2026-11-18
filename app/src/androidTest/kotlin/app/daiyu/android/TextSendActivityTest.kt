@@ -160,6 +160,103 @@ class TextSendActivityTest private constructor(
         assertEquals(1, fixture.opens.get()); assertEquals(1, preparationCalls.get())
     }
 
+    fun testSuccessfulVideoPickerResultsSurvivePausedComposerDisposal() {
+        val context = instrumentation.targetContext
+        val directory = java.io.File(context.filesDir, "opened-attachments/${java.util.UUID.randomUUID()}")
+        check(directory.mkdirs())
+        val source = java.io.File(directory, "content")
+        encodeOfflineBackupMp4(source)
+        java.io.File(directory, "metadata.json").writeText(org.json.JSONObject()
+            .put("name", "picker-success.mp4").put("mime", "video/mp4").put("size", source.length()).toString())
+        val uri = android.net.Uri.Builder().scheme("content").authority("${context.packageName}.opened.attachments")
+            .appendPath(directory.name).build()
+        val launches = AtomicInteger()
+        val picker = object : android.app.Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: android.content.Intent): android.app.Instrumentation.ActivityResult? {
+                if (intent.action == android.content.Intent.ACTION_GET_CONTENT && intent.type == "video/*") launches.incrementAndGet()
+                return null
+            }
+        }
+        instrumentation.addMonitor(picker)
+        val caption = "video selection retains its original draft"
+        setDraft(caption)
+        val host = fixture.controller.videoHost
+        val before = mainThreadValue { host.state }
+        try {
+            repeat(2) { index ->
+                ui.onNodeWithContentDescription("附件").performClick()
+                node("chat-attachment:ATTACH_VIDEO").performClick()
+                ui.waitUntil(5_000) { launches.get() == index + 1 }
+                awaitControl("video picker pauses the composer") {
+                    !activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+                }
+                awaitHomeWindowSettled()
+                ui.mainClock.advanceTimeBy(1_000)
+                instrumentation.waitForIdleSync()
+                val requestCode = mainThreadValue {
+                    val saved = Bundle()
+                    activity.activityResultRegistry.onSaveInstanceState(saved)
+                    val keys = checkNotNull(saved.getStringArrayList("KEY_COMPONENT_ACTIVITY_REGISTERED_KEYS"))
+                    val codes = checkNotNull(saved.getIntegerArrayList("KEY_COMPONENT_ACTIVITY_REGISTERED_RCS"))
+                    codes[keys.indexOfFirst { it.startsWith("video-picker-") }.also { check(it >= 0) }]
+                }
+                mainThread {
+                    assertFalse(activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED))
+                    assertEquals(before.visit, host.state.visit)
+                    val result = android.content.Intent().apply {
+                        if (index == 0) data = uri
+                        else clipData = android.content.ClipData.newRawUri("video", uri)
+                    }
+                    assertTrue(activity.activityResultRegistry.dispatchResult(requestCode, Activity.RESULT_OK, result))
+                }
+                // The system UI is real; only its successful payload is injected at the registry boundary.
+                assertTrue(instrumentation.uiAutomation.performGlobalAction(
+                    android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+                awaitControl("video result returns to the same Activity") {
+                    activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+                }
+                ui.waitForIdle()
+                ui.waitUntil(15_000) {
+                    host.state.items.size == index + 1 && host.state.items.all { it is VideoChatHost.Item.Ready }
+                }
+                val ready = mainThreadValue { host.state.items.filterIsInstance<VideoChatHost.Item.Ready>() }
+                val journal = VideoHostDraftStore(context.getSharedPreferences("video-drafts", 0)).read()
+                    .single { it.conversation == before.conversation }
+                assertEquals(ready.map { it.video }, journal.videos)
+                assertEquals(0, journal.blockedSlots)
+                assertEquals(before.owner, journal.owner)
+                ready.forEach { item ->
+                    node("video_attachments_item:${item.key}").assertIsDisplayed()
+                    fixture.controller.videoAttachments.store.openOriginal(before.owner, item.video).use {
+                        assertTrue(source.readBytes().contentEquals(it.readBytes()))
+                    }
+                }
+                assertEquals(ready.map { it.video }.toSet(), fixture.controller.videoAttachments.store.list(before.owner).toSet())
+                node("video_attachments_selecting").assertDoesNotExist()
+                assertDraft(caption)
+                assertEquals(0, fixture.opens.get())
+            }
+        } finally {
+            instrumentation.removeMonitor(picker)
+            if (!activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+                awaitHomeWindowSettled()
+                assertTrue(instrumentation.uiAutomation.performGlobalAction(
+                    android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
+                awaitControl("video picker cleanup returns") {
+                    activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+                }
+            }
+            mainThread { host.state.items.toList().forEach { host.remove(it.key) } }
+            directory.deleteRecursively()
+        }
+    }
+
+    private fun <T> mainThreadValue(work: () -> T): T {
+        var result: Result<T>? = null
+        mainThread { result = runCatching(work) }
+        return checkNotNull(result).getOrThrow()
+    }
+
     fun testFirstTextAcceptanceKeepsVideoMenuLiveAcrossRealPickerCancellation() {
         assertTrue(fixture.database.conversations().isEmpty())
         val session = fixture.session(holdSeconds = 120)

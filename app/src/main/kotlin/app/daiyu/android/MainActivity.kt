@@ -845,6 +845,7 @@ class MainActivity : ComponentActivity() {
     }
     private val imageHost by lazy { ImageChatHost.obtain(controller, { if (activityUsable()) publishChat() },
         { if (activityUsable()) toast(it) }, ::settleImageReceipt) }
+    private var videoPickerBinding by mutableStateOf<app.daiyu.android.ui.screens.chat.attachments.VideoPickerBinding?>(null)
     private var videoComposerControls by mutableStateOf<app.daiyu.android.ui.screens.chat.attachments.VideoComposerControls?>(null)
     private data class VideoPickEntry(val owner: ChatController.TextSendOwner, val epoch: Long)
     private var videoPickEntry by mutableStateOf<VideoPickEntry?>(null)
@@ -931,6 +932,7 @@ class MainActivity : ComponentActivity() {
         pendingTextSend == null && controller.textSendState() == null &&
         !imageHost.hasAttachments && !imageHost.busy && !shizukuWritesBlocked
     @Composable private fun VideoComposerPanel() {
+        val picker = videoPickerBinding ?: return
         val pick = videoPickEntry
         app.daiyu.android.ui.screens.chat.attachments.VideoAttachments(videoHost, selected?.id?.value,
             app.daiyu.android.ui.screens.chat.attachments.VideoDraftText(draft, editorGeneration, draftRevision),
@@ -940,7 +942,7 @@ class MainActivity : ComponentActivity() {
             }, enabled = videoComposerAvailable(),
             parentBusy = videoSending || controller.active != null || !controller.ready || controller.dataBusy,
             selectionBusy = videoSending || !controller.ready || controller.dataBusy,
-            compact = true, manageLifecycle = false, pickRequest = pick, onControls = { controls ->
+            compact = true, manageLifecycle = false, pickerBinding = picker, pickRequest = pick, onControls = { controls ->
                 videoComposerControls = controls
                 if (controls != null && pick != null && videoPickEntry === pick) {
                     val current = activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
@@ -2445,6 +2447,15 @@ class MainActivity : ComponentActivity() {
                     if (sidebarVisible || retainedPage != "chat") focus.clearFocus()
                 }
                 if (retainedPage == "chat" && !sidebarVisible) {
+                    // The composer unmounts on pause; the result receiver belongs to the real route.
+                    DisposableEffect(videoHost, this@MainActivity, selected?.id, editorGeneration) {
+                        val picker = app.daiyu.android.ui.screens.chat.attachments.VideoPickerBinding(videoHost, activityResultRegistry)
+                        videoPickerBinding = picker
+                        onDispose {
+                            if (videoPickerBinding === picker) videoPickerBinding = null
+                            picker.close()
+                        }
+                    }
                     DisposableEffect(videoHost, this@MainActivity) {
                         val binding = videoHost.bindLifecycle(this@MainActivity)
                         onDispose { binding.close() }

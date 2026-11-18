@@ -7,6 +7,24 @@ SRC = ROOT / "app/src/main/kotlin/app/daiyu/android"
 
 
 class MediaSendContract(unittest.TestCase):
+    def test_video_picker_receiver_outlives_paused_composer_but_not_route_owner(self):
+        activity = (SRC / "MainActivity.kt").read_text()
+        route = activity.split('if (retainedPage == "chat" && !sidebarVisible) {', 1)[1].split('androidx.activity.compose.BackHandler', 1)[0]
+        self.assertIn('DisposableEffect(videoHost, this@MainActivity, selected?.id, editorGeneration)', route)
+        self.assertIn('VideoPickerBinding(videoHost, activityResultRegistry)', route)
+        self.assertIn('picker.close()', route)
+        self.assertIn('pickerBinding = picker', activity)
+        self.assertIn('composerAttachments = { if (routeActive && !sidebarVisible)', activity)
+        ui = (SRC / "ui/screens/chat/attachments/VideoAttachments.kt").read_text()
+        self.assertIn('pickerBinding: VideoPickerBinding? = null', ui)
+        self.assertIn('if (pickerBinding == null) picker.close()', ui)
+        test = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/TextSendActivityTest.kt").read_text()
+        success = test.split('fun testSuccessfulVideoPickerResultsSurvivePausedComposerDisposal()', 1)[1].split('fun testFirstTextAcceptance', 1)[0]
+        for needle in ('awaitHomeWindowSettled', 'mainClock.advanceTimeBy', 'dispatchResult(requestCode, Activity.RESULT_OK, result)',
+                       'else clipData =', 'data = uri', 'VideoHostDraftStore', 'openOriginal', 'fixture.opens.get()'):
+            self.assertIn(needle, success)
+        self.assertNotIn('host.picked(', success)
+
     def test_normal_picture_send_has_no_preparation_controls_or_status(self):
         activity = (SRC / "MainActivity.kt").read_text()
         self.assertNotIn('"取消图片准备"', activity)

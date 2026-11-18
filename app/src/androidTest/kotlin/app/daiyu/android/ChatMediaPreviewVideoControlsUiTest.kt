@@ -19,6 +19,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.data.model.AppearanceSettings
@@ -79,12 +80,14 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
         val surface = node("chat-media-video-surface").fetchSemanticsNode().boundsInRoot
         val bar = node("chat-media-video-controls").fetchSemanticsNode().boundsInRoot
         val button = node("chat-media-video-play-pause").fetchSemanticsNode().boundsInRoot
-        val slider = node("chat-media-video-progress").fetchSemanticsNode().boundsInRoot
+        // Material3 expands Slider's TalkBack bounds; compare its allocated layout instead.
+        val slider = node("chat-media-video-progress").fetchSemanticsNode()
+            .layoutInfo.getModifierInfo().first().coordinates.boundsInRoot()
         val orientation = node("chat-media-video-orientation").fetchSemanticsNode().boundsInRoot
         val expectedInset = with(ui.density) { 20.dp.toPx() }
         assertTrue(button.left >= bar.left)
-        assertTrue(button.right <= slider.left)
-        assertTrue(slider.right <= orientation.left)
+        assertTrue("playPause=$button progress=$slider controls=$bar", button.right <= slider.left)
+        assertTrue("progress=$slider orientation=$orientation controls=$bar", slider.right <= orientation.left)
         assertTrue(orientation.right <= bar.right)
         assertEquals(expectedInset, bar.left - surface.left, 1.5f)
         assertEquals(expectedInset, surface.right - bar.right, 1.5f)

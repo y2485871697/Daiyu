@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import android.view.ViewTreeObserver
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
@@ -8,8 +9,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
@@ -26,9 +25,6 @@ class ChatStreamingFollowTest : WiredActivityTestCase() {
     private var request by mutableStateOf(ChatScrollRequest(1))
     private var body by mutableStateOf("")
     private var windowHeight by mutableStateOf(240.dp)
-    private var sampledTail: LayoutCoordinates? = null
-    private var sampledHistory: LayoutCoordinates? = null
-    private val draws = CopyOnWriteArrayList<Pair<Float, Float>>()
 
     private fun mount(initialHeight: Dp = 600.dp, viewportHeight: Dp = 240.dp) {
         mainThread {
@@ -36,14 +32,7 @@ class ChatStreamingFollowTest : WiredActivityTestCase() {
             windowHeight = viewportHeight
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    Box(Modifier.size(320.dp, windowHeight).drawWithContent {
-                        drawContent()
-                        sampledTail?.let { tail ->
-                            val history = checkNotNull(sampledHistory)
-                            check(tail.isAttached && history.isAttached)
-                            draws += tail.positionInRoot().y to history.positionInRoot().y
-                        }
-                    }) {
+                    Box(Modifier.size(320.dp, windowHeight)) {
                         ChatMessageList(
                             List(6) { ChatTurnUi.User("u$it", "history $it") } +
                                 ChatTurnUi.Assistant("tail", finalText = body,
@@ -111,19 +100,24 @@ class ChatStreamingFollowTest : WiredActivityTestCase() {
         val density = activity.resources.displayMetrics.density
         val tail = ui.onNodeWithTag("chat-turn:tail").fetchSemanticsNode().layoutInfo.coordinates
         val history = ui.onNodeWithTag("chat-turn:u5").fetchSemanticsNode().layoutInfo.coordinates
-        ui.runOnIdle {
-            sampledTail = tail
-            sampledHistory = history
+        val draws = CopyOnWriteArrayList<Pair<Float, Float>>()
+        val host = ui.runOnIdle { activity.window.decorView }
+        val observer = host.viewTreeObserver
+        val listener = ViewTreeObserver.OnDrawListener {
+            check(tail.isAttached && history.isAttached)
+            draws += tail.positionInRoot().y to history.positionInRoot().y
         }
+        ui.runOnIdle { observer.addOnDrawListener(listener) }
         ui.mainClock.autoAdvance = false
         try {
             for (suffix in listOf("\n\n第一行新增正文。", "\n\n第二行新增正文。")) {
                 val origin = tailTop()
                 draws.clear()
-                draws += origin to history.positionInRoot().y
+                ui.runOnUiThread { host.invalidate() }
+                ui.waitUntil(timeoutMillis = 5_000) { draws.isNotEmpty() }
                 ui.runOnUiThread { body += suffix }
                 repeat(90) { frame() }
-                assertTrue("Each short-body burst must produce actual draw samples", draws.size > 2)
+                assertTrue("Each short-body burst must produce actual draw samples: ${draws.size}", draws.size > 2)
                 var movingDraws = 0
                 for ((before, after) in draws.zipWithNext()) {
                     val movement = before.first - after.first
@@ -147,9 +141,8 @@ class ChatStreamingFollowTest : WiredActivityTestCase() {
             assertEquals("Viewport resize retains the original immediate clearance alignment",
                 ChatTailClearance.value, (safeBottom - bottom) / density, 2f / density)
         } finally {
-            sampledTail = null
-            sampledHistory = null
             ui.mainClock.autoAdvance = true
+            ui.runOnIdle { observer.removeOnDrawListener(listener) }
         }
         ui.waitForIdle()
         ui.onNodeWithText("stream tail marker").assertIsDisplayed()

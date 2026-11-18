@@ -121,11 +121,16 @@ class StreamingFollowContract(unittest.TestCase):
                         correction.index("listState.dispatchRawDelta"))
         device = DEVICE.read_text()
         for token in ("testShortStreamingBodyLinesUseSeveralDrawnFramesAfterEachIdleBurst",
-                      "initialHeight = 0.dp", "viewportHeight = 400.dp", "drawWithContent",
+                      "initialHeight = 0.dp", "viewportHeight = 400.dp", "ViewTreeObserver.OnDrawListener",
+                      "observer.addOnDrawListener(listener)", "observer.removeOnDrawListener(listener)",
+                      "host.invalidate()", "draws.isNotEmpty()",
                       "draws.zipWithNext()", "movingDraws > 1", "tail.size.height",
                       "History and the assistant move as one outer list",
                       "Viewport resize retains the original immediate clearance alignment"):
             self.assertIn(token, device)
+
+        self.assertNotIn("draws += origin to", device)
+        self.assertNotIn("sampledTail", device)
 
     def test_manual_clock_mutations_do_not_implicitly_advance_an_extra_frame(self):
         device = DEVICE.read_text()
@@ -140,7 +145,7 @@ class StreamingFollowContract(unittest.TestCase):
                 self.assertNotIn("mainThread {", line)
                 if "ui.runOnUiThread {" in line:
                     mutations += 1
-        self.assertEqual(8, mutations)
+        self.assertEqual(9, mutations)
         frame = device.split("private fun frame(): Float {", 1)[1].split("\n    }", 1)[0]
         self.assertEqual(1, frame.count("advanceTimeByFrame()"))
         self.assertIn("movement <= 14f * density", device)

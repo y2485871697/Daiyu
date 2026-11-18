@@ -116,13 +116,22 @@ class ControllerVideoFilesEntryTest : InstrumentationTestCase() {
     }
 
     fun testVideoPreparationUsesProductionTokensForRetainedHistory() {
+        // The complete production request fits, while the legacy byte estimator still rejects this history.
+        verifyRetainedHistoryBudget(windowTokens = 22000, expectCapacityPause = false)
+    }
+
+    fun testVideoRetainedHistoryWithFullToolCatalogPausesBeforeModelWhenOverBudget() {
+        verifyRetainedHistoryBudget(windowTokens = 20000, expectCapacityPause = true)
+    }
+
+    private fun verifyRetainedHistoryBudget(windowTokens: Long, expectCapacityPause: Boolean) {
         val fixture = RunControlFixture(instrumentation.targetContext, onSession = { _, _, _ -> })
         val clip = File(fixture.application.filesDir, "budget-fixture-video.mp4")
         var ui: ControllerVideoUi? = null
         try {
             awaitControl("controller ready") { fixture.controller.ready }
             app.daiyu.android.context.ProductionCompressionSettingsStore(fixture.application).save(
-                app.daiyu.android.context.ProductionCompressionSettings(contextWindowTokens = 20000))
+                app.daiyu.android.context.ProductionCompressionSettings(contextWindowTokens = windowTokens))
             val conversation = fixture.database.create("default")
             val run = RunId(UUID.randomUUID().toString())
             val oldUser = Message(MessageId(UUID.randomUUID().toString()), conversation.id, run, "user",
@@ -131,7 +140,7 @@ class ControllerVideoFilesEntryTest : InstrumentationTestCase() {
                 emptyList(), RunStatus.RUNNING)
             fixture.database.send(oldUser, oldAssistant)
             fixture.database.save(oldAssistant.copy(status = RunStatus.COMPLETED))
-            assertTrue(app.daiyu.android.domain.context.estimateTokens(listOf(oldUser)) > 20000 - 4096)
+            assertTrue(app.daiyu.android.domain.context.estimateTokens(listOf(oldUser)) > windowTokens - 4096)
             fixture.controller.reasoningPreference.set(conversation.id.value, ReasoningEffort.HIGH)
             encodeOfflineBackupMp4(clip)
             val owner = VideoAttachmentOwner(conversation.id.value, UUID.randomUUID().toString())
@@ -149,32 +158,58 @@ class ControllerVideoFilesEntryTest : InstrumentationTestCase() {
             }
             awaitControl("video receipt") { receipt.get() != null }
             assertEquals(fixture.controller.problem, VideoDraftOutcome.ACCEPTED, receipt.get()?.outcome)
-            if (!session.entered.await(20, TimeUnit.SECONDS)) {
-                val storedAssistant = fixture.database.messages(conversation.id).map { it.second }
-                    .lastOrNull { it.role == Message.ASSISTANT_ROLE }
-                val checkpoint = storedAssistant?.let {
-                    app.daiyu.android.storage.SQLiteRuntimeStore.readCheckpointSnapshot(
-                        fixture.database.readableDatabase, it.id.value)
+            val acceptedAssistant = fixture.database.messages(conversation.id).map { it.second }
+                .last { it.role == Message.ASSISTANT_ROLE }
+            fun checkpoint() = app.daiyu.android.storage.SQLiteRuntimeStore.readCheckpointSnapshot(
+                fixture.database.readableDatabase, acceptedAssistant.id.value)
+            if (expectCapacityPause) {
+                awaitControl("video request durably capacity-paused before model open") {
+                    checkpoint()?.let { it.phase == app.daiyu.android.domain.runtime.ExecutionPhase.PAUSED &&
+                        it.context?.capacity != null } == true
                 }
-                val state = AtomicReference<String>()
-                controlMain { state.set("active=${fixture.controller.active?.status}; problem=${fixture.controller.problem}") }
-                fail("video model did not enter: opens=${fixture.opens.get()}; ${state.get()}; " +
-                    "storedStatus=${storedAssistant?.status}; storedError=${storedAssistant?.error}; " +
-                    "phase=${checkpoint?.phase}; capacity=${checkpoint?.context?.capacity}; " +
-                    "checkpointError=${checkpoint?.message?.error}")
+                val paused = checkNotNull(checkpoint())
+                val capacity = checkNotNull(paused.context?.capacity)
+                assertEquals(windowTokens, capacity.windowTokens)
+                assertEquals(windowTokens - 4096, capacity.budgetTokens)
+                assertTrue(capacity.estimatedTokens > capacity.budgetTokens)
+                assertEquals(oldUser, paused.history.first())
+                assertEquals(RunStatus.RUNNING, paused.message.status)
+                assertFalse(paused.requestUnconfirmed)
+                assertNull(paused.request)
+                assertTrue(paused.usageRequests.isEmpty())
+                assertEquals(0, fixture.opens.get())
+                assertEquals(1L, session.entered.count)
+                assertTrue(fixture.histories.isEmpty())
+            } else {
+                if (!session.entered.await(20, TimeUnit.SECONDS)) {
+                    val storedAssistant = fixture.database.messages(conversation.id).map { it.second }
+                        .lastOrNull { it.role == Message.ASSISTANT_ROLE }
+                    val checkpoint = storedAssistant?.let {
+                        app.daiyu.android.storage.SQLiteRuntimeStore.readCheckpointSnapshot(
+                            fixture.database.readableDatabase, it.id.value)
+                    }
+                    val state = AtomicReference<String>()
+                    controlMain { state.set("active=${fixture.controller.active?.status}; problem=${fixture.controller.problem}") }
+                    fail("video model did not enter: opens=${fixture.opens.get()}; ${state.get()}; " +
+                        "storedStatus=${storedAssistant?.status}; storedError=${storedAssistant?.error}; " +
+                        "phase=${checkpoint?.phase}; capacity=${checkpoint?.context?.capacity}; " +
+                        "checkpointError=${checkpoint?.message?.error}")
+                }
+                assertEquals(1, fixture.opens.get())
+                val projected = fixture.histories.single()
+                assertEquals(oldUser, projected.first())
+                assertTrue(projected.last().blocks.filterIsInstance<MessageBlock.Text>().last().text.contains("Linux 路径:"))
             }
-            assertEquals(1, fixture.opens.get())
-            val projected = fixture.histories.single()
-            assertEquals(oldUser, projected.first())
-            assertTrue(projected.last().blocks.filterIsInstance<MessageBlock.Text>().last().text.contains("Linux 路径:"))
             assertEquals(ReasoningEffort.HIGH, fixture.controller.reasoningPreference.snapshot(owner.conversationId))
             val stored = ControllerVideoHistory(fixture.database).capture(conversation.id)
             assertEquals(4, stored.rows.size)
             assertFalse(stored.rows.any { row -> row.blocks.filterIsInstance<MessageBlock.Text>().any {
                 it.text.contains("Linux 路径:") } })
             controlMain { fixture.controller.acknowledgeVideoSend(request) }
-            session.release.countDown()
-            awaitControl("video complete") { fixture.controller.active == null }
+            if (!expectCapacityPause) {
+                session.release.countDown()
+                awaitControl("video complete") { fixture.controller.active == null }
+            }
         } finally {
             controlMain { ui?.let(fixture.controller::detachVideoUi) }
             fixture.close()

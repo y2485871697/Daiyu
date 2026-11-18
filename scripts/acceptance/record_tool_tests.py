@@ -844,6 +844,31 @@ PANE_QUESTION_MODULES = (
 )
 
 
+VIDEO_PICKER_PLATFORM_CLASSES = (
+    'app.daiyu.android.TextSendActivityTest',
+    'app.daiyu.android.ChatReferenceEntryActivityTest',
+    'app.daiyu.android.ui.screens.chat.attachments.VideoAttachmentsUiTest',
+)
+VIDEO_PICKER_MODULES = (
+    'test_media_send_contract',
+    'test_image_sidebar_visibility_contract',
+    'test_message_composer_edit_contract',
+    'test_tool_receipt_snapshot_contract',
+    'test_tool_receipt_pause_contract',
+    'test_chat_submission_preview_contract',
+    'test_composer_surface_color_contract',
+    'test_compression_send_gate_contract',
+    'test_delegation_batch_and_send_contract',
+    'test_full_regression_event_boundaries_contract.FullRegressionEventBoundariesContractTest.test_video_result_waits_for_exactly_one_picker_launch',
+    'test_full_regression_event_boundaries_contract.FullRegressionEventBoundariesContractTest.test_first_text_video_menu_advances_compose_before_native_picker_waits',
+    'test_candidate_window_publication_contract.CandidateWindowPublicationContract.test_video_disposes_only_its_own_publication_and_keeps_callback_fence',
+    'test_test_refresh_contract',
+    'test_record_tool_tests_scope',
+    'test_acceptance_tool_receipt',
+    'test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope',
+)
+
+
 MEDIA_SEND_PLATFORM_CLASSES = (
     "app.daiyu.android.ImageChatHostActivityTest",
     "app.daiyu.android.ui.screens.chat.attachments.ImageAttachmentsUiTest",
@@ -882,6 +907,9 @@ ERROR_DETAILS_MODULES = (
 
 
 def command_for(python, env):
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(VIDEO_PICKER_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *VIDEO_PICKER_MODULES, "-v"], "video-picker-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(USER_MESSAGE_ENTRANCE_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *USER_MESSAGE_ENTRANCE_MODULES, "-v"], "user-message-entrance-targeted"
@@ -1160,7 +1188,7 @@ def record(python):
         child_env = os.environ.copy()
         child_env["PYTHONPATH"] = str(Path("tests").resolve()) + os.pathsep + child_env.get("PYTHONPATH", "")
     validation_cwd = None
-    if scope in ("user-message-entrance-targeted", "composer-action-targeted", "error-details-targeted", "media-send-targeted", "receipt-summary-targeted", "runtime-stop-targeted", "workflow-collapse-targeted", "voice-browser-targeted", "browser-targeted", "doubao-motion-targeted", "child-hot-configuration-targeted", "child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted", "page-back-targeted") or (
+    if scope in ("user-message-entrance-targeted", "composer-action-targeted", "error-details-targeted", "video-picker-targeted", "media-send-targeted", "receipt-summary-targeted", "runtime-stop-targeted", "workflow-collapse-targeted", "voice-browser-targeted", "browser-targeted", "doubao-motion-targeted", "child-hot-configuration-targeted", "child-stop-targeted", "generation-port-targeted", "message-actions-targeted", "return-chat-handoff-targeted", "pane-question-targeted", "pane-question-core-targeted", "timeline-divider-targeted", "task-scroll-targeted", "page-back-targeted") or (
             scope == "child-task-cards-targeted" and sorted(os.environ.get("SMOKE_TEST_CLASSES", "").split(","))
             == sorted(CHILD_TASK_CARD_READ_ONLY_CLASSES)):
         validation_cwd = Path(__file__).resolve().parents[2]

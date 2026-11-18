@@ -17,7 +17,11 @@ class CandidateWindowPublicationContract(unittest.TestCase):
         self.assertLess(dispose.index('live = false'), dispose.index('release(published)'))
         self.assertIn('else controls(null)', dispose)
         self.assertIn('live && canSelect && sameVideoVisit(state, host.state)', source)
-        self.assertIn('live && canSubmit && sameVideoVisit(state, host.state)', source)
+        publication = source.split('val published = VideoComposerControls(', 1)[1].split('controls(published)', 1)[0]
+        self.assertIn('send = { if (live) send() }', publication)
+        send = source.split('    fun send() {', 1)[1].split('    DisposableEffect(', 1)[0]
+        self.assertLess(send.index('if (!canSubmit || !sameVideoVisit(state, host.state)) return'),
+                        send.index('host.submit(text.text, state)'))
         host = (MAIN / 'MainActivity.kt').read_text()
         self.assertIn('if (videoComposerControls === disposed) videoComposerControls = null', host)
         self.assertIn('DisposableEffect(videoHost, this@MainActivity)', host)

@@ -32,11 +32,26 @@ class FullRegressionEventBoundariesContractTest(unittest.TestCase):
 
     def test_video_result_waits_for_exactly_one_picker_launch(self):
         source = (ANDROID / 'ui/screens/chat/attachments/VideoAttachmentsUiTest.kt').read_text()
-        test = source.split('fun testCompactComposerBlockedVideoNeverSendsCaptionAndConfirmationFreezesText()', 1)[1].split('private fun pick(', 1)[0]
+        test = source.split('fun testCompactComposerBlockedVideoNeverSendsCaptionAndSingleClickFreezesText()', 1)[1].split('private fun pick(', 1)[0]
+        self.assertIn('ui.waitUntil(5_000)', test)
+        self.assertIn('node("video_attachments_confirmation").assertDoesNotExist()', test)
         self.assertLess(test.index('picker.launches.size == 1'), test.index('picker.result(picker.launches.single())'))
         self.assertIn('ui.mainClock.advanceTimeByFrame()', test)
         self.assertIn('assertEquals("first exact text", handed?.text)', test)
         self.assertIn('assertEquals("first exact text", frozenEditor?.text)', test)
+
+    def test_first_text_video_menu_advances_compose_before_native_picker_waits(self):
+        source = (ANDROID / 'TextSendActivityTest.kt').read_text()
+        test = source.split('fun testFirstTextAcceptanceKeepsVideoMenuLiveAcrossRealPickerCancellation()', 1)[1].split('fun testCommittedReceiptKeepsPreparingControlUntilUiConsumesIt()', 1)[0]
+        launch = 'ui.waitUntil(5_000) { launches.get() == index + 1 }'
+        self.assertLess(test.index('node("chat-attachment:ATTACH_VIDEO")'), test.index(launch))
+        self.assertLess(test.index(launch), test.index('awaitControl("actual picker stops the chat Activity")'))
+        self.assertLess(test.index('instrumentation.sendKeyDownUpSync'),
+                        test.index('awaitControl("actual picker returns to the same chat")'))
+        self.assertNotIn('awaitControl("video GET_CONTENT launch")', test)
+        for token in ('return null', 'repeat(2)', 'getVideoPickEntry',
+                      'assertEquals(2, launches.get())', 'assertDraft(caption)'):
+            self.assertIn(token, test)
 
     def test_ordinary_gui_fallback_observes_real_model_entry(self):
         source = (ANDROID / 'GuiMainActivityTest.kt').read_text()

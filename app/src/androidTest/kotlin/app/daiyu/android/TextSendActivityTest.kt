@@ -797,7 +797,7 @@ class TextSendActivityTest private constructor(
             assertTrue(preparing.await(5, TimeUnit.SECONDS))
             val key = checkNotNull(currentSendState().submissionPreview).key
             val start = sendFrame(key, 48)
-            val middle = sendFrame(key, 80)
+            val middle = sendFrame(key, 128)
             val end = sendFrame(key, 400)
             assertEquals(0, fixture.opens.get())
             assertTrue(fixture.database.conversations().isEmpty())

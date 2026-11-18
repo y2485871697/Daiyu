@@ -878,6 +878,13 @@ MEDIA_SEND_PLATFORM_CLASSES = (
     "app.daiyu.android.ToolReceiptPauseActivityTest",
     "app.daiyu.android.ChatReferenceEntryActivityTest",
 )
+VIDEO_FILES_PREVIEW_PLATFORM_CLASSES = (
+    "app.daiyu.android.ControllerVideoFilesEntryTest",
+    "app.daiyu.android.ChatMediaPreviewVideoControlsUiTest",
+    "app.daiyu.android.ControllerVideoProductionEntryTest",
+    "app.daiyu.android.VideoChatHostAndroidTest",
+    "app.daiyu.android.ui.screens.chat.attachments.VideoAttachmentsUiTest",
+)
 MEDIA_SEND_MODULES = (
     "test_media_send_contract", "test_image_sidebar_visibility_contract",
     "test_message_composer_edit_contract", "test_tool_receipt_snapshot_contract",
@@ -917,7 +924,9 @@ def command_for(python, env):
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(ERROR_DETAILS_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *ERROR_DETAILS_MODULES, "-v"], "error-details-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
-            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(MEDIA_SEND_PLATFORM_CLASSES)):
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (
+                sorted(MEDIA_SEND_PLATFORM_CLASSES),
+                sorted(VIDEO_FILES_PREVIEW_PLATFORM_CLASSES))):
         return [python, "-B", "-m", "unittest", *MEDIA_SEND_MODULES, "-v"], "media-send-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(SEARCH_BROWSER_PLATFORM_CLASSES)):

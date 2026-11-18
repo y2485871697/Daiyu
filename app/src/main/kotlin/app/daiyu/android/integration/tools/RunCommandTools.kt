@@ -165,7 +165,7 @@ internal class RunCommandTools(
     }
     fun tools(): List<RegisteredTool> = listOf(object : RegisteredTool {
         override val definition = app.daiyu.android.domain.tools.ToolDefinition("terminal_exec", 1,
-            "在已选择的 Android ${if (android.backend == "shizuku") "Shizuku（仅真实授权服务，不回退应用 UID）" else if (android.root) "Root" else "应用 UID"} 身份或绑定 Linux 中执行命令。当前会话 Android 工作目录：${android.workingDirectory?.path}；$linuxDescription。已绑定时两者直通同一会话目录；Android 系统命令请选择 android，不在 Linux 内猜测执行。应用内默认许可按本次精确命令和环境放行，无需逐次确认；仍核验真实身份与系统权限，不自动提权、不自动安装、不切换环境。同步等待真实输出，UNKNOWN不得重发，凭job_id用terminal_read读取。",
+            "在已选择的 Android ${if (android.backend == "shizuku") "Shizuku（仅真实授权服务，不回退应用 UID）" else if (android.root) "Root" else "应用 UID"} 身份或绑定 Linux 中执行命令。当前会话 Android 工作目录：${android.workingDirectory?.path}；$linuxDescription。已绑定时两者直通同一会话目录；Android 系统命令请选择 android，不在 Linux 内猜测执行。应用内默认许可按本次精确命令和环境放行，无需逐次确认；仍核验真实身份与系统权限，不自动提权、不自动安装、不切换环境。同步等待真实退出和完整输出；timeout_ms是首段等待时长，仍运行时继续等待同一job并响应取消，不会重新执行。UNKNOWN不得重发，凭job_id用terminal_read读取。",
             CAPABILITY, ToolEffect.WRITE, ToolSchema(listOf(
                 ArgumentField("command", ArgumentType.Text(maxLength = 32768, minimumLength = 1)),
                 ArgumentField("environment", ArgumentType.Text(choices = setOf("android", "linux"))),
@@ -312,11 +312,23 @@ internal class RunCommandTools(
         if (call.cancelled() || synchronized(lock) { closed })
             return ExecutionReceipt.NotExecuted("terminal_cancelled_before_command")
         TerminalTargetMetadata.publish(call, opened)
-        val raw = registry.execute("terminal_exec", JSONObject().put("request_id", "exec-$request")
+        var raw = registry.execute("terminal_exec", JSONObject().put("request_id", "exec-$request")
             .put("session_id", opened.getString("session_id")).put("command", command)
             .put("mode", "sync").put("timeout_ms", timeout))
+        while (raw.optBoolean("ok") && !raw.has("error") && raw.optBoolean("wait_pending") &&
+            raw.optString("execution") == "unknown") {
+            if (call.cancelled() || synchronized(lock) { closed }) break
+            Thread.sleep(250)
+            raw = registry.read(raw.getString("job_id"), 0, 16384)
+        }
         return when (raw.optString("execution")) {
-            "executed" -> ExecutionReceipt.Confirmed(raw.toString(), isError = !raw.optBoolean("ok"))
+            "executed" -> {
+                val exit = raw.opt("exit_code") as? Number
+                if (exit == null || exit.toDouble() != exit.toInt().toDouble()) {
+                    synchronized(lock) { unknown = true }
+                    ExecutionReceipt.Unknown("terminal_exit_evidence_missing_no_resend")
+                } else ExecutionReceipt.Confirmed(raw.toString(), isError = !raw.optBoolean("ok") || exit.toInt() != 0)
+            }
             "not_executed" -> ExecutionReceipt.NotExecuted(raw.optString("error", "terminal_not_executed"))
             else -> {
                 synchronized(lock) { unknown = true }

@@ -17,6 +17,12 @@ import kotlinx.coroutines.CancellationException
 fun interface MessageImageLoader {
     suspend fun load(expectedOwner: MessageImageOwner, reference: MessageImageReference, maxEdge: Int): ImageBitmap?
 
+    suspend fun loadVideo(expectedOwner: app.daiyu.android.media.video.MessageVideoOwner,
+        reference: app.daiyu.android.media.video.MessageVideoReference, maxEdge: Int): ImageBitmap? = null
+
+    fun cachedVideo(expectedOwner: app.daiyu.android.media.video.MessageVideoOwner,
+        reference: app.daiyu.android.media.video.MessageVideoReference, maxEdge: Int): ImageBitmap? = null
+
     /** Non-blocking, page-scoped, already authorized thumbnail; it may be below maxEdge. */
     fun cached(expectedOwner: MessageImageOwner, reference: MessageImageReference, maxEdge: Int): ImageBitmap? = null
 }
@@ -45,4 +51,14 @@ internal suspend fun loadMessageImage(
         // Never display exception text: resolver failures may contain local paths/URIs.
         MessageImageLoadResult.Unavailable
     }
+}
+
+internal suspend fun loadMessageVideo(video: MessageVideoUi, loader: MessageImageLoader?, maxEdge: Int): MessageImageLoadResult {
+    if (loader == null || video.expectedOwner != video.reference.owner || maxEdge <= 0)
+        return MessageImageLoadResult.Unavailable
+    return try {
+        loader.loadVideo(video.expectedOwner, video.reference, maxEdge)?.let(MessageImageLoadResult::Ready)
+            ?: MessageImageLoadResult.Unavailable
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (_: Exception) { MessageImageLoadResult.Unavailable }
 }

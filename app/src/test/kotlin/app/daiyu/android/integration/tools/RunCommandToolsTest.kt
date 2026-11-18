@@ -40,6 +40,10 @@ class RunCommandToolsTest {
         val configurations = mutableListOf<TerminalConfiguration>()
         val disclosures = mutableListOf<String>()
         var execution = "executed"
+        var exitCode: Int? = 0
+        var pendingReads = 0
+        var journalCommitUnknown = false
+        var reads = 0
         var ownerCurrent = true
         var duringConsent: () -> Unit = {}
         val effects = mutableListOf<WriteEffect>()
@@ -78,10 +82,20 @@ class RunCommandToolsTest {
                         executionRequests.add(arguments.getString("request_id"))
                         if (failExecute) throw java.io.IOException("sent but receipt lost")
                         executedCommands.add(arguments.getString("command"))
-                        return JSONObject().put("ok", true).put("execution", execution)
-                            .put("job_id", "00000000-0000-0000-0000-000000000001").put("stdout", "exact\n")
+                        return JSONObject().put("ok", true).put("execution", if (pendingReads > 0) "unknown" else execution)
+                            .put("wait_pending", pendingReads > 0).put("exit_code", exitCode ?: JSONObject.NULL)
+                            .put("job_id", "00000000-0000-0000-0000-000000000001").put("stdout", "exact\n").apply {
+                                if (journalCommitUnknown) put("ok", false).put("execution", "unknown")
+                                    .put("error", "journal_commit_unknown_not_replayed")
+                            }
                     }
-                    override fun read(id: String, offset: Long, limit: Int) = JSONObject().put("ok", true).put("execution", "executed")
+                    override fun read(id: String, offset: Long, limit: Int): JSONObject {
+                        reads++
+                        if (pendingReads > 0) pendingReads--
+                        return JSONObject().put("ok", true).put("execution", if (pendingReads > 0) "unknown" else "executed")
+                            .put("wait_pending", pendingReads > 0).put("exit_code", exitCode ?: JSONObject.NULL)
+                            .put("job_id", id).put("stdout", "exact\n")
+                    }
                     override fun readLinuxTmpPng(path: String, cancelled: () -> Boolean): ByteArray {
                         assertFalse(cancelled())
                         imageReads++; imagePath = path; afterImageRead()
@@ -105,6 +119,41 @@ class RunCommandToolsTest {
             listOf(ToolInvocation(ToolCallId(id), "terminal_exec", JSONObject().put("command", command)
                 .put("environment", environment).put("timeout_ms", timeout).toString())), dispatchOwner) { cancelled }.single().outcome
     }
+    @Test fun syncWaitReadsTheOriginalJobUntilCompletionWithoutExecutingAgain() {
+        val fixture = Fixture().apply { pendingReads = 2 }
+        try {
+            assertFalse((fixture.dispatch() as DispatchOutcome.Confirmed).isError)
+            assertEquals(1, fixture.executions)
+            assertEquals(2, fixture.reads)
+            assertFalse((fixture.dispatch() as DispatchOutcome.Confirmed).isError)
+            assertEquals(1, fixture.executions)
+        } finally { fixture.leaf.close() }
+    }
+
+    @Test fun journalFailureWithPendingFlagRemainsUnknownWithoutReadingOrExecutingAgain() {
+        val fixture = Fixture().apply { pendingReads = 2; journalCommitUnknown = true }
+        try {
+            assertTrue(fixture.dispatch() is DispatchOutcome.Unknown)
+            assertEquals(0, fixture.reads)
+            fixture.dispatch(id = "later-command", command = "echo never")
+            assertEquals(1, fixture.executions)
+            assertEquals(0, fixture.reads)
+        } finally { fixture.leaf.close() }
+    }
+
+    @Test fun nonzeroExitIsConfirmedFailureAndMissingExitRemainsUnknown() {
+        for (code in listOf(1, 127)) {
+            val fixture = Fixture().apply { exitCode = code }
+            try {
+                assertTrue((fixture.dispatch() as DispatchOutcome.Confirmed).isError)
+                assertEquals(1, fixture.executions)
+            } finally { fixture.leaf.close() }
+        }
+        val missing = Fixture().apply { exitCode = null }
+        try { assertTrue(missing.dispatch() is DispatchOutcome.Unknown) }
+        finally { missing.leaf.close() }
+    }
+
     @Test fun fileImagesRequireAHostReceiptAndTheExactCurrentOwner() {
         val absent = Fixture()
         assertFalse(absent.hasImageTool())

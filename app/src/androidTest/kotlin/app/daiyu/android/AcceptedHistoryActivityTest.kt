@@ -254,6 +254,41 @@ class AcceptedHistoryActivityTest : WiredActivityTestCase() {
         assertDraft("new draft without remapping history")
     }
 
+    fun testAcceptedHistoryIsNotStarvedByPresentationOnlyPublications() {
+        val conversation = seedHistory("accepted-publication", 2)
+        mainThread { activity.select(conversation) }
+        val run = RunId("accepted-publication-new")
+        val user = Message(MessageId("accepted-publication-user"), conversation.id, run, Message.USER_ROLE,
+            listOf(MessageBlock.Text("user", "视频能看到吗")), RunStatus.COMPLETED)
+        fixture.database.send(user, Message(MessageId("accepted-publication-answer"), conversation.id, run,
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
+        @Suppress("UNCHECKED_CAST")
+        val original = field("loadedWindowReader") as (ConversationId, Long, Int) -> List<Pair<Long, Message>>
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val reads = AtomicInteger()
+        val reader: (ConversationId, Long, Int) -> List<Pair<Long, Message>> = { id, before, count ->
+            assertFalse(Looper.myLooper() == Looper.getMainLooper())
+            val rows = original(id, before, count)
+            if (reads.incrementAndGet() == 1) { entered.countDown(); check(release.await(5, TimeUnit.SECONDS)) }
+            rows
+        }
+        try {
+            mainThread { setField("loadedWindowReader", reader); call("loadAcceptedHistory", conversation, true) }
+            assertTrue(entered.await(5, TimeUnit.SECONDS))
+            mainThread { repeat(8) { call("publishChat") } }
+            release.countDown()
+            awaitShown { rows -> rows.any { it.second.id == user.id } }
+            // This window is smaller than one page: redraws must not restart the acceptance read.
+            assertEquals(1, reads.get())
+            mainThread {
+                val state = (field("chatState\$delegate") as State<*>).value as ChatScreenState
+                assertTrue(state.turns.filterIsInstance<app.daiyu.android.ui.screens.chat.conversation.ChatTurnUi.User>()
+                    .any { it.text == "视频能看到吗" })
+            }
+        } finally { release.countDown(); mainThread { setField("loadedWindowReader", original) } }
+    }
+
     fun testLateAcceptedHistoryCannotOverwriteExpandedWindowOrNewFinalText() {
         val conversation = fixture.database.create("default")
         repeat(70) { index ->

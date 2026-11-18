@@ -1635,6 +1635,14 @@ class ChatController internal constructor(private val application:Application,
         ControllerMessageMedia(database, videoAttachments.store).openOriginal(conversation, binding, cancelled)
     }
 
+    internal fun messageVideoThumbnail(conversation: ConversationId,
+        video: app.daiyu.android.ui.screens.chat.conversation.MessageVideoUi, edge: Int,
+        cancelled: () -> Boolean): android.graphics.Bitmap = imageRead {
+        ControllerMessageMedia(database, videoAttachments.store).openOriginal(conversation, video, cancelled).use {
+            app.daiyu.android.media.video.decodeVideoThumbnail(it, video.reference, edge, cancelled)
+        }
+    }
+
     private fun <T> imageRead(work:()->T):T {
         check(Looper.myLooper()!=Looper.getMainLooper()) {"image_read_requires_worker"}
         synchronized(this) {check(!closed && ready && !recoveryFailed);imageReaders++}

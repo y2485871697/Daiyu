@@ -439,12 +439,18 @@ internal class PreviewLease(private val controller: ChatController, val conversa
     fun isOpen(): Boolean = open.get()
     @Synchronized fun close() {
         open.set(false); originals.close()
-        draftThumbnails.evictAll(); messageThumbnails.evictAll()
+        draftThumbnails.evictAll(); messageThumbnails.evictAll(); videoThumbnails.evictAll()
     }
     private val draftThumbnails = android.util.LruCache<ImageAttachment, androidx.compose.ui.graphics.ImageBitmap>(8)
     private val messageThumbnails = object : android.util.LruCache<app.daiyu.android.domain.MessageImageReference,
         androidx.compose.ui.graphics.ImageBitmap>(8 * 1024 * 1024) {
         override fun sizeOf(key: app.daiyu.android.domain.MessageImageReference,
+            value: androidx.compose.ui.graphics.ImageBitmap) = value.width * value.height * 4
+    }
+
+    private val videoThumbnails = object : android.util.LruCache<app.daiyu.android.media.video.MessageVideoReference,
+        androidx.compose.ui.graphics.ImageBitmap>(8 * 1024 * 1024) {
+        override fun sizeOf(key: app.daiyu.android.media.video.MessageVideoReference,
             value: androidx.compose.ui.graphics.ImageBitmap) = value.width * value.height * 4
     }
 
@@ -552,6 +558,31 @@ internal class PreviewLease(private val controller: ChatController, val conversa
         }
     }
     val historyLoader = object : MessageImageLoader {
+        override fun cachedVideo(owner: app.daiyu.android.media.video.MessageVideoOwner,
+            ref: app.daiyu.android.media.video.MessageVideoReference, maxEdge: Int): androidx.compose.ui.graphics.ImageBitmap? =
+            synchronized(this@PreviewLease) {
+                if (!open.get() || maxEdge <= 0 || conversation == null || owner.conversationId != conversation || owner != ref.owner)
+                    null else videoThumbnails.get(ref)?.takeIf { it.width <= maxEdge && it.height <= maxEdge }
+            }
+
+        override suspend fun loadVideo(owner: app.daiyu.android.media.video.MessageVideoOwner,
+            ref: app.daiyu.android.media.video.MessageVideoReference, maxEdge: Int): androidx.compose.ui.graphics.ImageBitmap? {
+            if (conversation == null || owner.conversationId != conversation || owner != ref.owner) return null
+            val context = currentCoroutineContext()
+            return try {
+                decode { controller.messageVideoThumbnail(ConversationId(conversation),
+                    app.daiyu.android.ui.screens.chat.conversation.MessageVideoUi(owner, ref), maxEdge) {
+                    !open.get() || !context.isActive
+                } }.also { bitmap -> synchronized(this@PreviewLease) {
+                    if (open.get()) videoThumbnails.put(ref, bitmap)
+                } }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (failure: Exception) {
+                synchronized(this@PreviewLease) { videoThumbnails.remove(ref) }
+                throw failure
+            }
+        }
+
         override fun cached(owner: app.daiyu.android.domain.MessageImageOwner,
             ref: app.daiyu.android.domain.MessageImageReference, maxEdge: Int): androidx.compose.ui.graphics.ImageBitmap? =
             synchronized(this@PreviewLease) {

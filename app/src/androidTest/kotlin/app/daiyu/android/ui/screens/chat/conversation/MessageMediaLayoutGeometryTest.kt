@@ -92,6 +92,34 @@ class MessageMediaLayoutGeometryTest : WiredActivityTestCase() {
         nearDp(0f, host.right - bubble.right)
     }
 
+    fun testPortraitVideoUsesDecodedThumbnailGeometryAndCenteredPlayOverlay() {
+        val videoOwner = app.daiyu.android.media.video.MessageVideoOwner(
+            "00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002")
+        val video = MessageVideoUi(videoOwner, app.daiyu.android.media.video.MessageVideoReference(videoOwner,
+            "00000000-0000-0000-0000-000000000003", "video/mp4", 24, "a".repeat(64), 14332, 1080, 2344))
+        val loader = object : MessageImageLoader {
+            override suspend fun load(expectedOwner: MessageImageOwner, reference: MessageImageReference, maxEdge: Int) =
+                ImageBitmap(100, 200)
+            override suspend fun loadVideo(expectedOwner: app.daiyu.android.media.video.MessageVideoOwner,
+                reference: app.daiyu.android.media.video.MessageVideoReference, maxEdge: Int) = ImageBitmap(108, 234)
+        }
+        val turn = ChatTurnUi.User("layout-user", "视频", content = listOf(MessageContentUi.Text("caption", "视频"),
+            MessageContentUi.Video(video)))
+        mount { UserTurn(turn, ChatScreenActions(), loader) }
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("message-video-thumbnail:2", useUnmergedTree = true).fetchSemanticsNodes().size == 1
+        }
+        val frame = ui.onNodeWithTag("message-video:2", useUnmergedTree = true).unclippedBounds()
+        val play = ui.onNodeWithTag("message-video-play:2", useUnmergedTree = true).unclippedBounds()
+        nearDp(360f, frame.height)
+        nearDp(360f * 108f / 234f, frame.width)
+        assertTrue(abs(frame.center.x - play.center.x) <= 2f)
+        assertTrue(abs(frame.center.y - play.center.y) <= 2f)
+        ui.onNodeWithText("▶ 播放视频", useUnmergedTree = true).assertDoesNotExist()
+        ui.onNodeWithTag("message-video:2", useUnmergedTree = true).performClick()
+        assertEquals(listOf(messageVideoPreviewKey(video)), opened)
+    }
+
     fun testShortCaptionAndPortraitShrinkActualUserBubble() {
         mountUser(listOf(MessageContentUi.Text("short", "一张图"), MessageContentUi.Image(image(1))))
         waitForImages(1)

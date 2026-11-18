@@ -5977,6 +5977,8 @@ class MainActivity : ComponentActivity() {
         val generation = editorGeneration
         val request = ++historyRequestSerial
         val content = chatState.contentRevision
+        val capturedWindow = shown.toList()
+        val capturedDisplay = displayWindow
         val first = shown.firstOrNull()?.first
         val data = controller.dataRevision
         val owner = loadedHistoryOwner(conversation.id)
@@ -5992,23 +5994,26 @@ class MainActivity : ComponentActivity() {
                 loadAcceptedHistory(conversation, animateUserMessage)
                 return@launch
             }
-            if (chatState.contentRevision != content) {
+            val active = controller.active?.takeIf { it.conversationId == conversation.id }
+            val sameWindow = capturedWindow == shown ||
+                app.daiyu.android.ui.screens.chat.conversation.canOverlayLiveHistory(capturedWindow, shown, active)
+            if (capturedDisplay !== displayWindow || chatState.contentRevision != content && !sameWindow) {
                 loadAcceptedHistory(conversation, animateUserMessage)
                 return@launch
             }
             if (animateUserMessage) rows?.lastOrNull { it.second.role == Message.USER_ROLE }?.second?.let {
                 userMessageEntrance = UserMessageEntrance(it.id.value)
             }
-            applyAcceptedHistory(conversation, generation, request, content, rows)
+            applyAcceptedHistory(conversation, generation, request, chatState.contentRevision, rows)
         }
     }
 
     private fun readAcceptedWindow(id: ConversationId, first: Long?): List<Pair<Long, Message>> {
-        if (first == null) return controller.database.messages(id)
+        if (first == null) return loadedWindowReader(id, Long.MAX_VALUE, 50)
         val rows = mutableListOf<Pair<Long, Message>>()
         var cursor = Long.MAX_VALUE
         while (true) {
-            val page = controller.database.messages(id, cursor, 200)
+            val page = loadedWindowReader(id, cursor, 200)
             if (page.isEmpty()) break
             rows.addAll(0, page)
             cursor = page.first().first

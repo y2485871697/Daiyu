@@ -350,11 +350,13 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             val remaining=timeout-TimeUnit.NANOSECONDS.toMillis(System.nanoTime()-startedAt)
             val completed=try { remaining>0 && process.waitFor(remaining,TimeUnit.MILLISECONDS) }
                 catch(_:InterruptedException) { Thread.currentThread().interrupt(); false }
-            if(!completed) job.unknown=true
+            if(!completed && Thread.currentThread().isInterrupted) job.unknown=true
             if(completed) job.reader?.join(200)
             try { saveJob(job) } catch(_:Exception) { job.unknown=true; return dispatchedError(job,"job_metadata_commit_unknown_not_replayed") }
-            return page(job,0,16384).put("ok",completed).apply {
-                if(!completed) put("execution","unknown").put("error","timeout_outcome_unknown_not_replayed")
+            val result = page(job,0,16384)
+            return result.put("ok", completed || result.optBoolean("wait_pending") || result.optString("execution") == "executed").apply {
+                if(!completed && optString("execution") == "unknown" && !optBoolean("wait_pending"))
+                    put("error","timeout_outcome_unknown_not_replayed")
             }
         } catch(_:Exception) {
             if(job.handle!=null || job.startupCleanup!=null) { job.unknown=true; return dispatchedError(job,"command_delivery_unknown_not_replayed") }
@@ -434,6 +436,8 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             .put("exit_code",exitCode ?: JSONObject.NULL)
             .put("scope_drain_confirmed", completion?.scopeDrained ?: (process is RootScopeCommandProcess && !running))
             .put("execution",completion?.execution ?: if(process==null) (if(job.state in setOf("start_failed", "cancelled_before_dispatch")) "not_executed" else "unknown") else if(running || exitCode == null || job.unknown || !job.outputComplete) "unknown" else "executed")
+            .put("wait_pending", job.mode == "sync" && process != null && !job.unknown && !job.cancelRequested &&
+                (running || (exitCode != null && !job.outputComplete)))
             .put("stderr_merged",true).put("log_truncated",job.truncated).put("output_complete",job.outputComplete)
     }
     private fun readLog(file:File,offset:Long,limit:Int):JSONObject {

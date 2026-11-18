@@ -76,8 +76,47 @@ class ControllerVideoFilesEntryTest : InstrumentationTestCase() {
             fixture.close()
         }
     }
-    fun testVideoPreparationUsesProductionTokensForRetainedHistory() {
+    fun testVideoThumbnailResolvesLogicalOwnerThroughPhysicalHistorySidecar() {
         val fixture = RunControlFixture(instrumentation.targetContext)
+        val clip = File(fixture.application.filesDir, "history-thumbnail-fixture.mp4")
+        try {
+            awaitControl("controller ready") { fixture.controller.ready }
+            encodeOfflineBackupMp4(clip)
+            val conversation = fixture.database.create("default")
+            val run = RunId(UUID.randomUUID().toString())
+            val user = Message(MessageId(UUID.randomUUID().toString()), conversation.id, run, Message.USER_ROLE,
+                listOf(MessageBlock.Text("initial", "initial question")), RunStatus.COMPLETED)
+            val logicalId = MessageId(UUID.randomUUID().toString())
+            val assistantId = MessageId(UUID.randomUUID().toString())
+            val assistant = user.copy(id = assistantId, role = Message.ASSISTANT_ROLE,
+                blocks = emptyList(), status = RunStatus.RUNNING, historySegments = listOf(
+                    MessageHistorySegment(assistantId, Message.ASSISTANT_ROLE, emptyList()),
+                    MessageHistorySegment(logicalId, Message.USER_ROLE, listOf(MessageBlock.Text("caption", "video")))))
+            val draftOwner = VideoAttachmentOwner(conversation.id.value, UUID.randomUUID().toString())
+            val draft = fixture.controller.videoAttachments.store.import(draftOwner, clip.inputStream())
+            val owner = app.daiyu.android.media.video.MessageVideoOwner(conversation.id.value, logicalId.value)
+            val reference = fixture.controller.videoAttachments.store.prepare(owner, draft)
+            fixture.database.send(user, assistant)
+            app.daiyu.android.context.DatabaseTransactions { fixture.database.writableDatabase }.run { sql ->
+                sql.execSQL("DELETE FROM message_video_witnesses WHERE message_id=?", arrayOf(assistant.id.value))
+                app.daiyu.android.storage.SQLiteMessageVideoStore.insert(sql, assistant,
+                    listOf(app.daiyu.android.model.videos.MessageVideoInput(owner, listOf(reference))))
+            }
+            fixture.database.readableDatabase.rawQuery("SELECT 1 FROM messages WHERE id=?", arrayOf(logicalId.value)).use {
+                assertFalse(it.moveToFirst())
+            }
+            val video = app.daiyu.android.ui.screens.chat.conversation.MessageVideoUi(owner, reference)
+            val bitmap = fixture.controller.messageVideoThumbnail(conversation.id, video, 1024) { false }
+            try {
+                assertTrue(bitmap.width > 0 && bitmap.height > 0)
+                assertEquals(reference.width.toFloat() / reference.height, bitmap.width.toFloat() / bitmap.height, 0.02f)
+            } finally { bitmap.recycle() }
+            assertEquals(0, fixture.opens.get())
+        } finally { fixture.close() }
+    }
+
+    fun testVideoPreparationUsesProductionTokensForRetainedHistory() {
+        val fixture = RunControlFixture(instrumentation.targetContext, onSession = { _, _, _ -> })
         val clip = File(fixture.application.filesDir, "budget-fixture-video.mp4")
         var ui: ControllerVideoUi? = null
         try {
@@ -111,6 +150,7 @@ class ControllerVideoFilesEntryTest : InstrumentationTestCase() {
             awaitControl("video receipt") { receipt.get() != null }
             assertEquals(fixture.controller.problem, VideoDraftOutcome.ACCEPTED, receipt.get()?.outcome)
             assertTrue(session.entered.await(20, TimeUnit.SECONDS))
+            assertEquals(1, fixture.opens.get())
             val projected = fixture.histories.single()
             assertEquals(oldUser, projected.first())
             assertTrue(projected.last().blocks.filterIsInstance<MessageBlock.Text>().last().text.contains("Linux 路径:"))

@@ -76,6 +76,46 @@ class TerminalRegistryRetentionTest {
         }
     }
 
+    @Test fun syncWaitExpiryKeepsTheOwnedJobAndLaterPersistsExactCompletion() = fixture { root, registry, session ->
+        val process = TestProcess(true)
+        var starts = 0
+        registry.startProcess = { starts++; process }
+        val args = command(session, 910).put("timeout_ms", 1)
+        val pending = registry.execute("terminal_exec", args)
+        val id = pending.getString("job_id")
+        assertTrue(pending.toString(), pending.getBoolean("wait_pending"))
+        assertFalse(pending.has("error"))
+        process.destroy()
+        awaitPump(id)
+        val result = registry.inspectJob(id)
+        assertEquals(result.toString(), "executed", result.getString("execution"))
+        assertEquals(0, result.getInt("exit_code"))
+        assertFalse(result.getBoolean("wait_pending"))
+        assertEquals("actual output", result.getString("stdout"))
+        assertEquals("executed", JSONObject(File(root, "terminal-jobs/$id.json").readText())
+            .getJSONObject("completion").getString("execution"))
+        registry.execute("terminal_exec", args)
+        assertEquals(1, starts)
+    }
+
+    @Test fun completedPageWinsWhenTimedWaitReportsFalseAtTheExitBoundary() = fixture { _, registry, session ->
+        val process = object : TestProcess() {
+            override fun waitFor(timeout: Long, unit: TimeUnit): Boolean {
+                if (Thread.currentThread().name.startsWith("terminal-log-")) return true
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                while (Thread.getAllStackTraces().keys.any { it.name.startsWith("terminal-log-") && it.isAlive } &&
+                    System.nanoTime() < deadline) Thread.sleep(1)
+                return false
+            }
+        }
+        registry.startProcess = { process }
+        val result = registry.execute("terminal_exec", command(session, 911).put("timeout_ms", 1000))
+        assertEquals(result.toString(), "executed", result.getString("execution"))
+        assertEquals(0, result.getInt("exit_code"))
+        assertFalse(result.getBoolean("wait_pending"))
+        assertFalse(result.has("error"))
+    }
+
     @Test fun continuous130CommandsKeepAllHistoryAndReplayNeverStartsAgain() = fixture { root, registry, session ->
         var starts = 0
         registry.startProcess = { starts++; TestProcess() }

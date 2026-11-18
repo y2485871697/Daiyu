@@ -8,6 +8,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
@@ -150,17 +155,20 @@ private fun MessageMediaGroup(
     // The load state lives under the same source key as the thumbnail, not its grid position.
     val results = items.mapIndexed { offset, block ->
         key(block.workflowKey(range.first + offset)) {
-            if (block is MessageContentUi.Image) rememberMessageImageResult(block.image, loader).value else null
+            when (block) {
+                is MessageContentUi.Image -> rememberMessageImageResult(block.image, loader).value
+                is MessageContentUi.Video -> rememberMessageVideoResult(block.video, loader).value
+                else -> null
+            }
         }
     }
-    val aspects = results.mapIndexed { offset, result ->
-        if (items[offset] is MessageContentUi.Video) 16f / 9f else result.decodedAspectRatio()
-    }
+    val aspects = results.map { it.decodedAspectRatio() }
     MessageMediaGrid(aspects, items.mapIndexed { offset, block -> block.workflowKey(range.first + offset) }, modifier) { offset ->
         when (val block = items[offset]) {
             is MessageContentUi.Image -> MessageImageThumbnail(block.image, imageNumbers[range.first + offset],
                 results[offset] ?: MessageImageLoadResult.Unavailable, compact = false)
-            is MessageContentUi.Video -> MessageVideo(block.video, range.first + offset + 1)
+            is MessageContentUi.Video -> MessageVideo(block.video, range.first + offset + 1,
+                result = results[offset] ?: MessageImageLoadResult.Unavailable)
             else -> Unit
         }
     }
@@ -176,6 +184,18 @@ private fun rememberMessageImageResult(image: MessageImageUi, loader: MessageIma
     return key(image, loader) {
         produceState<MessageImageLoadResult>(initialValue = initial, image, loader) {
             value = withContext(Dispatchers.IO) { loadMessageImage(image, loader, 1024) }
+        }
+    }
+}
+
+@Composable
+private fun rememberMessageVideoResult(video: MessageVideoUi, loader: MessageImageLoader?): State<MessageImageLoadResult> {
+    val initial = if (loader == null || video.expectedOwner != video.reference.owner)
+        MessageImageLoadResult.Unavailable else loader.cachedVideo(video.expectedOwner, video.reference, 1024)
+            ?.let(MessageImageLoadResult::Ready) ?: MessageImageLoadResult.Loading
+    return key(video, loader) {
+        produceState<MessageImageLoadResult>(initialValue = initial, video, loader) {
+            value = withContext(Dispatchers.IO) { loadMessageVideo(video, loader, 1024) }
         }
     }
 }
@@ -230,23 +250,24 @@ private fun MessageImageStatus(label: String, description: String, compact: Bool
         color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
 }
 
-/**
- * No UI file/URI construction. Until the host exposes an authorized cover loader, show an
- * explicit 16:9 playback block; the mixed viewer resolves the original through its owner.
- */
 @Composable
-internal fun MessageVideo(video: MessageVideoUi, number: Int, modifier: Modifier = Modifier) {
+internal fun MessageVideo(video: MessageVideoUi, number: Int, modifier: Modifier = Modifier,
+    result: MessageImageLoadResult = MessageImageLoadResult.Unavailable) {
     val openPreview = LocalOpenChatMediaPreview.current
     val ownerMatches = video.expectedOwner == video.reference.owner
-    Box(modifier.clip(RoundedCornerShape(8.dp)).background(MiuixTheme.colorScheme.surfaceVariant)
+    val ready = ownerMatches && result is MessageImageLoadResult.Ready
+    Box(modifier.clip(RoundedCornerShape(8.dp))
+        .then(if (ready) Modifier else Modifier.background(MiuixTheme.colorScheme.surfaceVariant))
         .testTag("message-video:$number")
         .clickable(enabled = ownerMatches, role = Role.Button, onClickLabel = "播放视频") {
             if (ownerMatches) openPreview(messageVideoPreviewKey(video))
         }, contentAlignment = Alignment.Center) {
-        Text(if (ownerMatches) "▶ 播放视频" else "视频不可用",
-            modifier = Modifier.padding(12.dp).semantics {
-                contentDescription = if (ownerMatches) "消息视频 $number，播放视频" else "视频不可用"
-            }, color = MiuixTheme.colorScheme.onSurfaceVariantSummary)
+        if (ready) Image((result as MessageImageLoadResult.Ready).bitmap, contentDescription = "消息视频缩略图 $number",
+            modifier = Modifier.fillMaxSize().testTag("message-video-thumbnail:$number"), contentScale = ContentScale.Fit)
+        if (ownerMatches) Icon(Icons.Filled.PlayArrow, contentDescription = "消息视频 $number，播放视频",
+            modifier = Modifier.size(44.dp).background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(50))
+                .padding(7.dp).testTag("message-video-play:$number"), tint = Color.White)
+        else MessageImageStatus("视频不可用", "视频不可用", false)
     }
 }
 

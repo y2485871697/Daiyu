@@ -76,28 +76,32 @@ class AndroidVideoAttachments(
         val cancelled = { cancellation.isCanceled || Thread.currentThread().isInterrupted }
         checkVideoCancellation(cancelled)
         store.openOriginal(owner, reference, cancelled).use { original ->
-            val retriever = MediaMetadataRetriever()
+            val frame = decodeVideoThumbnail(original, reference, maxEdge, cancelled)
             try {
-                retriever.setDataSource(original.fd, 0L, reference.bytes)
+                val result = ByteArrayOutputStream()
+                if (!frame.compress(Bitmap.CompressFormat.JPEG, 80, result) || result.size() > 2 * 1024 * 1024)
+                    videoFail(VideoAttachmentFailure.PREVIEW_UNAVAILABLE)
                 checkVideoCancellation(cancelled)
-                val frame = scaledFrame(retriever, reference.width, reference.height, maxEdge)
-                    ?: videoFail(VideoAttachmentFailure.PREVIEW_UNAVAILABLE)
-                try {
-                    checkVideoCancellation(cancelled)
-                    val result = ByteArrayOutputStream()
-                    if (!frame.compress(Bitmap.CompressFormat.JPEG, 80, result) || result.size() > 2 * 1024 * 1024) {
-                        videoFail(VideoAttachmentFailure.PREVIEW_UNAVAILABLE)
-                    }
-                    checkVideoCancellation(cancelled)
-                    return VideoPreview(reference, frame.width, frame.height, result.toByteArray())
-                } finally { frame.recycle() }
-            } catch (failure: Exception) {
-                checkVideoCancellation(cancelled)
-                if (failure is VideoAttachmentException) throw failure
-                throw VideoAttachmentException(VideoAttachmentFailure.PREVIEW_UNAVAILABLE, failure)
-            } finally { retriever.release() }
+                return VideoPreview(reference, frame.width, frame.height, result.toByteArray())
+            } finally { frame.recycle() }
         }
     }
+}
+
+internal fun decodeVideoThumbnail(original: java.io.FileInputStream, reference: VideoReference,
+    maxEdge: Int, cancelled: () -> Boolean): Bitmap {
+    require(maxEdge in 1..1024)
+    checkVideoCancellation(cancelled)
+    val retriever = MediaMetadataRetriever()
+    try {
+        retriever.setDataSource(original.fd, 0L, reference.bytes)
+        checkVideoCancellation(cancelled)
+        val frame = scaledFrame(retriever, reference.width, reference.height, maxEdge)
+            ?: videoFail(VideoAttachmentFailure.PREVIEW_UNAVAILABLE)
+        try { checkVideoCancellation(cancelled) }
+        catch (failure: Throwable) { frame.recycle(); throw failure }
+        return frame
+    } finally { retriever.release() }
 }
 
 /** Production inspection requires a recognized container, actual video track/sample and a decoded

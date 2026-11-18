@@ -77,6 +77,25 @@ internal class ControllerMessageMedia(
             ControllerMessageMediaSnapshot(conversation, bindings, images)
         }
 
+    fun openOriginal(conversation: ConversationId, video: MessageVideoUi,
+        cancelled: () -> Boolean): FileInputStream {
+        val binding = DatabaseTransactions { database.readableDatabase }.run { db ->
+            require(video.expectedOwner.conversationId == conversation.value && video.reference.owner == video.expectedOwner)
+            val ids = db.rawQuery("SELECT m.id FROM messages m JOIN message_video_inputs v ON v.message_id=m.id " +
+                "WHERE m.conversation_id=?", arrayOf(conversation.value)).use { cursor ->
+                buildList { while (cursor.moveToNext()) add(cursor.getString(0)) }
+            }
+            ids.mapNotNull { id ->
+                check(!cancelled()) { "media_projection_cancelled" }
+                val row = database.storedMessage(db, conversation, id)
+                val input = SQLiteMessageVideoStore.readVerified(db, row).singleOrNull { it.owner == video.expectedOwner }
+                if (input?.references?.contains(video.reference) == true)
+                    MessageMediaVideoBinding(id, row.runId.value, video) else null
+            }.single()
+        }
+        return openOriginal(conversation, binding, cancelled)
+    }
+
     /** Revalidate the physical sidecar witness at EVERY open, including a later save. The returned
      * stream is the exact read-only fd hashed/rewound by VideoAssetStore, not a thumbnail/reopen.
      */

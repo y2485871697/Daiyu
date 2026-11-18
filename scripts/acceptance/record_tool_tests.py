@@ -928,6 +928,9 @@ def command_for(python, env):
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(ERROR_DETAILS_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *ERROR_DETAILS_MODULES, "-v"], "error-details-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
+            and env.get("SMOKE_TEST_CLASSES") == "app.daiyu.android.ChatMediaPreviewVideoControlsUiTest"):
+        return [python, "-B", "-m", "unittest", *MEDIA_SEND_MODULES, "-v"], "media-send-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (
                 sorted(MEDIA_SEND_PLATFORM_CLASSES),
                 sorted(VIDEO_FILES_PREVIEW_PLATFORM_CLASSES),

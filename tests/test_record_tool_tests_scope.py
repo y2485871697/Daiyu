@@ -283,6 +283,20 @@ class VideoMessageDisplayToolTestsScopeTest(VideoFilesPreviewToolTestsScopeTest)
 
 class RecordToolTestsScopeTest(unittest.TestCase):
 
+    def test_video_controls_single_class_uses_only_media_contracts(self):
+        target = "app.daiyu.android.ChatMediaPreviewVideoControlsUiTest"
+        command, scope = recorder.command_for("python3", dict(
+            SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=target))
+        self.assertEqual("media-send-targeted", scope)
+        self.assertEqual(["python3", "-B", "-m", "unittest", *recorder.MEDIA_SEND_MODULES, "-v"], command)
+        for selected in (" " + target, target + " ", target + ",", target + "," + target,
+                         target + ",app.daiyu.android.OtherTest"):
+            self.assertEqual("full", recorder.command_for("python3", dict(
+                SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=selected))[1])
+        for mode in ("compile", "candidate", "daily", "release", "checks", "build"):
+            self.assertEqual("full", recorder.command_for("python3", dict(
+                SMOKE_MODE=mode, SMOKE_TEST_CLASSES=target))[1])
+
     def test_media_send_scope_is_exact_and_preserves_full_fallback(self):
         classes = recorder.MEDIA_SEND_PLATFORM_CLASSES
         self.assertEqual(7, len(classes))

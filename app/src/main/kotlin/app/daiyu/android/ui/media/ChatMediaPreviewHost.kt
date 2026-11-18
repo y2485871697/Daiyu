@@ -23,6 +23,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -91,6 +92,7 @@ internal fun ChatMediaPreviewDialog(selection: ChatMediaPreviewSelection,
     val pagerState = rememberPagerState(initialPage = selection.initialIndex, pageCount = { sources.size })
     val currentPage = pagerState.currentPage
     val item = sources[currentPage]
+    val video = chatMediaPreviewIsVideo(item.mimeType)
     var transform by remember(currentPage) { mutableStateOf(ChatMediaPreviewTransform()) }
     var transforming by remember(currentPage) { mutableStateOf(false) }
     var landscape by remember(currentPage) { mutableStateOf(false) }
@@ -176,9 +178,10 @@ internal fun ChatMediaPreviewDialog(selection: ChatMediaPreviewSelection,
                         }
                     }
                 },
-                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp),
+                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(if (video) 24.dp else 8.dp),
             ) {
-                Icon(Icons.Rounded.Download, contentDescription = "下载原件", tint = Color.White)
+                Icon(Icons.Rounded.Download, contentDescription = "下载原件",
+                    tint = if (video) MaterialTheme.colorScheme.primary else Color.White)
             }
             if (saving) {
                 CircularProgressIndicator(

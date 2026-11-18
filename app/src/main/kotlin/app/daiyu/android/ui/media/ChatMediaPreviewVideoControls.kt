@@ -22,6 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.ScreenRotation
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -133,7 +134,7 @@ internal fun ChatMediaPreviewVideoControls(
                     Icon(
                         imageVector = if (state.playRequested) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         contentDescription = if (state.playRequested) "暂停" else "播放",
-                        tint = Color.White,
+                        tint = MaterialTheme.colorScheme.primary,
                     )
                 }
                 ChatMediaPreviewVideoProgress(
@@ -161,7 +162,7 @@ internal fun ChatMediaPreviewVideoControls(
                 ) {
                     Icon(Icons.Rounded.ScreenRotation,
                         contentDescription = if (landscape) "切换竖屏" else "切换横屏",
-                        tint = Color.White)
+                        tint = MaterialTheme.colorScheme.primary)
                 }
             }
         }

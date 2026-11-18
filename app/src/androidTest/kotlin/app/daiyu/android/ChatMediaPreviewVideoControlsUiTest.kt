@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -19,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
@@ -187,6 +189,7 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
         val file = java.io.File(activity.cacheDir, "preview-${java.util.UUID.randomUUID()}.mp4")
         encodeOfflineBackupMp4(file)
         val original = file.readBytes()
+        val accent = Color(0xFF58C9D4)
         var opened by mutableStateOf(true)
         val item = app.daiyu.android.ui.media.ChatMediaPreviewItem(
             "real-video-preview", "video/mp4", file.name, { null },
@@ -194,11 +197,22 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
         try {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    if (opened) app.daiyu.android.ui.media.ChatMediaPreviewDialog(
-                        app.daiyu.android.ui.media.ChatMediaPreviewSelection(listOf(item), 0)) { opened = false }
+                    MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = accent)) {
+                        if (opened) app.daiyu.android.ui.media.ChatMediaPreviewDialog(
+                            app.daiyu.android.ui.media.ChatMediaPreviewSelection(listOf(item), 0)) { opened = false }
+                    }
                 }
             } }
             ui.onNodeWithContentDescription("下载原件").assertIsDisplayed()
+            val download = ui.onNodeWithContentDescription("下载原件", useUnmergedTree = true)
+            assertAccentInk(download, accent)
+            val downloadBounds = download.fetchSemanticsNode().boundsInRoot
+            val viewport = node("chat-media-video-surface").fetchSemanticsNode().boundsInRoot
+            val minimumInset = with(ui.density) { 24.dp.toPx() }
+            assertTrue("download=$downloadBounds viewport=$viewport",
+                viewport.right - downloadBounds.right >= minimumInset - 1.5f)
+            assertTrue("download=$downloadBounds viewport=$viewport",
+                downloadBounds.top - viewport.top >= minimumInset - 1.5f)
             node("chat-media-video-surface").performClick()
             ui.waitUntil(20_000) {
                 ui.onAllNodes(hasTestTag("chat-media-video-play-pause") and hasClickAction() and isEnabled())
@@ -208,6 +222,9 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             }
             node("chat-media-video-play-pause").assertIsEnabled().assertHasClickAction().performClick()
             ui.onNodeWithContentDescription("播放").assertIsDisplayed()
+            assertAccentInk(node("chat-media-video-play-pause"), accent)
+            assertAccentInk(node("chat-media-video-orientation"), accent)
+            assertAccentInk(node("chat-media-video-progress"), accent)
             node("chat-media-video-progress").performTouchInput {
                 swipe(Offset(width * 0.2f, centerY), Offset(width * 0.7f, centerY), 200)
             }
@@ -228,6 +245,18 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             ui.waitForIdle()
             file.delete()
         }
+    }
+
+    private fun assertAccentInk(target: SemanticsNodeInteraction, accent: Color) {
+        val pixels = target.captureToImage().toPixelMap()
+        var matches = 0
+        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+            val pixel = pixels[x, y]
+            if (kotlin.math.abs(pixel.red - accent.red) < 0.06f &&
+                kotlin.math.abs(pixel.green - accent.green) < 0.06f &&
+                kotlin.math.abs(pixel.blue - accent.blue) < 0.06f) matches++
+        }
+        assertTrue("Expected progress accent in control, matching pixels=$matches", matches >= 8)
     }
 
 }

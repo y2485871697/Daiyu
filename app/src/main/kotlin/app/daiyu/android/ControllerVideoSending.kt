@@ -198,17 +198,24 @@ internal class ControllerVideoAttempt(
 
     fun prepare(assets: VideoAssetStore, provider: ProviderSnapshot, capability: OpenRouterVideoCapability,
         createdAt: Long? = null, cancelled: () -> Boolean): PreparedControllerVideoSend {
-        check(reserved && !settled && !databaseEntered) { "video_attempt_not_fresh" }
-        require(createdAt == null || createdAt >= 0)
-        check(!timeFrozen || this.createdAt == createdAt) { "video_candidate_time_changed" }
-        this.createdAt = createdAt
-        timeFrozen = true
         capability.validate(provider.asModelSettings())
         if (cancelled()) throw VideoAttachmentException(VideoAttachmentFailure.CANCELLED)
         // Enforce provider limits before publishing any original, not only during base64 freezing.
         require(request.videos.size <= capability.maxVideos && request.videos.all {
             it.mime == "video/mp4" && it.bytes <= capability.maxVideoBytes
         } && request.videos.sumOf { it.bytes } <= capability.maxTotalBytes) { "video_capability_budget" }
+        return prepareFiles(assets, createdAt, cancelled)
+    }
+
+    /** Local tool attachments keep the same original/receipt transaction, without an upload grant. */
+    fun prepareFiles(assets: VideoAssetStore, createdAt: Long? = null,
+        cancelled: () -> Boolean): PreparedControllerVideoSend {
+        check(reserved && !settled && !databaseEntered) { "video_attempt_not_fresh" }
+        require(createdAt == null || createdAt >= 0)
+        check(!timeFrozen || this.createdAt == createdAt) { "video_candidate_time_changed" }
+        this.createdAt = createdAt
+        timeFrozen = true
+        if (cancelled()) throw VideoAttachmentException(VideoAttachmentFailure.CANCELLED)
         val owner = MessageVideoOwner(conversationId.value, userId.value)
         val refs = request.videos.map { assets.prepare(owner, it, cancelled) }
         val inputs = listOf(MessageVideoInput(owner, refs))
@@ -241,7 +248,7 @@ internal class ControllerVideoAttempt(
         check(!database.writableDatabase.inTransaction()) { "video_outer_transaction_forbidden" }
         return try {
             check(prepared.user == expectedUser() && prepared.assistant == expectedAssistant())
-            check(plan.history == snapshot.rows + prepared.user && plan.videos != null &&
+            check(plan.history == snapshot.rows + prepared.user && (plan.videos != null || plan.files.isNotEmpty()) &&
                 plan.inputs.map { it.owner to it.references } == (snapshot.inputs + prepared.inputs).map { it.owner to it.references }) {
                 "video_preflight_required"
             }

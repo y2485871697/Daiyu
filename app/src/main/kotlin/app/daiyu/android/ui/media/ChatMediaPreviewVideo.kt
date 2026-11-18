@@ -31,7 +31,8 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 /** Original VideoView rendering, scoped to the current page and the foreground lifecycle. */
 @Composable
-internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, modifier: Modifier = Modifier) {
+internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, modifier: Modifier = Modifier,
+    landscape: Boolean = false, onToggleOrientation: () -> Unit = {}) {
     val context = LocalContext.current
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val lifecycleState by lifecycle.currentStateFlow.collectAsState()
@@ -150,6 +151,8 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
             state = controls,
             active = active,
             ready = prepared && !failed,
+            landscape = landscape,
+            onToggleOrientation = onToggleOrientation,
             onToggleVisibility = { controls = controls.toggleVisibility() },
             onTogglePlayback = {
                 if (prepared && shouldStage) {

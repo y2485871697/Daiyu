@@ -77,3 +77,43 @@ class MediaSendContract(unittest.TestCase):
         self.assertIn("media_send_sources if media_send_only", smoke)
         discovery = next(line for line in smoke.splitlines() if 'discovery_scope="targeted" if ' in line)
         self.assertIn("media_send_only", discovery.split(' else "full"', 1)[0].split(" if ", 1)[1].split(" or "))
+
+    def test_video_files_use_current_model_reasoning_and_ordinary_tool_route(self):
+        controller = (SRC / "ChatController.kt").read_text()
+        send = controller.split("val hasVideoFiles =", 1)[1].split("val preparedContext =", 1)[0]
+        self.assertIn("videoAttempt?.prepareFiles", send)
+        self.assertIn("messageVideoFiles.preflight", send)
+        self.assertNotIn("ReasoningEffort.OFF", send)
+        self.assertNotIn("fetchSavedVideoEvidence", send)
+        self.assertIn("messageVideoFiles.wrap(delegate, requestProvider", controller)
+        ordinary = controller.split("val ordinaryRun =", 1)[1].split("val prepared = try", 1)[0]
+        self.assertNotIn("video", ordinary)
+        self.assertIn("--tests '*ControllerVideoFilesTest'", (ROOT / ".github/workflows/media-inline-checks.yml").read_text())
+
+    def test_local_video_manifest_is_not_native_video_upload_or_android_frame_extraction(self):
+        source = (SRC / "ControllerVideoFiles.kt").read_text()
+        for expected in ("assets.openOriginal", "ATOMIC_MOVE", "ref.sha256", "Linux 路径:",
+                         "当前已选 Linux 环境", "不要切换 Linux 后端", "withAppendedUserText"):
+            self.assertIn(expected, source)
+        self.assertNotIn("data:video/", source)
+        self.assertNotIn("MediaMetadataRetriever", source)
+        self.assertNotIn("OpenRouterVideoCapability", source)
+
+    def test_draft_video_uses_shared_fullscreen_player_and_orientation_controls(self):
+        ui = (SRC / "ui/screens/chat/attachments/VideoAttachments.kt").read_text()
+        self.assertIn("ChatMediaPreviewDialog(selection, onSaveDocument", ui)
+        self.assertIn("host.openPreviewOriginal", ui)
+        self.assertNotIn("封面预览（非视频播放）", ui)
+        controls = (SRC / "ui/media/ChatMediaPreviewVideoControls.kt").read_text()
+        for expected in ("chat-media-video-play-pause", "chat-media-video-progress", "chat-media-video-orientation",
+                         "切换横屏", "切换竖屏"):
+            self.assertIn(expected, controls)
+
+    def test_legacy_draft_video_save_result_is_owned_by_route_not_preview_composition(self):
+        source = (SRC / "ui/screens/chat/attachments/VideoPickerBinding.kt").read_text()
+        save = source.split("fun savePreviewOriginal", 1)[1].split("override fun close", 1)[0]
+        self.assertLess(save.index("item.openOriginal()"), save.index("launcher.launch(item.displayName)"))
+        self.assertIn("ActivityResultContracts.CreateDocument(item.mimeType)", save)
+        self.assertIn("result.await()", save)
+        self.assertIn("saveScope.cancel()", source)
+        self.assertIn("file.delete()", save)

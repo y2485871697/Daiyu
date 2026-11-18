@@ -127,6 +127,10 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
             check(inventoryGate?.await(60, TimeUnit.SECONDS) != false)
             return originals.values.filter { it.owner == owner }
         }
+        override fun openOriginal(video: VideoAttachment, cancellation: CancellationSignal): java.io.InputStream {
+            check(originals[video.id] == video && !cancellation.isCanceled)
+            return java.io.ByteArrayInputStream(byteArrayOf(1, 2, 3))
+        }
         override fun remove(video: VideoAttachment) {
             originals.remove(video.id)
             removals.incrementAndGet()
@@ -361,8 +365,9 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         media.gate!!.countDown()
         val ready = awaitReady()
         node("video_attachments_thumbnail:$ready").performClick()
-        node("video_attachments_preview").assertIsDisplayed()
-        node("video_attachments_close_preview").performClick()
+        ui.onNodeWithContentDescription("下载原件").assertIsDisplayed()
+        androidx.test.espresso.Espresso.pressBack()
+        ui.onNodeWithContentDescription("下载原件").assertDoesNotExist()
         assertEquals(1, media.originals.size)
         node("video_attachments_remove:$ready").performClick()
         node("video_attachments_item:$ready").assertDoesNotExist()

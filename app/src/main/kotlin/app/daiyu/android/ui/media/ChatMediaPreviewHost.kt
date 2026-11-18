@@ -13,6 +13,8 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -81,7 +83,8 @@ internal fun ChatMediaPreviewHost(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChatMediaPreviewDialog(selection: ChatMediaPreviewSelection, onDismiss: () -> Unit) {
+internal fun ChatMediaPreviewDialog(selection: ChatMediaPreviewSelection,
+    onSaveDocument: ((ChatMediaPreviewItem) -> Boolean)? = null, onDismiss: () -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val sources = selection.gallery
@@ -90,6 +93,7 @@ private fun ChatMediaPreviewDialog(selection: ChatMediaPreviewSelection, onDismi
     val item = sources[currentPage]
     var transform by remember(currentPage) { mutableStateOf(ChatMediaPreviewTransform()) }
     var transforming by remember(currentPage) { mutableStateOf(false) }
+    var landscape by remember(currentPage) { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
     var documentItem by remember { mutableStateOf<ChatMediaPreviewItem?>(null) }
 
@@ -115,13 +119,18 @@ private fun ChatMediaPreviewDialog(selection: ChatMediaPreviewSelection, onDismi
         }
     }
 
-    BackHandler(onBack = onDismiss)
+    val dismiss = { if (landscape) landscape = false else onDismiss() }
+    BackHandler(onBack = dismiss)
     Dialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = dismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         ChatMediaPreviewHideStatusBars()
-        Box(Modifier.fillMaxSize().background(Color.Black)) {
+        BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+            // Rotate only the preview viewport; keep the Activity, player and media owner intact.
+            Box(Modifier.align(Alignment.Center)
+                .requiredSize(if (landscape) maxHeight else maxWidth, if (landscape) maxWidth else maxHeight)
+                .graphicsLayer(rotationZ = if (landscape) 90f else 0f)) {
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
@@ -132,6 +141,8 @@ private fun ChatMediaPreviewDialog(selection: ChatMediaPreviewSelection, onDismi
                 ChatMediaPreviewPage(
                     item = sources[page],
                     active = active,
+                    landscape = landscape,
+                    onToggleOrientation = { landscape = !landscape },
                     transform = if (active) transform else ChatMediaPreviewTransform(),
                     onTransform = { if (active) transform = it },
                     onTransforming = { if (active) transforming = it },
@@ -143,7 +154,10 @@ private fun ChatMediaPreviewDialog(selection: ChatMediaPreviewSelection, onDismi
                     // Capture the page before any asynchronous work or picker navigation.
                     val requested = item
                     saving = true
-                    if (Build.VERSION.SDK_INT < 29) {
+                    if (Build.VERSION.SDK_INT < 29 && onSaveDocument != null) {
+                        if (!onSaveDocument(requested)) reportSaved(false)
+                        saving = false
+                    } else if (Build.VERSION.SDK_INT < 29) {
                         documentItem = requested
                         try {
                             documentLauncher.launch(chatMediaPreviewFileName(requested.displayName, requested.mimeType))
@@ -173,6 +187,7 @@ private fun ChatMediaPreviewDialog(selection: ChatMediaPreviewSelection, onDismi
                     strokeWidth = 2.dp,
                 )
             }
+            }
         }
     }
 }
@@ -181,6 +196,8 @@ private fun ChatMediaPreviewDialog(selection: ChatMediaPreviewSelection, onDismi
 private fun ChatMediaPreviewPage(
     item: ChatMediaPreviewItem,
     active: Boolean,
+    landscape: Boolean,
+    onToggleOrientation: () -> Unit,
     transform: ChatMediaPreviewTransform,
     onTransform: (ChatMediaPreviewTransform) -> Unit,
     onTransforming: (Boolean) -> Unit,
@@ -206,7 +223,7 @@ private fun ChatMediaPreviewPage(
     Box(Modifier.fillMaxSize().clipToBounds()) {
         val image = bitmap
         when {
-            video -> ChatMediaPreviewVideo(item, active, Modifier.fillMaxSize())
+            video -> ChatMediaPreviewVideo(item, active, Modifier.fillMaxSize(), landscape, onToggleOrientation)
             image != null -> Image(
                 bitmap = image,
                 contentDescription = item.displayName,

@@ -119,3 +119,13 @@ private fun validateOwner(conversation: String, local: String) {
     require(conversation.isNotBlank() && conversation.length <= 200)
     require(local.isNotBlank() && local.length <= 200)
 }
+
+internal fun videoFileExtension(mime: String): String = when (mime) {
+    "video/mp4" -> "mp4"
+    "video/quicktime" -> "mov"
+    "video/3gpp" -> "3gp"
+    "video/3gpp2" -> "3g2"
+    "video/webm" -> "webm"
+    "video/x-matroska" -> "mkv"
+    else -> error("video_mime_unsupported")
+}

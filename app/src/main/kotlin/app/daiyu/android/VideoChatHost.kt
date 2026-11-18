@@ -48,6 +48,7 @@ internal fun videoReceiptMatches(request: VideoDraftRequest, receipt: VideoDraft
 internal interface VideoDraftMedia {
     fun import(owner: VideoAttachmentOwner, uri: Uri, cancellation: CancellationSignal): VideoAttachment
     fun preview(video: VideoAttachment, maxEdge: Int, cancellation: CancellationSignal): VideoPreview
+    fun openOriginal(video: VideoAttachment, cancellation: CancellationSignal): java.io.InputStream
     /** Enumerate only this exact draft owner; never message assets or other owners. */
     fun list(owner: VideoAttachmentOwner): List<VideoAttachment>
     /** Idempotent: absence is success; partial deletion or IO failure must throw. */
@@ -59,6 +60,8 @@ private class AndroidDraftVideoMedia(private val media: AndroidVideoAttachments)
         media.import(owner, uri, cancellation)
     override fun preview(video: VideoAttachment, maxEdge: Int, cancellation: CancellationSignal) =
         media.preview(video.owner, video, maxEdge, cancellation)
+    override fun openOriginal(video: VideoAttachment, cancellation: CancellationSignal) =
+        media.store.openOriginal(video.owner, video) { cancellation.isCanceled }
     override fun list(owner: VideoAttachmentOwner) = media.store.list(owner)
     override fun remove(video: VideoAttachment) { media.store.remove(video.owner, video) }
 }
@@ -428,6 +431,38 @@ internal class VideoChatHost internal constructor(
                 video in videos(target) && result.original == video) result else null
         } catch (_: Exception) { null }
         finally { previews.remove(signal) }
+    }
+
+    /** The caller owns a preview-scoped lease; no source URI or private path escapes. */
+    suspend fun openPreviewOriginal(video: VideoAttachment, expected: Snapshot,
+        originals: MessageMediaOriginals): java.io.InputStream? = kotlinx.coroutines.coroutineScope {
+        val signal = CancellationSignal()
+        var opened: java.io.InputStream? = null
+        val cancellation = launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) {
+            try { kotlinx.coroutines.awaitCancellation() } finally { signal.cancel() }
+        }
+        try {
+            val admitted = withContext(hostDispatcher) {
+                checkThread()
+                if (!current(expected) || video !in videos(selected) || !originals.isOpen()) false
+                else { previews.add(signal); true }
+            }
+            if (!admitted) return@coroutineScope null
+            withContext(ioDispatcher) {
+                opened = originals.retain(media.openOriginal(video, signal))
+            }
+            val current = withContext(hostDispatcher) {
+                checkThread()
+                current(expected) && video in videos(selected) && !signal.isCanceled && originals.isOpen()
+            }
+            if (!current) return@coroutineScope null
+            opened.also { opened = null }
+        } finally {
+            cancellation.cancel()
+            try { opened?.close() } finally {
+                withContext(NonCancellable + hostDispatcher) { previews.remove(signal) }
+            }
+        }
     }
 
     /**

@@ -124,6 +124,7 @@ internal class ControllerVideoModelPlan internal constructor(
     val videos: FrozenMessageVideoPlan?,
     val images: FrozenMessageImagePlan,
     inputs: List<MessageVideoInput>,
+    internal val files: List<ControllerVideoFile> = emptyList(),
 ) {
     internal val inputs = Collections.unmodifiableList(inputs.map { MessageVideoInput(it.owner, it.references) })
 }

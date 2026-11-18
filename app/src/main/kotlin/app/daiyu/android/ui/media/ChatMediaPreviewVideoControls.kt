@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -81,6 +82,8 @@ internal fun ChatMediaPreviewVideoControls(
     onScrub: (Float) -> Unit,
     onSeekFinished: () -> Unit,
     modifier: Modifier = Modifier,
+    landscape: Boolean = false,
+    onToggleOrientation: () -> Unit = {},
 ) {
     Box(modifier) {
         // This sibling is below the controls: button and slider gestures cannot toggle the surface.
@@ -138,6 +141,15 @@ internal fun ChatMediaPreviewVideoControls(
                     maxLines = 1,
                     modifier = Modifier.padding(end = 4.dp).testTag("chat-media-video-time"),
                 )
+                IconButton(
+                    enabled = active && state.visible,
+                    onClick = onToggleOrientation,
+                    modifier = Modifier.size(48.dp).testTag("chat-media-video-orientation"),
+                ) {
+                    Icon(Icons.Rounded.ScreenRotation,
+                        contentDescription = if (landscape) "切换竖屏" else "切换横屏",
+                        tint = Color.White)
+                }
             }
         }
     }

@@ -68,7 +68,7 @@ class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testOrdinaryTextWithVideoHistoryNeverFallsBackToGenericTextModel() {
+    fun testMissingHistoricalVideoOriginalRejectsBeforeOpeningTheModel() {
         val db = fixture.database
         val conversation = db.create(db.selectedAssistantId())
         val run = RunId("historical-video")
@@ -88,12 +88,11 @@ class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
         setDraft(text)
         node("chat-send").performClick()
         awaitTextSendResult(activity)
-        // Fixture uses example.invalid: production evidence rejects it BEFORE any models GET.
-        // A plain ModelPort or the last visible row may never substitute for video authorization.
+        // The sidecar has no matching original. A generic model must not silently omit it.
         assertEquals(0, fixture.opens.get())
         assertDraft(text)
         assertEquals(2, ControllerVideoHistory(db).capture(conversation.id).rows.size)
-        assertTrue(fixture.controller.problem?.contains("原视频") == true)
+        assertTrue(fixture.controller.problem?.contains("视频原件") == true)
     }
 
     fun testProductionReceiptConsumerNeverOverwritesANewerEditor() {

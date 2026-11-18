@@ -43,6 +43,17 @@ class FrozenMessageImagePlan private constructor(
         require(history == snapshot(messages)) { "Image plan does not match history" }
     }
 
+    internal fun withAppendedUserText(messages: List<Message>): FrozenMessageImagePlan {
+        val projected = snapshot(messages)
+        require(projected.size == history.size && projected.zip(history).all { (next, previous) ->
+            next.copy(blocks = previous.blocks) == previous &&
+                next.blocks.take(previous.blocks.size) == previous.blocks &&
+                next.blocks.drop(previous.blocks.size).all { it is MessageBlock.Text } &&
+                (next.blocks.size == previous.blocks.size || previous.role == Message.USER_ROLE)
+        }) { "File projection may only append user text" }
+        return FrozenMessageImagePlan(projected, endpoint, protocol, model, blocks, media)
+    }
+
     internal fun block(messageIndex: Int, blockIndex: Int): JSONObject =
         JSONObject(blocks[messageIndex to blockIndex] ?: error("Missing frozen image"))
 

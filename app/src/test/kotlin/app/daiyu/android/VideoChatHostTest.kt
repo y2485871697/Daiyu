@@ -61,6 +61,10 @@ class VideoChatHostTest {
             duringPreview(cancellation)
             return VideoPreview(video, 2, 2, byteArrayOf(1, 2))
         }
+        override fun openOriginal(video: VideoAttachment, cancellation: CancellationSignal): java.io.InputStream {
+            check(video in originals && !cancellation.isCanceled)
+            return java.io.ByteArrayInputStream(byteArrayOf(1, 2, 3))
+        }
         override fun remove(video: VideoAttachment) {
             if (deleteFails) throw IllegalStateException("delete failed")
             originals.remove(video)

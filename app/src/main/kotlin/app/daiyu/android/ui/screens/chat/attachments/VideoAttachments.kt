@@ -46,7 +46,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import app.daiyu.android.ui.components.DaiyuDialog as Dialog
+import app.daiyu.android.MessageMediaOriginals
+import app.daiyu.android.ui.media.ChatMediaPreviewDialog
+import app.daiyu.android.ui.media.ChatMediaPreviewItem
+import app.daiyu.android.ui.media.ChatMediaPreviewOriginal
+import app.daiyu.android.ui.media.ChatMediaPreviewSelection
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.VideoChatHost
@@ -181,7 +185,7 @@ private fun VideoAttachmentsContent(
                 enabled = canEdit && !picker.selecting && state.remaining > 0 && state.items.none { it is VideoChatHost.Item.Importing },
                 modifier = Modifier.heightIn(min = 48.dp).testTag("video_attachments_select"))
         }
-        if (!compact) Text("发送的是原视频，不是封面图片。",
+        if (!compact) Text("视频原件供模型通过 Linux 工具读取，不直接上传视频。",
             style = MiuixTheme.textStyles.footnote1, color = colors.onSurfaceVariantSummary)
         if (picker.selecting) VideoStatus("正在选择视频…", "video_attachments_selecting")
         picker.notice?.let { VideoStatus(it, "video_attachments_notice") }
@@ -198,7 +202,7 @@ private fun VideoAttachmentsContent(
                         Box(Modifier.fillMaxWidth().height(104.dp).then(
                             if (item is VideoChatHost.Item.Ready && state.visible) Modifier.clickable(
                                 interactionSource = remember { MutableInteractionSource() }, indication = null,
-                                role = Role.Button, onClickLabel = "查看第 ${index + 1} 个视频的封面",
+                                role = Role.Button, onClickLabel = "播放第 ${index + 1} 个视频",
                                 onClick = { if (sameVideoVisit(state, host.state)) cover = item },
                             ) else Modifier,
                         ).testTag("video_attachments_thumbnail:${item.key}"), contentAlignment = Alignment.Center) {
@@ -220,21 +224,30 @@ private fun VideoAttachmentsContent(
                 }
             }
         }
-        if (!compact) TextButton(text = "发送原视频…", enabled = canSubmit,
+        if (!compact) TextButton(text = "发送视频…", enabled = canSubmit,
             onClick = { send() },
             modifier = Modifier.heightIn(min = 48.dp).testTag("video_attachments_send"))
     }
     cover?.takeIf { state.visible && state.items.contains(it) }?.let { item ->
-        Dialog(onDismissRequest = { cover = null }) {
-            Column(Modifier.fillMaxWidth().background(colors.background).padding(16.dp).testTag("video_attachments_preview")) {
-                Text("封面预览（非视频播放）", style = MiuixTheme.textStyles.title3)
-                Box(Modifier.fillMaxWidth().height(280.dp), contentAlignment = Alignment.Center) {
-                    key(state.owner, state.visit, state.revision, item.key) { VideoCover(host, state, item, 1024) }
-                }
-                TextButton(text = "关闭", onClick = { cover = null }, modifier = Modifier.heightIn(min = 48.dp)
-                    .testTag("video_attachments_close_preview"))
-            }
+        val originals = remember(host, state.owner, state.visit, item.video) { MessageMediaOriginals() }
+        DisposableEffect(originals) { onDispose { originals.close() } }
+        val selection = remember(host, state.owner, state.visit, state.revision, item.video) {
+            val name = "video-${item.video.id}.${app.daiyu.android.media.video.videoFileExtension(item.video.mime)}"
+            val preview = ChatMediaPreviewItem(
+                key = "draft-video:${state.owner}:${item.video.id}",
+                mimeType = item.video.mime,
+                displayName = name,
+                loadImage = { null },
+                openOriginal = {
+                    host.openPreviewOriginal(item.video, state, originals)?.let {
+                        ChatMediaPreviewOriginal(it, item.video.mime, name)
+                    }
+                },
+            )
+            ChatMediaPreviewSelection(listOf(preview), 0)
         }
+        val context = androidx.compose.ui.platform.LocalContext.current
+        ChatMediaPreviewDialog(selection, onSaveDocument = { picker.savePreviewOriginal(context, it) }) { cover = null }
     }
 
 }
@@ -256,7 +269,7 @@ private fun CompactVideoAttachment(
         Box(Modifier.size(36.dp).clip(RoundedCornerShape(8.dp)).then(
             if (item is VideoChatHost.Item.Ready && state.visible) Modifier.clickable(
                 interactionSource = remember { MutableInteractionSource() }, indication = null,
-                role = Role.Button, onClickLabel = "查看第 ${index + 1} 个视频的封面", onClick = onPreview,
+                role = Role.Button, onClickLabel = "播放第 ${index + 1} 个视频", onClick = onPreview,
             ) else Modifier,
         ).testTag("video_attachments_thumbnail:${item.key}"), contentAlignment = Alignment.Center) {
             if (item is VideoChatHost.Item.Ready) VideoCover(host, state, item, 256, compact = true)

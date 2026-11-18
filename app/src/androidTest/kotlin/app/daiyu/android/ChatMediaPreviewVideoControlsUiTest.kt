@@ -18,13 +18,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.test.assertIsDisplayed
-import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.click
-import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.performClick
-import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.test.swipe
+import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
@@ -164,4 +158,49 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             ui.mainClock.autoAdvance = previous
         }
     }
+    fun testRealVideoPreviewKeepsPauseAndSeekAcrossOrientationAndBack() {
+        val file = java.io.File(activity.cacheDir, "preview-${java.util.UUID.randomUUID()}.mp4")
+        encodeOfflineBackupMp4(file)
+        val original = file.readBytes()
+        var opened by mutableStateOf(true)
+        val item = app.daiyu.android.ui.media.ChatMediaPreviewItem(
+            "real-video-preview", "video/mp4", file.name, { null },
+            { app.daiyu.android.ui.media.ChatMediaPreviewOriginal(file.inputStream(), "video/mp4", file.name) })
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    if (opened) app.daiyu.android.ui.media.ChatMediaPreviewDialog(
+                        app.daiyu.android.ui.media.ChatMediaPreviewSelection(listOf(item), 0)) { opened = false }
+                }
+            } }
+            ui.onNodeWithContentDescription("下载原件").assertIsDisplayed()
+            node("chat-media-video-surface").performClick()
+            ui.waitUntil(20_000) {
+                ui.onAllNodes(hasTestTag("chat-media-video-play-pause") and isEnabled())
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
+            }
+            node("chat-media-video-play-pause").performClick()
+            ui.onNodeWithContentDescription("播放").assertIsDisplayed()
+            node("chat-media-video-progress").performTouchInput {
+                swipe(Offset(width * 0.2f, centerY), Offset(width * 0.7f, centerY), 200)
+            }
+            val pausedTime = node("chat-media-video-time").fetchSemanticsNode().config[
+                androidx.compose.ui.semantics.SemanticsProperties.Text].toString()
+            node("chat-media-video-orientation").performClick()
+            ui.onNodeWithContentDescription("切换竖屏").assertIsDisplayed()
+            ui.onNodeWithContentDescription("播放").assertIsDisplayed()
+            assertEquals(pausedTime, node("chat-media-video-time").fetchSemanticsNode().config[
+                androidx.compose.ui.semantics.SemanticsProperties.Text].toString())
+            androidx.test.espresso.Espresso.pressBack()
+            ui.onNodeWithContentDescription("切换横屏").assertIsDisplayed()
+            androidx.test.espresso.Espresso.pressBack()
+            ui.onNodeWithContentDescription("下载原件").assertDoesNotExist()
+            assertTrue(original.contentEquals(file.readBytes()))
+        } finally {
+            mainThread { opened = false }
+            ui.waitForIdle()
+            file.delete()
+        }
+    }
+
 }

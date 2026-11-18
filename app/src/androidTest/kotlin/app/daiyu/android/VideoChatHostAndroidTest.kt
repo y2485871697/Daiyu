@@ -162,6 +162,8 @@ class VideoChatHostAndroidTest : InstrumentationTestCase() {
                 media.import(owner, uri, cancellation)
             override fun preview(video: VideoAttachment, maxEdge: Int, cancellation: android.os.CancellationSignal) =
                 media.preview(video.owner, video, maxEdge, cancellation)
+            override fun openOriginal(video: VideoAttachment, cancellation: android.os.CancellationSignal) =
+                media.store.openOriginal(video.owner, video) { cancellation.isCanceled }
             override fun list(owner: VideoAttachmentOwner) = media.store.list(owner)
             override fun remove(video: VideoAttachment) {
                 attempted.countDown()

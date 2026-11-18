@@ -9,6 +9,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import app.daiyu.android.VideoChatHost
 import java.util.UUID
+import kotlinx.coroutines.*
 
 /** One route-view binding, NOT a host or journal owner. Main thread only.
  *
@@ -25,6 +26,10 @@ internal class VideoPickerBinding(
     private class Pending(val ticket: VideoChatHost.Selection, val launcher: ActivityResultLauncher<String>)
     private var pending: Pending? = null
     private var closed = false
+    private val saveScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private var saveJob: Job? = null
+    private var saveLauncher: ActivityResultLauncher<String>? = null
+    private var saveFile: java.io.File? = null
     var selecting by mutableStateOf(false); private set
     var notice by mutableStateOf<String?>(null); private set
 
@@ -80,8 +85,64 @@ internal class VideoPickerBinding(
         return true
     }
 
+    /** Stage the authorized original before leaving for DocumentsUI; the route owns its result. */
+    fun savePreviewOriginal(context: android.content.Context,
+        item: app.daiyu.android.ui.media.ChatMediaPreviewItem): Boolean {
+        if (closed || saveJob != null || saveLauncher != null) return false
+        val application = context.applicationContext
+        saveJob = saveScope.launch {
+            var staged: java.io.File? = null
+            try {
+                val file = java.io.File.createTempFile("draft-video-save-", ".original", application.cacheDir)
+                staged = file
+                saveFile = file
+                withContext(Dispatchers.IO) {
+                    val original = item.openOriginal() ?: error("video_original_unavailable")
+                    original.use { source ->
+                        require(source.mimeType == item.mimeType)
+                        file.outputStream().use { output ->
+                            app.daiyu.android.ui.media.chatMediaPreviewCopy(source.stream, output)
+                        }
+                    }
+                }
+                ensureActive()
+                val result = CompletableDeferred<Uri?>()
+                val launcher = registry.register("video-save-${UUID.randomUUID()}",
+                    ActivityResultContracts.CreateDocument(item.mimeType)) { uri -> result.complete(uri) }
+                saveLauncher = launcher
+                launcher.launch(item.displayName)
+                val destination = result.await()
+                if (destination != null) {
+                    withContext(Dispatchers.IO) {
+                        val output = application.contentResolver.openOutputStream(destination, "w")
+                            ?: error("video_destination_unavailable")
+                        output.use { target -> file.inputStream().use { source ->
+                            app.daiyu.android.ui.media.chatMediaPreviewCopy(source, target)
+                        } }
+                    }
+                    android.widget.Toast.makeText(application, "已保存原件", android.widget.Toast.LENGTH_SHORT).show()
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                android.widget.Toast.makeText(application, "保存失败，请重试", android.widget.Toast.LENGTH_SHORT).show()
+            } finally {
+                saveLauncher?.unregister()
+                saveLauncher = null
+                saveFile = null
+                staged?.delete()
+                saveJob = null
+            }
+        }
+        return true
+    }
+
     override fun close() {
         closed = true
+        saveScope.cancel()
+        saveLauncher?.unregister()
+        saveLauncher = null
+        saveFile?.delete()
         pending?.let {
             // The unique registry key will never be rebound; retire its host tombstone explicitly.
             host.selectionLaunchFailed(it.ticket)

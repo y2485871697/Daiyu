@@ -2569,11 +2569,13 @@ class MainActivity : ComponentActivity() {
                                             mediaLease.takeIf { displayWindow == null },
                                             messageMediaSnapshot.takeIf { displayWindow == null })
                                     }
+                            val pageUserMessageEntrance = app.daiyu.android.ui.screens.chat.conversation.rememberUserMessageEntrance(
+                                pageState.userMessageEntrance, routeActive && !sidebarVisible, awaitPlacement = true)
                             app.daiyu.android.ui.screens.chat.conversation.ChatPageHost(
                                 owner = pageState.conversationKey, modifier = Modifier.fillMaxSize(),
                                 content = remember(
                                     chatPageState, pageState, pageCompression, pageActions, pageGeneration,
-                                    pageImageLoader, pageAssistant,
+                                    pageImageLoader, pageAssistant, pageUserMessageEntrance,
                                     mediaGallery, speechMessageId, speechPreparingMessageId, routeActive,
                                 ) {
                                 @Composable { presented, onReady ->
@@ -2591,6 +2593,7 @@ class MainActivity : ComponentActivity() {
                                         turn.segmentIndex == 0 && questionRows[turn.id]?.retryCleanup == true
                                     }, speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId,
                                         onPresentationReady = onReady,
+                                        suppliedUserMessageEntrance = pageUserMessageEntrance,
                                         callEntryMotion = floatingCallButtonMotion.takeIf {
                                             shownVoiceCall()?.let { call -> call.sessionKey == floatingCallMotionKey &&
                                                 (call.presentation == DoubaoCallPresentation.EXPANDED ||
@@ -7214,7 +7217,7 @@ class MainActivity : ComponentActivity() {
             pendingTextSend = null
             toast(if (unknown) "发送结果未确认" else "本次发送未受理")
         }
-        if (queued) userMessageEntrance = UserMessageEntrance(pending.ticket.previewKey)
+        if (queued) userMessageEntrance = UserMessageEntrance(pending.ticket.previewKey, waitForIme = true)
         publishChat()
         if (queued) jumpToBottom()
     }

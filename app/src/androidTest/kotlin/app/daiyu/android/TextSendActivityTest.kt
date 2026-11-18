@@ -6,6 +6,8 @@ import android.os.Bundle
 import android.os.Looper
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.asAndroidBitmap
 import app.daiyu.android.domain.MessageBlock
 import app.daiyu.android.domain.RunStatus
 import java.util.concurrent.CountDownLatch
@@ -17,7 +19,11 @@ import java.util.concurrent.atomic.AtomicReference
 /** 检查 MainActivity 发送经准备、SQLite 回执到 Activity 回调的流程。
  * 通过阻塞模型初始化及指定的主线程消息投递控制测试时序。
  */
-class TextSendActivityTest : WiredActivityTestCase() {
+private class TextSendMotionScale : androidx.compose.ui.MotionDurationScale {
+    override val scaleFactor = 1f
+}
+
+class TextSendActivityTest : WiredActivityTestCase(TextSendMotionScale()) {
     private val preparing = CountDownLatch(1)
     private val releasePreparation = CountDownLatch(1)
     private val preparationCalls = AtomicInteger()
@@ -729,4 +735,208 @@ class TextSendActivityTest : WiredActivityTestCase() {
         assertEquals(newer, fixture.database.conversations().single().draft)
         assertEquals(1, fixture.opens.get()); assertEquals(1, preparationCalls.get())
     }
+    private data class SendFrame(val clock: Long, val bubble: androidx.compose.ui.geometry.Rect,
+        val actions: androidx.compose.ui.geometry.Rect, val contrast: Float, val actionInk: Float)
+
+    private fun currentSendState(): app.daiyu.android.ui.screens.chat.conversation.ChatScreenState {
+        var result: app.daiyu.android.ui.screens.chat.conversation.ChatScreenState? = null
+        instrumentation.runOnMainSync {
+            result = MainActivity::class.java.declaredMethods.single {
+                it.name == "getChatState" && it.parameterCount == 0
+            }.apply { isAccessible = true }.invoke(activity) as app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
+        }
+        return checkNotNull(result)
+    }
+
+    private fun sendFrame(key: String, advance: Long): SendFrame {
+        ui.mainClock.advanceTimeBy(advance)
+        ui.waitForIdle()
+        val clock = ui.mainClock.currentTime
+        val viewport = ui.onNodeWithTag("chat-messages")
+        val origin = viewport.fetchSemanticsNode().boundsInRoot
+        val bubble = ui.onNodeWithTag("message-user-bubble:$key").fetchSemanticsNode().boundsInRoot
+        val actions = ui.onNodeWithTag("message-user-actions:$key").fetchSemanticsNode().boundsInRoot
+        val bitmap = captureScreenNode(viewport, advanceAnimationClock = false)
+        val pixels = bitmap.toPixelMap()
+        assertEquals(clock, ui.mainClock.currentTime)
+        val density = activity.resources.displayMetrics.density
+        val x = (bubble.right - 24f * density - origin.left).toInt()
+        val y = (bubble.top + 4f * density - origin.top).toInt()
+        assertTrue("the actual bubble patch must be on screen", x > 0 && y > 0 && x < pixels.width && y < pixels.height)
+        fun difference(a: androidx.compose.ui.graphics.Color, b: androidx.compose.ui.graphics.Color) =
+            kotlin.math.abs(a.red - b.red) + kotlin.math.abs(a.green - b.green) + kotlin.math.abs(a.blue - b.blue)
+        val contrast = difference(pixels[x, y], pixels[2, y])
+        val left = (actions.left - origin.left).toInt().coerceAtLeast(0)
+        val top = (actions.top - origin.top).toInt().coerceAtLeast(0)
+        val right = (actions.right - origin.left).toInt().coerceAtMost(pixels.width)
+        val bottom = (actions.bottom - origin.top).toInt().coerceAtMost(pixels.height)
+        assertTrue("action slot must stay above the composer", bottom > top && right > left)
+        var actionInk = 0f
+        for (py in top until bottom) for (px in left until right) actionInk += difference(pixels[px, py], pixels[2, py])
+        val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/real-send-$name").apply { mkdirs() }
+        java.io.File(directory, "$clock.png").outputStream().use {
+            check(bitmap.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+        }
+        val frame = SendFrame(clock, bubble, actions, contrast, actionInk)
+        java.io.File(directory, "frames.txt").appendText("$frame\n")
+        return frame
+    }
+
+    fun testRealTouchSendPaintsBubbleAndActionIntermediateFramesBeforeReceipt() {
+        setDraft("真实发送动画回归")
+        dismissIme()
+        awaitImeFrame(node("chat-draft"), visible = false)
+        ui.mainClock.autoAdvance = false
+        try {
+            node("chat-send").performTouchInput { click(center) }
+            assertTrue(preparing.await(5, TimeUnit.SECONDS))
+            val key = checkNotNull(currentSendState().submissionPreview).key
+            val start = sendFrame(key, 48)
+            val middle = sendFrame(key, 80)
+            val end = sendFrame(key, 400)
+            assertEquals(0, fixture.opens.get())
+            assertTrue(fixture.database.conversations().isEmpty())
+            assertTrue("real send must expand across drawn frames", end.bubble.width > start.bubble.width + 1f)
+            assertTrue("real send must fade by visible pixel amounts", end.contrast > start.contrast + 2f / 255f)
+            assertTrue("the intermediate bubble is neither initial nor final",
+                middle.contrast > start.contrast + 1f / 255f && middle.contrast < end.contrast - 1f / 255f)
+            assertTrue("actions must fade in, not appear at the terminal opacity", middle.actionInk > start.actionInk + 1f &&
+                end.actionInk > middle.actionInk + 1f)
+            assertEquals(start.actions, middle.actions)
+            assertEquals(start.actions, end.actions)
+        } finally {
+            releasePreparation.countDown()
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
+    fun testFastRealReceiptKeepsTheSamePaintedEntranceAcrossNewConversationPage() {
+        val session = fixture.session(holdSeconds = 120)
+        setDraft("新会话快速回执入场")
+        dismissIme()
+        awaitImeFrame(node("chat-draft"), visible = false)
+        ui.mainClock.autoAdvance = false
+        try {
+            node("chat-send").performTouchInput { click(center) }
+            assertTrue(preparing.await(5, TimeUnit.SECONDS))
+            val preview = checkNotNull(currentSendState().submissionPreview)
+            val before = sendFrame(preview.key, 48)
+            releasePreparation.countDown()
+            assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+            ui.waitUntil(5_000) { currentSendState().turns.any { it is app.daiyu.android.ui.screens.chat.conversation.ChatTurnUi.User } }
+            val user = currentSendState().turns.filterIsInstance<app.daiyu.android.ui.screens.chat.conversation.ChatTurnUi.User>().single()
+            val after = sendFrame(user.listKey, 96)
+            val end = sendFrame(user.listKey, 400)
+            assertNotNull(currentSendState().conversationKey)
+            assertTrue("page handoff must not reset the animated extent", after.bubble.width >= before.bubble.width - .75f)
+            assertTrue("the newly committed page must still contain painted intermediate frames", end.contrast > after.contrast + 1f / 255f)
+            assertTrue(after.contrast >= before.contrast - 1f / 255f)
+            ui.onAllNodesWithTag("message-user-bubble:${preview.key}").assertCountEquals(0)
+            assertEquals(1, fixture.opens.get())
+            assertUserText(checkNotNull(fixture.controller.active).conversationId, "新会话快速回执入场")
+        } finally {
+            releasePreparation.countDown()
+            session.release.countDown()
+            ui.mainClock.autoAdvance = true
+        }
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    fun testRealSendAutomaticallyClosesImeWithoutRebuildingOrJumpingTheActionButton() {
+        val keys = listOf("animator_duration_scale", "window_animation_scale", "transition_animation_scale")
+        val previous = keys.associateWith { android.provider.Settings.Global.getString(activity.contentResolver, it) }
+        fun setAnimation(key: String, value: String?) {
+            check(key in keys)
+            check(value == null || value.toFloatOrNull() != null)
+            val command = if (value == null) "settings delete global $key" else "settings put global $key $value"
+            android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command))
+                .use { it.readBytes() }
+        }
+        data class NativeFrame(val nanos: Long, val ime: Int, val attached: Boolean, val nativeDraw: Boolean,
+            val rowBottom: Float, val rightInset: Float, val topInset: Float)
+        val frames = mutableListOf<NativeFrame>()
+        var observedView: android.view.View? = null
+        var listener: android.view.ViewTreeObserver.OnPreDrawListener? = null
+        try {
+            keys.forEach {
+                setAnimation(it, "1")
+                assertEquals("native animations must actually be enabled", 1f,
+                    android.provider.Settings.Global.getFloat(activity.contentResolver, it), .001f)
+            }
+            setDraft("输入法与发送联动\n第二行草稿\n第三行草稿\n第四行草稿")
+            node("chat-draft").performClick()
+            awaitImeFrame(node("chat-draft"), visible = true)
+            val row = node("chat-composer-bottom").fetchSemanticsNode()
+            val button = node("chat-send").fetchSemanticsNode()
+            val view = (row.root as androidx.compose.ui.platform.ViewRootForTest).view
+            observedView = view
+            fun record(nativeDraw: Boolean) {
+                val attached = row.layoutInfo.isPlaced && button.layoutInfo.isPlaced &&
+                    row.layoutInfo.coordinates.isAttached && button.layoutInfo.coordinates.isAttached
+                val ime = androidx.core.view.ViewCompat.getRootWindowInsets(view)
+                    ?.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())?.bottom ?: -1
+                val rowPosition = if (attached) row.positionOnScreen else androidx.compose.ui.geometry.Offset.Zero
+                val buttonPosition = if (attached) button.positionOnScreen else androidx.compose.ui.geometry.Offset.Zero
+                frames += NativeFrame(System.nanoTime(), ime, attached, nativeDraw, rowPosition.y + row.size.height,
+                    rowPosition.x + row.size.width - buttonPosition.x - button.size.width, buttonPosition.y - rowPosition.y)
+            }
+            val recorder = android.view.ViewTreeObserver.OnPreDrawListener { record(true); true }
+            listener = recorder
+            instrumentation.runOnMainSync { view.viewTreeObserver.addOnPreDrawListener(recorder); record(false) }
+            ui.mainClock.autoAdvance = false
+            node("chat-send").performTouchInput { click(center) }
+            assertTrue(preparing.await(5, TimeUnit.SECONDS))
+            val deadline = android.os.SystemClock.elapsedRealtime() + 15_000
+            repeat(40) {
+                assertTrue("native recording must finish before the preparation gate expires",
+                    android.os.SystemClock.elapsedRealtime() < deadline)
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                val drawn = CountDownLatch(1)
+                instrumentation.runOnMainSync {
+                    android.view.Choreographer.getInstance().postFrameCallback { drawn.countDown() }
+                    view.invalidate()
+                }
+                val remaining = deadline - android.os.SystemClock.elapsedRealtime()
+                assertTrue("native recording exceeded its total budget", remaining > 0)
+                assertTrue("native frame must be delivered", drawn.await(minOf(2_000L, remaining), TimeUnit.MILLISECONDS))
+            }
+            awaitImeFrame(node("chat-draft"), visible = false)
+            instrumentation.runOnMainSync { view.viewTreeObserver.removeOnPreDrawListener(recorder); record(false) }
+            listener = null
+            assertTrue("must record the visible native keyboard", frames.first().ime > 0)
+            assertEquals("send itself must hide the keyboard", 0, frames.last().ime)
+            assertTrue("keep the primary button instance through send preparation", frames.all { it.attached })
+            val first = frames.first()
+            val nativeFrames = frames.filter { it.nativeDraw }
+            assertTrue("endpoint snapshots cannot substitute for actual native draws", nativeFrames.size >= 5)
+            if (android.os.Build.VERSION.SDK_INT >= 30) assertTrue(
+                "animated IME travel must have an actual intermediate drawn action-row position",
+                nativeFrames.any { it.rowBottom > first.rowBottom + 2f && it.rowBottom < frames.last().rowBottom - 2f })
+            frames.forEach {
+                assertEquals("IME travel must not move the primary button within its action slot", first.rightInset, it.rightInset, 1.5f)
+                assertEquals("editor collapse must not jump the primary button within its action slot", first.topInset, it.topInset, 1.5f)
+            }
+            assertTrue("the action row must travel down as the keyboard closes", frames.last().rowBottom > first.rowBottom + 24f)
+            val key = checkNotNull(currentSendState().submissionPreview).key
+            ui.onNodeWithTag("message-user-bubble:$key").assertIsDisplayed()
+            val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/real-send-$name").apply { mkdirs() }
+            java.io.File(directory, "native-frames.txt").writeText(frames.joinToString("\n"))
+            sendFrame(key, 16)
+        } finally {
+            val view = observedView
+            val observer = listener
+            if (view != null && observer != null) instrumentation.runOnMainSync {
+                if (view.viewTreeObserver.isAlive) view.viewTreeObserver.removeOnPreDrawListener(observer)
+            }
+            releasePreparation.countDown()
+            ui.mainClock.autoAdvance = true
+            previous.forEach { (key, value) ->
+                setAnimation(key, value)
+                assertEquals("restore native animation setting $key", value,
+                    android.provider.Settings.Global.getString(activity.contentResolver, key))
+            }
+        }
+    }
+
 }

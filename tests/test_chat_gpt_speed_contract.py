@@ -110,7 +110,7 @@ class ChatGptSpeedContractTest(unittest.TestCase):
         composer = source('ui/screens/chat/conversation/ChatComposer.kt')
         self.assertIn('val visualEnabled = state.enabled || state.gptSpeedSaving', composer)
         for unchanged in ('val toolbarEnabled = pageActive && state.enabled && !editing', 'enabled = state.enabled,',
-                          '.controlGesture(actions, pageActive && primaryEnabled)', 'enabled = pageActive && (primaryEnabled || compressionBlocked),',
+                          '.controlGesture(actions, pageActive && primaryEnabled,', 'enabled = pageActive && (primaryEnabled || compressionBlocked),',
                           'mountedGeneration == currentEditorGeneration && state.enabled && currentEditorEnabled'):
             self.assertIn(unchanged, composer)
         self.assertIn('state.copy(enabled = visualEnabled).textActionEnabled()', composer)

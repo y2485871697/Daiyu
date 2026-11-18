@@ -70,7 +70,10 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
         self.assertIn('statusText = controller.problem ?: when {', main)
         composer = (CHAT / 'ChatComposer.kt').read_text()
         self.assertIn('if (preparingSend) actions.onCancelSend()', composer)
-        self.assertIn('key(state.preparingSendKey ?: state.controlOwnerKey)', composer)
+        self.assertNotIn('key(state.preparingSendKey ?: state.controlOwnerKey)', composer)
+        self.assertIn('return pointerInput(enabled, owner)', composer)
+        self.assertIn('val pressedActions = latest', composer)
+        self.assertIn('finally { pressedActions.onControlRelease() }', composer)
         self.assertIn('if (preparingSend) Modifier else Modifier.controlGesture', composer)
         self.assertIn('preparingSend -> "取消发送"', composer)
         self.assertIn('!preparingSend && state.mainContextCompressing', composer)
@@ -123,6 +126,22 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
                        'testAcceptedRegenerationReplacesPreviewOnlyAfterExactNewReplyIsPublished'):
             self.assertIn(oracle, source)
 
+
+    def test_send_motion_is_owned_outside_the_dual_page_host_and_actions_share_its_clock(self):
+        main = (APP / 'MainActivity.kt').read_text()
+        motion = (CHAT / 'UserMessageEntrance.kt').read_text()
+        screen = (CHAT / 'ChatScreen.kt').read_text()
+        rows = (CHAT / 'ChatMessageList.kt').read_text()
+        self.assertLess(main.index('val pageUserMessageEntrance ='), main.index('conversation.ChatPageHost('))
+        self.assertIn('suppliedUserMessageEntrance = pageUserMessageEntrance', main)
+        self.assertIn('val userMessageEntrance = suppliedUserMessageEntrance ?:', screen)
+        self.assertNotIn('Animatable(if (request.claim()', motion)
+        self.assertLess(motion.index('if (!active)'), motion.index('if (request.claim())'))
+        self.assertLess(motion.index('snapshotFlow { !awaitPlacement || motion.positioned }'), motion.index('if (request.claim())'))
+        self.assertIn('withTimeoutOrNull(240)', motion)
+        self.assertIn('item.offset < layout.viewportEndOffset - currentOcclusionPx', rows)
+        self.assertIn('alpha = userMessageActionEntranceAlpha(entering.progress.value)', rows)
+        self.assertIn('interactionEnabled = actionsAvailable', rows)
 
 if __name__ == "__main__":
     unittest.main()

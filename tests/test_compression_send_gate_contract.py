@@ -24,7 +24,7 @@ class CompressionSendGateContractTest(unittest.TestCase):
         self.assertIn("enabled = pageActive && (primaryEnabled || compressionBlocked)", click)
         self.assertIn("containerColor = if (compressionBlocked) MiuixTheme.colorScheme.onSurface", click)
         self.assertIn("tint = if (compressionBlocked) MiuixTheme.colorScheme.onSurface", click)
-        self.assertIn(".controlGesture(actions, pageActive && primaryEnabled)", click)
+        self.assertIn(".controlGesture(actions, pageActive && primaryEnabled,", click)
         self.assertIn("state.mainContextCompressing && (textAction || state.phase == ComposerPhase.IDLE)", composer)
     def test_host_notices_and_guards_before_mutating_draft_or_voice(self):
         activity = (APP / "MainActivity.kt").read_text()

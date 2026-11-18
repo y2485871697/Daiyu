@@ -24,6 +24,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import kotlin.math.abs
 import androidx.compose.ui.semantics.ScrollAxisRange
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.semantics.verticalScrollAxisRange
 import androidx.compose.ui.unit.Constraints
 import kotlin.math.roundToInt
@@ -946,6 +947,20 @@ internal fun ChatMessageList(
         }.collect { ready -> currentPresentationReady(ready) }
     }
 
+    LaunchedEffect(userMessageEntrance, listState) {
+        val entrance = userMessageEntrance ?: return@LaunchedEffect
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            presentationActive && pageActive && scrollResumed && !initialPositionPending && !currentRetainingRows &&
+                (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial) &&
+                layout.visibleItemsInfo.any { item ->
+                    (item.key == entrance.request.key || item.key == entrance.request.messageId) &&
+                        item.size > 0 && item.offset < layout.viewportEndOffset - currentOcclusionPx &&
+                        item.offset + item.size > layout.viewportStartOffset
+                }
+        }.collect { visible -> if (visible) entrance.positioned = true }
+    }
+
     val viewportHeightPx = remember { mutableIntStateOf(0) }
     Box(modifier.fillMaxSize()) {
       Layout(modifier = Modifier.fillMaxSize(), content = {
@@ -1085,6 +1100,9 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
         it.request.messageId == turn.id || it.request.messageId == turn.listKey ||
             it.request.key == turn.id || it.request.key == turn.listKey
     }
+    val actionsAvailable by remember(entering, turn.pending) {
+        derivedStateOf { !turn.pending && (entering == null || entering.progress.value > .25f) }
+    }
     Column(Modifier.fillMaxWidth().then(if (turn.pending) Modifier.testTag("chat-send-preview") else Modifier),
         horizontalAlignment = Alignment.End) {
         BoxWithConstraints(Modifier.fillMaxWidth(), contentAlignment = Alignment.TopEnd) {
@@ -1093,7 +1111,7 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
             Column(Modifier.widthIn(max = bubbleWidth)
                 .then(if (entering == null) Modifier else Modifier.graphicsLayer {
                     val progress = entering.progress.value
-                    alpha = (progress * 3f).coerceIn(0f, 1f)
+                    alpha = (progress * 2f).coerceIn(0f, 1f)
                     transformOrigin = TransformOrigin(1f, 0f)
                     scaleX = userMessageEntranceScale(progress)
                     scaleY = scaleX
@@ -1117,6 +1135,13 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
         if (actions.editingMessageKey != turn.listKey) MessageActionBar(
             id = turn.listKey,
             actions = actions,
+            modifier = Modifier.testTag("message-user-actions:${turn.listKey}")
+                .then(if (entering == null) Modifier else Modifier.graphicsLayer {
+                    alpha = userMessageActionEntranceAlpha(entering.progress.value)
+                }).then(if (actionsAvailable) Modifier else Modifier.clearAndSetSemantics {
+                    testTag = "message-user-actions:${turn.listKey}"
+                }),
+            interactionEnabled = actionsAvailable,
             messageActionsEnabled = !turn.pending,
             branchEnabled = !turn.pending,
             showEditAction = true,

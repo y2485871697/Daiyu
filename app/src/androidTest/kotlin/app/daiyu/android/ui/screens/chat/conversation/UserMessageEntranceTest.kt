@@ -40,8 +40,10 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
     private var mounted by mutableStateOf(true)
     private var active by mutableStateOf(true)
     private var motion: UserMessageEntranceMotion? = null
+    private var awaitPlacement by mutableStateOf(false)
     private var background = Color.Unspecified
     private var density = 1f
+    private var actionCalls = 0
 
     private fun show() {
         mainThread { activity.setContent {
@@ -51,10 +53,11 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
                 Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
                 Box(Modifier.width(320.dp).height(180.dp).background(background).testTag("entrance-raster")) {
                     if (mounted) {
-                        val current = rememberUserMessageEntrance(request, active)
+                        val current = rememberUserMessageEntrance(request, active, awaitPlacement)
                         SideEffect { motion = current }
                         Column(Modifier.testTag("entrance-slot")) {
-                            key(turn.listKey) { UserTurn(turn, ChatScreenActions(), entrance = current) }
+                            key(turn.listKey) { UserTurn(turn, ChatScreenActions(onCopy = { actionCalls++ }, onEditUser = { actionCalls++ },
+                                onBranch = { actionCalls++ }, onDeleteTurn = { actionCalls++ }), entrance = current) }
                         }
                     }
                 }
@@ -228,4 +231,85 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
         assertEquals(1f, progress(), .001f)
         assertTrue(ink() > 1f)
     }
+    fun testUnpresentedCandidateDoesNotConsumeTheVisiblePagesEntrance() {
+        active = false
+        show()
+        val ticket = UserMessageEntrance("candidate")
+        change { request = ticket; turn = turn.copy(id = ticket.key, listKey = ticket.key) }
+        ui.mainClock.advanceTimeBy(500)
+        ui.waitForIdle()
+        assertFalse("an invisible candidate cannot claim the send", ticket.claimed)
+        change { active = true }
+        assertTrue("the first presented frames must still animate", progress() < 1f)
+        finish()
+    }
+
+    fun testSendWaitsForTheRealRowInsteadOfSpendingItsAnimationOffscreen() {
+        awaitPlacement = true
+        show()
+        val ticket = UserMessageEntrance("waiting-row")
+        change { request = ticket; turn = turn.copy(id = ticket.key, listKey = ticket.key) }
+        ui.mainClock.advanceTimeBy(500)
+        ui.waitForIdle()
+        assertFalse(ticket.claimed)
+        assertEquals(0f, progress(), .001f)
+        change { checkNotNull(motion).positioned = true }
+        assertTrue(progress() < 1f)
+        finish()
+    }
+
+    fun testActionsFadeAfterTheBubbleWithoutMovingOrChangingItsSlot() {
+        show()
+        change { request = UserMessageEntrance("new-send"); turn = turn.copy(id = "new-send", listKey = "new-send") }
+        val actions = ui.onNodeWithTag("message-user-actions:new-send")
+        val start = actions.fetchSemanticsNode().boundsInRoot
+        val slot = ui.onNodeWithTag("entrance-slot").fetchSemanticsNode().boundsInRoot
+        assertEquals(0f, userMessageActionEntranceAlpha(progress()), .001f)
+        ui.mainClock.advanceTimeBy(144)
+        ui.waitForIdle()
+        assertTrue(userMessageActionEntranceAlpha(progress()) in .01f.. .99f)
+        assertEquals(start, actions.fetchSemanticsNode().boundsInRoot)
+        finish()
+        assertEquals(1f, userMessageActionEntranceAlpha(progress()), .001f)
+        assertEquals(start, actions.fetchSemanticsNode().boundsInRoot)
+        assertEquals(slot, ui.onNodeWithTag("entrance-slot").fetchSemanticsNode().boundsInRoot)
+    }
+
+    fun testImeTravelAdmitsTheBubbleLateAndHandlesEqualOrOpeningInsets() {
+        assertFalse(userMessageEntranceImeReady(current = 800, source = 800, target = 40, navigation = 40))
+        assertFalse(userMessageEntranceImeReady(current = 500, source = 800, target = 40, navigation = 40))
+        assertTrue(userMessageEntranceImeReady(current = 280, source = 800, target = 40, navigation = 40))
+        assertTrue(userMessageEntranceImeReady(current = 40, source = 800, target = 40, navigation = 40))
+        assertFalse(userMessageEntranceImeReady(current = 300, source = 40, target = 800, navigation = 40))
+        assertFalse(userMessageEntranceImeReady(current = 800, source = 800, target = 800, navigation = 40))
+    }
+
+    fun testLeavingBeforePlacementDoesNotPlayAnOldEntranceOnReturn() {
+        awaitPlacement = true
+        show()
+        val ticket = UserMessageEntrance("leave-before-placement")
+        change { request = ticket; turn = turn.copy(id = ticket.key, listKey = ticket.key) }
+        assertFalse(ticket.claimed)
+        change { active = false }
+        assertTrue(ticket.claimed)
+        assertEquals(1f, progress(), .001f)
+        change { active = true; checkNotNull(motion).positioned = true }
+        assertEquals(1f, progress(), .001f)
+    }
+
+    fun testPendingActionSlotCannotBeClickedOrExposedAsAccessibleActions() {
+        show()
+        change { request = UserMessageEntrance("pending-actions"); turn = turn.copy(id = "pending-actions", listKey = "pending-actions", pending = true) }
+        finish()
+        val actions = ui.onNodeWithTag("message-user-actions:pending-actions")
+        assertTrue("pending action semantics must be cleared", actions.fetchSemanticsNode().children.isEmpty())
+        for (inset in listOf(12.5f, 42.5f, 72.5f, 102.5f)) actions.performTouchInput {
+            click(androidx.compose.ui.geometry.Offset(width - inset.dp.toPx(), height / 2f))
+        }
+        assertEquals("invisible or pending actions must not reach the host", 0, actionCalls)
+        change { turn = turn.copy(pending = false) }
+        ui.onNodeWithContentDescription("复制回答").performClick()
+        assertEquals("the settled real action must remain connected", 1, actionCalls)
+    }
+
 }

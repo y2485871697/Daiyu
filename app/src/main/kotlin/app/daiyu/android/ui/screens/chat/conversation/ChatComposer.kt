@@ -225,7 +225,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                 Box(Modifier.fillMaxWidth().padding(horizontal = 13.dp).height(1.dp)
                     .testTag("chat-composer-divider").background(dividerColor))
                 Column(Modifier.fillMaxWidth().animateContentSize(
-                    animationSpec = spring(dampingRatio = 1f, stiffness = 500f),
+                    animationSpec = if (preparingSend || state.text.isEmpty()) tween(180, easing = FastOutSlowInEasing)
+                        else spring(dampingRatio = 1f, stiffness = 500f),
                     alignment = Alignment.BottomCenter,
                 )) {
                     ComposerReferenceChips(references.references, pageActive && state.enabled, visualEnabled) { reference ->
@@ -320,8 +321,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             }
                         }
                         val primaryMotion = rememberChatActionMotion()
-                        key(state.preparingSendKey ?: state.controlOwnerKey) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(15.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(15.dp)) {
                             app.daiyu.android.balance.ui.ProviderBalanceIndicator(
                                 state = balanceState, modifier = Modifier.testTag("chat-composer-provider-balance")
                                     .widthIn(max = 72.dp), animateChanges = true, iconSize = 16.dp,
@@ -341,7 +341,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 preparingSend -> "text-send-cancel"
                                 textAction || state.phase == ComposerPhase.IDLE -> "chat-send"
                                 else -> "chat-control"
-                            }).then(if (preparingSend) Modifier else Modifier.controlGesture(actions, pageActive && primaryEnabled)),
+                            }).then(if (preparingSend) Modifier else Modifier.controlGesture(actions, pageActive && primaryEnabled,
+                                state.controlOwnerKey)),
                                 containerColor = if (compressionBlocked) MiuixTheme.colorScheme.onSurface.copy(alpha = .12f)
                                     else (if (preparingSend || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
                                         .copy(alpha = if (primaryVisualEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f),
@@ -350,7 +351,6 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     else if (preparingSend || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
                                 iconSize = if (preparingSend || !textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp,
                                 onLongClick = if (preparingSend) actions.onCancelSend else if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
-                            }
                         }
                     }
                     Box {
@@ -387,16 +387,17 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
 }
 
 @Composable
-private fun Modifier.controlGesture(actions: ChatScreenActions, enabled: Boolean): Modifier {
+private fun Modifier.controlGesture(actions: ChatScreenActions, enabled: Boolean, owner: String?): Modifier {
     val latest by rememberUpdatedState(actions)
-    return pointerInput(enabled) {
+    return pointerInput(enabled, owner) {
         if (!enabled) return@pointerInput
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            latest.onControlPress()
+            val pressedActions = latest
+            pressedActions.onControlPress()
             try {
                 do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
-            } finally { latest.onControlRelease() }
+            } finally { pressedActions.onControlRelease() }
         }
     }
 }

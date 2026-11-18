@@ -38,10 +38,11 @@ internal fun MessageActionBar(
     endAligned: Boolean = false,
     speaking: Boolean = false,
     preparing: Boolean = false,
+    interactionEnabled: Boolean = true,
 ) {
     val colors = conversationColors()
-    val actionsEnabled = messageActionsEnabled && actions.messageActionsEnabled
-    val canBranch = branchEnabled && actions.messageBranchEnabled
+    val actionsEnabled = interactionEnabled && messageActionsEnabled && actions.messageActionsEnabled
+    val canBranch = interactionEnabled && branchEnabled && actions.messageBranchEnabled
     val actionTint = colors.muted.copy(alpha = if (actionsEnabled) 1f else .38f)
     var copied by remember(id) { mutableStateOf(false) }
     LaunchedEffect(copied) {
@@ -59,7 +60,7 @@ internal fun MessageActionBar(
 
             actions.onCopy(id)
             copied = true
-        }) {
+        }, enabled = interactionEnabled) {
             Icon(if (copied) DaiyuIcons.Check else DaiyuIcons.Copy,
                 if (copied) "已复制" else "复制回答", Modifier.size(13.dp),
                 tint = if (copied) colors.success else colors.muted)

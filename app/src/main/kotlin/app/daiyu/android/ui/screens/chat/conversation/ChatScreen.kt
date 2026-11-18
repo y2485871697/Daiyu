@@ -143,6 +143,7 @@ internal fun DaiyuChatScreen(
     menuAvailable: Boolean = true,
     onPresentationReady: (Boolean) -> Unit = {},
     hasTurnExtras: (ChatTurnUi.Assistant) -> Boolean = { true },
+    suppliedUserMessageEntrance: UserMessageEntranceMotion? = null,
 ) {
     val presentationActive = LocalChatPresentationActive.current &&
         app.daiyu.android.ui.navigation.LocalPageContentActive.current
@@ -164,7 +165,8 @@ internal fun DaiyuChatScreen(
     val callCoordinates = remember(state.conversationKey) { ChatCallAnchorCoordinates() }
     val latestCallAnchorChanged by rememberUpdatedState(onCallAnchorChanged)
     val displayedTurns = submissionTurns(state.turns, state.submissionPreview)
-    val userMessageEntrance = rememberUserMessageEntrance(state.userMessageEntrance, presentationActive)
+    val userMessageEntrance = suppliedUserMessageEntrance ?:
+        rememberUserMessageEntrance(state.userMessageEntrance, presentationActive, awaitPlacement = true)
     val focus = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val view = LocalView.current

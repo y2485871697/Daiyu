@@ -362,6 +362,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         fun verify(force: Boolean = false) {
             val safe = inkRect(host, "ink-editor").top - kotlin.math.round(ChatTailClearance.value * density)
             val h = ui.onNodeWithTag(host).fetchSemanticsNode().positionInRoot
+            val viewportTop = maxOf(0f, inkRect(host, "chat-stream-viewport:ink-wire-tail").top)
             val glyphs = ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().map { node ->
                 val layouts = mutableListOf<TextLayoutResult>()
                 ui.runOnUiThread { node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts) }
@@ -376,7 +377,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 approved[index]?.takeIf { candidate.at.y + it.size.height <= safe + .01f }?.let {
                     InkGlyph(it, candidate.at)
                 }
-            }.filter { it.at.y + it.layout.getLineTop(it.layout.lineCount - 1) >= 0f }
+            }.filter { it.at.y >= viewportTop }
             val p = visible.maxWithOrNull(compareBy<InkGlyph> {
                 it.at.y + it.layout.getLineBottom(it.layout.lineCount - 1)
             }.thenBy { it.at.x }) ?: return
@@ -388,9 +389,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 androidx.compose.ui.geometry.Rect(candidate.at, Size(
                     maxOf(candidate.layout.size.width, saved?.size?.width ?: 0).toFloat(),
                     maxOf(candidate.layout.size.height, saved?.size?.height ?: 0).toFloat()))
-            }
-            val frame = InkFrame(visible, regions,
-                maxOf(0f, inkRect(host, "chat-stream-viewport:ink-wire-tail").top), safe)
+            }.filter { it.top >= viewportTop }
+            // History intentionally clips at the viewport top; compare complete leaves and every unsafe tail.
+            val frame = InkFrame(visible, regions, viewportTop, safe)
             val shot = inkShot(host, matcher, p, frame)
             assertEquals("A painted trailing line must retain its complete reference glyph", 0, shot.lost)
             assertTrue("The actual glyph must stay above the original O+8 safety line", shot.last < ceil(safe).toInt())

@@ -109,12 +109,17 @@ class StreamingFollowContract(unittest.TestCase):
             "// A non-following viewport", 1)[0]
         live = correction.split("// Ordinary live text", 1)[1].split(
             "if (!listState.canScrollForward)", 1)[0]
-        for token in ("shortBoundedTail", "activeTail?.status == RunStatus.RUNNING",
-                      "activeTail.isStreaming", "activeTail.hasBodyTextActions()",
-                      "activeTail.workflowContent().work == null", "!resumeFollowPending",
-                      "!nestedTail.followCatchup", "clearanceLayout.followViewport",
-                      "layout.beforeContentPadding, layout.afterContentPadding", ")) return"):
+        for token in ("shortBoundedTail", "val liveTextTail = activeTail?.let {",
+                      "it.status == RunStatus.RUNNING &&",
+                      "(it.isStreaming && it.hasBodyTextActions() && it.workflowContent().work == null ||",
+                      "it.hasPlainTextBody(allowEmpty = true) && !hasTurnExtras(it) &&",
+                      "reconnectPartsByKey.getValue(it.listKey).placedIds.isEmpty() &&",
+                      "fallbackAfter[it.listKey].isNullOrEmpty() && compressionAfter[it.listKey].isNullOrEmpty())",
+                      "} == true", "!resumeFollowPending", "!nestedTail.followCatchup",
+                      "clearanceLayout.followViewport == Triple(layout.viewportSize,",
+                      "layout.beforeContentPadding, currentOcclusionPx + currentFollowClearancePx", ")) return"):
             self.assertIn(token, live)
+        self.assertNotIn("layout.afterContentPadding", live)
         self.assertLess(correction.index("remeasurement.forceRemeasure()"),
                         correction.index("// Ordinary live text"))
         self.assertLess(correction.index("// Ordinary live text"),

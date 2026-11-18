@@ -56,6 +56,7 @@ fun modelFailureDetails(reason: ModelFailure, diagnostic: ModelRequestDiagnostic
             ModelFailure.REDIRECT -> "模型接口返回重定向，未转发密钥，请填写最终 HTTPS 地址。"
             ModelFailure.CONFIGURATION -> "无法准备模型请求，请检查服务地址及请求头设置。"
             ModelFailure.REQUEST -> "模型服务拒绝请求，具体原因未识别。"
+            ModelFailure.CONTEXT_LIMIT -> "请求超过模型上下文限制，请压缩上下文或调整输出上限。"
             ModelFailure.PROTOCOL -> "模型服务未返回兼容的事件流，请检查接口协议。"
             ModelFailure.INCOMPLETE -> "模型回复未完整结束，已接收内容保留。"
             ModelFailure.TLS -> "模型 HTTPS 安全连接失败，请检查服务证书和网络。"
@@ -109,6 +110,7 @@ internal fun modelFailureLabel(reason: ModelFailure): String = when (reason) {
     ModelFailure.RATE_LIMIT -> "请求限流或额度不足"; ModelFailure.SERVER -> "服务端错误"
     ModelFailure.ENDPOINT -> "接口地址或方法错误"; ModelFailure.REDIRECT -> "接口重定向"
     ModelFailure.CONFIGURATION -> "请求配置错误"; ModelFailure.REQUEST -> "请求被拒绝"
+    ModelFailure.CONTEXT_LIMIT -> "上下文超出限制"
     ModelFailure.PROTOCOL -> "回复协议错误"; ModelFailure.INCOMPLETE -> "回复未完整结束"
     ModelFailure.TLS -> "安全连接错误"
 }

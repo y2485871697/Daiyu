@@ -50,16 +50,22 @@ object ContextRevision {
 
 data class CompressionPolicy(val enabled: Boolean = false, val contextTokens: Long? = null,
     val triggerPercent: Int = 80, val reserveTokens: Long = 4096, val keepTurns: Int = 4,
-    val tokenTail: Boolean = false) {
+    val tokenTail: Boolean = false, val routedOutputTokens: Long? = null) {
     init { require(contextTokens == null || contextTokens in 1024..10_000_000)
         require(triggerPercent in 10..95 && reserveTokens >= 0 && keepTurns in 1..100)
-        require(contextTokens == null || reserveTokens < contextTokens) }
+        require(contextTokens == null || reserveTokens < contextTokens)
+        require(routedOutputTokens == null || routedOutputTokens >= 0) }
     /** Unknown provider window remains unknown; never guess a capacity for automatic compression. */
+    val outputReservationTokens: Long get() = routedOutputTokens ?: reserveTokens
+    val compactSpec: HarnessContextPolicy.Spec? get() = contextTokens?.let { window ->
+        runCatching { HarnessContextPolicy.resolve(window, outputReservationTokens, triggerPercent) }.getOrNull()
+    }
     fun shouldCompress(estimatedTokens: Long): Boolean = enabled && contextTokens != null &&
-        estimatedTokens >= (if (tokenTail) contextTokens else contextTokens - reserveTokens) * triggerPercent / 100
+        if (tokenTail) compactSpec?.let { estimatedTokens >= it.thresholdTokens } == true
+        else estimatedTokens >= (contextTokens - reserveTokens) * triggerPercent / 100
 
     /** Sending capacity is independent of automatic compression. Unknown stays unknown. */
-    val sendBudgetTokens: Long? get() = contextTokens?.minus(reserveTokens)
+    val sendBudgetTokens: Long? get() = contextTokens?.minus(if (tokenTail) outputReservationTokens else reserveTokens)
     fun fitsSendBudget(estimatedTokens: Long): Boolean {
         require(estimatedTokens >= 0)
         return sendBudgetTokens?.let { estimatedTokens <= it } ?: true

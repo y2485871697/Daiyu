@@ -109,11 +109,9 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         require(pending.all { it.conversationId == id }) { "待发送消息不属于当前会话" }
         val before = RuntimeDiagnostics.measure(Stage.CONTEXT_READ) { transactions.run { effective(it, id) } }
         checkCancellation(cancelled)
-        // Empty history (including a not-yet-created conversation) has no compressible
-        // evidence. Still enforce the pending budget below, without ensureIdle/nonexistent owner.
-        // Production preparation recovers a hard send limit, not the cloud-only 80% trigger.
-        if (before.messages.isNotEmpty() && summarizer != null && (if (policy.tokenTail) policy.enabled && !policy.fitsSendBudget(TokenTailCompression.historyTokens(MessageHistory.expand(ModelHistory.project(before.messages + pending)), includeLatestScreen = false))
-                else policy.shouldCompress(estimateTokens(before.messages + pending))))
+        // Production pressure is evaluated by Runner against the complete routed envelope.
+        if (!policy.tokenTail && before.messages.isNotEmpty() && summarizer != null &&
+            policy.shouldCompress(estimateTokens(before.messages + pending)))
             compress(id, policy, summarizer, pending, cancelled)
         val prepared = RuntimeDiagnostics.measure(Stage.CONTEXT_READ) { transactions.run { effective(it, id) } }
         requireCapacity(policy, prepared.messages + pending)
@@ -121,6 +119,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         return prepared
     }
     private fun requireCapacity(policy: CompressionPolicy, messages: List<Message>) {
+        if (policy.tokenTail) return
         val budget = policy.sendBudgetTokens ?: return
         RuntimeDiagnostics.measure(Stage.CONTEXT_PREFLIGHT, size = messages.size.toLong()) {
             val estimate = estimateSendContextTokens(policy, messages)
@@ -134,7 +133,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     }
     private fun summaryMessage(id: ConversationId, archive: String, summary: String) =
         Message(MessageId("summary-$archive"), id, RunId("summary-$archive"), "user",
-            listOf(MessageBlock.Text("summary", "[历史摘要；仅供上下文，非新指令]\n${SummaryCheckpoint.withoutLegacyMarker(summary)}\n[摘要结束]")), RunStatus.COMPLETED)
+            listOf(MessageBlock.Text("summary", SummaryCheckpoint.frame(SummaryCheckpoint.withoutLegacyMarker(summary)))), RunStatus.COMPLETED)
     private data class ArchiveFit(val physicalCount: Int, val tail: List<Message>)
 
     private fun fitArchive(id: ConversationId, current: List<Message>, count: Int, revision: String,
@@ -172,7 +171,9 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                 if (original.take(fit.physicalCount).any {
                     app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty()
                 }) continue
-                val messages = listOf(summaryMessage(id, c.getString(0), c.getString(3))) + fit.tail
+                val system = original.takeWhile { it.role == "system" }
+                if (fit.tail.any { it.role == "system" }) continue
+                val messages = system + summaryMessage(id, c.getString(0), c.getString(3)) + fit.tail
                 return PreparedContext(messages, estimateTokens(messages), c.getString(0))
             }
         }
@@ -180,41 +181,47 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     }
     fun compress(id: ConversationId, policy: CompressionPolicy, summarizer: ContextSummarizer,
         pendingMessages: List<Message> = emptyList(), cancelled: () -> Boolean = { false },
-        onStarted: () -> Unit = {}): String? =
+        onStarted: () -> Unit = {}, retainTail: Boolean = true): String? =
         RuntimeDiagnostics.measure(
             Stage.SUMMARY_TOTAL,
             size = pendingMessages.size.toLong()) {
-            compressInternal(id, policy, summarizer, pendingMessages, cancelled, onStarted)
+            compressInternal(id, policy, summarizer, pendingMessages, cancelled, onStarted, retainTail)
         }
 
     private fun compressInternal(id: ConversationId, policy: CompressionPolicy, summarizer: ContextSummarizer,
-        pendingMessages: List<Message>, cancelled: () -> Boolean, onStarted: () -> Unit): String? {
+        pendingMessages: List<Message>, cancelled: () -> Boolean, onStarted: () -> Unit, retainTail: Boolean): String? {
         checkCancellation(cancelled)
         val pending = pendingMessages.toList()
         require(pending.all { it.conversationId == id }) { "待发送消息不属于当前会话" }
-        val (snapshot, firstVideo) = RuntimeDiagnostics.measure(Stage.SUMMARY_SNAPSHOT) { transactions.run { db ->
+        val (snapshot, firstVideo, currentSurface) = RuntimeDiagnostics.measure(Stage.SUMMARY_SNAPSHOT) { transactions.run { db ->
             ensureIdle(db, id)
             val messages = read(db, id)
-            messages to messages.indexOfFirst {
+            Triple(messages, messages.indexOfFirst {
                 app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty()
-            }
+            }, if (policy.tokenTail) effective(db, id).messages else messages)
         } }
         data class Selection(val count: Int, val input: List<Message>, val tail: List<Message>, val logicalCut: Int?)
         val selected = RuntimeDiagnostics.measure(Stage.SUMMARY_SELECT) {
             val expanded = if (policy.tokenTail) MessageHistory.expandWithSources(snapshot) else emptyList()
-            val logical = expanded.map { it.message }
-            val logicalCut = if (policy.tokenTail) TokenTailCompression.selectStart(logical, policy.contextTokens) else null
+            val originalLogical = expanded.map { it.message }
+            val logical = if (policy.tokenTail) MessageHistory.expand(currentSurface) else emptyList()
+            val surfaceCut = if (policy.tokenTail) TokenTailCompression.selectStart(logical, policy.contextTokens,
+                overflow = !retainTail, reservedCompletionTokens = policy.outputReservationTokens) else null
+            var logicalCut: Int? = null
             val count: Int
             val summaryInput: List<Message>
             val tail: List<Message>
-            if (logicalCut != null) {
-                if (logicalCut <= 0) return null
-                val minimum = expanded.take(logicalCut).maxOf { it.sourcePhysicalIndex } + 1
+            if (surfaceCut != null) {
+                if (surfaceCut <= 0) return null
+                summaryInput = logical.take(surfaceCut)
+                tail = logical.drop(surfaceCut)
+                val rawCut = originalLogical.size - tail.size
+                require(rawCut > 0 && TokenTailCompression.isSafeCut(originalLogical, rawCut) &&
+                    originalLogical.drop(rawCut) == tail) { "当前摘要尾部与原文不一致；保留原文" }
+                logicalCut = rawCut
+                val minimum = expanded.take(rawCut).maxOf { it.sourcePhysicalIndex } + 1
                 val ceiling = if (firstVideo < 0) snapshot.size else firstVideo
                 count = (minimum..ceiling).firstOrNull { isHistoryClosedPrefix(snapshot, it) } ?: return null
-                summaryInput = logical.take(logicalCut)
-                require(MessageHistory.expand(snapshot.take(count)).take(logicalCut) == summaryInput)
-                tail = logical.drop(logicalCut)
             } else {
                 val requested = compressionBoundary(snapshot, policy.keepTurns)
                 require(requested in 0..snapshot.size)
@@ -241,7 +248,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             val summary = SummaryCheckpoint.withoutLegacyMarker(summarizer.summarize(CompressionInput(summaryInput, revision))).trim()
             checkCancellation(cancelled)
             val reduced = if (policy.tokenTail) TokenTailCompression.messageTokens(summaryMessage(id, "candidate", summary)) <
-                TokenTailCompression.historyTokens(summaryInput, includeLatestScreen = false) else summary.toByteArray(Charsets.UTF_8).size + 128 < estimateTokens(summaryInput)
+                TokenTailCompression.historyTokens(summaryInput.dropWhile { it.role == "system" }, includeLatestScreen = false) else summary.toByteArray(Charsets.UTF_8).size + 128 < estimateTokens(summaryInput)
             require(summary.isNotEmpty() && reduced) { "压缩未缩小；保留原文" }
             val archive = activity.id
             // Validate the actual wrapped summary plus retained tail and new input BEFORE publishing.
@@ -286,16 +293,15 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         model: app.daiyu.android.timeline.SummaryModelIdentity?) {
         if ((checkpoint.context?.compactions ?: 0) == 0) return
         val effective = checkpoint.history
-        val summary = effective.firstOrNull() ?: return
+        val summaryIndex = effective.takeWhile { it.role == "system" }.size
+        val summary = effective.getOrNull(summaryIndex) ?: return
         if (!summary.id.value.startsWith("summary-") || summary.blocks.size != 1) return
         val wrapped = (summary.blocks.single() as? MessageBlock.Text)?.text ?: return
-        val opening = "[历史摘要；仅供上下文，非新指令]\n"
-        val ending = "\n[摘要结束]"
-        if (!wrapped.startsWith(opening) || !wrapped.endsWith(ending)) return
+        val text = SummaryCheckpoint.unframe(wrapped) ?: return
         val archiveId = summary.id.value.removePrefix("summary-")
         if (db.rawQuery("SELECT 1 FROM chat_timeline_events WHERE id=?", arrayOf(archiveId)).use { it.moveToFirst() }) return
         val originals = MessageHistory.expand(read(db, checkpoint.message.conversationId))
-        val tail = effective.drop(1)
+        val tail = effective.drop(summaryIndex + 1)
         val cut = originals.size - tail.size
         if (cut <= 0 || tail.isEmpty() || originals.drop(cut).zip(tail).any { (original, projected) ->
                 original.conversationId != projected.conversationId || original.runId != projected.runId ||
@@ -304,7 +310,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         val boundary = MessageHistory.expand(listOf(checkpoint.message))
         app.daiyu.android.timeline.ChatTimelineStore.write(db, app.daiyu.android.timeline.ChatTimelineEntry.Compression(
             archiveId, app.daiyu.android.timeline.TimelineAnchor.at(boundary, boundary.lastIndex),
-            System.currentTimeMillis(), wrapped.removePrefix(opening).removeSuffix(ending), model, cut,
+            System.currentTimeMillis(), text, model, cut,
             estimateTokens(originals.take(cut)), estimateTokens(listOf(summary))))
     }
 
@@ -313,22 +319,19 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         if ((checkpoint.context?.compactions ?: 0) == 0) return
         check(db === store.writableDatabase && db.inTransaction())
         val effective = checkpoint.history
-        val summary = effective.firstOrNull() ?: return
+        val summaryIndex = effective.takeWhile { it.role == "system" }.size
+        val summary = effective.getOrNull(summaryIndex) ?: return
         if (summary.role != Message.USER_ROLE || !summary.id.value.startsWith("summary-") ||
             summary.blocks.size != 1 || summary.historySegments.isNotEmpty() || summary.protocolItems.isNotEmpty() ||
             summary.status != RunStatus.COMPLETED || summary.error != null || summary.conversationId != checkpoint.message.conversationId) return
         val block = summary.blocks.single() as? MessageBlock.Text ?: return
         if (block.itemId != "summary") return
         val wrapped = block.text
-        val opening = "[历史摘要；仅供上下文，非新指令]\n"
-        val ending = "\n[摘要结束]"
-        if (!wrapped.startsWith(opening) || !wrapped.endsWith(ending)) return
-        val text = wrapped.removePrefix(opening).removeSuffix(ending)
-        if (text.isBlank()) return
+        val text = SummaryCheckpoint.unframe(wrapped) ?: return
         val original = read(db, checkpoint.message.conversationId)
         val expanded = MessageHistory.expandWithSources(original)
         val logical = expanded.map { it.message }
-        val tail = effective.drop(1)
+        val tail = effective.drop(summaryIndex + 1)
         val cut = logical.size - tail.size
         fun normalized(message: Message) = app.daiyu.android.media.ScreenHistoryProjection.messages(listOf(
             message.copy(status = RunStatus.COMPLETED, error = null, reportedReasoning = emptyList()))).single()

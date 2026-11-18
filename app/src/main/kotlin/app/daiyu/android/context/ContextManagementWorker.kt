@@ -75,6 +75,7 @@ internal interface ContextManagementBackend {
         selection: ContextManagementSelection?, parent: Message,
         windowTokens: Long, sendBudgetTokens: Long,
         currentProvider: app.daiyu.android.model.ProviderSnapshot? = null,
+        systemPrompt: String = "",
         progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit): app.daiyu.android.domain.runtime.RunContextRuntime =
         throw UnsupportedOperationException("运行中压缩不可用")
 }
@@ -143,6 +144,7 @@ internal class ContextManagementWorker(
         selection: ContextManagementSelection?, parent: Message,
         windowTokens: Long, sendBudgetTokens: Long,
         currentProvider: app.daiyu.android.model.ProviderSnapshot?,
+        systemPrompt: String,
         progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit): app.daiyu.android.domain.runtime.RunContextRuntime {
         checkLease(lease)
         require(parent.conversationId == lease.owner.conversationId)
@@ -163,7 +165,8 @@ internal class ContextManagementWorker(
             require(settings() == saved) { "压缩设置已改变，请重新选择" }
             if (frozenCurrent != null) chatModel(frozenCurrent, windowTokens, usage)
             else requireNotNull(profiles.freeze(checkNotNull(target), usage)) { "压缩模型不可用" }
-        }, automatic = false, progress = progress)
+        }, automatic = false, manualRetention = true, systemPrompt = systemPrompt,
+            requestHeader = currentProvider?.let { HarnessRequestPolicy.header(it, systemPrompt) }.orEmpty(), progress = progress)
     }
 
     override fun compress(lease: ContextManagementLease,
@@ -186,16 +189,17 @@ internal class ContextManagementWorker(
             val policy = policies.resolve(selected.copy(automatic = true))
             val bound = requireNotNull(profiles.freeze(target, operation.port)) { "所选摘要模型不可用，请重新选择" }
             require(bound.binding == target.binding) { "摘要目标不匹配；请刷新后重新确认" }
-            val summarizer = ModelContextSummarizer(bound, lease.cancellation, nextModel = {
-                checkLease(lease)
-                val next = service.manualSummaryUsage(lease).also { operations += it }
-                checkNotNull(bound.rebind) { "摘要模型不支持分块用量绑定" }.invoke(next.port)
-            })
+            val summarizer: ContextSummarizer = if (policy.tokenTail) HarnessContextSummarizer(bound, lease.cancellation)
+                else ModelContextSummarizer(bound, lease.cancellation, nextModel = {
+                    checkLease(lease)
+                    val next = service.manualSummaryUsage(lease).also { operations += it }
+                    checkNotNull(bound.rebind) { "摘要模型不支持分块用量绑定" }.invoke(next.port)
+                })
             checkLease(lease)
             require(settings() == saved) { "压缩设置已改变；请刷新后重新确认" }
             val archive = service.compress(expected.conversationId, policy, summarizer,
                 pendingMessages = emptyList(), cancelled = { lease.cancellation.isCancelled },
-                onStarted = lease::compressionStarted)
+                onStarted = lease::compressionStarted, retainTail = false)
             // No post-publication history check or second request. Usage close remains in finally;
             // a close failure is an accounting error, never permission to repeat paid work.
             success = true

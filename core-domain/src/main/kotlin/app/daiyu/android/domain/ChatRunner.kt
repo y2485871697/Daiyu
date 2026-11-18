@@ -328,14 +328,20 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var modelHistory = sourceHistory
         var segmentHistory = RunnerHistorySegments(initial) { reasoningInterruptedAtNanos ?: System.nanoTime() }
         val contextRuntime = options.contextRuntime
-        var contextState = contextRuntime?.let { RunContextCheckpoint() }
+        var contextState = contextRuntime?.let { RunContextCheckpoint(meter = it.initialMeter?.copy(overflowRetries = 0) ?: ContextMeterCheckpoint()) }
         var acceptedContextSegments = 0
         var reopenAfterCompaction = false
         var contextInputOverhead = 0L
+        var pressureChecked = false
         var requestDefinitions = emptyList<ToolDefinition>()
         fun effectiveHistory(message: Message = current): List<Message> = if (contextRuntime == null) modelHistory else modelHistory +
             MessageHistory.expand(listOf(segmentHistory.project(message).copy(status = RunStatus.COMPLETED, error = null)))
                 .drop(acceptedContextSegments)
+        fun meterHistory(message: Message = current): List<Message> = effectiveHistory(message).let { rows ->
+            val last = rows.lastOrNull()
+            if (last != null && last.id == message.id && last.role == Message.ASSISTANT_ROLE &&
+                last.blocks.isEmpty() && last.protocolItems.isEmpty() && last.reportedReasoning.isEmpty()) rows.dropLast(1) else rows
+        }
         var outputs = emptyList<ToolOutput>()
         var round = 0
         var requestUnconfirmed = false
@@ -352,13 +358,18 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var revision = 0L
         var pendingCheckpoint: PendingToolCheckpoint? = null
         val records = linkedMapOf<ToolCallId, ToolRecord>()
-        fun snapshot(message: Message = current, usageSnapshot: List<RequestUsageCheckpoint> = usage): RunCheckpoint = synchronized(terminalLock) {
-            val now = reasoningInterruptedAtNanos ?: System.nanoTime()
-            RunCheckpoint(message.frozenReasoning(now), effectiveHistory(message).map { it.frozenReasoning(now) },
-                if (message.status != RunStatus.RUNNING) ExecutionPhase.TERMINAL else execution.phase,
-                records.values.toList(), outputs, supplements.toList(), round, requestUnconfirmed,
-                owner = owner, revision = revision + 1,
-                pending = if (message.status == RunStatus.RUNNING) pendingCheckpoint else null, request = request, usage = usageSnapshot, usageRequests = usageRequests, transport = transportCheckpoint, context = contextState)
+        fun snapshot(message: Message = current, usageSnapshot: List<RequestUsageCheckpoint> = usage): RunCheckpoint {
+            val surface = contextRuntime?.fixedSurfaceTokens(meterHistory(message))
+            return synchronized(terminalLock) {
+                val now = reasoningInterruptedAtNanos ?: System.nanoTime()
+                contextState = contextState?.let { state -> state.copy(meter = (state.meter ?: ContextMeterCheckpoint()).copy(
+                    surfaceTokens = checkNotNull(surface))) }
+                RunCheckpoint(message.frozenReasoning(now), effectiveHistory(message).map { it.frozenReasoning(now) },
+                    if (message.status != RunStatus.RUNNING) ExecutionPhase.TERMINAL else execution.phase,
+                    records.values.toList(), outputs, supplements.toList(), round, requestUnconfirmed,
+                    owner = owner, revision = revision + 1,
+                    pending = if (message.status == RunStatus.RUNNING) pendingCheckpoint else null, request = request, usage = usageSnapshot, usageRequests = usageRequests, transport = transportCheckpoint, context = contextState)
+            }
         }
         fun checkpoint(next: RunCheckpoint = snapshot()) {
             if (stagingTransportBatch) return
@@ -478,6 +489,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 }
             }
             if (acceptedUsers != null) {
+                pressureChecked = false
                 val sealed = segmentHistory.sealSession(current, acceptedUsers)
                 segmentHistory = RunnerHistorySegments(sealed) { reasoningInterruptedAtNanos ?: System.nanoTime() }
                 outputs = emptyList()
@@ -490,13 +502,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             checkpoint()
             return acceptedUsers != null
         }
-        fun compactAtBoundary(): Boolean {
+        fun compactAtBoundary(pressureTrigger: Boolean = false, overflow: Boolean = false): Boolean {
             val base = contextRuntime ?: return false
             if (!base.canCompact) return false
             val pressure = contextState?.pressure
             val selected = synchronized(terminalLock) {
                 if (stopped.get() || terminalReserved || pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) return false
-                if (pendingCompact == null && (!base.automatic || pressure == null)) return false
+                if (pendingCompact == null && !pressureTrigger && !overflow && (!base.automatic || pressure == null)) return false
                 (pendingCompact to pauseEpoch).also { pendingCompact = null; compacting = true }
             }
             val manual = selected.first
@@ -525,7 +537,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 val local = anchor?.let { (it.localTokens + historyLocal - it.historyTokens).coerceAtLeast(0) } ?: historyLocal
                 val billed = anchor?.billedTokens?.let { (it + local - anchor.localTokens).coerceAtLeast(0) }
                 if (cancelled()) return false
-                val candidate = selectedRuntime.compactRequests(before, billed, local, object : RunSummaryRequests {
+                val summaryRequests = object : RunSummaryRequests {
                     override fun create() = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
                     override fun admit(request: RequestCheckpoint) {
                         persistenceFailure?.let { throw it }
@@ -542,7 +554,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         val next = usage.filterNot { it.request.owner == owner && it.request.requestId == request.requestId } + accepted
                         persistSummary(snapshot(usageSnapshot = next)); usage = next
                     }
-                }, cancelled)
+                }
+                val candidate = if (overflow) selectedRuntime.compactOverflowRequests(before, billed, local, summaryRequests, cancelled)
+                    else selectedRuntime.compactRequests(before, billed, local, summaryRequests, cancelled)
                 persistenceFailure?.let { throw it }
                 if (candidate == null || cancelled()) return false
                 require(candidate.all { it.conversationId == initial.conversationId })
@@ -553,8 +567,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 sourceHistory = candidate.toList(); modelHistory = sourceHistory
                 outputs = emptyList()
                 transportCheckpoint = null
-                contextState = checkNotNull(contextState).copy(input = null, calibration = null, pressure = null,
-                    compactions = checkNotNull(contextState).compactions + 1)
+                contextState = checkNotNull(contextState).let { state -> state.copy(input = null, calibration = null, pressure = null,
+                    meter = (state.meter ?: ContextMeterCheckpoint()).copy(inputFixedSurfaceTokens = null),
+                    compactions = state.compactions + 1) }
                 val expected = snapshot()
                 val store = options.runtimeStore
                 try { checkpoint(expected) } catch (failure: PersistenceException) {
@@ -601,59 +616,50 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         }
         fun contextSize(): Long {
             val runtime = contextRuntime ?: return 0
-            val local = runtime.localTokens(effectiveHistory(), requestDefinitions)
-            val anchor = contextState?.calibration ?: contextState?.input
-            return if (anchor != null) ((anchor.billedTokens ?: anchor.localTokens) + local - anchor.historyTokens).coerceAtLeast(0)
-                else (local + contextInputOverhead).coerceAtLeast(0)
+            val local = runtime.localTokens(meterHistory(), requestDefinitions)
+            val header = runtime.headerIdentity(requestDefinitions)
+            val meter = contextState?.meter
+            if (meter?.anchorHeader != null && meter.anchorHeader == header &&
+                meter.anchorEstimate != null && meter.anchorSurface != null) {
+                val baseline = maxOf(meter.anchorEstimate, meter.anchorUsageTotal ?: meter.anchorEstimate)
+                return (baseline + local - meter.anchorSurface).coerceAtLeast(0)
+            }
+            return local
         }
         fun awaitContextCapacity() {
-            val runtime = contextRuntime
-            while (true) {
-                if (stopped.get() || terminalReserved) throw InterruptedException()
-                val controls = synchronized(terminalLock) {
-                    pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()
-                }
-                if (controls && boundary()) reopenAfterCompaction = true
-                // A manual summary is maintenance on the same writer, not a new model/tool turn.
-                if (synchronized(terminalLock) { pendingCompact != null }) compactAtBoundary()
-                requestDefinitions = (tool as? CatalogTool)?.definitions.orEmpty().toList()
-                if (runtime == null) return
-                val estimate = contextSize()
-                if (estimate <= runtime.sendBudgetTokens) {
-                    if (contextLimited) {
-                        contextState = checkNotNull(contextState).copy(capacity = null)
-                        synchronized(terminalLock) { contextLimited = false; boundaryWaiter = null }
-                        setPhase(ExecutionPhase.BOUNDARY)
-                        checkpoint()
-                    }
-                    return
-                }
-                if (!contextLimited) {
-                    val claimed = synchronized(terminalLock) {
-                        if (stopped.get() || terminalReserved) throw InterruptedException()
-                        if (pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) false
-                        else { contextLimited = true; setPhase(ExecutionPhase.PAUSED); true }
-                    }
-                    if (!claimed) continue
-                    // Freeze the stop position so resumed text starts below the divider.
-                    val sealed = segmentHistory.sealSession(current, emptyList())
-                    segmentHistory = RunnerHistorySegments(sealed) { reasoningInterruptedAtNanos ?: System.nanoTime() }
-                    current = sealed
-                    val segment = (MessageHistory.expand(listOf(sealed)).count {
-                        it.id == initial.id && it.runId == initial.runId
-                    } - 1).coerceAtLeast(0)
-                    contextState = checkNotNull(contextState).copy(capacity = ContextCapacityCheckpoint(
-                        UUID.randomUUID().toString(), System.currentTimeMillis(), estimate,
-                        runtime.windowTokens, runtime.sendBudgetTokens, segment))
-                    checkpoint()
-                }
-                val park = synchronized(terminalLock) {
-                    if (stopped.get() || terminalReserved || pauseRequested || breakStream || pendingCompact != null ||
-                        supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) false
-                    else { boundaryWaiter = Thread.currentThread(); true }
-                }
-                if (park) LockSupport.park()
+            if (stopped.get() || terminalReserved) throw InterruptedException()
+            val controls = synchronized(terminalLock) {
+                pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()
             }
+            if (controls && boundary()) { reopenAfterCompaction = true; pressureChecked = false }
+            if (synchronized(terminalLock) { pendingCompact != null }) compactAtBoundary()
+            requestDefinitions = (tool as? CatalogTool)?.definitions.orEmpty().toList()
+            val runtime = contextRuntime ?: return
+            if (pressureChecked || !runtime.automatic || !runtime.canCompact) return
+            pressureChecked = true
+            val threshold = runtime.pressureThresholdTokens ?: return
+            repeat(app.daiyu.android.domain.context.HarnessContextPolicy.COMPACTION_RETRIES + 1) {
+                if (contextSize() < threshold) return
+                if (!compactAtBoundary(pressureTrigger = true)) return
+            }
+            // Harness pre-step pressure compression is best-effort; provider rejection owns overflow recovery.
+        }
+        fun recoverContextOverflow(failure: Exception): Boolean {
+            val rejected = failure as? ModelRequestException ?: return false
+            if (rejected.failure != ModelFailure.CONTEXT_LIMIT && rejected.diagnostic?.rejection != RequestRejection.CONTEXT_LIMIT) return false
+            val runtime = contextRuntime ?: return false
+            val state = contextState ?: return false
+            val attempts = state.meter?.overflowRetries ?: 0
+            if (!runtime.automatic || !runtime.canCompact || attempts >= app.daiyu.android.domain.context.HarnessContextPolicy.MAX_OVERFLOW_RETRIES ||
+                stopped.get() || pauseRequested || terminalReserved || breakStream) return false
+            contextState = state.copy(meter = (state.meter ?: ContextMeterCheckpoint()).copy(overflowRetries = attempts + 1))
+            requestUnconfirmed = false
+            checkpoint()
+            if (!compactAtBoundary(overflow = true)) return false
+            if (stopped.get() || pauseRequested || terminalReserved || breakStream) return false
+            pressureChecked = true
+            checkpoint()
+            return true
         }
         fun open(): ModelSession {
             while (true) {
@@ -691,6 +697,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             token.first != generation || token.second != pauseEpoch || pauseRequested || supplements.isNotEmpty() || pendingSupplements.isNotEmpty() || breakStream
                         }
                         if (invalidated) continue
+                        if (recoverContextOverflow(failure)) continue
+                        if (pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) {
+                            boundary(); pressureChecked = false; continue
+                        }
                         throw failure
                     }
                     val accept = synchronized(terminalLock) {
@@ -826,7 +836,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 transportCheckpoint = null
                 request = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
                 usageRequests = usageRequests + checkNotNull(request)
-                contextState = contextState?.copy(input = null)
+                contextState = contextState?.let { state -> state.copy(input = null,
+                    meter = (state.meter ?: ContextMeterCheckpoint()).copy(inputFixedSurfaceTokens =
+                        checkNotNull(contextRuntime).fixedSurfaceTokens(meterHistory()))) }
                 requestUnconfirmed = true
                 checkpoint()
                 val sink: (ModelEvent) -> Unit = { event ->
@@ -842,9 +854,12 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     repetitiveSurface?.let { throw RepetitiveOutputException(it) }
                     when (event) {
                         is ModelEvent.InputEstimate -> {
-                            contextState = contextState?.copy(input = RequestInputCheckpoint(checkNotNull(request), event.tokens,
-                                historyTokens = checkNotNull(contextRuntime).localTokens(effectiveHistory(),
-                                    requestDefinitions)))
+                            contextState = contextState?.let { state ->
+                                val surface = checkNotNull(contextRuntime).localTokens(meterHistory(), requestDefinitions)
+                                state.copy(input = RequestInputCheckpoint(checkNotNull(request), surface, historyTokens = surface))
+                            }
+                            contextState = contextState?.let { state -> state.copy(meter = (state.meter ?: ContextMeterCheckpoint()).copy(
+                                inputFixedSurfaceTokens = checkNotNull(contextRuntime).fixedSurfaceTokens(meterHistory()))) }
                             contextState?.input?.let { contextInputOverhead = it.localTokens - it.historyTokens }
                             checkpoint()
                         }
@@ -859,17 +874,18 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             val window = contextRuntime?.windowTokens
                             val billed = event.inputTokens
                             if (window != null) {
-                                val plausible = billed != null && billed > 0 && billed <= window * 130 / 100 &&
-                                    (event.cachedTokens == null || (event.cachedTokens <= window && event.cachedTokens <= billed))
+                                val plausible = billed != null && billed >= 0 &&
+                                    (event.cachedTokens == null || event.cachedTokens <= billed)
                                 val state = checkNotNull(contextState)
-                                if (plausible && local != null && local.request == request)
-                                    contextInputOverhead = checkNotNull(billed) - local.historyTokens
+                                val meter = state.meter ?: ContextMeterCheckpoint()
                                 contextState = state.copy(
                                     calibration = if (plausible && local?.request == request) local?.copy(billedTokens = billed)
-                                        else state.calibration,
-                                    pressure = if (contextRuntime.automatic && plausible &&
-                                        checkNotNull(billed) >= window * 80 / 100) request
-                                        else state.pressure)
+                                        else null,
+                                    pressure = null,
+                                    meter = if (plausible) meter.copy(pressureTokens = billed,
+                                        sampledSurfaceTokens = meter.inputFixedSurfaceTokens)
+                                    else meter.copy(pressureTokens = null, sampledSurfaceTokens = null))
+
                             }
                             checkpoint(snapshot(usageSnapshot = nextUsage))
                             usage = nextUsage
@@ -1282,8 +1298,28 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     active = open()
                     continue
                 }
+                val requestFailure = transportFailure
+                if (requestFailure != null && pending.isEmpty() && !effectiveOutput && recoverContextOverflow(requestFailure)) {
+                    cancelSession(active)
+                    active = open()
+                    continue
+                }
+                if (requestFailure != null && (pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty())) {
+                    cancelSession(active); boundary(); pressureChecked = false; active = open(); continue
+                }
                 transportFailure?.let { throw it }
                 requestUnconfirmed = false
+                contextRuntime?.let { runtime ->
+                    val state = checkNotNull(contextState)
+                    val surface = runtime.localTokens(meterHistory(), requestDefinitions)
+                    val estimate = surface
+                    val receipt = usage.lastOrNull { it.source == UsageRequestSource.MAIN && it.request == request }?.snapshot
+                    val reportedTotal = receipt?.inputTokens?.let { prompt -> receipt.outputTokens?.let { Math.addExact(prompt, it) } }
+                    contextState = state.copy(meter = (state.meter ?: ContextMeterCheckpoint()).copy(
+                        anchorHeader = runtime.headerIdentity(requestDefinitions), anchorEstimate = estimate,
+                        anchorSurface = surface, anchorUsageTotal = reportedTotal, overflowRetries = 0))
+                }
+                pressureChecked = false
                 round++
                 synchronized(terminalLock) { setPhase(ExecutionPhase.BOUNDARY) }
                 checkpoint()

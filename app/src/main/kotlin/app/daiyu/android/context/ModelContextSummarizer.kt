@@ -29,6 +29,10 @@ class SummaryRequestDeadline(timeoutMillis: Long, private val nanoTime: () -> Lo
  * disable all tool advertisement (including built-ins) and must open lazily without I/O. */
 fun interface SummaryModelTransport {
     fun openWithoutTools(history: List<Message>, deadline: SummaryRequestDeadline): ModelSession
+    fun openReplay(history: List<Message>, tools: List<ToolDefinition>, systemPrompt: String,
+        deadline: SummaryRequestDeadline, cancellation: ContextPreparationCancellation): ModelSession =
+        openWithoutTools(history, deadline, app.daiyu.android.model.SummaryReasoningLevel.OFF, cancellation)
+
     fun openWithoutTools(history: List<Message>, deadline: SummaryRequestDeadline,
         reasoning: app.daiyu.android.model.SummaryReasoningLevel): ModelSession {
         require(reasoning == app.daiyu.android.model.SummaryReasoningLevel.OFF)

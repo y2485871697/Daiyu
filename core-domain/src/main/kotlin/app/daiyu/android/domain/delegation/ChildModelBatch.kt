@@ -825,7 +825,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
         private const val MAX_OUTPUT = 64 * 1024
         private val CONFIRMED_MODEL_FAILURES = setOf(ModelFailure.AUTHENTICATION, ModelFailure.PERMISSION,
             ModelFailure.ENDPOINT, ModelFailure.REDIRECT, ModelFailure.RATE_LIMIT, ModelFailure.SERVER,
-            ModelFailure.CONFIGURATION, ModelFailure.REQUEST)
+            ModelFailure.CONFIGURATION, ModelFailure.REQUEST, ModelFailure.CONTEXT_LIMIT)
         private fun bytes(text: String) = text.toByteArray(Charsets.UTF_8).size
     }
 }

@@ -8,6 +8,7 @@
 
 | 组件 / 使用范围 | 固定来源 / 版本 | 源码、制品与变更证据位置（仓内路径） | 随包许可 / 告知（`assets/licenses/` 下） |
 |---|---|---|---|
+| DeepSeek Harness token-meter 与 compaction-basic 的 Kotlin 适配 | `deepseek-ai/deepseek-harness@ca33fd6843b205e279c7ccb6cb73a472c78f5760` | 固定密度估算、usage校准、压缩范围与摘要指令；本工程适配多协议及Android持久化，详见 `THIRD_PARTY/deepseek-harness/NOTICE.md` | `deepseek-harness/LICENSE`（MIT原文）、`deepseek-harness/NOTICE.md` |
 | 代鱼独立宿主 | 本工程 `0.1.0`；精确源码 revision 由构建记录给出 | 根 `LICENSE`；`app/`、`core-domain/`；保留各复用单元独立许可，不将所有内容一律标为 AGPL | `AGPL-3.0.txt`（根许可原文） |
 | RikkaHub Responses 地址配置改编，不是整个 ai/UI 模块 | `rikkahub/rikkahub@c94237eaa36c84816ab7e2e6dee9ce82477d4725` | 上游 `ai/src/main/java/me/rerere/ai/provider/ProviderSetting.kt`、`ai/src/main/java/me/rerere/ai/provider/providers/openai/ResponseAPI.kt`；目标 `core-domain/.../ResponsesEndpoint.kt` 及宿主设置接线；原许可与改动见 `THIRD_PARTY/rikkahub/{LICENSE,NOTICE.md}` | `AGPL-3.0.txt`（与 RikkaHub 原 LICENSE 相同的完整文本）、`rikkahub/NOTICE.md` |
 | 十种模型品牌图标 | `rikkahub/rikkahub@2b633370f3948eb57b9f907e4fe767b5ff6e4536` 的 `app/src/main/assets/icons/` | `THIRD_PARTY/rikkahub/model-icons/{sources.json,svg/,generate.py}`；保留原SVG、逐文件摘要，转换为Compose向量，不导入上游UI和依赖 | `AGPL-3.0.txt`、`rikkahub/model-icons/NOTICE.md` 与 `LICENSE-LobeHub`（MIT，LobeHub 2023） |

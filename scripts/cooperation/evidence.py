@@ -23,6 +23,9 @@ CLOUD_SCOPES['context'] = (
     '--tests app.daiyu.android.domain.runtime.RunnerContextRuntimeTest '
     ':app:testDebugUnitTest --tests app.daiyu.android.context.* '
     '--tests app.daiyu.android.model.RequestInputEstimateTest '
+    '--tests app.daiyu.android.model.ProviderHttpFailureTest '
+    '--tests app.daiyu.android.storage.CompressionCheckpointCodecTest '
+    '--tests app.daiyu.android.ui.model.CloudContextUsageTest '
     '--tests app.daiyu.android.storage.ProviderRepositoryDeletionTest '
     '--tests app.daiyu.android.storage.ProviderRegistryTest :app:compileDebugAndroidTestKotlin')
 UNIT_SCOPES = {'unit', 'delegation', 'context'}
@@ -37,6 +40,9 @@ CONTEXT_STORAGE_CLASSES = {
 CONTEXT_EXACT_CLASSES = {
     ('core-domain', 'app.daiyu.android.domain.runtime.RunnerContextRuntimeTest'),
     ('app', 'app.daiyu.android.model.RequestInputEstimateTest'),
+    ('app', 'app.daiyu.android.model.ProviderHttpFailureTest'),
+    ('app', 'app.daiyu.android.storage.CompressionCheckpointCodecTest'),
+    ('app', 'app.daiyu.android.ui.model.CloudContextUsageTest'),
 }
 CONTEXT_RESOLUTION_CLASS = 'app.daiyu.android.context.SavedCatalogSummaryResolutionTest'
 CONTEXT_TOOL_CLASS = 'app.daiyu.android.context.ContextToolDefinitionStabilityTest'

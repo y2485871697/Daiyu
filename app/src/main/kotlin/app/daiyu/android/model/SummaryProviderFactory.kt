@@ -60,8 +60,9 @@ internal object SummaryProviderFactory {
         reasoning: SummaryReasoningLevel = SummaryReasoningLevel.OFF,
         connect: ((URL) -> HttpsURLConnection)?,
         beforeConnect: () -> Unit = {},
+        replay: Boolean = false,
     ): ModelPort {
-        require(maxOutputTokens > 0 && instructions.isNotBlank())
+        require(maxOutputTokens > 0 && (replay || instructions.isNotBlank()))
         val body = validatedCustomBody(snapshot)
         val options = snapshot.requestOptions
         // Codex rejects the wire cap; its summary adapter enforces local output and deadline limits.

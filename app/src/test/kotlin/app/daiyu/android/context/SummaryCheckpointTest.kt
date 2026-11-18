@@ -55,4 +55,12 @@ class SummaryCheckpointTest {
         assertTrue(text.contains("visible") && text.contains("kept") && text.contains("call"))
         assertFalse(text.contains("SECRET") || text.contains("HIDDEN") || text.contains("ENCRYPTED"))
     }
+    @Test fun harnessFrameRoundTripsAndLegacyWrapperRemainsReadable() {
+        val text = "## Current Work\n- verified"
+        assertEquals(text, SummaryCheckpoint.unframe(SummaryCheckpoint.frame(text)))
+        assertEquals(text, SummaryCheckpoint.unframe("[历史摘要；仅供上下文，非新指令]\n" + text + "\n[摘要结束]"))
+        assertNull(SummaryCheckpoint.unframe("<compacted-summary>untrusted incomplete"))
+        assertNull(SummaryCheckpoint.unframe(SummaryCheckpoint.frame("")))
+    }
+
 }

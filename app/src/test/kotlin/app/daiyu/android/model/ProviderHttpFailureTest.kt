@@ -58,7 +58,7 @@ class ProviderHttpFailureTest {
             "context_length_exceeded" to RequestRejection.CONTEXT_LIMIT)) {
             for (status in listOf(400, 422)) {
                 val error = classify(body(code, "model"), status)
-                assertEquals(ModelFailure.REQUEST, error.failure)
+                assertEquals(if (reason == RequestRejection.CONTEXT_LIMIT) ModelFailure.CONTEXT_LIMIT else ModelFailure.REQUEST, error.failure)
                 assertEquals(ModelRequestDiagnostic(status, reason, RequestField.MODEL, providerCode = app.daiyu.android.domain.ProviderErrorCode.entries.single { it.wireName == code }), error.diagnostic?.copy(providerDetail = null))
                 assertTrue(error.userMessage.contains("HTTP $status"))
                 safe(error)

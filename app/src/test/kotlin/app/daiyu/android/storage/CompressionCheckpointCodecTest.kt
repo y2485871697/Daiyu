@@ -117,4 +117,21 @@ class CompressionCheckpointCodecTest {
         assertThrows(IllegalArgumentException::class.java) { RunCheckpointCodec.decode(invalid.toString()) }
     }
 
+    @Test fun v11MeterAndOverflowRetryRoundTripWithoutInventingProviderUsage() {
+        val base = checkpoint()
+        val meter = ContextMeterCheckpoint(anchorHeader = "header", anchorEstimate = 123,
+            anchorSurface = 100, anchorUsageTotal = 999, pressureTokens = 900,
+            sampledSurfaceTokens = 80, surfaceTokens = 120, inputFixedSurfaceTokens = 90,
+            overflowRetries = 1)
+        val value = base.copy(context = base.context!!.copy(meter = meter))
+        val encoded = RunCheckpointCodec.encode(value)
+        assertEquals(11, JSONObject(encoded).getInt("version"))
+        assertEquals(value, RunCheckpointCodec.decode(encoded))
+        assertEquals(meter, ProcessRecovery.interrupt(RunCheckpointCodec.decode(encoded)).context!!.meter)
+        assertEquals(value.usage, RunCheckpointCodec.decode(encoded).usage)
+        val invalid = JSONObject(encoded)
+        invalid.getJSONObject("context").getJSONObject("meter").put("overflow_retries", 4294967296L)
+        assertThrows(IllegalArgumentException::class.java) { RunCheckpointCodec.decode(invalid.toString()) }
+    }
+
 }

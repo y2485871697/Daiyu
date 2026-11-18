@@ -310,7 +310,7 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
         assertTrue("original preparation cleanup permits storage close", f.closeDone.await(10, TimeUnit.SECONDS))
     }
 
-    fun testSmallWindowPlainDraftCapacityPausesButConfirmedGuiRejectsBeforeAcceptanceOrModelOpen() {
+    fun testPlainDraftHasNoRunnerCapacityPauseWhileLegacyGuiPolicyRejectsBeforeAcceptance() {
         val ordinary = Fixture(window = 1024)
         try {
             ordinary.database.draft(ordinary.draft)
@@ -327,23 +327,14 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
             val assistant = rows.single { it.role == Message.ASSISTANT_ROLE }
             assertTrue(estimateTokens(listOf(user)) <= 1024 - 128)
             assertEquals(listOf(ordinary.draft), user.blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
-            awaitControl("ordinary request durably capacity-paused before model open") {
-                scalar(ordinary, "SELECT COUNT(*) FROM runtime_checkpoints WHERE message_id=?", assistant.id.value) == 1L &&
-                    checkpoint(ordinary, assistant.id).phase == ExecutionPhase.PAUSED
-            }
-            val paused = checkpoint(ordinary, assistant.id)
-            val capacity = checkNotNull(paused.context?.capacity)
-            assertEquals(RunStatus.RUNNING, paused.message.status)
-            assertEquals(1024L, capacity.windowTokens)
-            assertEquals(896L, capacity.budgetTokens)
-            assertTrue(capacity.estimatedTokens > capacity.budgetTokens)
-            assertEquals(user, paused.history.single { it.id == user.id })
-            assertNull(paused.request)
-            assertFalse(paused.requestUnconfirmed)
-            assertTrue(paused.usageRequests.isEmpty())
-            assertEquals(0, ordinary.opens.get())
-            assertNull(ordinary.modelInput.get())
-            assertEquals(1L, ordinary.modelEntered.count)
+            assertTrue(ordinary.modelEntered.await(5, TimeUnit.SECONDS))
+            assertEquals(1, ordinary.opens.get())
+            assertEquals(listOf(user), ordinary.modelInput.get())
+            val running = checkpoint(ordinary, assistant.id)
+            assertNull(running.context?.capacity)
+            assertTrue(running.phase != ExecutionPhase.PAUSED)
+            ordinary.modelRelease.countDown()
+            awaitControl("ordinary request completes") { ordinary.controller.active == null }
             assertEquals("", ordinary.database.draft())
             controlMain { ordinary.controller.close() }
             assertTrue("ordinary run drained", ordinary.closeDone.await(10, TimeUnit.SECONDS))

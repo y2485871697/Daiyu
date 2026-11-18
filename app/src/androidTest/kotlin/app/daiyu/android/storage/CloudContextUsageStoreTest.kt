@@ -216,4 +216,68 @@ class CloudContextUsageStoreTest : InstrumentationTestCase() {
         transaction(db) { db.delete("conversations", "id=?", arrayOf(conversation.value)) }
         assertNull(ConversationUsageStore.read(db, conversation.value))
     }
+    fun testInternalHarnessMeterNeverChangesTheCloudContextDisplay() {
+        database().use { db ->
+            val meter = ContextMeterCheckpoint(anchorHeader = "header", anchorEstimate = 400,
+                anchorSurface = 400, anchorUsageTotal = 40010, pressureTokens = 40000,
+                sampledSurfaceTokens = 300, surfaceTokens = 2300)
+            val value = checkpoint().let { it.copy(context = it.context!!.copy(meter = meter)) }
+            transaction(db) { CloudContextUsageStore.record(db, value, model) }
+            val actual = CloudContextUsageStore.read(db, conversation, model)
+            assertEquals(40000L, actual.inputTokens)
+            assertEquals("40.0% 上下文", actual.label(java.util.Locale.US))
+            assertEquals("40K/100K", actual.tokensLabel(java.util.Locale.US))
+            assertEquals(meter, CloudContextUsageStore.meter(db, conversation, model))
+            transaction(db) { CloudContextUsageStore.record(db, value.copy(context = value.context!!.copy(
+                meter = meter.copy(surfaceTokens = 100))), model) }
+            assertEquals(40000L, CloudContextUsageStore.read(db, conversation, model).inputTokens)
+            transaction(db) { CloudContextUsageStore.invalidate(db, conversation) }
+            assertNull(CloudContextUsageStore.meter(db, conversation, model))
+            assertNull(CloudContextUsageStore.read(db, conversation, model).inputTokens)
+        }
+    }
+
+    fun testInternalHarnessEstimateDoesNotInventACloudReceipt() {
+        database().use { db ->
+            val value = checkpoint(input = null).let { it.copy(context = it.context!!.copy(
+                meter = ContextMeterCheckpoint(pressureTokens = 40000, sampledSurfaceTokens = 100, surfaceTokens = 200))) }
+            transaction(db) { CloudContextUsageStore.record(db, value, model) }
+            assertNotNull(CloudContextUsageStore.meter(db, conversation, model))
+            assertNull(CloudContextUsageStore.read(db, conversation, model).inputTokens)
+            assertEquals("上下文", CloudContextUsageStore.read(db, conversation, model).label())
+        }
+    }
+
+    fun testCompactionWithoutANewMeterRevokesTheCloudReceiptAndInternalAnchor() {
+        database().use { db ->
+            val first = checkpoint()
+            val meter = ContextMeterCheckpoint(pressureTokens = 40000, sampledSurfaceTokens = 100, surfaceTokens = 200)
+            transaction(db) { CloudContextUsageStore.record(db, first.copy(context = first.context!!.copy(meter = meter)), model) }
+            assertEquals(40000L, CloudContextUsageStore.read(db, conversation, model).inputTokens)
+            transaction(db) { CloudContextUsageStore.record(db, checkpoint(compactions = 1), model) }
+            assertNull(CloudContextUsageStore.read(db, conversation, model).inputTokens)
+            assertNull(CloudContextUsageStore.meter(db, conversation, model))
+        }
+    }
+
+    fun testCloudReceiptValidationKeepsTheExistingWindowLimit() {
+        database().use { db ->
+            transaction(db) { CloudContextUsageStore.record(db, checkpoint(input = 140000), model) }
+            assertNull(CloudContextUsageStore.read(db, conversation, model).inputTokens)
+        }
+    }
+    fun testInvalidInternalMeterDoesNotDiscardAValidCloudReceipt() {
+        database().use { db ->
+            transaction(db) {
+                CloudContextUsageStore.record(db, checkpoint(), model)
+                val raw = db.rawQuery("SELECT payload FROM context_ui_state WHERE conversation_id=?", arrayOf(conversation.value))
+                    .use { assertTrue(it.moveToFirst()); it.getString(0) }
+                val payload = org.json.JSONObject(raw).put("meter", org.json.JSONObject().put("provider", "broken"))
+                db.execSQL("UPDATE context_ui_state SET payload=? WHERE conversation_id=?", arrayOf(payload.toString(), conversation.value))
+            }
+            assertEquals(40000L, CloudContextUsageStore.read(db, conversation, model).inputTokens)
+            assertNull(CloudContextUsageStore.meter(db, conversation, model))
+        }
+    }
+
 }

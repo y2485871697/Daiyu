@@ -29,6 +29,8 @@ NATIVE_SOURCES = tuple(ASSETS + "native-sources/" + name + ".tgz" for name in (
 ))
 # Copies are complete repository originals, not reconstructed license templates.
 COPIES = (
+    ("THIRD_PARTY/deepseek-harness/LICENSE", "deepseek-harness/LICENSE"),
+    ("THIRD_PARTY/deepseek-harness/NOTICE.md", "deepseek-harness/NOTICE.md"),
     ("THIRD_PARTY/neoplayer/LICENSE", "neoplayer/LICENSE"),
     ("THIRD_PARTY/neoplayer/NOTICE.md", "neoplayer/NOTICE.md"),
     ("LICENSE", "AGPL-3.0.txt"),

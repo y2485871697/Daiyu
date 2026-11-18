@@ -606,7 +606,7 @@ class ChatController internal constructor(private val application:Application,
             postCompressionActivity(waiting)
             val accepted = running.requestCompaction(create = { capacity ->
                 postCompressionActivity(waiting.copy(running = false))
-                contextManagementBackend(owner.conversationId).runCompression(lease, expected, selection, original, capacity.windowTokens, capacity.sendBudgetTokens, currentProvider) { activity ->
+                contextManagementBackend(owner.conversationId).runCompression(lease, expected, selection, original, capacity.windowTokens, capacity.sendBudgetTokens, currentProvider, systemPrompt = capacity.systemPrompt) { activity ->
                     if (activity.running) runtimeStore?.bindCompressionModel(original, activity.model)
                     postCompressionActivity(activity)
                 }
@@ -4286,10 +4286,6 @@ class ChatController internal constructor(private val application:Application,
                 // A video run must not silently replace physical/retained history with a text summary.
                 // Keep the same policy/budget and acceptance revision, but send every physical row.
                 val modelHistory = videoPlan.modelHistory()
-                val estimate = app.daiyu.android.context.estimateSendContextTokens(frozen.policy, modelHistory)
-                val budget = frozen.policy.sendBudgetTokens
-                if (budget != null && !frozen.policy.fitsSendBudget(estimate))
-                    throw app.daiyu.android.context.ContextCapacityExceededException(estimate, budget)
                 app.daiyu.android.context.PreparedSendContext(frozen,
                     app.daiyu.android.context.PreparedContext(physicalVideoHistory.rows,
                         app.daiyu.android.context.estimateSendContextTokens(frozen.policy, modelHistory.dropLast(1)), null),
@@ -4621,7 +4617,7 @@ class ChatController internal constructor(private val application:Application,
                     val parentAnchor = app.daiyu.android.timeline.TimelineAnchor(conversationId.value, run.value, assistant.id.value, 0)
                     var childActivity: app.daiyu.android.timeline.CompressionActivity? = null
                     val childContext = app.daiyu.android.context.ProductionContextPreparation.childRuntime(
-                        application, childInitial, childProvider, childLabel) { activity ->
+                        application, childInitial, childProvider, childLabel, systemPrompt = assistantContext.systemPrompt) { activity ->
                         childActivity = activity
                         postCompressionActivity(activity.copy(anchor = parentAnchor))
                     }
@@ -4637,14 +4633,15 @@ class ChatController internal constructor(private val application:Application,
                             app.daiyu.android.timeline.ChatTimelineStore.contextLimit(checkpoint, childLabel, parentAnchor)?.let { entry ->
                                 synchronized(this) { if (!closed) persistReconnect(entry) }
                             }
-                            val summary = checkpoint.history.firstOrNull()
+                            val summary = checkpoint.history.firstOrNull { it.role != "system" }
                             val wrapped = (summary?.blocks?.singleOrNull() as? MessageBlock.Text)?.text
+                            val summaryText = wrapped?.let(app.daiyu.android.context.SummaryCheckpoint::unframe)
                             if ((checkpoint.context?.compactions ?: 0) > 0 && summary?.id?.value?.startsWith("summary-") == true &&
-                                wrapped?.startsWith("[历史摘要；仅供上下文，非新指令]\n") == true && wrapped.endsWith("\n[摘要结束]")) {
+                                summaryText != null) {
                                 val activity = childActivity
                                 val entry = app.daiyu.android.timeline.ChatTimelineEntry.Compression(
                                     summary.id.value.removePrefix("summary-"), parentAnchor, System.currentTimeMillis(),
-                                    wrapped.removePrefix("[历史摘要；仅供上下文，非新指令]\n").removeSuffix("\n[摘要结束]"),
+                                    summaryText,
                                     activity?.model, activity?.messages ?: 1, null,
                                     app.daiyu.android.context.TokenTailCompression.messageTokens(summary), agentLabel = childLabel)
                                 synchronized(this) { if (!closed) persistReconnect(entry) }
@@ -4772,8 +4769,16 @@ class ChatController internal constructor(private val application:Application,
                     contextRuntime = if (preparedContext.frozen.policy.contextTokens == null) null
                         else if (videoPlan != null || auxiliaryFrozen != null)
                             app.daiyu.android.context.ProductionRunContext(preparedContext.frozen.policy, assistant,
-                                null, automatic = false, canCompact = false)
-                        else app.daiyu.android.context.ProductionRunContext(preparedContext.frozen, assistant) { activity ->
+                                null, automatic = false, canCompact = false,
+                                systemPrompt = assistantContext.systemPrompt,
+                                requestHeader = app.daiyu.android.context.HarnessRequestPolicy.header(requestProvider, assistantContext.systemPrompt),
+                                initialMeter = app.daiyu.android.storage.CloudContextUsageStore.meter(database.readableDatabase,
+                                    conversationId, checkNotNull(runtimeStore).contextUsageModel(conversationId)))
+                        else app.daiyu.android.context.ProductionRunContext(preparedContext.frozen, assistant,
+                            systemPrompt = assistantContext.systemPrompt,
+                            requestHeader = app.daiyu.android.context.HarnessRequestPolicy.header(requestProvider, assistantContext.systemPrompt),
+                            initialMeter = app.daiyu.android.storage.CloudContextUsageStore.meter(database.readableDatabase,
+                                conversationId, checkNotNull(runtimeStore).contextUsageModel(conversationId))) { activity ->
                             synchronized(this) {
                                 val original = reconnectResources
                                 if (original != null && resources === original && !original.fenced) {

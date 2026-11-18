@@ -47,7 +47,7 @@ internal object RunCheckpointCodec {
                 put(item)
             } }
         }
-        val version = if (value.context?.capacity != null) 10 else if (value.context != null) 9 else if (value.usage.any { it.snapshot.cacheCreationTokens != null }) 8 else if (value.transport == null) 6 else 7
+        val version = if (value.context?.meter != null) 11 else if (value.context?.capacity != null) 10 else if (value.context != null) 9 else if (value.usage.any { it.snapshot.cacheCreationTokens != null }) 8 else if (value.transport == null) 6 else 7
         return JSONObject().put("version", version).put("message", messages(listOf(value.message)))
             // Runtime context is a logical projection: several segments may share one physical message ID.
             .put("history", if (value.context != null) projectedHistory(value.history) else messages(value.history))
@@ -67,7 +67,7 @@ internal object RunCheckpointCodec {
                 .put("calibration", context.calibration?.let(::encodeInput) ?: JSONObject.NULL)
                 .put("pressure", context.pressure?.let(::encodeRequest) ?: JSONObject.NULL)
                 .put("summaries", JSONArray().apply { context.summaries.forEach { put(encodeRequest(it)) } })
-                .put("compactions", context.compactions).apply { context.capacity?.let { capacity ->
+                .put("compactions", context.compactions).apply { context.meter?.let { put("meter", encodeMeter(it)) } }.apply { context.capacity?.let { capacity ->
                     put("capacity", JSONObject().put("id", capacity.id).put("created", capacity.created)
                         .put("estimated", capacity.estimatedTokens).put("window", capacity.windowTokens)
                         .put("budget", capacity.budgetTokens).put("segment", capacity.segment))
@@ -95,7 +95,7 @@ internal object RunCheckpointCodec {
         require(parsed is JSONObject && parser.nextClean() == '\u0000')
         val value = CheckpointStringPool.unpack(parsed, MAX_BYTES)
         val version = integer(value, "version")
-        require(version in 1L..10L)
+        require(version in 1L..11L)
         val keys = arrayOf("version", "message", "history", "phase", "tools", "outputs", "supplements", "round",
             "request_unconfirmed", "message_reconciled", "owner", "revision")
         val recoveryOwner = if (value.has("recovery_source_owner")) string(value, "recovery_source_owner") else null
@@ -114,19 +114,20 @@ internal object RunCheckpointCodec {
         val context = if (version < 9) null else {
             val row = value.getJSONObject("context")
             fields(row, *(arrayOf("input", "calibration", "pressure", "summaries", "compactions") +
-                if (version >= 10) arrayOf("capacity") else emptyArray()))
+                (if (row.has("capacity")) arrayOf("capacity") else emptyArray()) +
+                (if (version >= 11) arrayOf("meter") else emptyArray())))
             val summaries = row.getJSONArray("summaries"); require(summaries.length() <= 100)
             RunContextCheckpoint(if (row.isNull("input")) null else decodeInput(row.getJSONObject("input")),
                 if (row.isNull("calibration")) null else decodeInput(row.getJSONObject("calibration")),
                 if (row.isNull("pressure")) null else decodeRequest(row.get("pressure")),
                 (0 until summaries.length()).map { decodeRequest(summaries.get(it)) },
                 integer(row, "compactions").also { require(it in 0..100) }.toInt(),
-                if (version < 10) null else row.getJSONObject("capacity").let { capacity ->
+                if (!row.has("capacity")) null else row.getJSONObject("capacity").let { capacity ->
                     fields(capacity, "id", "created", "estimated", "window", "budget", "segment")
                     ContextCapacityCheckpoint(string(capacity, "id"), integer(capacity, "created"),
                         integer(capacity, "estimated"), integer(capacity, "window"), integer(capacity, "budget"),
                         integer(capacity, "segment").also { require(it in 0L..50000L) }.toInt())
-                })
+                }, if (version >= 11) decodeMeter(row.getJSONObject("meter")) else null)
         }
         val transport = if (version < 7L || !value.has("transport") || value.isNull("transport")) null else {
             val row = value.getJSONObject("transport")
@@ -264,6 +265,23 @@ internal object RunCheckpointCodec {
         MessageHistorySegment(row.id, row.role, row.blocks, row.protocolItems, row.createdAt, row.reportedReasoning))
     private fun hasResult(disposition: ToolDisposition) = disposition in setOf(
         ToolDisposition.SUCCEEDED, ToolDisposition.FAILED, ToolDisposition.NOT_EXECUTED)
+    internal fun encodeMeter(value: ContextMeterCheckpoint): JSONObject = JSONObject()
+        .put("anchor_header", value.anchorHeader ?: JSONObject.NULL)
+        .put("anchor_estimate", value.anchorEstimate ?: JSONObject.NULL)
+        .put("anchor_surface", value.anchorSurface ?: JSONObject.NULL)
+        .put("anchor_usage", value.anchorUsageTotal ?: JSONObject.NULL)
+        .put("pressure", value.pressureTokens ?: JSONObject.NULL)
+        .put("sampled_surface", value.sampledSurfaceTokens ?: JSONObject.NULL)
+        .put("surface", value.surfaceTokens)
+        .put("input_fixed_surface", value.inputFixedSurfaceTokens ?: JSONObject.NULL).put("overflow_retries", value.overflowRetries)
+    internal fun decodeMeter(value: JSONObject): ContextMeterCheckpoint {
+        fields(value, "anchor_header", "anchor_estimate", "anchor_surface", "anchor_usage", "pressure",
+            "sampled_surface", "surface", "input_fixed_surface", "overflow_retries")
+        return ContextMeterCheckpoint(if (value.isNull("anchor_header")) null else string(value, "anchor_header"),
+            nullableInteger(value, "anchor_estimate"), nullableInteger(value, "anchor_surface"),
+            nullableInteger(value, "anchor_usage"), nullableInteger(value, "pressure"),
+            nullableInteger(value, "sampled_surface"), integer(value, "surface"), nullableInteger(value, "input_fixed_surface"), integer(value, "overflow_retries").also { require(it in 0..Int.MAX_VALUE.toLong()) }.toInt())
+    }
     private fun encodeInput(value: RequestInputCheckpoint) = JSONObject()
         .put("request", encodeRequest(value.request)).put("local", value.localTokens)
         .put("billed", value.billedTokens ?: JSONObject.NULL).put("history_local", value.historyTokens)

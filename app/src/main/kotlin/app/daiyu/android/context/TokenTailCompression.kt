@@ -6,28 +6,20 @@ import app.daiyu.android.model.TerminalToolResultProjection
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.ceil
-import kotlin.math.roundToLong
 
-/** Local input units for token-tail selection and send-capacity checks, not billed usage. */
+/** Harness fixed-density surface pricing; media payload pricing remains route-owned. */
 internal object TokenTailCompression {
-    fun textTokens(text: String): Long {
-        if (text.isEmpty()) return 0
-        var cjk = 0L
-        var other = 0L
-        var index = 0
-        while (index < text.length) {
-            val code = Character.codePointAt(text, index)
-            if (code in 0x3400..0x4dbf || code in 0x4e00..0x9fff || code in 0xf900..0xfaff ||
-                code in 0x3040..0x30ff || code in 0xac00..0xd7af || code in 0x3000..0x303f ||
-                code in 0xff00..0xffef || code in 0x20000..0x2a6df) cjk++ else other++
-            index += Character.charCount(code)
-        }
-        return (cjk * 1.5 + other * 0.25).roundToLong().coerceAtLeast(1)
-    }
+    fun textTokens(text: String): Long = app.daiyu.android.domain.context.HarnessTokenEstimate.text(text)
 
     fun imageTokens(width: Int, height: Int): Long {
         val scale = minOf(1.0, 2048.0 / maxOf(width, height))
         return maxOf(85L, (ceil(width * scale / 32) * ceil(height * scale / 32)).toLong())
+    }
+
+    fun imageReferenceTokens(reference: MessageImageReference): Long {
+        val attachment = JSONObject().put("attachmentId", reference.sha256).put("mediaType", reference.mime)
+            .put("bytes", reference.bytes).put("width", reference.width).put("height", reference.height)
+        return 4L + textTokens(JSONObject().put("type", "image").put("attachment", attachment).toString())
     }
 
     fun messageTokens(message: Message): Long = historyTokens(listOf(message))
@@ -42,14 +34,10 @@ internal object TokenTailCompression {
             message.blocks.lastOrNull { it is MessageBlock.Tool && it.invocation.name == "screen" && it.result != null }
         }
         return history.map { message ->
-            val calls = JSONArray()
             val payload = message.blocks.sumOf { block -> when (block) {
-                is MessageBlock.Text -> textTokens(block.text)
-                is MessageBlock.Image -> imageTokens(block.reference.width, block.reference.height)
+                is MessageBlock.Text -> 4L + textTokens(block.text)
+                is MessageBlock.Image -> imageReferenceTokens(block.reference)
                 is MessageBlock.Tool -> {
-                    calls.put(JSONObject().put("id", block.invocation.id.value)
-                        .put("type", "function").put("function", JSONObject().put("name", block.invocation.name)
-                            .put("arguments", block.invocation.arguments)))
                     block.result?.let { result ->
                         val metadata = if (result.contains("\"image_asset\""))
                             NativeScreenImage.metadata(block.invocation.name, block.invocation.arguments, result)
@@ -62,12 +50,17 @@ internal object TokenTailCompression {
                         val pixels = if (image != null && attached)
                             imageTokens(image.getInt("width"), image.getInt("height")) + textTokens(
                                 "screen工具图像（call_id=${block.invocation.id.value}），坐标使用原始${image.getInt("width")}×${image.getInt("height")}像素。") else 0L
-                        3 + textTokens(block.invocation.id.value) + textTokens(output) + pixels
+                        8L + textTokens(output) + pixels
                     } ?: 0L
                 }
             } }
-            3L + payload + visibleReasoningTokens(message) +
-                if (calls.length() == 0) 0L else textTokens(calls.toString())
+            if (message.role == "system") {
+                val rendered = message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("") { it.text }
+                app.daiyu.android.domain.context.HarnessTokenEstimate.system(rendered)
+            } else 4L + payload + visibleReasoningTokens(message) +
+                message.blocks.filterIsInstance<MessageBlock.Tool>().sumOf {
+                    app.daiyu.android.domain.context.HarnessTokenEstimate.toolCall(it.invocation.name, it.invocation.arguments)
+                }
         }
     }
 
@@ -76,35 +69,32 @@ internal object TokenTailCompression {
         fun parts(array: JSONArray?, reasoning: Boolean = false): Long = if (array == null) 0L else (0 until array.length()).sumOf { index ->
             val part = array.optJSONObject(index) ?: return@sumOf 0L
             when (part.optString("type")) {
-                "summary_text", "reasoning_text" -> textTokens(part.optString("text"))
-                "text", "input_text", "output_text" -> if (reasoning) textTokens(part.optString("text")) else 0L
-                "refusal" -> if (reasoning) textTokens(part.optString("refusal")) else 0L
-                "thinking" -> textTokens(part.optString("thinking"))
+                "summary_text", "reasoning_text" -> 4L + textTokens(part.optString("text"))
+                "text", "input_text", "output_text" -> if (reasoning) 4L + textTokens(part.optString("text")) else 0L
+                "refusal" -> if (reasoning) 4L + textTokens(part.optString("refusal")) else 0L
+                "thinking" -> 4L + textTokens(part.optString("thinking"))
                 else -> 0L
             }
         }
         return message.protocolItems.sumOf { raw ->
             val item = JSONObject(raw)
             val reasoning = item.optString("type") == "reasoning"
-            textTokens(item.optString("reasoning_content")) + parts(item.optJSONArray("content"), reasoning) +
-                if (reasoning) parts(item.optJSONArray("summary"), true) + textTokens(item.optString("reasoning_text")) else 0L
+            (item.optString("reasoning_content").takeIf { it.isNotEmpty() }?.let { 4L + textTokens(it) } ?: 0L) + parts(item.optJSONArray("content"), reasoning) +
+                if (reasoning) parts(item.optJSONArray("summary"), true) +
+                    (item.optString("reasoning_text").takeIf { it.isNotEmpty() }?.let { 4L + textTokens(it) } ?: 0L) else 0L
         }
     }
 
     fun toolTokens(tools: List<ToolDefinition>): Long {
         if (tools.isEmpty()) return 0
         val definitions = JSONArray()
-        tools.forEach { tool -> definitions.put(JSONObject().put("type", "function").put("function",
-            JSONObject().put("name", tool.name).put("description", tool.description)
-                .put("parameters", JSONObject(tool.parameters)))) }
-        return textTokens(definitions.toString())
+        tools.forEach { tool -> definitions.put(JSONObject().put("name", tool.name).put("description", tool.description)
+            .put("parameters", JSONObject(tool.parameters))) }
+        return 4L + textTokens(definitions.toString())
     }
 
-    fun localBudget(budget: Long, billed: Long?, local: Long?): Long {
-        if (billed == null || billed <= 0 || local == null || local <= 0) return budget
-        val scaled = (budget.toDouble() * local / billed).toLong()
-        return scaled.coerceIn(1, budget * 3 / 2)
-    }
+    @Suppress("UNUSED_PARAMETER")
+    fun localBudget(budget: Long, billed: Long?, local: Long?): Long = budget
 
     fun isSafeCut(history: List<Message>, cut: Int): Boolean = cut in availableCuts(history)
 
@@ -118,52 +108,21 @@ internal object TokenTailCompression {
         return cuts
     }
 
+    @Suppress("UNUSED_PARAMETER")
     fun selectStart(history: List<Message>, window: Long?, billed: Long? = null,
-        local: Long? = null, overflow: Boolean = false): Int {
-        if (history.size < 2 || window == null || window <= 0) return 0
-        val cuts = availableCuts(history)
+        local: Long? = null, overflow: Boolean = false, reservedCompletionTokens: Long = 0): Int {
+        if (history.size < 2 || (!overflow && (window == null || window <= reservedCompletionTokens))) return 0
+        val first = history.takeWhile { it.role == "system" }.size
+        val retain = if (overflow) 0L else (checkNotNull(window) - reservedCompletionTokens) * 16 / 100
         val weights = messageWeights(history)
-        fun start(budget: Long): Int {
-            var total = 0L
-            var from = history.lastIndex
-            for (index in history.indices.reversed()) {
-                total += weights[index]; from = index
-                if (total >= budget.coerceAtLeast(1)) break
-            }
-            return cuts.lastOrNull { it <= from && it < history.size } ?: 0
+        var accumulated = 0L
+        var keepFrom = history.size
+        for (index in history.indices.reversed()) {
+            accumulated += weights[index]
+            keepFrom = index
+            if (accumulated >= retain) break
         }
-        val budget = localBudget(if (overflow) 1 else maxOf(1, window * 16 / 100), billed, local)
-        var cut = start(budget)
-        if (cut <= 0) cut = if (overflow) start(1) else {
-            val half = weights.sum() / 2
-            start(half.coerceAtLeast(1)).takeIf { it > 0 } ?: start(1)
-        }
-        if (history.any(::hasOpaque)) {
-            val end = history.size
-            val inFlight = if (cuts.last() == end) end else cuts.last()
-            val bounds = cuts.filter { it <= inFlight }
-            if (bounds.size >= 2) {
-                val newest = bounds[bounds.lastIndex - 1]
-                var required = newest
-                val user = history.indexOfLast { it.role == Message.USER_ROLE }
-                val userCut = cuts.lastOrNull { it <= user && it < end } ?: 0
-                if (userCut > 0 && userCut <= newest && history.subList(userCut, newest).none(::hasOpaque) &&
-                    weights.subList(userCut, end).sum() <= budget)
-                    required = userCut
-                if (inFlight < end) required = minOf(required, inFlight)
-                if (required in 0 until end && required in cuts) cut = required
-            }
-        }
-        return cut
-    }
-
-    private fun hasOpaque(message: Message): Boolean = message.protocolItems.any { raw ->
-        val item = JSONObject(raw)
-        if (item.optString("type") == "reasoning") true
-        else item.optJSONArray("content")?.let { content ->
-            (0 until content.length()).any { index ->
-                content.optJSONObject(index)?.optString("type") in setOf("thinking", "redacted_thinking")
-            }
-        } == true
+        if (keepFrom <= first) return 0
+        return availableCuts(history).lastOrNull { it <= keepFrom && it > first } ?: 0
     }
 }

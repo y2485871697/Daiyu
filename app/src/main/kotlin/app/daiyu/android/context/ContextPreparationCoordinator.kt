@@ -124,7 +124,9 @@ class ContextPreparationCoordinator(
                 ?: savedSettings.reserveTokens)
         else if (contextWindowOverride == null) savedSettings else
             savedSettings.copy(contextWindowTokens = contextWindowOverride.toLong())
-        val policy = policies.resolve(settings)
+        val resolvedPolicy = policies.resolve(settings)
+        val policy = if (resolvedPolicy.tokenTail && chatProvider != null) resolvedPolicy.copy(
+            routedOutputTokens = HarnessRequestPolicy.outputReservation(chatProvider)) else resolvedPolicy
         // A resolver cannot enable unknown capacity or substitute the main model's window.
         require(policy.enabled == settings.automaticWithKnownWindow)
         require(policy.contextTokens == settings.contextWindowTokens && policy.reserveTokens == settings.reserveTokens)

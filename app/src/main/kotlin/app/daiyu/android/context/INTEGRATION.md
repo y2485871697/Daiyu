@@ -1,5 +1,18 @@
 # F11/F19 接缝（接口冻结）
 
+## 当前实现：Harness 估算与压缩（随对应代码同次提交，待云端验证）
+
+本节优先于下方历史接缝记录。最新要求采用固定上游 `deepseek-ai/deepseek-harness@ca33fd6843b205e279c7ccb6cb73a472c78f5760` 的计量与压缩语义，不再采用“完全不使用本地估算”的旧方向。
+
+- canonical surface 使用 UTF-16 字符长度每4字符1 token、block/role开销、规范化工具schema；云端返回的原始usage单独保存，测量以 `max(anchorEstimate, reportedTotal) + surfaceDelta` 校准，不将估算写入计费用量。
+- 内部压缩压力按规范化 input（已包含缓存子集）加 surface 差值投影；首请求尚无receipt时使用canonical估算。模型/请求头变化不沿用旧测量anchor。聊天框右上方上下文严格沿用原云端receipt展示、校验和失效逻辑，不展示估算或投影，不增加 `≈`。
+- 生产 tokenTail 不再按本地预算拒绝发送或持久化容量暂停；自动压缩为best-effort，最多两次。关闭自动压缩或不可压缩路线直接发送，由真实云端上下文拒绝返回错误；确认上下文溢出且可自动压缩时最多恢复一次，不重放工具。
+- 普通压缩阈值为 `min(window×80%, window-reservedCompletionTokens-65536)`；保留近期原文至少 `(window-reservedCompletionTokens)×16%`。16%不是压缩后完整请求或云端显示目标。保留system前导节点并保持工具调用/结果配对；手动压缩和溢出恢复使用零留尾策略。
+- 摘要指令追加为重放对话最后一条user，输出使用 `<compacted-summary>` 包装，只接受文本；不再分块摘要或格式修复。摘要输出上限65536，小窗口沿用不超过半窗口的协议适配。图片缺少可用读取计划时保留原文并报告压缩失败，不伪造图片内容。
+- checkpoint v11持久化计量anchor和投影状态；v1–v10兼容。压缩原文仍入既有档案，计费用量、暂停/取消/恢复语义分别保存。
+
+此段描述候选接线，不是验证通过声明。Kotlin单测、instrumentation和APK构建均仅在GitHub执行；精确SHA/run/attempt见唯一清单和更新说明。下文旧UTF-8估算、`fitsSendBudget`硬拒绝及尚未接线判断仅作历史资料，非当前生产tokenTail合同。
+
 ## 当前增量：R11 / P09 / P10 / P42（基线 65db994）
 
 本节覆盖下方历史记录中“生产未用 Context”的过时判断，旧记录保留作来源，不据此重复接线。只读核对当前 `ChatController.sendPrepared`：已在 `database.send` 前调用共享 helper 的 `ContextService.prepareSend(conversationId)`，将 `prepared.messages + user` 交给 runner，且将同一结果的 `archiveId` 交给 `ScopedContextTools`。但该调用仍使用默认未知窗口、不传 summarizer / 待发输入 / 取消标志；不能据此认自动压缩和 P42 已闭环。此次不改 Controller、数据库、runtime、model settings 或已保留的边界/估算/修订算法。

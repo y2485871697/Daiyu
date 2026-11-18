@@ -64,6 +64,40 @@ class ProviderSummaryModelTest {
         assertEquals("Bearer synthetic-summary-key", wire.getRequestProperty("Authorization"))
     }
 
+    @Test fun replayKeepsTheFrozenOutputLimitInsteadOfTheHarnessMaximum() {
+        for (protocol in protocols + ProviderProtocol.CHAT_COMPLETIONS) {
+            val config = configuration(protocol)
+            val wire = Connection(if (protocol == ProviderProtocol.CHAT_COMPLETIONS) chatSummary() else success(protocol))
+            val bound = resolver(config, wire).resolve(binding)!!
+            val session = bound.transport.openReplay(request(), emptyList(), "frozen system", bound.startDeadline(),
+                ContextPreparationCancellation())
+            session.next(emptyList()) { }
+            assertEquals(1, wire.posts)
+            val body = wire.json()
+            assertEquals(config.maxOutputTokens,
+                body.getInt(if (protocol == ProviderProtocol.RESPONSES) "max_output_tokens" else "max_tokens"))
+        }
+    }
+
+    @Test fun replayRejectsOverBudgetOrUnsupportedSystemBeforeConnecting() {
+        for (protocol in protocols + ProviderProtocol.CHAT_COMPLETIONS) {
+            val config = configuration(protocol)
+            val invalid = listOf(
+                listOf(request().single().copy(blocks = listOf(MessageBlock.Text("large", "x".repeat(100000))))),
+                request() + request().single().copy(id = MessageId("late-system"), role = "system"),
+                listOf(request().single().copy(id = MessageId("system"), role = "system", protocolItems = listOf("{}"))) + request()
+            )
+            for (history in invalid) {
+                val wire = Connection("")
+                val bound = resolver(config, wire).resolve(binding)!!
+                assertThrows(IllegalArgumentException::class.java) {
+                    bound.transport.openReplay(history, emptyList(), "", bound.startDeadline(), ContextPreparationCancellation())
+                }
+                assertEquals(0, wire.posts)
+            }
+        }
+    }
+
     @Test fun chatSummaryTruncationOrMissingAuthoritativeDoneNeverPublishesProse() {
         for (stream in listOf(chatSummary("length"), chatSummary(done = false))) {
             val wire = Connection(stream)

@@ -95,7 +95,7 @@ internal object ProviderHttpFailure {
             }
         }
         checkCancelled(cancelled)
-        return ModelRequestException(failure, detail)
+        return ModelRequestException(if (detail.rejection == RequestRejection.CONTEXT_LIMIT) ModelFailure.CONTEXT_LIMIT else failure, detail)
     }
 
     fun event(error: JSONObject?, secrets: Collection<String> = emptyList(), requestId: String? = null): ModelRequestException {
@@ -110,7 +110,7 @@ internal object ProviderHttpFailure {
         }
         val detail = if (failure == ModelFailure.REQUEST) diagnostic(error, null)
             else ModelRequestDiagnostic(providerCode = providerCode(error))
-        return ModelRequestException(failure, detail.copy(providerDetail = providerDetail(error,
+        return ModelRequestException(if (detail.rejection == RequestRejection.CONTEXT_LIMIT) ModelFailure.CONTEXT_LIMIT else failure, detail.copy(providerDetail = providerDetail(error,
             requestId ?: scalar(error, "request_id"), secrets)))
     }
 

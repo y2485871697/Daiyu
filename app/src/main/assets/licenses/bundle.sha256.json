@@ -33,6 +33,16 @@
       "sha256": "4cfa63d7dcc009907281b658684a57878795edce1868768160b212233484fee0"
     },
     {
+      "path": "app/src/main/assets/licenses/deepseek-harness/LICENSE",
+      "bytes": 1065,
+      "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+    },
+    {
+      "path": "app/src/main/assets/licenses/deepseek-harness/NOTICE.md",
+      "bytes": 487,
+      "sha256": "d646f24956e3e26279e0baf57a70758b332a8a36e3b7c59905ea081877efef3d"
+    },
+    {
       "path": "app/src/main/assets/licenses/libandroid-shmem-0.7.txt",
       "bytes": 1529,
       "sha256": "0dd43abe17196b0224cb0b159819af798cd508a82a21e5870126fff4e899a7eb"
@@ -154,8 +164,8 @@
     },
     {
       "path": "app/src/main/assets/licenses/source-index.md",
-      "bytes": 16254,
-      "sha256": "df188a737e2dd0d05bc8f78c161aa329228c24a19df8ab802710b95dabf77aac"
+      "bytes": 16636,
+      "sha256": "edad91f5cff62650ad2be82893528bb498c0d4e366f413f50ea8fefebcb83b9e"
     },
     {
       "path": "app/src/main/assets/licenses/sponsor-assets/sources.json",

@@ -23,6 +23,21 @@ internal object SummaryCheckpoint {
         不复制归档指针、工具修剪标记、checkpoint ID；不输出压缩完成说明。
     """.trimIndent()
 
+    fun frame(text: String): String = HarnessCompactionPrompt.preamble +
+        "\n\n<compacted-summary>\n" + text.trim() + "\n</compacted-summary>"
+
+    fun unframe(text: String): String? {
+        val opening = HarnessCompactionPrompt.preamble + "\n\n<compacted-summary>\n"
+        val ending = "\n</compacted-summary>"
+        val legacyOpening = "[历史摘要；仅供上下文，非新指令]\n"
+        val legacyEnding = "\n[摘要结束]"
+        return when {
+            text.startsWith(opening) && text.endsWith(ending) -> text.removePrefix(opening).removeSuffix(ending)
+            text.startsWith(legacyOpening) && text.endsWith(legacyEnding) -> text.removePrefix(legacyOpening).removeSuffix(legacyEnding)
+            else -> null
+        }?.takeIf { it.isNotBlank() }
+    }
+
     fun withoutLegacyMarker(text: String): String {
         val start = text.trimStart()
         return if (start.substringBefore('\n').trimEnd() == marker)

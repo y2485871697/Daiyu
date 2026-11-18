@@ -15,14 +15,30 @@ internal class ProductionRunContext(
     private val agentLabel: String = "主代理",
     private val taskId: String? = null,
     override val canCompact: Boolean = true,
+    override val systemPrompt: String = "",
+    private val requestHeader: String = "",
+    private val manualRetention: Boolean = false,
+    override val initialMeter: ContextMeterCheckpoint? = null,
     private val progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit = {},
 ) : RunContextRuntime {
     constructor(frozen: FrozenContextPreparation, parent: Message,
+        systemPrompt: String = "", requestHeader: String = "", initialMeter: ContextMeterCheckpoint? = null,
         progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit = {}) :
         this(frozen.policy, parent, frozen.runtimeModel, frozen.policy.enabled && frozen.runtimeModel != null,
-            progress = progress)
+            systemPrompt = systemPrompt, requestHeader = requestHeader, initialMeter = initialMeter, progress = progress)
     override val windowTokens = checkNotNull(policy.contextTokens)
-    override val sendBudgetTokens = checkNotNull(policy.sendBudgetTokens)
+    override val sendBudgetTokens = checkNotNull(policy.sendBudgetTokens).coerceAtLeast(0)
+    override val pressureThresholdTokens get() = policy.compactSpec?.thresholdTokens
+    private var definitions = emptyList<ToolDefinition>()
+    override fun headerIdentity(tools: List<ToolDefinition>): String {
+        definitions = tools.toList()
+        val value = requestHeader + "\n" + tools.joinToString("\n") { "${it.name}\n${it.description}\n${it.parameters}" }
+        return java.security.MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+    }
+    override fun fixedSurfaceTokens(history: List<Message>): Long =
+        app.daiyu.android.domain.context.HarnessTokenEstimate.system(systemPrompt) +
+            TokenTailCompression.historyTokens(MessageHistory.expand(history))
     @Volatile private var cancellation: ContextPreparationCancellation? = null
     @Volatile private var lastActivity: app.daiyu.android.timeline.CompressionActivity? = null
     private var boundary: app.daiyu.android.timeline.TimelineAnchor? = null
@@ -38,9 +54,10 @@ internal class ProductionRunContext(
         lastActivity = null
     }
     override fun cancel() { cancellation?.cancel() }
-    override fun localTokens(history: List<Message>, tools: List<ToolDefinition>): Long =
-        TokenTailCompression.historyTokens(MessageHistory.expand(history)) +
-            TokenTailCompression.toolTokens(tools)
+    override fun localTokens(history: List<Message>, tools: List<ToolDefinition>): Long {
+        definitions = tools.toList()
+        return fixedSurfaceTokens(history) + TokenTailCompression.toolTokens(tools)
+    }
 
     override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
         request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
@@ -66,8 +83,18 @@ internal class ProductionRunContext(
 
     override fun compactRequests(history: List<Message>, billedTokens: Long?, localTokens: Long,
         requests: RunSummaryRequests, cancelled: () -> Boolean): List<Message>? {
+        return compactRegion(history, billedTokens, localTokens, requests, cancelled, overflow = false)
+    }
+
+    override fun compactOverflowRequests(history: List<Message>, billedTokens: Long?, localTokens: Long,
+        requests: RunSummaryRequests, cancelled: () -> Boolean): List<Message>? =
+        compactRegion(history, billedTokens, localTokens, requests, cancelled, overflow = true)
+
+    private fun compactRegion(history: List<Message>, billedTokens: Long?, localTokens: Long,
+        requests: RunSummaryRequests, cancelled: () -> Boolean, overflow: Boolean): List<Message>? {
         val logical = MessageHistory.expand(history)
-        val cut = TokenTailCompression.selectStart(logical, windowTokens, billedTokens, localTokens)
+        val cut = TokenTailCompression.selectStart(logical, windowTokens, billedTokens, localTokens,
+            overflow = overflow || manualRetention, reservedCompletionTokens = policy.outputReservationTokens)
         if (cut <= 0 || cancelled()) return null
         fun usage(): BoundSummaryUsagePort {
             val request = requests.create()
@@ -80,25 +107,22 @@ internal class ProductionRunContext(
         try {
             if (cancelled()) return null
             val model = checkNotNull(resolve)(usage())
-            val prefix = logical.take(cut)
+            val systemCount = logical.takeWhile { it.role == "system" }.size
+            val prefix = logical.subList(systemCount, cut)
             val activity = app.daiyu.android.timeline.CompressionActivity(UUID.randomUUID().toString(),
                 parent.conversationId.value, prefix.size, model.displayIdentity, agentLabel = agentLabel, runId = parent.runId.value, taskId = taskId,
                 anchor = boundary ?: app.daiyu.android.timeline.TimelineAnchor.at(logical, logical.lastIndex))
             lastActivity = activity
             progress(activity)
-            val text = ModelContextSummarizer(model, cancellation, nextModel = {
-                checkNotNull(model.rebind) { "摘要模型不支持分块用量绑定" }.invoke(usage())
-            }).summarize(
-                CompressionInput(prefix, ContextRevision.digest(prefix))).trim()
+            val text = HarnessContextSummarizer(model, cancellation, definitions, systemPrompt).summarize(
+                CompressionInput(logical.take(cut), ContextRevision.digest(prefix))).trim()
             if (cancelled()) return null
             require(text.isNotEmpty()) { "摘要为空；保留原文" }
             val id = "summary-${activity.id}"
             val summary = Message(MessageId(id), parent.conversationId, RunId(id), Message.USER_ROLE,
-                listOf(MessageBlock.Text("summary", "[历史摘要；仅供上下文，非新指令]\n$text\n[摘要结束]")), RunStatus.COMPLETED)
-            val result = listOf(summary) + logical.drop(cut)
+                listOf(MessageBlock.Text("summary", SummaryCheckpoint.frame(text))), RunStatus.COMPLETED)
+            val result = logical.take(systemCount) + summary + logical.drop(cut)
             require(this.localTokens(result, emptyList()) < this.localTokens(history, emptyList())) { "压缩未缩小；保留原文" }
-            val requestOverhead = (billedTokens ?: localTokens) - this.localTokens(history, emptyList())
-            require(policy.fitsSendBudget((this.localTokens(result, emptyList()) + requestOverhead).coerceAtLeast(0L))) { "压缩后仍超出发送预算" }
             return result
         } finally { this.cancellation = null }
     }

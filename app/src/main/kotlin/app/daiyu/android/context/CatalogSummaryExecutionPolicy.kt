@@ -7,7 +7,7 @@ import app.daiyu.android.storage.ProviderRepository
 
 /** Application request limits, not provider capability metadata. Only the selected model supplies capacity. */
 internal object CatalogSummaryExecutionPolicy {
-    const val OUTPUT_CAP_TOKENS = 16384
+    const val OUTPUT_CAP_TOKENS = app.daiyu.android.domain.context.HarnessContextPolicy.SUMMARY_MAX_TOKENS
     const val DEADLINE_MILLIS = 120_000L
     private const val EXTRA_FRAMING_RESERVE = 512L
 

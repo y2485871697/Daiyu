@@ -10,20 +10,24 @@ import app.daiyu.android.ui.model.ContextUsageModel
 import app.daiyu.android.ui.model.acceptedContextInput
 import org.json.JSONObject
 
-/** 实际输入量的界面记录，与导入的计费历史和本地压缩估算分开保存。 */
+/** 云端实际输入量沿用原展示口径；内部 Harness meter 不参与界面用量。 */
 internal object CloudContextUsageStore {
     fun installSchema(db: SQLiteDatabase) {
         db.execSQL("CREATE TABLE IF NOT EXISTS context_ui_state(conversation_id TEXT PRIMARY KEY REFERENCES conversations(id) ON DELETE CASCADE,payload TEXT NOT NULL)")
     }
     private data class Receipt(val model: ContextUsageModel, val epoch: Long, val input: Long, val requestOwner: String, val requestId: String)
+    private data class MeterReceipt(val model: ContextUsageModel, val value: app.daiyu.android.domain.runtime.ContextMeterCheckpoint)
     private data class State(val epoch: Long = 0, val run: String = "", val compactions: Int = 0,
-        val blockedMainCount: Int = 0, val receipt: Receipt? = null)
+        val blockedMainCount: Int = 0, val receipt: Receipt? = null, val meter: MeterReceipt? = null)
 
     fun read(db: SQLiteDatabase, conversation: ConversationId, model: ContextUsageModel): CloudContextUsageUi {
         val state = load(db, conversation)
         val receipt = state.receipt?.takeIf { it.epoch == state.epoch && model.accepts(it.model) }
         return CloudContextUsageUi(receipt?.input, model.windowTokens)
     }
+
+    fun meter(db: SQLiteDatabase, conversation: ConversationId, model: ContextUsageModel?): app.daiyu.android.domain.runtime.ContextMeterCheckpoint? =
+        model?.let { selected -> load(db, conversation).meter?.takeIf { selected.accepts(it.model) }?.value }
 
     /** Invoked only inside the same accepted checkpoint transaction. */
     fun record(db: SQLiteDatabase, checkpoint: RunCheckpoint, model: ContextUsageModel): Boolean {
@@ -37,7 +41,7 @@ internal object CloudContextUsageStore {
         val compactions = checkpoint.context?.compactions ?: 0
         if (compactions > next.compactions) {
             next = next.copy(epoch = Math.addExact(next.epoch, 1), compactions = compactions,
-                blockedMainCount = admitted.size, receipt = null)
+                blockedMainCount = admitted.size, receipt = null, meter = null)
         }
         if (admitted.size > next.blockedMainCount) {
             val request = admitted.last()
@@ -45,6 +49,7 @@ internal object CloudContextUsageStore {
             val input = observation?.snapshot?.let { acceptedContextInput(it, model.windowTokens) }
             if (input != null) next = next.copy(receipt = Receipt(model, next.epoch, input, request.owner, request.requestId))
         }
+        next = next.copy(meter = checkpoint.context?.meter?.let { MeterReceipt(model, it) })
         if (next == previous) return false
         save(db, conversation, next)
         return true
@@ -54,7 +59,7 @@ internal object CloudContextUsageStore {
     fun invalidate(db: SQLiteDatabase, conversation: ConversationId) {
         check(db.inTransaction())
         val old = load(db, conversation)
-        save(db, conversation, old.copy(epoch = Math.addExact(old.epoch, 1), receipt = null))
+        save(db, conversation, old.copy(epoch = Math.addExact(old.epoch, 1), receipt = null, meter = null))
     }
 
     private fun load(db: SQLiteDatabase, conversation: ConversationId): State {
@@ -62,7 +67,7 @@ internal object CloudContextUsageStore {
             .use { if (it.moveToFirst()) it.getString(0) else null } ?: return State()
         return try {
             val json = JSONObject(raw)
-            require(json.getInt("version") == 1 && json.getString("source") == "cloud_actual" &&
+            require(json.getInt("version") in 1..2 && json.getString("source") in setOf("cloud_actual", "harness_meter") &&
                 json.getString("conversation") == conversation.value)
             val epoch = json.getLong("epoch").also { require(it >= 0) }
             val receipt = if (json.isNull("receipt")) null else json.getJSONObject("receipt").let { r ->
@@ -77,8 +82,15 @@ internal object CloudContextUsageStore {
                     require(it.epoch == epoch && it.input >= 0 && it.requestOwner.isNotBlank() && it.requestId.isNotBlank())
                 }
             }
+            val meter = try { if (!json.has("meter") || json.isNull("meter")) null else json.getJSONObject("meter").let { item ->
+                val model = ContextUsageModel(item.getString("provider"), item.getString("model"),
+                    item.getLong("configuration"), if (item.isNull("window")) null else item.getLong("window"),
+                    item.getLong("registry"), if (item.isNull("identity")) null else item.getString("identity"))
+                MeterReceipt(model, RunCheckpointCodec.decodeMeter(item.getJSONObject("value")))
+            } } catch (_: org.json.JSONException) { null }
+            catch (_: IllegalArgumentException) { null }
             State(epoch, json.getString("run"), json.getInt("compactions").also { require(it >= 0) },
-                json.getInt("blockedMainCount").also { require(it >= 0) }, receipt)
+                json.getInt("blockedMainCount").also { require(it >= 0) }, receipt, meter)
         } catch (_: org.json.JSONException) { State() }
         catch (_: IllegalArgumentException) { State() }
     }
@@ -89,10 +101,14 @@ internal object CloudContextUsageStore {
             .put("window", r.model.windowTokens ?: JSONObject.NULL).put("registry", r.model.registryRevision)
             .put("identity", r.model.receiptIdentity ?: JSONObject.NULL)
             .put("epoch", r.epoch).put("input", r.input).put("requestOwner", r.requestOwner).put("requestId", r.requestId) }
-        val json = JSONObject().put("version", 1).put("source", "cloud_actual")
+        val meter = state.meter?.let { m -> JSONObject().put("provider", m.model.provider).put("model", m.model.model)
+            .put("configuration", m.model.configuration).put("window", m.model.windowTokens ?: JSONObject.NULL)
+            .put("registry", m.model.registryRevision).put("identity", m.model.receiptIdentity ?: JSONObject.NULL)
+            .put("value", RunCheckpointCodec.encodeMeter(m.value)) }
+        val json = JSONObject().put("version", 2).put("source", "cloud_actual")
             .put("conversation", conversation.value).put("epoch", state.epoch).put("run", state.run)
             .put("compactions", state.compactions).put("blockedMainCount", state.blockedMainCount)
-            .put("receipt", receipt ?: JSONObject.NULL)
+            .put("receipt", receipt ?: JSONObject.NULL).put("meter", meter ?: JSONObject.NULL)
         db.insertWithOnConflict("context_ui_state", null, ContentValues().apply {
             put("conversation_id", conversation.value); put("payload", json.toString())
         }, SQLiteDatabase.CONFLICT_REPLACE).also { check(it != -1L) }

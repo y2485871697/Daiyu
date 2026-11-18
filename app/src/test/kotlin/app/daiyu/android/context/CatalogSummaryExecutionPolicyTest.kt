@@ -79,7 +79,7 @@ class CatalogSummaryExecutionPolicyTest {
                 assertEquals(32768L, config.contextWindowTokens)
                 assertEquals(config.contextWindowTokens - config.maxOutputTokens - config.reasoningReserveTokens - config.providerOverheadTokens,
                     config.inputBudgetTokens)
-                assertEquals(CatalogSummaryExecutionPolicy.OUTPUT_CAP_TOKENS, config.maxOutputTokens)
+                assertEquals(minOf(CatalogSummaryExecutionPolicy.OUTPUT_CAP_TOKENS, (config.contextWindowTokens / 2).toInt()), config.maxOutputTokens)
                 assertEquals(reasoning, config.provider.reasoningOverride)
                 assertEquals(false, config.provider.visionOverride)
                 assertFalse(config.provider.asModelSettings().batteryEnabled)

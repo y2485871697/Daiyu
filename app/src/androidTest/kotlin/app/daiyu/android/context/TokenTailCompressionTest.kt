@@ -11,27 +11,27 @@ class TokenTailCompressionTest : InstrumentationTestCase() {
         listOf(MessageBlock.Text("text", "a".repeat(400)))) = Message(MessageId("m-$index"),
         ConversationId("owner"), RunId("run-$index"), role, blocks, RunStatus.COMPLETED)
 
-    fun testTokenPricesAndBilledLocalConversionMatchOriginalConstants() {
+    fun testCanonicalHarnessPricesAndRetentionBudgetDoNotRescale() {
         assertEquals(0L, TokenTailCompression.textTokens(""))
-        assertEquals(2L, TokenTailCompression.textTokens("中"))
+        assertEquals(1L, TokenTailCompression.textTokens("中"))
         assertEquals(1L, TokenTailCompression.textTokens("abcd"))
-        assertEquals(103L, TokenTailCompression.messageTokens(message(0)))
+        assertEquals(108L, TokenTailCompression.messageTokens(message(0)))
         assertEquals(100L, TokenTailCompression.localBudget(100, null, 200))
-        assertEquals(50L, TokenTailCompression.localBudget(100, 200, 100))
-        assertEquals(150L, TokenTailCompression.localBudget(100, 1, 1000))
-        assertEquals(1L, TokenTailCompression.localBudget(100, 100000, 1))
+        assertEquals(100L, TokenTailCompression.localBudget(100, 200, 100))
+        assertEquals(100L, TokenTailCompression.localBudget(100, 1, 1000))
+        assertEquals(100L, TokenTailCompression.localBudget(100, 100000, 1))
     }
 
-    fun testSixteenPercentTailAndHalfFallbackAndOverflowKeepOriginalTail() {
+    fun testMinimumSixteenPercentTailAndOverflowKeepLatestSafeNode() {
         val history = (0..9).map { message(it) }
         assertEquals(8, TokenTailCompression.selectStart(history, 1000))
-        assertEquals(5, TokenTailCompression.selectStart(history, 100000))
+        assertEquals(0, TokenTailCompression.selectStart(history, 100000))
         assertEquals(9, TokenTailCompression.selectStart(history, 100000, overflow = true))
         assertEquals(0, TokenTailCompression.selectStart(history, null))
         assertEquals(0, TokenTailCompression.selectStart(history.take(1), 1000))
     }
 
-    fun testIncompleteToolBatchKeepsEveryFollowingMessageAndOpaqueKeepsLatestUnit() {
+    fun testIncompleteToolBatchStaysTogetherAndOpaqueDataDoesNotChangeTextPrices() {
         val history = (0..9).map { message(it) }.toMutableList()
         history[5] = message(5, blocks = listOf(MessageBlock.Tool(ToolInvocation(ToolCallId("call"), "tool", "{}"))))
         assertTrue(TokenTailCompression.isSafeCut(history, 5))
@@ -39,10 +39,10 @@ class TokenTailCompressionTest : InstrumentationTestCase() {
         assertEquals(5, TokenTailCompression.selectStart(history, 1000))
         val opaque = (0..9).map { message(it) }.toMutableList()
         opaque[0] = opaque[0].copy(protocolItems = listOf("""{"type":"reasoning","encrypted_content":"opaque"}"""))
-        assertEquals(9, TokenTailCompression.selectStart(opaque, 1000))
+        assertEquals(8, TokenTailCompression.selectStart(opaque, 1000))
         opaque[8] = opaque[8].copy(role = "user")
-        assertEquals(9, TokenTailCompression.selectStart(opaque, 1000))
-        assertEquals(9, TokenTailCompression.selectStart(opaque, 1287))
+        assertEquals(8, TokenTailCompression.selectStart(opaque, 1000))
+        assertEquals(8, TokenTailCompression.selectStart(opaque, 1287))
         assertEquals(8, TokenTailCompression.selectStart(opaque, 1288))
     }
 
@@ -69,9 +69,9 @@ class TokenTailCompressionTest : InstrumentationTestCase() {
     }
 
     fun testProductionTriggerUsesFullWindowWhileSendBudgetKeepsReserve() {
-        val policy = CompressionPolicy(true, 10000, reserveTokens = 2000, tokenTail = true)
-        assertFalse(policy.shouldCompress(7999)); assertTrue(policy.shouldCompress(8000))
-        assertTrue(policy.fitsSendBudget(8000)); assertFalse(policy.fitsSendBudget(8001))
+        val policy = CompressionPolicy(true, 272000, reserveTokens = 4096, tokenTail = true)
+        assertFalse(policy.shouldCompress(202367)); assertTrue(policy.shouldCompress(202368))
+        assertTrue(policy.fitsSendBudget(267904)); assertFalse(policy.fitsSendBudget(267905))
         assertTrue(CompressionPolicy(true, 10000, reserveTokens = 2000).shouldCompress(6400))
     }
 }

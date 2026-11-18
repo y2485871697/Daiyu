@@ -41,11 +41,13 @@ internal object ProductionContextPreparation {
 
     fun childRuntime(context: Context, parent: app.daiyu.android.domain.Message,
         snapshot: app.daiyu.android.model.ProviderSnapshot, agentLabel: String,
+        systemPrompt: String = "",
         progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit): ProductionRunContext? {
         requireWorker()
         val app = context.applicationContext ?: context
         val settings = ProductionCompressionSettingsStore(app).snapshot().childSettings(snapshot)
-        val policy = ProductionCompressionPolicyResolver.resolve(settings)
+        val policy = ProductionCompressionPolicyResolver.resolve(settings).copy(
+            routedOutputTokens = HarnessRequestPolicy.outputReservation(snapshot))
         if (policy.contextTokens == null) return null
         val configuration = CatalogSummaryExecutionPolicy.childConfiguration(snapshot,
             checkNotNull(policy.contextTokens), settings.summaryModel, settings.summaryProtocol) { binding ->
@@ -54,7 +56,8 @@ internal object ProductionContextPreparation {
         }
         return ProductionRunContext(policy, parent, { usage ->
             requireNotNull(ProviderSummaryModelResolver { configuration }.resolve(configuration.binding, usage)) { "子代理摘要模型不可用" }
-        }, automatic = true, agentLabel = agentLabel, taskId = parent.runId.value, progress = progress)
+        }, automatic = true, agentLabel = agentLabel, taskId = parent.runId.value,
+            systemPrompt = systemPrompt, requestHeader = HarnessRequestPolicy.header(snapshot, systemPrompt), progress = progress)
     }
 
     private fun requireWorker() {

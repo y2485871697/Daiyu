@@ -135,6 +135,7 @@ enum class ModelFailure(val userMessage: String) {
     SERVER("模型服务端发生错误，请检查服务状态；未自动重试"),
     CONFIGURATION("无法准备模型请求，请检查服务地址及请求头设置"),
     REQUEST("服务拒绝本次请求，具体原因未识别；未自动重发"),
+    CONTEXT_LIMIT("请求超过模型上下文限制，请压缩上下文或调整输出上限"),
     PROTOCOL("服务未返回兼容的事件流，请检查所选接口协议"),
     INCOMPLETE("回复未完整结束；已接收内容保留，未执行未确认工具"),
     TIMEOUT("请求超时，远端结果尚未确认；已接收内容保留，未自动重发"),

@@ -139,6 +139,44 @@ internal class ProviderSummaryModelPort(
         cancellation: ContextPreparationCancellation): ModelSession =
         openSession(history, deadline, reasoning) { cancellation.check(); deadline.check() }
 
+    override fun openReplay(history: List<Message>, tools: List<ToolDefinition>, systemPrompt: String,
+        deadline: SummaryRequestDeadline, cancellation: ContextPreparationCancellation): ModelSession {
+        fun checkLive() { cancellation.check(); deadline.check() }
+        checkLive()
+        val frozen = freezeContextMessages(history)
+        require(frozen.isNotEmpty())
+        require(frozen.none { row -> row.blocks.any { it is MessageBlock.Image } }) {
+            "当前摘要传输缺少原图片读取计划；保留原文"
+        }
+        val leadingSystem = frozen.takeWhile { it.role == "system" }
+        require(leadingSystem.all { row -> row.blocks.all { it is MessageBlock.Text } &&
+            row.protocolItems.isEmpty() && row.historySegments.isEmpty() }) { "摘要 system 输入无法完整重放；保留原文" }
+        val messages = frozen.drop(leadingSystem.size)
+        require(messages.all { it.role == Message.USER_ROLE || it.role == "assistant" }) {
+            "摘要历史包含无法重放的角色；保留原文"
+        }
+        val system = listOf(systemPrompt, leadingSystem.flatMap { it.blocks }.filterIsInstance<MessageBlock.Text>()
+            .joinToString("") { it.text }).filter { it.isNotEmpty() }.joinToString("\n\n")
+        val inputTokens = app.daiyu.android.domain.context.HarnessTokenEstimate.system(system) +
+            TokenTailCompression.historyTokens(messages, includeLatestScreen = false) + TokenTailCompression.toolTokens(tools)
+        require(inputTokens <= configuration.inputBudgetTokens) { "摘要模型输入超过其配置预算；保留原文" }
+        usagePort?.let { port ->
+            require(frozen.all { it.conversationId.value == port.conversationId })
+            port.claim()
+        }
+        checkLive()
+        val replayOutput = configuration.maxOutputTokens
+        val provider = SummaryProviderFactory.create(configuration.provider, replayOutput,
+            system, connect = connect, beforeConnect = ::checkLive, oauthHeaders = oauthHeaders, replay = true)
+        val session = app.daiyu.android.model.usage.UsageRecorder.wrap(provider, configuration.provider,
+            usagePort?.conversationId ?: frozen.first().conversationId.value).open(messages, tools)
+        return try {
+            checkLive()
+            TerminalSession(session, configuration.provider.protocol, deadline, deadlines, usagePort,
+                if (configuration.provider.oauth != null) SummaryOutputBudget(replayOutput) else null)
+        } catch (failure: Exception) { runCatching { session.cancel() }; throw failure }
+    }
+
     private fun openSession(history: List<Message>, deadline: SummaryRequestDeadline,
         reasoning: app.daiyu.android.model.SummaryReasoningLevel, checkLive: () -> Unit): ModelSession {
         checkLive()

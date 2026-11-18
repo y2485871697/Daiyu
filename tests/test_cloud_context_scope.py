@@ -43,7 +43,8 @@ class ContextChecksScopeTest(unittest.TestCase):
 
     def test_both_modules_and_actual_new_resolution_regression_are_required(self):
         with tempfile.TemporaryDirectory() as folder:
-            self.assertEqual(8, verify_xml(self.archive(folder), 'context')['tests_passed'])
+            self.assertEqual(4 + len(CONTEXT_STORAGE_CLASSES) + len(CONTEXT_EXACT_CLASSES),
+                             verify_xml(self.archive(folder), 'context')['tests_passed'])
             for name in [CONTEXT_PACKAGES[0][1] + 'Fixture', CONTEXT_RESOLUTION_CLASS, CONTEXT_TOOL_CLASS, *CONTEXT_STORAGE_CLASSES, *(name for _, name in CONTEXT_EXACT_CLASSES)]:
                 with self.subTest(missing=name), self.assertRaisesRegex(ValueError, 'coverage_missing|module_report_missing'):
                     verify_xml(self.archive(folder, omit=name), 'context')

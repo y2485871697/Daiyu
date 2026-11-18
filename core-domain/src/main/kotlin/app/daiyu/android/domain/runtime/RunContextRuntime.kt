@@ -15,6 +15,25 @@ data class ContextCapacityCheckpoint(val id: String, val created: Long, val esti
     }
 }
 
+/** Accepted meter facts; provider counts and local surface prices never enter billing totals. */
+data class ContextMeterCheckpoint(
+    val anchorHeader: String? = null,
+    val anchorEstimate: Long? = null,
+    val anchorSurface: Long? = null,
+    val anchorUsageTotal: Long? = null,
+    val pressureTokens: Long? = null,
+    val sampledSurfaceTokens: Long? = null,
+    val surfaceTokens: Long = 0,
+    val inputFixedSurfaceTokens: Long? = null,
+    val overflowRetries: Int = 0,
+) {
+    init {
+        require(surfaceTokens >= 0 && overflowRetries >= 0)
+        require(listOf(anchorEstimate, anchorSurface, anchorUsageTotal, pressureTokens,
+            sampledSurfaceTokens, inputFixedSurfaceTokens).all { it == null || it >= 0 })
+    }
+}
+
 data class RunContextCheckpoint(
     val input: RequestInputCheckpoint? = null,
     val calibration: RequestInputCheckpoint? = null,
@@ -22,6 +41,7 @@ data class RunContextCheckpoint(
     val summaries: List<RequestCheckpoint> = emptyList(),
     val compactions: Int = 0,
     val capacity: ContextCapacityCheckpoint? = null,
+    val meter: ContextMeterCheckpoint? = null,
 )
 
 interface RunSummaryRequests {
@@ -32,10 +52,17 @@ interface RunSummaryRequests {
 
 /** Runs only at a completed protocol/tool boundary, on the original checkpoint writer. */
 interface RunContextRuntime {
+    val systemPrompt: String get() = ""
     val automatic: Boolean get() = true
     val canCompact: Boolean get() = true
     val windowTokens: Long
     val sendBudgetTokens: Long get() = windowTokens
+    val initialMeter: ContextMeterCheckpoint? get() = null
+    val pressureThresholdTokens: Long? get() = runCatching {
+        app.daiyu.android.domain.context.HarnessContextPolicy.resolve(windowTokens, windowTokens - sendBudgetTokens).thresholdTokens
+    }.getOrNull()
+    fun headerIdentity(tools: List<ToolDefinition>): String? = null
+    fun fixedSurfaceTokens(history: List<Message>): Long = localTokens(history, emptyList())
     fun localTokens(history: List<Message>, tools: List<ToolDefinition>): Long
     fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
         request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
@@ -46,6 +73,9 @@ interface RunContextRuntime {
         return compact(history, billedTokens, localTokens, request, { requests.observe(request, it) },
             { requests.admit(request) }, cancelled)
     }
+    fun compactOverflowRequests(history: List<Message>, billedTokens: Long?, localTokens: Long,
+        requests: RunSummaryRequests, cancelled: () -> Boolean): List<Message>? =
+        compactRequests(history, billedTokens, localTokens, requests, cancelled)
     fun beginCompaction(boundary: Message) {}
     fun compactionApplied() {}
     fun finishedCompaction() {}

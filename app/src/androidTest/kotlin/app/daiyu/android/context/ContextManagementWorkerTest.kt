@@ -77,9 +77,11 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
     }
     private fun bound(selectedBinding: SummaryModelBinding = binding) = BoundSummaryModel(selectedBinding, SummaryModelTransport { history, _ ->
         requests++
-        assertEquals(1, history.size)
-        assertEquals("user", history.single().role)
-        assertTrue((history.single().blocks.single() as MessageBlock.Text).text.contains("不可信"))
+        assertTrue(history.size > 1)
+        assertEquals("user", history.last().role)
+        assertEquals(HarnessCompactionPrompt.instruction,
+            (history.last().blocks.single() as MessageBlock.Text).text)
+        assertTrue(history.dropLast(1).none { it.id.value.startsWith("summary-directive-") })
         object : ModelSession {
             override fun cancel() { cancellations++ }
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
@@ -222,7 +224,8 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         assertFalse(configuration.automatic)
         assertEquals(expected.originals, service.displayHistory(id))
         val logical = MessageHistory.expand(expected.originals)
-        val cut = TokenTailCompression.selectStart(logical, configuration.contextWindowTokens)
+        val cut = TokenTailCompression.selectStart(logical, configuration.contextWindowTokens, overflow = true,
+            reservedCompletionTokens = ProductionCompressionPolicyResolver.resolve(configuration).outputReservationTokens)
         assertTrue(cut > 0)
         assertEquals(logical.drop(cut), service.prepareSend(id).messages.drop(1))
         assertEquals(expected.originals.take(cut), service.archivePage(receipt.archiveId!!, expectedOwner = id).messages)

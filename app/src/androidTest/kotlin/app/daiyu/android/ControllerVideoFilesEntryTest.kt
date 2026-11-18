@@ -116,15 +116,15 @@ class ControllerVideoFilesEntryTest : InstrumentationTestCase() {
     }
 
     fun testVideoPreparationUsesProductionTokensForRetainedHistory() {
-        // The complete production request fits, while the legacy byte estimator still rejects this history.
-        verifyRetainedHistoryBudget(windowTokens = 22000, expectCapacityPause = false)
+        // Harness surface estimation replaces the legacy byte-count send gate.
+        verifyRetainedHistoryBudget(windowTokens = 22000)
     }
 
-    fun testVideoRetainedHistoryWithFullToolCatalogPausesBeforeModelWhenOverBudget() {
-        verifyRetainedHistoryBudget(windowTokens = 20000, expectCapacityPause = true)
+    fun testVideoRetainedHistoryWithFullToolCatalogDoesNotPauseOnLocalBudget() {
+        verifyRetainedHistoryBudget(windowTokens = 20000)
     }
 
-    private fun verifyRetainedHistoryBudget(windowTokens: Long, expectCapacityPause: Boolean) {
+    private fun verifyRetainedHistoryBudget(windowTokens: Long) {
         val fixture = RunControlFixture(instrumentation.targetContext, onSession = { _, _, _ -> })
         val clip = File(fixture.application.filesDir, "budget-fixture-video.mp4")
         var ui: ControllerVideoUi? = null
@@ -162,25 +162,6 @@ class ControllerVideoFilesEntryTest : InstrumentationTestCase() {
                 .last { it.role == Message.ASSISTANT_ROLE }
             fun checkpoint() = app.daiyu.android.storage.SQLiteRuntimeStore.readCheckpointSnapshot(
                 fixture.database.readableDatabase, acceptedAssistant.id.value)
-            if (expectCapacityPause) {
-                awaitControl("video request durably capacity-paused before model open") {
-                    checkpoint()?.let { it.phase == app.daiyu.android.domain.runtime.ExecutionPhase.PAUSED &&
-                        it.context?.capacity != null } == true
-                }
-                val paused = checkNotNull(checkpoint())
-                val capacity = checkNotNull(paused.context?.capacity)
-                assertEquals(windowTokens, capacity.windowTokens)
-                assertEquals(windowTokens - 4096, capacity.budgetTokens)
-                assertTrue(capacity.estimatedTokens > capacity.budgetTokens)
-                assertEquals(oldUser, paused.history.first())
-                assertEquals(RunStatus.RUNNING, paused.message.status)
-                assertFalse(paused.requestUnconfirmed)
-                assertNull(paused.request)
-                assertTrue(paused.usageRequests.isEmpty())
-                assertEquals(0, fixture.opens.get())
-                assertEquals(1L, session.entered.count)
-                assertTrue(fixture.histories.isEmpty())
-            } else {
                 if (!session.entered.await(20, TimeUnit.SECONDS)) {
                     val storedAssistant = fixture.database.messages(conversation.id).map { it.second }
                         .lastOrNull { it.role == Message.ASSISTANT_ROLE }
@@ -199,17 +180,15 @@ class ControllerVideoFilesEntryTest : InstrumentationTestCase() {
                 val projected = fixture.histories.single()
                 assertEquals(oldUser, projected.first())
                 assertTrue(projected.last().blocks.filterIsInstance<MessageBlock.Text>().last().text.contains("Linux 路径:"))
-            }
             assertEquals(ReasoningEffort.HIGH, fixture.controller.reasoningPreference.snapshot(owner.conversationId))
             val stored = ControllerVideoHistory(fixture.database).capture(conversation.id)
             assertEquals(4, stored.rows.size)
             assertFalse(stored.rows.any { row -> row.blocks.filterIsInstance<MessageBlock.Text>().any {
                 it.text.contains("Linux 路径:") } })
             controlMain { fixture.controller.acknowledgeVideoSend(request) }
-            if (!expectCapacityPause) {
-                session.release.countDown()
-                awaitControl("video complete") { fixture.controller.active == null }
-            }
+            assertNull(checkpoint()?.context?.capacity)
+            session.release.countDown()
+            awaitControl("video complete") { fixture.controller.active == null }
         } finally {
             controlMain { ui?.let(fixture.controller::detachVideoUi) }
             fixture.close()

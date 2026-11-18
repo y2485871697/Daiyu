@@ -4,7 +4,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -12,25 +11,30 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Pause
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.ScreenRotation
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import app.daiyu.android.ui.haptics.material.Slider
 import kotlin.math.roundToInt
 import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
@@ -85,6 +89,14 @@ internal fun ChatMediaPreviewVideoControls(
     landscape: Boolean = false,
     onToggleOrientation: () -> Unit = {},
 ) {
+    val controlsEnabled = active && state.visible
+    val playbackEnabled = controlsEnabled && ready
+    val density = LocalDensity.current
+    val direction = LocalLayoutDirection.current
+    val physical = WindowInsets.safeDrawing
+    val safe = chatMediaPreviewVideoInsets(physical.getLeft(density, direction), physical.getTop(density),
+        physical.getRight(density, direction), physical.getBottom(density), landscape)
+    val controlInsets = WindowInsets(left = safe[0], top = safe[1], right = safe[2], bottom = safe[3])
     Box(modifier) {
         // This sibling is below the controls: button and slider gestures cannot toggle the surface.
         Box(
@@ -99,22 +111,24 @@ internal fun ChatMediaPreviewVideoControls(
                 ),
         )
         AnimatedVisibility(
-            visible = active && state.visible,
+            visible = controlsEnabled,
             enter = fadeIn(tween(180)),
             exit = fadeOut(tween(180)),
-            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(horizontal = 20.dp),
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .windowInsetsPadding(controlInsets.only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom))
+                .padding(horizontal = 20.dp).padding(bottom = if (landscape) 8.dp else 24.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth().testTag("chat-media-video-controls")
-                    .background(Color.Black.copy(alpha = 0.55f))
-                    .navigationBarsPadding().padding(horizontal = 8.dp, vertical = 4.dp),
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 IconButton(
-                    enabled = active && state.visible && ready,
+                    enabled = playbackEnabled,
                     onClick = onTogglePlayback,
-                    modifier = Modifier.size(48.dp).testTag("chat-media-video-play-pause"),
+                    modifier = Modifier.size(48.dp).testTag("chat-media-video-play-pause")
+                        .semantics { if (!playbackEnabled) disabled() },
                 ) {
                     Icon(
                         imageVector = if (state.playRequested) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
@@ -122,15 +136,13 @@ internal fun ChatMediaPreviewVideoControls(
                         tint = Color.White,
                     )
                 }
-                Slider(
+                ChatMediaPreviewVideoProgress(
                     value = state.fraction,
+                    playing = state.playRequested,
+                    seeking = state.seeking,
                     onValueChange = onScrub,
                     onValueChangeFinished = onSeekFinished,
-                    enabled = active && state.visible && ready && state.durationMillis > 0,
-                    colors = SliderDefaults.colors(
-                        thumbColor = Color.White, activeTrackColor = Color.White,
-                        inactiveTrackColor = Color.White.copy(alpha = 0.35f),
-                    ),
+                    enabled = playbackEnabled && state.durationMillis > 0,
                     modifier = Modifier.weight(1f).testTag("chat-media-video-progress")
                         .semantics { contentDescription = "视频进度" },
                 )
@@ -142,9 +154,10 @@ internal fun ChatMediaPreviewVideoControls(
                     modifier = Modifier.padding(end = 4.dp).testTag("chat-media-video-time"),
                 )
                 IconButton(
-                    enabled = active && state.visible,
+                    enabled = controlsEnabled,
                     onClick = onToggleOrientation,
-                    modifier = Modifier.size(48.dp).testTag("chat-media-video-orientation"),
+                    modifier = Modifier.size(48.dp).testTag("chat-media-video-orientation")
+                        .semantics { if (!controlsEnabled) disabled() },
                 ) {
                     Icon(Icons.Rounded.ScreenRotation,
                         contentDescription = if (landscape) "切换竖屏" else "切换横屏",
@@ -154,3 +167,7 @@ internal fun ChatMediaPreviewVideoControls(
         }
     }
 }
+
+/** Clockwise preview rotation maps the physical bottom gesture inset to logical right. */
+internal fun chatMediaPreviewVideoInsets(left: Int, top: Int, right: Int, bottom: Int, landscape: Boolean): List<Int> =
+    if (landscape) listOf(top, right, bottom, left) else listOf(left, top, right, bottom)

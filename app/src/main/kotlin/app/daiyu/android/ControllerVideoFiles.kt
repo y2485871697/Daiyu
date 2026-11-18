@@ -133,6 +133,7 @@ internal fun videoFileModelHistory(rows: List<Message>, files: List<ControllerVi
                 append("缺少抽帧工具时，可自行通过当前 Linux 环境的包管理器安装。")
                 append("抽帧图片及其他分析临时文件必须放在 Linux /tmp 下为本次分析新建的独立临时目录，")
                 append("例如使用 mktemp -d /tmp/daiyu-video-XXXXXX 创建；不要写入会话工作区。")
+                append("调用 read_image 读取 /tmp 中的 PNG 抽帧，单张 PNG 不超过 128 KiB；超限时缩小画面后重新抽帧。")
                 append("通过图片读取工具实际查看所需画面并完成分析后，立即删除本次生成的临时文件和该目录；")
                 append("失败或取消时也要清理，但不能在图片读取完成前删除。")
                 append("只清理本次分析产物，不得清空整个 /tmp，不得删除输入视频原件、")

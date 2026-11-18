@@ -251,7 +251,6 @@ class OpenRouterVideoInputTest {
             if (continuation) input.put(JSONObject().put("type", "function_call_output")
                 .put("call_id", "call").put("output", "result"))
             val baseline = ResponsesRequest.body(settings.model, input, emptyList())
-            VideoRequestPolicy.disableReasoning(baseline)
             plan.validateRequest(settings, baseline, input)
             for (raw in forbiddenVideoBodies().filterNot { it == """{"model":"fixture/exact-model"}""" }) {
                 val request = JSONObject(baseline.toString())
@@ -306,7 +305,7 @@ class OpenRouterVideoInputTest {
     @Test fun toolContinuationKeepsVideoAndEncryptedReasoningWithoutRefreezing() {
         val cap = grant()
         val config = settings.copy(requestOptions = ProviderRequestOptions(
-            """{"temperature":0.25,"top_p":0.9,"max_output_tokens":512}"""))
+            """{"temperature":0.25,"top_p":0.9,"max_output_tokens":512,"reasoning":{"effort":"high","summary":"auto"}}"""))
         val ref = reference()
         val plan = freeze(ref, cap, config = config)
         val call = JSONObject().put("type", "function_call").put("id", "fc").put("call_id", "call")
@@ -333,7 +332,8 @@ class OpenRouterVideoInputTest {
             assertEquals(512, body.getInt("max_output_tokens"))
             assertEquals(setOf("model", "input", "stream", "store", "include", "temperature", "top_p", "max_output_tokens", "reasoning"),
                 body.keys().asSequence().toSet())
-            assertEquals("none", body.getJSONObject("reasoning").getString("effort"))
+            assertEquals("high", body.getJSONObject("reasoning").getString("effort"))
+            assertEquals("auto", body.getJSONObject("reasoning").getString("summary"))
         }
         val firstInput = JSONObject(first.sent.toString("UTF-8")).getJSONArray("input")
         val nextInput = JSONObject(second.sent.toString("UTF-8")).getJSONArray("input")

@@ -13,29 +13,36 @@ class VideoDefaultReasoningTest {
     private fun body() = JSONObject().put("model", settings.model).put("input", input)
         .put("stream", true).put("store", false).put("include", JSONArray().put("reasoning.encrypted_content"))
 
-    @Test fun everyVideoPayloadHasExplicitOffAndKeepsTheApprovedConfiguration() {
+    @Test fun defaultReasoningIsNotSilentlyOverriddenByVideoInput() {
         repeat(2) {
             val request = body()
-            VideoRequestPolicy.disableReasoning(request)
             VideoRequestPolicy.finalPayload(settings, request, input)
-            assertEquals("none", request.getJSONObject("reasoning").getString("effort"))
+            assertFalse(request.has("reasoning"))
             assertEquals("", settings.requestOptions.customBody)
         }
     }
 
-    @Test fun missingEnabledOrExtraReasoningFieldsCannotPassTheVideoAllowlist() {
-        assertThrows(IllegalArgumentException::class.java) { VideoRequestPolicy.finalPayload(settings, body(), input) }
-        for (raw in listOf("""{"effort":"high"}""", """{"effort":"none","summary":"auto"}""", "null")) {
-            val request = body().put("reasoning", if (raw == "null") JSONObject.NULL else JSONObject(raw))
-            assertThrows(IllegalArgumentException::class.java) { VideoRequestPolicy.finalPayload(settings, request, input) }
+    @Test fun highOffAndSummaryRemainExactlyAsFrozenForVideoRequests() {
+        for (raw in listOf("""{"effort":"high","summary":"auto"}""", """{"effort":"none"}""")) {
+            val configured = settings.copy(requestOptions = ProviderRequestOptions(JSONObject().put("reasoning", JSONObject(raw)).toString()))
+            VideoRequestPolicy.preflight(configured)
+            val request = body().put("reasoning", JSONObject(raw))
+            VideoRequestPolicy.finalPayload(configured, request, input)
+            assertEquals(JSONObject(raw).toString(), request.getJSONObject("reasoning").toString())
         }
     }
 
-    @Test fun videoOffNeverOverridesCustomReasoningOrRelaxesTheSavedOptionsAllowlist() {
-        for (key in listOf("reasoning", "thinking", "reasoning_effort", "output_config", "enable_thinking"))
-            assertThrows(IllegalArgumentException::class.java) { VideoRequestPolicy.disableReasoning(body().put(key, JSONObject.NULL)) }
-        assertThrows(IllegalArgumentException::class.java) {
-            VideoRequestPolicy.preflight(settings.copy(requestOptions = ProviderRequestOptions("""{"reasoning":{"effort":"none"}}""")))
+    @Test fun malformedReasoningAndRecipientOverridesStillFailClosed() {
+        for (value in listOf<Any>(JSONObject.NULL, JSONObject("""{"effort":"not-valid"}"""),
+            JSONObject("""{"route":"fallback"}"""))) {
+            assertThrows(IllegalArgumentException::class.java) {
+                VideoRequestPolicy.finalPayload(settings, body().put("reasoning", value), input)
+            }
+        }
+        for (raw in listOf("""{"provider":{"allow_fallbacks":true}}""", """{"thinking":{"type":"enabled"}}""")) {
+            assertThrows(IllegalArgumentException::class.java) {
+                VideoRequestPolicy.preflight(settings.copy(requestOptions = ProviderRequestOptions(raw)))
+            }
         }
     }
 }

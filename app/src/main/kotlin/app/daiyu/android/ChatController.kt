@@ -829,6 +829,7 @@ class ChatController internal constructor(private val application:Application,
     internal val videoHost by lazy { VideoChatHost(application.getSharedPreferences("video-drafts", 0), videoAttachments) }
     private val videoJournal by lazy { ControllerVideoJournal(application.getSharedPreferences("video-send-identities", 0)) }
     private val messageVideoFiles by lazy { ControllerVideoFiles(database, videoAttachments.store, messageImages) }
+    private val messageVideos by lazy { ControllerMessageVideos(database, videoAttachments.store, messageImages) }
     @Volatile private var videoSession: ControllerVideoSession? = null
     @Volatile private var videoUi: ControllerVideoUi? = null
     internal data class VideoSendState(val request: VideoDraftRequest, val editor: ControllerVideoEditor,
@@ -4157,7 +4158,79 @@ class ChatController internal constructor(private val application:Application,
         }
         val hasVideoFiles = videoAttempt != null || physicalVideoHistory.inputs.isNotEmpty()
         var videoPrepared: PreparedControllerVideoSend? = null
-        val videoPlan: ControllerVideoModelPlan? = if (hasVideoFiles) try {
+        var preparedVideoPlan: ControllerVideoModelPlan? = null
+        val projectVideoSettings: (ModelSettings) -> ModelSettings = { saved ->
+            app.daiyu.android.model.ReasoningRequestPolicy.freeze(ProviderSnapshot.capture(saved), reasoningIntent)
+                .asModelSettings()
+        }
+        val videoInventory = physicalVideoHistory.inputs.flatMap { it.references } + videoAttempt?.request?.videos.orEmpty()
+        val nativeVideoEligible = hasVideoFiles && token.videoEditor != null && videoUi != null &&
+            canProbeNativeVideo(requestProvider, videoInventory) && frozenReconnect.responsesBackground == null &&
+            !withChildren && imageAttempt == null && generation == null && terminalRun == null && terminalJobRun == null &&
+            virtualDisplay == null && gui == null && shizukuPreparation == null && shizukuAuthorization == null &&
+            mcpPreparation == null && browserPreparation == null && browserBinding == null
+        val nativeVideo = if (nativeVideoEligible) try {
+            token.videoRequired = true
+            check(token.videoRouteEpoch == videoRouteEpoch.get() && !preparationCancelled(token))
+            val epoch = videoConfigurationEpoch.get()
+            val loadVideoForRun: () -> ModelSettings = {
+                val current = freezeConversationProvider(conversation?.id)
+                check(current.editor.slotId == frozenProvider.editor.slotId &&
+                    current.localModelIdentity == frozenProvider.localModelIdentity) { "video_model_binding_changed" }
+                projectVideoSettings(current.settings)
+            }
+            val proof = try { ModelCatalogService(loadVideoForRun, loadSavedForRun = loadVideoForRun)
+                .fetchSavedVideoEvidence(requestProvider, epoch,
+                videoConfigurationEpoch::get) { preparationCancelled(token) || token.videoRouteEpoch != videoRouteEpoch.get() } } catch (failure: Exception) {
+                    if (preparationCancelled(token) || Thread.currentThread().isInterrupted) throw failure
+                    null // No video POST has begun: unknown or unsupported capability uses Linux.
+                }
+            if (proof == null) null else {
+                val ready = CountDownLatch(1)
+                var created: ControllerVideoSession? = null
+                handler.post {
+                    try {
+                        val ui = checkNotNull(videoUi)
+                        val editor = checkNotNull(token.videoEditor) { "video_requires_editor_owner" }
+                        check(!preparationCancelled(token) && ui.editor() == editor)
+                        val frozen = if (videoAttempt != null)
+                            app.daiyu.android.model.videos.FrozenVideoApprovalRequest.forDraft(videoAttempt.request,
+                                run.value, run.value, requestProvider, epoch, MessageHistory.expand(physicalVideoHistory.rows), physicalVideoHistory.inputs)
+                        else app.daiyu.android.model.videos.FrozenVideoApprovalRequest.forText(conversationId.value,
+                            run.value, run.value, editor.revision, text, requestProvider, epoch,
+                            MessageHistory.expand(physicalVideoHistory.rows), physicalVideoHistory.inputs)
+                        created = ControllerVideoSession(handler, database, requestProvider, epoch, videoRunEpoch.incrementAndGet(), videoConfigurationEpoch::get,
+                            { projectVideoSettings(frozenProvider.settings) }, ui, editor, physicalVideoHistory, assistant, frozen,
+                            isParentCurrent = { synchronized(this) {
+                                !closed && token.videoRouteEpoch == videoRouteEpoch.get() && videoSession === token.video &&
+                                    (preparation === token && !token.revoked || resources?.let {
+                                        it.initial.runId == run && !it.fenced
+                                    } == true)
+                            } }, currentAssistant = { synchronized(this) { active } }, cancelTransport = {
+                                token.cancellation.cancel()
+                                val owned = synchronized(this) { resources?.takeIf { it.initial.runId == run } }
+                                owned?.let(::stopRun)
+                            }).also { token.video = it; videoSession = it }
+                    } catch (_: Exception) { } finally { ready.countDown() }
+                }
+                while (!ready.await(50, TimeUnit.MILLISECONDS)) check(!preparationCancelled(token))
+                val session = checkNotNull(created)
+                val capability = session.authorize(proof)
+                videoPrepared = videoAttempt?.prepare(videoAttachments.store, requestProvider, capability, acceptedAt) { session.isRevoked() }
+                videoPrepared?.let {
+                    check(it.user == user && it.assistant == assistant) { "video_candidate_changed" }
+                    user = it.user
+                }
+                preparedVideoPlan = if (videoPrepared != null) messageVideos.preflight(physicalVideoHistory, requestProvider,
+                    capability, videoPrepared) { session.isRevoked() }
+                else messageVideos.preflightText(physicalVideoHistory, requestProvider, capability, user) { session.isRevoked() }
+                session to capability
+            }
+        } catch (_: Exception) {
+            token.video?.revoke()
+            problem="原视频发送准备失败，请检查附件和当前模型配置";notifyChanged();return null
+        } else null
+        if (hasVideoFiles && nativeVideo == null) preparedVideoPlan = try {
             token.videoRequired = true
             check(token.videoRouteEpoch == videoRouteEpoch.get() && !preparationCancelled(token))
             videoPrepared = videoAttempt?.prepareFiles(videoAttachments.store, acceptedAt) {
@@ -4181,7 +4254,8 @@ class ChatController internal constructor(private val application:Application,
         } catch (_: Exception) {
             problem = "视频附件无法写入当前会话工作区，请检查工作区后重试"
             notifyChanged(); return null
-        } else null
+        }
+        val videoPlan = preparedVideoPlan
         val preparedContext = try {
             // All sends, including the very first message, share the same frozen policy/budget.
             val coordinator = contextPreparation
@@ -4252,17 +4326,31 @@ class ChatController internal constructor(private val application:Application,
         var auxiliaryPort: ControllerAuxiliaryVision? = null
         val acceptedTitle = java.util.concurrent.atomic.AtomicReference<String?>()
         val pendingTitle = java.util.concurrent.atomic.AtomicReference<app.daiyu.android.title.TitleJob?>()
+        fun fileVideoModel(plan: ControllerVideoModelPlan): ModelPort {
+            val assembled = sessionModel?.invoke(requestProvider, assistantContext, screenSessionContext(conversationId, run.value))
+                ?: assistantModel?.invoke(requestProvider, assistantContext)
+                ?: if (plan.images.hasImages) imageModel(requestProvider) else model(requestConfig)
+            val background = frozenReconnect.responsesBackground
+            val delegate = if (background != null && assembled is app.daiyu.android.model.ResponsesModel)
+                assembled.withBackgroundResume(background) else assembled
+            return messageVideoFiles.wrap(delegate, requestProvider, conversationId, assistant.id,
+                plan, workspace) { !isRunUnfenced(assistant) }
+        }
         val preparedModel=try {
-            if (videoPlan != null) {
-                val assembled = sessionModel?.invoke(requestProvider, assistantContext, screenSessionContext(conversationId, run.value))
-                    ?: assistantModel?.invoke(requestProvider, assistantContext)
-                    ?: if (videoPlan.images.hasImages) imageModel(requestProvider) else model(requestConfig)
-                val background = frozenReconnect.responsesBackground
-                val delegate = if (background != null && assembled is app.daiyu.android.model.ResponsesModel)
-                    assembled.withBackgroundResume(background) else assembled
-                messageVideoFiles.wrap(delegate, requestProvider, conversationId, assistant.id,
-                    videoPlan, workspace) { !isRunUnfenced(assistant) }
-            } else {
+            if (nativeVideo != null) {
+                val nativeModel = messageVideos.wrap(requestProvider, nativeVideo.second, conversationId, assistant.id,
+                checkNotNull(videoPlan), assistantContext.systemPrompt, { nativeVideo.first.isRevoked() },
+                checkNotNull(nativeVideo.first.post), onFrozenPlan = nativeVideo.first::onFrozenPlan,
+                modelFactory = { p, instructions, permission, approval ->
+                    app.daiyu.android.model.ResponsesModel(p, instructions, permission, approval,
+                        sessionContext = screenSessionContext(conversationId, run.value))
+                })
+                nativeVideoWithFileFallback(nativeModel) {
+                    val filePlan = messageVideoFiles.preflight(physicalVideoHistory, requestProvider, user,
+                        videoPrepared, workspace) { !isRunUnfenced(assistant) }
+                    fileVideoModel(filePlan)
+                }
+            } else if (videoPlan != null) fileVideoModel(videoPlan) else {
             // Capability preflight is against the actual image route, not the text/main provider.
             val summaries = preparedContext.messages.filter { row ->
                 preparedContext.archiveId != null && row.id.value == "summary-${preparedContext.archiveId}" &&
@@ -4580,13 +4668,21 @@ class ChatController internal constructor(private val application:Application,
                             workingDirectory = workspace.resolved.hostDirectory, linuxState = linuxBinding.state,
                             androidConfiguration = androidCommands, shizukuUid = ordinaryShizuku?.uid,
                             shizukuBackend = { ordinaryShizukuScope?.backendForCommands() },
+                            imageReceipt = { context, png ->
+                                screenToolImages.fileReceipt(realOwner.conversationId.value, realOwner.runId.value,
+                                    context.invocation.id.value, png)
+                            },
                             approve = { context, effect, disclosure ->
                             commandApprovals.await(CommandApprovalRequest(realOwner, context.invocation.id.value,
                                 effect, disclosure), context.cancelled)
                         })
                     } catch (failure: Throwable) { launch?.close(); throw failure }
                 },
-                authorizationFactory = if (generation == null) null else { realOwner ->
+                authorizationFactory = if (nativeVideo != null) { realOwner ->
+                    nativeVideo.first.bindOwner(realOwner)
+                    app.daiyu.android.domain.tools.TaskAuthorization(capabilities.sessionId, run.value,
+                        browserBinding?.requiredWrites.orEmpty())
+                } else if (generation == null) null else { realOwner ->
                     synchronized(this) {
                         check(generationEntry === generation)
                         val session = checkNotNull(generation.session)
@@ -4837,6 +4933,7 @@ class ChatController internal constructor(private val application:Application,
             } catch (_: Exception) { titleNotice = "独立标题配置不可用" }
         }
         imageAttempt?.accepted(saved)
+        nativeVideo?.first?.accepted(user, videoPrepared?.inputs.orEmpty())
         synchronized(this) { virtualDisplay?.accepted = true; gui?.accepted = true }
         generation?.session?.recordPersistence(generation.identity, GenerationPersistenceReceipt.Accepted(saved))
         val lifetime=RunResources(assistant,owned,tools,auxiliaryPort,token.summaryPreparation, requestProvider,

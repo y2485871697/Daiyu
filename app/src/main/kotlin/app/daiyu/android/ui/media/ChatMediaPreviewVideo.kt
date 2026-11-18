@@ -1,8 +1,8 @@
 package app.daiyu.android.ui.media
 
 import android.net.Uri
-import android.widget.VideoView
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -16,6 +16,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -29,7 +30,7 @@ import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-/** Original VideoView rendering, scoped to the current page and the foreground lifecycle. */
+/** Texture-backed original video rendering, scoped to the current page and the foreground lifecycle. */
 @Composable
 internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, modifier: Modifier = Modifier,
     landscape: Boolean = false, onToggleOrientation: () -> Unit = {}) {
@@ -37,11 +38,12 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     val lifecycleState by lifecycle.currentStateFlow.collectAsState()
     val currentActive by rememberUpdatedState(active)
-    val view = remember(context, item.key) { VideoView(context) }
+    val view = remember(context, item.key) { ChatMediaPreviewVideoView(context) }
     var controls by remember(item.key) { mutableStateOf(ChatMediaPreviewVideoControlsState()) }
     var loading by remember(item) { mutableStateOf(false) }
     var failed by remember(item) { mutableStateOf(false) }
     var prepared by remember(item.key) { mutableStateOf(false) }
+    var videoSize by remember(item.key) { mutableStateOf(0 to 0) }
     val resumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
     val shouldStage = chatMediaPreviewVideoShouldPlay(active, resumed)
 
@@ -58,8 +60,10 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
             lifecycle.removeObserver(observer)
             if (prepared) controls = controls.positionChanged(view.currentPosition)
             prepared = false
+            view.setOnVideoSizeChangedListener(null)
             view.setOnPreparedListener(null)
             view.setOnErrorListener(null)
+            view.setOnPlaybackInterruptedListener(null)
             view.stopPlayback()
         }
     }
@@ -74,7 +78,10 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
         try {
             withChatMediaPreviewVideo(context, item) { file ->
                 try {
+                    view.setOnPlaybackInterruptedListener { controls = controls.copy(playRequested = false) }
+                    view.setOnVideoSizeChangedListener { _, width, height -> videoSize = width to height }
                     view.setOnPreparedListener { player ->
+                        videoSize = player.videoWidth to player.videoHeight
                         player.isLooping = true
                         controls = controls.prepared(player.duration)
                         prepared = true
@@ -89,12 +96,11 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
                             view.pause()
                         }
                     }
-                    view.setOnErrorListener { _, _, _ ->
+                    view.setOnErrorListener {
                         prepared = false
                         loading = false
                         failed = true
                         controls = controls.hidden()
-                        true
                     }
                     view.setVideoURI(Uri.fromFile(file))
                     // Pausing or scrubbing must not restart staging or delete the playback file.
@@ -106,6 +112,7 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
                     loading = false
                     view.setOnPreparedListener(null)
                     view.setOnErrorListener(null)
+                    view.setOnPlaybackInterruptedListener(null)
                     view.stopPlayback()
                 }
             }
@@ -128,10 +135,12 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
             controls = controls.positionChanged(view.currentPosition)
         }
     }
-    Box(modifier) {
+    BoxWithConstraints(modifier) {
+        val frame = chatMediaPreviewVideoFit(maxWidth.value, maxHeight.value, videoSize.first, videoSize.second)
         AndroidView(
             factory = { view },
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.align(Alignment.Center).size(frame.first.dp, frame.second.dp)
+                .testTag("chat-media-video-renderer"),
             onReset = null,
             update = { if (!controls.shouldPlay(active, resumed)) it.pause() },
             onRelease = { it.stopPlayback() },

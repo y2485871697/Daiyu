@@ -329,9 +329,13 @@ class ResponsesModel internal constructor(
                     settings.requestOptions.nativeSearchEnabled(ProviderProtocol.RESPONSES, settings.model, settings.endpoint, tools)),
                 assistantInstructions,
             )
+            // Validate custom-body history before trusted tool-image projection changes it.
+            videoPlan?.validateRequest(settings, request, input)
             val screenInput = ScreenToolImageInput.prepare(request, input, settings, capability,
                 imagePlan?.media.orEmpty().map { it.bytes.toInt() }, cancelled::get, sessionContext?.screenImageReader, outputs.map { it.callId.value }.toSet())
             request = screenInput.request
+            val videoWireInput = if (videoPlan == null) input else
+                org.json.JSONArray(request.getJSONArray("input").toString())
             if (java.net.URI(settings.endpoint).host.equals("ark.cn-beijing.volces.com", true)) request.remove("include")
             if (backgroundResume != null) {
                 backgroundResume.requireMatches(settings)
@@ -340,13 +344,12 @@ class ResponsesModel internal constructor(
             if (settings.oauth != null) app.daiyu.android.model.oauth.CodexRequestPolicy.apply(request, settings.requestOptions.speedMode, preserveReasoning = summaryRequest)
             val finalUrl = settings.requestEndpoint()
             SessionGateway.applyResponses(request, finalUrl, settings.requestOptions.sessionGateway, sessionContext)
-            if (videoPlan != null) app.daiyu.android.model.videos.VideoRequestPolicy.disableReasoning(request)
             ReasoningRequestPolicy.validate(request, ProviderProtocol.RESPONSES, if (summaryRequest) null else settings.reasoningOverride,
                 if (summaryRequest) null else request.opt("model") as? String)
             val sessionHeaders = SessionGateway.headers(finalUrl, sessionContext, settings.requestOptions.sessionGateway)
             // Video-only allowlist and exact history binding apply to the final merged payload
             // on EVERY round, before serialization/connect. Ordinary provider options stay flexible.
-            videoPlan?.validateRequest(settings, request, input)
+            videoPlan?.validateRequest(settings, request, videoWireInput)
             // Resolve on a small copy: never mutate the session's marker history between rounds.
             val projectedRequest = TerminalToolResultProjection.request(request, settings.protocol)
             val wireRequest = JSONObject(projectedRequest.toString())
@@ -416,7 +419,7 @@ class ResponsesModel internal constructor(
                     // Neither that external operation nor the connection factory may hold the
                     // control lock: cancel must return even if either waits on DB/another gate.
                     videoPlan?.validate(settings, videoCapability, historySnapshot)
-                    videoPlan?.validateRequest(settings, request, input)
+                    videoPlan?.validateRequest(settings, request, videoWireInput)
                     checkCancelled()
                     pendingPost.consume(approval)
                 }

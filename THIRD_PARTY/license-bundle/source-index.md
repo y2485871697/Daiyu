@@ -67,3 +67,7 @@ Required Notice: Copyright © 2026 蛮吉 (Mangi-11).
 
 - The maintainer explicitly requested the original sponsor QR images. Exact original bytes, source revision and paths are pinned in `THIRD_PARTY/sponsor-assets/sources.json`; bundled under `assets/sponsor/`. No new license grant for the payment images is inferred.
 - Telegram, Tencent QQ and GitHub link icons use unmodified path geometry from Simple Icons 11.0.0 (CC0-1.0). Original SVGs, immutable revision and file hashes are pinned in `THIRD_PARTY/community-icons/sources.json`; the license is included at `community-icons/LICENSE.md`. Brand trademarks remain with their owners; these icons only identify their corresponding links, without implying endorsement.
+
+## Video-only NeoPlayer progress adaptation
+
+`ChatMediaPreviewVideoProgress.kt` adapts only the wave drawing from `NextPlayerCloud/NeoPlayer@4151a45f862550a91b7a8efe35a6b19841242d48` `Seekbar.kt`; parameters retain upstream pixel/dp units. Complete Apache-2.0 and the local modification/provenance notice are preserved in `THIRD_PARTY/neoplayer/` and bundled as `assets/licenses/neoplayer/{LICENSE,NOTICE.md}`. No full player or new runtime dependency is imported.

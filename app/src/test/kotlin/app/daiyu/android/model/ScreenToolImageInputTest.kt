@@ -91,10 +91,10 @@ class ScreenToolImageInputTest {
         override fun getResponseCode() = 200
         override fun getContentType() = "text/event-stream"
     }
-    private fun events(protocol: ProviderProtocol, tool: Boolean): String {
+    private fun events(protocol: ProviderProtocol, tool: Boolean, toolName: String = "screen", toolArguments: String = args): String {
         if (protocol == ProviderProtocol.RESPONSES) {
             val call = JSONObject().put("type", "function_call").put("id", "fc").put("call_id", "call")
-                .put("name", "screen").put("arguments", args)
+                .put("name", toolName).put("arguments", toolArguments)
             return (if (tool) "data: ${JSONObject().put("type", "response.output_item.done").put("item", call)}\n\n" else "") +
                 "data: ${JSONObject().put("type", "response.completed").put("response", JSONObject().put("status", "completed")
                     .put("output", JSONArray().apply { if (tool) put(call) }))}\n\n"
@@ -102,13 +102,13 @@ class ScreenToolImageInputTest {
         if (protocol == ProviderProtocol.CHAT_COMPLETIONS) {
             val delta = JSONObject().put("role", "assistant")
             if (tool) delta.put("tool_calls", JSONArray().put(JSONObject().put("index", 0).put("id", "call")
-                .put("type", "function").put("function", JSONObject().put("name", "screen").put("arguments", args))))
+                .put("type", "function").put("function", JSONObject().put("name", toolName).put("arguments", toolArguments))))
             else delta.put("content", "ok")
             return "data: ${JSONObject().put("id", "fixture").put("choices", JSONArray().put(JSONObject().put("index", 0)
                 .put("delta", delta).put("finish_reason", if (tool) "tool_calls" else "stop")))}\n\ndata: [DONE]\n\n"
         }
-        val block = if (tool) JSONObject().put("type", "tool_use").put("id", "call").put("name", "screen")
-            .put("input", JSONObject(args)) else JSONObject().put("type", "text").put("text", "ok")
+        val block = if (tool) JSONObject().put("type", "tool_use").put("id", "call").put("name", toolName)
+            .put("input", JSONObject(toolArguments)) else JSONObject().put("type", "text").put("text", "ok")
         return listOf(
             JSONObject().put("type", "message_start").put("message", JSONObject().put("id", "m").put("role", "assistant").put("content", JSONArray())),
             JSONObject().put("type", "content_block_start").put("index", 0).put("content_block", block),
@@ -648,6 +648,162 @@ class ScreenToolImageInputTest {
             TokenTailCompression.historyTokens(listOf(second), includeLatestScreen = false),
             TokenTailCompression.historyTokens(both, includeLatestScreen = false))
         assertTrue(TokenTailCompression.historyTokens(both, includeLatestScreen = false) < TokenTailCompression.historyTokens(both))
+    }
+
+    @Test fun pendingFileImageReachesAllThreeRealProviderRequestsAsActualPixels() {
+        val root = java.nio.file.Files.createTempDirectory("file-image-input").toFile()
+        try {
+            val store = app.daiyu.android.media.ScreenToolImageStore(root)
+            val bytes = png()
+            val arguments = """{"path":"/tmp/daiyu-video-fixture/frame.png"}"""
+            val output = store.fileReceipt("c", "r", "call", bytes)
+            val fileTool = ToolDefinition("read_image", "fixture", """{"type":"object","properties":{"path":{"type":"string"}}}""", false)
+            protocols.forEach { protocol ->
+                var reads = 0
+                val context = app.daiyu.android.model.sessiongateway.SessionGatewayContext(ConversationId("c")) { call, value ->
+                    reads++; store.read("c", call, value, "r")
+                }
+                val connections = mutableListOf<Connection>()
+                val session = modelWithImages(protocol, context) {
+                    Connection(events(protocol, connections.isEmpty(), "read_image", arguments)).also(connections::add)
+                }.open(emptyList(), listOf(fileTool))
+                session.next(emptyList()) {}
+                val delivered = mutableListOf<ModelEvent>()
+                session.next(listOf(ToolOutput(ToolCallId("call"), output)), delivered::add)
+                assertEquals(1, reads)
+                val wire = JSONObject(connections.last().sent.toString("UTF-8"))
+                assertEquals(1, imageCount(wire))
+                assertTrue(wire.toString().contains(Base64.getEncoder().encodeToString(bytes)))
+                assertFalse(wire.toString().contains("image_asset"))
+                val persisted = delivered.filterIsInstance<ModelEvent.ProtocolOutput>().last().items.joinToString()
+                assertTrue(persisted.contains("image_asset"))
+                assertFalse(persisted.contains(Base64.getEncoder().encodeToString(bytes)))
+                session.cancel()
+                val old = modelWithImages(protocol, context) { Connection(events(protocol, false)) }
+                    .open(listOf(history(output, "read_image", arguments)), listOf(fileTool))
+                old.next(emptyList()) {}
+                assertEquals(1, reads)
+                old.cancel()
+            }
+            store.finishRun("c", "r")
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun nativeVideoAndFileImageContinuationKeepBothPayloadsReasoningAndFreshPostPermits() {
+        val root = java.nio.file.Files.createTempDirectory("native-video-file-frame").toFile()
+        try {
+            val config = ModelSettings(app.daiyu.android.model.videos.OpenRouterVideoCapability.ENDPOINT,
+                "fixture/exact-model", "synthetic-key", false,
+                requestOptions = ProviderRequestOptions("""{"reasoning":{"effort":"high","summary":"auto"}}"""))
+            val videoStore = app.daiyu.android.media.video.VideoAssetStore(java.io.File(root, "videos"),
+                app.daiyu.android.media.video.VideoAttachmentLimits(),
+                app.daiyu.android.media.video.VideoInspector { _, _, _ ->
+                    app.daiyu.android.media.video.VideoMetadata("video/mp4", 1000, 32, 24)
+                })
+            val original = byteArrayOf(5, 4, 3, 2, 1)
+            val videoOwner = app.daiyu.android.media.video.MessageVideoOwner("c", "u")
+            val ref = videoStore.prepare(videoOwner, videoStore.import(
+                app.daiyu.android.media.video.VideoAttachmentOwner("c", "d"), original.inputStream()))
+            val user = Message(MessageId("u"), ConversationId("c"), RunId("r"), "user",
+                listOf(MessageBlock.Text("t", "Describe the video")), RunStatus.COMPLETED)
+            val capability = app.daiyu.android.model.videos.OpenRouterVideoCapability.grant(
+                config.model, config.requestEndpoint(), true, true)
+            val plan = app.daiyu.android.model.videos.FrozenMessageVideoPlan.freeze(listOf(user), ProviderSnapshot.capture(config),
+                capability, listOf(app.daiyu.android.media.video.MessageVideoInput(videoOwner, listOf(ref))), videoStore,
+                { app.daiyu.android.media.video.MessageVideoOwner(it.conversationId.value, it.id.value) })
+            val frames = app.daiyu.android.media.ScreenToolImageStore(java.io.File(root, "frames"))
+            val bytes = png()
+            val receipt = frames.fileReceipt("c", "r", "call", bytes)
+            val arguments = """{"path":"/tmp/daiyu-video-fixture/frame.png"}"""
+            val connections = mutableListOf<Connection>()
+            var consumed = 0
+            val approvals = app.daiyu.android.model.videos.VideoPostApprovalProvider { request ->
+                val spent = java.util.concurrent.atomic.AtomicBoolean(false)
+                request.bindPermitConsumption { check(spent.compareAndSet(false, true)); consumed++ }
+            }
+            val context = app.daiyu.android.model.sessiongateway.SessionGatewayContext(ConversationId("c")) { call, output ->
+                frames.read("c", call, output, "r")
+            }
+            val session = ResponsesModel(config, {
+                Connection(events(ProviderProtocol.RESPONSES, connections.isEmpty(), "read_image", arguments)).also(connections::add)
+            }, true, videoInputCapability = capability, videoPostApprovalProvider = approvals, sessionContext = context)
+                .open(listOf(user), listOf(ToolDefinition("read_image", "fixture", """{"type":"object","properties":{"path":{"type":"string"}}}""", false)), plan)
+            session.next(emptyList()) {}
+            val delivered = mutableListOf<ModelEvent>()
+            session.next(listOf(ToolOutput(ToolCallId("call"), receipt)), delivered::add)
+            assertEquals(2, connections.size)
+            assertEquals(2, consumed)
+            connections.forEachIndexed { index, connection ->
+                val wire = JSONObject(connection.sent.toString("UTF-8"))
+                assertEquals("high", wire.getJSONObject("reasoning").getString("effort"))
+                assertEquals("data:video/mp4;base64," + Base64.getEncoder().encodeToString(original),
+                    wire.getJSONArray("input").getJSONObject(0).getJSONArray("content").getJSONObject(1).getString("video_url"))
+                assertEquals(index, imageCount(wire))
+            }
+            assertTrue(connections.last().sent.toString("UTF-8").contains(Base64.getEncoder().encodeToString(bytes)))
+            val persisted = delivered.filterIsInstance<ModelEvent.ProtocolOutput>().last().items.joinToString()
+            assertTrue(persisted.contains("image_asset"))
+            assertFalse(persisted.contains(Base64.getEncoder().encodeToString(bytes)))
+            session.cancel()
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun pendingFileImageBatchKeepsEveryFrameButUnknownAndNonPendingCallsGetNoPixels() {
+        val root = java.nio.file.Files.createTempDirectory("file-image-batch").toFile()
+        try {
+            val store = app.daiyu.android.media.ScreenToolImageStore(root)
+            val arguments = """{"path":"/tmp/daiyu-video-fixture/frame.png"}"""
+            val first = store.fileReceipt("c", "r", "frame1", png())
+            val second = store.fileReceipt("c", "r", "frame2", png())
+            protocols.forEach { protocol ->
+                val frames = listOf("frame1" to first, "frame2" to second)
+                val source = when (protocol) {
+                    ProviderProtocol.RESPONSES -> JSONArray().apply {
+                        frames.forEach { (id, _) -> put(JSONObject().put("type", "function_call")
+                            .put("call_id", id).put("name", "read_image").put("arguments", arguments)) }
+                        frames.forEach { (id, output) -> put(JSONObject().put("type", "function_call_output")
+                            .put("call_id", id).put("output", output)) }
+                    }
+                    ProviderProtocol.MESSAGES -> JSONArray().put(JSONObject().put("role", "assistant")
+                        .put("content", JSONArray().apply { frames.forEach { (id, _) ->
+                            put(JSONObject().put("type", "tool_use").put("id", id).put("name", "read_image")
+                                .put("input", JSONObject(arguments)))
+                        } })).put(JSONObject().put("role", "user").put("content", JSONArray().apply {
+                            frames.forEach { (id, output) -> put(JSONObject().put("type", "tool_result")
+                                .put("tool_use_id", id).put("content", output)) }
+                        }))
+                    else -> JSONArray().put(JSONObject().put("role", "assistant").put("tool_calls", JSONArray().apply {
+                        frames.forEach { (id, _) -> put(JSONObject().put("id", id).put("type", "function")
+                            .put("function", JSONObject().put("name", "read_image").put("arguments", arguments))) }
+                    })).apply { frames.forEach { (id, output) ->
+                        put(JSONObject().put("role", "tool").put("tool_call_id", id).put("content", output))
+                    } }
+                }
+                var reads = 0
+                val reader: (String, String) -> ByteArray? = { call, value -> reads++; store.read("c", call, value, "r") }
+                val pending = setOf("frame1", "frame2")
+                val result = ScreenToolImageInput.prepare(body(protocol, source), source, settings(protocol), true,
+                    emptyList(), { false }, reader, pending)
+                assertEquals(2, reads)
+                assertEquals(2, imageCount(result.request))
+                assertFalse(result.request.toString().contains("image_asset"))
+                for (notPending in listOf<Set<String>?>(null, emptySet())) {
+                    val old = ScreenToolImageInput.prepare(body(protocol, source), source, settings(protocol), true,
+                        emptyList(), { false }, reader, notPending)
+                    assertEquals(0, imageCount(old.request))
+                }
+                val foreign = ScreenToolImageInput.prepare(body(protocol, source), JSONArray(), settings(protocol), true,
+                    emptyList(), { false }, reader, pending)
+                assertEquals(0, imageCount(foreign.request))
+                assertEquals(2, reads)
+                assertThrows(ImageAttachmentException::class.java) {
+                    ScreenToolImageInput.prepare(body(protocol, source), source, settings(protocol), true,
+                        List(8) { 1 }, { false }, reader, pending)
+                }
+                assertEquals(2, reads)
+            }
+            store.finishRun("c", "r")
+        } finally { root.deleteRecursively() }
     }
 
 }

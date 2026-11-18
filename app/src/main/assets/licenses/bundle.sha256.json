@@ -83,6 +83,16 @@
       "sha256": "64bc8696af3f6c770521412b85d3a733fa44b2ef5b0f4bd739e0c4d02eca492a"
     },
     {
+      "path": "app/src/main/assets/licenses/neoplayer/LICENSE",
+      "bytes": 11357,
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "app/src/main/assets/licenses/neoplayer/NOTICE.md",
+      "bytes": 1014,
+      "sha256": "6143ab61e919bfacc722e5313d36ca93254a6d908f5aae2104613e78f7ccb93c"
+    },
+    {
       "path": "app/src/main/assets/licenses/openminis/NOTICE.md",
       "bytes": 3909,
       "sha256": "71bf93d6096826e74b10e3d50e1e88620e64ac4d4d06f9b869af4de064de0248"
@@ -144,8 +154,8 @@
     },
     {
       "path": "app/src/main/assets/licenses/source-index.md",
-      "bytes": 15788,
-      "sha256": "d1de34cffeff83971b7a1a800b9e8194cc161e7f5467fa98f5c154e93dbe0fbf"
+      "bytes": 16254,
+      "sha256": "df188a737e2dd0d05bc8f78c161aa329228c24a19df8ab802710b95dabf77aac"
     },
     {
       "path": "app/src/main/assets/licenses/sponsor-assets/sources.json",

@@ -11,6 +11,8 @@ import java.security.MessageDigest
 internal interface CommandTransport : AutoCloseable {
     fun execute(name: String, arguments: JSONObject): JSONObject
     fun read(id: String, offset: Long, limit: Int): JSONObject
+    fun readLinuxTmpPng(path: String, cancelled: () -> Boolean): ByteArray =
+        throw UnsupportedOperationException("linux_tmp_png_read_unsupported")
     fun awaitTermination(timeoutMillis: Long): Boolean
 }
 
@@ -49,6 +51,7 @@ internal class RunCommandTools(
     private val create: (String, TerminalConfiguration) -> CommandTransport,
     private val linuxState: TerminalLinuxState? = null,
     private val shizukuUid: Int? = null,
+    private val imageReceipt: ((ToolExecutionContext, ByteArray) -> String)? = null,
 ) : AutoCloseable {
     companion object {
         const val CAPABILITY = "terminal.command.consent"
@@ -81,6 +84,7 @@ internal class RunCommandTools(
             androidConfiguration: TerminalConfiguration = androidConfiguration(context, workingDirectory),
             shizukuUid: Int? = null,
             shizukuBackend: () -> app.daiyu.android.shizuku.ShizukuBackend? = { null },
+            imageReceipt: ((ToolExecutionContext, ByteArray) -> String)? = null,
             approve: (ToolExecutionContext, WriteEffect, String) -> Boolean): RunCommandTools {
             val configuration = androidConfiguration
             require(configuration.backend in setOf("android", "shizuku") && configuration.linux == null && configuration.workingDirectory == workingDirectory)
@@ -92,11 +96,13 @@ internal class RunCommandTools(
                     object : CommandTransport {
                         override fun execute(name: String, arguments: JSONObject) = registry.execute(name, arguments)
                         override fun read(id: String, offset: Long, limit: Int) = registry.inspectJob(id, offset, limit)
+                        override fun readLinuxTmpPng(path: String, cancelled: () -> Boolean) =
+                            registry.readLinuxTmpPng(path, cancelled)
                         override fun close() = registry.close()
                         override fun awaitTermination(timeoutMillis: Long) = registry.awaitOrdinaryTermination(timeoutMillis)
                     }
                 }
-            }, linuxState = linuxState, shizukuUid = shizukuUid)
+            }, linuxState = linuxState, shizukuUid = shizukuUid, imageReceipt = imageReceipt)
         }
     }
     private val lock = Any()
@@ -212,7 +218,48 @@ internal class RunCommandTools(
                 }
             })
         }
+    }) + if (imageReceipt == null) emptyList() else listOf(object : RegisteredTool {
+        override val definition = app.daiyu.android.domain.tools.ToolDefinition("read_image", 1,
+            "实际查看当前已绑定 Linux 的 /tmp 下 PNG 抽帧图片，并把画面交给视觉模型；不操作或观察手机屏幕。" +
+                "请先用 terminal_exec 在当前 Linux 抽帧，单张 PNG 不超过 128 KiB；超限时缩小尺寸重新抽帧。" +
+                "这里只读取图片，不删除源文件。查看并完成分析后，用 Linux 命令删除本次临时目录及产物，保留原视频。",
+            CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
+                ArgumentField("path", ArgumentType.Text(maxLength = 2048, minimumLength = 10)))))
+        override fun prepare(arguments: ToolArguments): PreparedTool {
+            val path = arguments.text("path")
+            require(path.startsWith("/tmp/") && path.endsWith(".png") && '\u0000' !in path &&
+                path.removePrefix("/tmp/").split('/').all { it.isNotEmpty() && it != "." && it != ".." })
+            return PreparedTool.contextual(admit = ::denied, execute = { call ->
+                if (call.cancelled()) ExecutionReceipt.NotExecuted("image_read_cancelled")
+                else try {
+                    val png = readLinuxTmpPng(call, path)
+                    if (call.cancelled() || denied(call) != null) ExecutionReceipt.NotExecuted("image_read_cancelled")
+                    else ExecutionReceipt.Confirmed(checkNotNull(imageReceipt)(call, png))
+                } catch (failure: LinuxTmpPngReadException) {
+                    ExecutionReceipt.Confirmed(JSONObject().put("ok", false).put("error", failure.reason)
+                        .put("message", failure.guidance).toString(), isError = true)
+                }
+            })
+        }
     })
+
+    internal fun readLinuxTmpPng(call: ToolExecutionContext, path: String): ByteArray =
+        synchronized(executionLock) {
+            check(denied(call) == null) { "terminal_read_image_context_denied" }
+            if (call.cancelled()) throw java.util.concurrent.CancellationException("terminal_cancelled")
+            val registry = synchronized(lock) {
+                check(!closed && !unknown) { "terminal_closed_or_unknown" }
+                checkNotNull(registries["linux"]) { "linux_terminal_exec_required_before_read_image" }
+            }
+            checkNotNull(linux) { linuxUnavailableReason }.revalidate()
+            val bytes = registry.readLinuxTmpPng(path) {
+                call.cancelled() || synchronized(lock) { closed }
+            }
+            check(denied(call) == null) { "terminal_read_image_context_denied" }
+            if (call.cancelled()) throw java.util.concurrent.CancellationException("terminal_cancelled")
+            bytes
+        }
+
     private fun execute(call: ToolExecutionContext, effect: WriteEffect, environment: String,
         command: String, timeout: Long): ExecutionReceipt = synchronized(executionLock) {
         try { executeSerial(call, effect, environment, command, timeout) }

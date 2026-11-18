@@ -185,7 +185,7 @@ private fun VideoAttachmentsContent(
                 enabled = canEdit && !picker.selecting && state.remaining > 0 && state.items.none { it is VideoChatHost.Item.Importing },
                 modifier = Modifier.heightIn(min = 48.dp).testTag("video_attachments_select"))
         }
-        if (!compact) Text("视频原件供模型通过 Linux 工具读取，不直接上传视频。",
+        if (!compact) Text("模型与接口支持时直接发送原视频，否则使用 Linux 工具抽帧读取。",
             style = MiuixTheme.textStyles.footnote1, color = colors.onSurfaceVariantSummary)
         if (picker.selecting) VideoStatus("正在选择视频…", "video_attachments_selecting")
         picker.notice?.let { VideoStatus(it, "video_attachments_notice") }

@@ -55,7 +55,7 @@ jobs:
           import json, unittest
           from pathlib import Path
           records = []
-          for pattern in ('test_media_send_contract.py', 'test_tool_receipt_snapshot_contract.py', 'test_tool_receipt_pause_contract.py', 'test_record_tool_tests_scope.py', 'test_acceptance_tool_receipt.py', 'test_message_composer_edit_contract.py', 'test_preview_dialog_status_bar_contract.py', 'test_work_timeline_connector_contract.py', 'test_image_sidebar_visibility_contract.py', 'test_message_edit_revalidation_contract.py', 'test_message_action_snapshot_admission_contract.py'):
+          for pattern in ('test_terminal_tmp_png_reader.py', 'test_license_bundle.py', 'test_media_send_contract.py', 'test_tool_receipt_snapshot_contract.py', 'test_tool_receipt_pause_contract.py', 'test_record_tool_tests_scope.py', 'test_acceptance_tool_receipt.py', 'test_message_composer_edit_contract.py', 'test_preview_dialog_status_bar_contract.py', 'test_work_timeline_connector_contract.py', 'test_image_sidebar_visibility_contract.py', 'test_message_edit_revalidation_contract.py', 'test_message_action_snapshot_admission_contract.py'):
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)
@@ -95,6 +95,13 @@ jobs:
             --tests '*ImageAttachmentsStateTest' \
             --tests '*VideoChatHostTest' \
             --tests '*ControllerVideoFilesTest' \
+            --tests '*ControllerVideoNativeRouteTest' \
+            --tests '*VideoDefaultReasoningTest' \
+            --tests '*OpenRouterVideoInputTest' \
+            --tests '*ScreenToolImageStoreTest' \
+            --tests '*ScreenToolImageInputTest' \
+            --tests '*TerminalImageReadTest' \
+            --tests '*RunCommandToolsTest' \
             --tests '*ComposerReferencesTest' \
             --tests '*ToolReceiptSourceTest' \
             --tests '*ChatTurnMapperTest' \
@@ -110,12 +117,13 @@ jobs:
           expected_groups = ('ChatMediaPreview', 'MessageMediaLayoutTest', 'MessageMediaPreviewBridgeTest',
                              'EditingImageSelectionStoreTest', 'MessageEditBaselineTest', 'MessageActionRenderedRevisionTest',
                              'ForegroundComposerStateTest', 'MessageImageContractTest', 'ImageAttachmentsStateTest',
-                             'VideoChatHostTest', 'ControllerVideoFilesTest', 'ComposerReferencesTest', 'ToolReceiptSourceTest',
+                             'VideoChatHostTest', 'ControllerVideoFilesTest', 'ControllerVideoNativeRouteTest', 'VideoDefaultReasoningTest', 'OpenRouterVideoInputTest', 'ScreenToolImageStoreTest', 'ScreenToolImageInputTest', 'TerminalImageReadTest', 'RunCommandToolsTest', 'ComposerReferencesTest', 'ToolReceiptSourceTest',
                              'ChatTurnMapperTest', 'ReasoningWorkflowMapperTest')
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert all(any(group in name for name in names) for group in expected_groups), (names, expected_groups)
           assert 'ChatMediaPreviewVideoControlsTest' in names, names
+          assert 'ChatMediaPreviewVideoLayoutTest' in names, names
           assert all(any(group in name for group in expected_groups) for name in names), names
           assert all(int(s.attrib['tests']) > 0 for s in suites)
           assert all(int(s.attrib.get(k, 0)) == 0 for s in suites for k in ('failures', 'errors', 'skipped'))

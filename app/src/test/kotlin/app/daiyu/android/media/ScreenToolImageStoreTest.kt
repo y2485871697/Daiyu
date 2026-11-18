@@ -135,4 +135,45 @@ class ScreenToolImageStoreTest {
         assertThrows(IllegalStateException::class.java) { write(store, image, call = "late") }
     }
 
+    @Test fun fileImagesRequireTheCurrentLiveRunAndNeverMasqueradeAsScreen() {
+        val root = folder.newFolder()
+        val store = ScreenToolImageStore(root)
+        val bytes = image().png
+        val receipt = store.fileReceipt("c", "r", "frame", bytes)
+        assertEquals(0, root.walkTopDown().count { it.extension == "png" })
+        val args = """{"path":"/tmp/daiyu-video-fixture/frame.png"}"""
+        assertFalse(receipt.contains("data_base64"))
+        assertFalse(receipt.contains("/tmp/"))
+        assertArrayEquals(bytes, store.read("c", "frame", receipt, "r"))
+        assertNull(store.read("c", "frame", receipt))
+        assertNull(store.read("c", "frame", receipt, "other"))
+        assertNull(store.read("other", "frame", receipt, "r"))
+        assertNull(store.read("c", "other", receipt, "r"))
+        assertNotNull(NativeFileImage.parse("read_image", args, receipt) { store.read("c", "frame", it, "r") })
+        assertNull(NativeScreenImage.parse("read_image", args, receipt) { store.read("c", "frame", it, "r") })
+        assertNull(ScreenToolImageStore(root).read("c", "frame", receipt, "r"))
+        assertEquals(1, store.finishRun("c", "r"))
+        assertNull(store.read("c", "frame", receipt, "r"))
+        assertEquals(0, root.walkTopDown().count { it.extension == "png" })
+    }
+
+    @Test fun fileImageMetadataRejectsInlineDataForeignFieldsAndInvalidPngHeaders() {
+        val store = ScreenToolImageStore(folder.newFolder())
+        val bytes = image().png
+        val receipt = store.fileReceipt("c", "r", "frame", bytes)
+        val args = """{"path":"/tmp/frame.png"}"""
+        for (field in listOf("data_base64", "capture_id", "observation_id", "url")) {
+            assertNull(NativeFileImage.metadata("read_image", args, JSONObject(receipt).put(field, "forged").toString()))
+        }
+        assertNull(NativeFileImage.metadata("screen", args, receipt))
+        assertNull(NativeFileImage.metadata("read_image", "{}", receipt))
+        assertNull(NativeFileImage.pngDimensions(bytes.copyOf(20)))
+        assertNull(NativeFileImage.pngDimensions(bytes.copyOf().also { it[0] = 0 }))
+        val wrongSize = JSONObject(receipt).put("width", 99).toString()
+        assertNull(NativeFileImage.parse("read_image", args, wrongSize) { store.read("c", "frame", receipt, "r") })
+        val tampered = JSONObject(receipt).apply { getJSONObject("image_asset").put("sha256", "0".repeat(64)) }.toString()
+        assertNull(store.read("c", "frame", tampered, "r"))
+        store.finishRun("c", "r")
+    }
+
 }

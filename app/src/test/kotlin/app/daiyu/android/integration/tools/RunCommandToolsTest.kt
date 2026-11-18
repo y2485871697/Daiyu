@@ -12,7 +12,7 @@ import java.io.File
 class RunCommandToolsTest {
     private class Fixture(private val automaticConsent: Boolean = false, linuxState: app.daiyu.android.terminal.TerminalLinuxState? = null,
         androidConfiguration: TerminalConfiguration = TerminalConfiguration(workingDirectory = File("/fixed")),
-        linuxLaunch: TerminalPtyLaunch.Linux? = null) {
+        linuxLaunch: TerminalPtyLaunch.Linux? = null, fileImages: Boolean = false) {
         val owner = runnerOwner(Message(MessageId("m"), ConversationId("c"), RunId("r"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
         val task = TaskAuthorization("s", "r")
@@ -20,6 +20,11 @@ class RunCommandToolsTest {
         var prompts = 0
         var created = 0
         var executions = 0
+        var imageReads = 0
+        var imageReceipts = 0
+        var imagePath: String? = null
+        var afterImageRead: () -> Unit = {}
+        var imageFailure: LinuxTmpPngReadException? = null
         var closes = 0
         var drains = 0
         var onCreate: () -> Unit = {}
@@ -50,7 +55,13 @@ class RunCommandToolsTest {
                 if (automaticConsent) gate.await(CommandApprovalRequest(owner, context.invocation.id.value,
                     effect, disclosure), context.cancelled)
                 else { prompts++; approved }
-            }, linuxState = linuxState, create = { _, configuration ->
+            }, linuxState = linuxState, imageReceipt = if (!fileImages) null else { context, bytes ->
+                assertSame(owner, context.owner)
+                assertSame(task, context.authorization)
+                assertArrayEquals(byteArrayOf(1, 2, 3), bytes)
+                imageReceipts++
+                "image-receipt"
+            }, create = { _, configuration ->
                 configurations.add(configuration)
                 created++; onCreate()
                 object : CommandTransport {
@@ -70,6 +81,12 @@ class RunCommandToolsTest {
                             .put("job_id", "00000000-0000-0000-0000-000000000001").put("stdout", "exact\n")
                     }
                     override fun read(id: String, offset: Long, limit: Int) = JSONObject().put("ok", true).put("execution", "executed")
+                    override fun readLinuxTmpPng(path: String, cancelled: () -> Boolean): ByteArray {
+                        assertFalse(cancelled())
+                        imageReads++; imagePath = path; afterImageRead()
+                        imageFailure?.let { throw it }
+                        return byteArrayOf(1, 2, 3)
+                    }
                     override fun close() { closes++; if (failClose) throw java.io.IOException("close failed") }
                     override fun awaitTermination(timeoutMillis: Long): Boolean { drains++; return terminated }
                 }
@@ -77,11 +94,85 @@ class RunCommandToolsTest {
         private val registry = ToolRegistry().also { registry -> leaf.tools().forEach { registry.register(it) } }
         private val dispatcher = ToolDispatcher(registry.snapshot(), SessionCapabilities("s", setOf(RunCommandTools.CAPABILITY)),
             ToolLedger(InMemoryToolLedgerStore()))
+        fun image(id: String = "image", path: String = "/tmp/daiyu-video-test/frame.png",
+            dispatchOwner: RunExecutionOwner = owner) = dispatcher.dispatchOwned(task,
+                listOf(ToolInvocation(ToolCallId(id), "read_image", JSONObject().put("path", path).toString())),
+                dispatchOwner) { cancelled }.single().outcome
+        fun hasImageTool() = leaf.tools().any { it.definition.name == "read_image" }
         fun dispatch(id: String = "call", environment: String = "android", timeout: Long = 30000,
             command: String = "echo exact", dispatchOwner: RunExecutionOwner = owner) = dispatcher.dispatchOwned(task,
             listOf(ToolInvocation(ToolCallId(id), "terminal_exec", JSONObject().put("command", command)
                 .put("environment", environment).put("timeout_ms", timeout).toString())), dispatchOwner) { cancelled }.single().outcome
     }
+    @Test fun fileImagesRequireAHostReceiptAndTheExactCurrentOwner() {
+        val absent = Fixture()
+        assertFalse(absent.hasImageTool())
+        absent.leaf.close()
+        val fixture = Fixture(fileImages = true)
+        try {
+            assertTrue(fixture.hasImageTool())
+            val foreign = runnerOwner(Message(MessageId("other"), ConversationId("c"), RunId("r"),
+                Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
+            assertTrue(fixture.image(dispatchOwner = foreign) is DispatchOutcome.NotExecuted)
+            assertFalse(fixture.image("invalid", "/tmp/../frame.png") is DispatchOutcome.Confirmed)
+            assertFalse(fixture.image("without-linux") is DispatchOutcome.Confirmed)
+            assertEquals(0, fixture.created)
+            assertEquals(0, fixture.imageReads)
+            assertEquals(0, fixture.imageReceipts)
+            assertTrue(fixture.effects.isEmpty())
+        } finally { fixture.leaf.close() }
+    }
+
+    @Test fun fileImagesReuseTheFrozenLinuxTransportAndCancellationPreventsReceiptPublication() {
+        org.junit.Assume.assumeFalse("Requires production POSIX directory fsync", System.getProperty("os.name").orEmpty().startsWith("Windows", true))
+        val files = java.nio.file.Files.createTempDirectory("command-image-").toFile()
+        try {
+            val root = File(files, "rootfs").apply { File(this, "bin").mkdirs(); File(this, "bin/sh").writeText("never executed") }
+            val proot = File(files, "proot").apply { writeText("never executed"); setExecutable(true) }
+            val loader = File(files, "loader").apply { writeText("never executed") }
+            fun hash(file: File) = java.security.MessageDigest.getInstance("SHA-256").digest(file.readBytes()).joinToString("") { "%02x".format(it) }
+            val installation = app.daiyu.android.terminal.LinuxInstallation("debian", "env", "generation", root, proot, hash(proot), loader, hash(loader))
+            val access = app.daiyu.android.terminal.LinuxRootfsBackupAccess.forFiles(files)
+            val store = app.daiyu.android.terminal.LinuxEnvironmentStore(File(files, "selection"),
+                directorySync = app.daiyu.android.terminal.TerminalDurability::syncDirectory, rootfsAccess = access).apply { select(installation) }
+            val launch = TerminalPtyLaunch.Linux.freeze(store, app.daiyu.android.terminal.LinuxGenerationRef("env", "generation"),
+                File(files, "tmp").apply { mkdirs() }, files)
+            val fixture = Fixture(linuxLaunch = launch, fileImages = true)
+            try {
+                assertTrue(fixture.dispatch("extract", environment = "linux") is DispatchOutcome.Confirmed)
+                assertTrue(fixture.image() is DispatchOutcome.Confirmed)
+                assertEquals("/tmp/daiyu-video-test/frame.png", fixture.imagePath)
+                assertEquals(1, fixture.imageReads)
+                assertEquals(1, fixture.imageReceipts)
+                assertEquals(1, fixture.created)
+                assertEquals(1, fixture.executions)
+                assertEquals(1, fixture.prompts)
+                assertTrue(fixture.configurations.single().backend == "linux")
+                fixture.imageFailure = LinuxTmpPngReadException("linux_tmp_png_python3_required",
+                    "请用当前已授权 Linux 的 terminal_exec 和包管理器安装 python3；不要切换环境")
+                val missing = fixture.image("missing-python") as DispatchOutcome.Confirmed
+                assertTrue(missing.isError)
+                assertTrue(missing.payload.contains("python3"))
+                assertTrue(missing.payload.contains("不要切换环境"))
+                fixture.leaf.observeOutcomes(listOf(ToolDispatchResult(ToolCallId("missing-python"), missing)))
+                val replay = fixture.image("missing-python") as DispatchOutcome.Confirmed
+                assertTrue(replay.isError && replay.replayed)
+                assertEquals(2, fixture.imageReads)
+                assertTrue(fixture.dispatch("install-python", environment = "linux", command = "apt-get install -y python3") is DispatchOutcome.Confirmed)
+                fixture.imageFailure = null
+                fixture.afterImageRead = { fixture.cancelled = true }
+                assertTrue(fixture.image("cancelled", "/tmp/daiyu-video-test/second.png") is DispatchOutcome.NotExecuted)
+                assertEquals(3, fixture.imageReads)
+                assertEquals(1, fixture.imageReceipts)
+            } finally {
+                fixture.leaf.close()
+                val drained = java.util.concurrent.CompletableFuture<RunCatalogCloseResult>()
+                fixture.leaf.observeClose { drained.complete(it) }
+                assertEquals(RunCatalogCloseResult.Drained, drained.get(2, java.util.concurrent.TimeUnit.SECONDS))
+            }
+        } finally { files.deleteRecursively() }
+    }
+
     @Test fun preFactoryLinuxClaimFailureCanDrainItsUnstartedMetadataLease() {
         org.junit.Assume.assumeFalse("Requires production POSIX directory fsync", System.getProperty("os.name").orEmpty().startsWith("Windows", ignoreCase = true))
         val files = java.nio.file.Files.createTempDirectory("command-unstarted-").toFile()

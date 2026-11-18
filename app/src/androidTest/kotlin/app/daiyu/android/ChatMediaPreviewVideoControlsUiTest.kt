@@ -6,7 +6,8 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
@@ -32,6 +33,7 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
     private var controls by mutableStateOf(ChatMediaPreviewVideoControlsState())
     private var surfaceTaps = 0
     private var playbackTaps = 0
+    private var scrubChanges = 0
     private var completedSeeks = 0
     private var pager: PagerState? = null
 
@@ -41,7 +43,7 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             state = controls, active = active, ready = ready,
             onToggleVisibility = { surfaceTaps++; controls = controls.toggleVisibility() },
             onTogglePlayback = { playbackTaps++; controls = controls.togglePlayback() },
-            onScrub = { controls = controls.scrub(it) },
+            onScrub = { scrubChanges++; controls = controls.scrub(it) },
             onSeekFinished = { completedSeeks++; controls = controls.finishSeeking() },
             modifier = Modifier.fillMaxSize(),
         )
@@ -54,7 +56,7 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
         controls = ChatMediaPreviewVideoControlsState(visible = visible, playRequested = requested).prepared(10_000)
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                Box(Modifier.requiredWidth(360.dp).height(240.dp).background(Color.Black)) {
+                Box(Modifier.widthIn(max = 360.dp).fillMaxWidth().height(240.dp).background(Color.Black)) {
                     if (paged) {
                         val state = rememberPagerState(pageCount = { 2 })
                         pager = state
@@ -78,10 +80,16 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
         val bar = node("chat-media-video-controls").fetchSemanticsNode().boundsInRoot
         val button = node("chat-media-video-play-pause").fetchSemanticsNode().boundsInRoot
         val slider = node("chat-media-video-progress").fetchSemanticsNode().boundsInRoot
-        val expectedInset = 20f * activity.resources.displayMetrics.density
+        val orientation = node("chat-media-video-orientation").fetchSemanticsNode().boundsInRoot
+        val expectedInset = with(ui.density) { 20.dp.toPx() }
+        assertTrue(button.left >= bar.left)
         assertTrue(button.right <= slider.left)
+        assertTrue(slider.right <= orientation.left)
+        assertTrue(orientation.right <= bar.right)
         assertEquals(expectedInset, bar.left - surface.left, 1.5f)
         assertEquals(expectedInset, surface.right - bar.right, 1.5f)
+        val minimumBottomSpace = with(ui.density) { 24.dp.toPx() }
+        assertTrue(surface.bottom - bar.bottom >= minimumBottomSpace - 1.5f)
         node("chat-media-video-surface").performClick()
         awaitVisualIdle()
         node("chat-media-video-controls").assertDoesNotExist()
@@ -132,8 +140,22 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
 
     fun testUnpreparedVideoDisablesPlaybackAndSeek() {
         showControls(visible = true, ready = false)
-        node("chat-media-video-play-pause").assertIsNotEnabled()
-        node("chat-media-video-progress").assertIsNotEnabled()
+        node("chat-media-video-play-pause").assertIsDisplayed().assertIsNotEnabled()
+        node("chat-media-video-progress").assertIsDisplayed().assertIsNotEnabled()
+            .performTouchInput {
+                swipe(Offset(width * 0.25f, centerY), Offset(width * 0.75f, centerY), 200)
+            }
+        awaitVisualIdle()
+        assertEquals(0, scrubChanges)
+        assertEquals(0, completedSeeks)
+        node("chat-media-video-play-pause").assertIsNotEnabled().performTouchInput { click() }
+        awaitVisualIdle()
+        assertEquals(0, playbackTaps)
+        assertEquals(0, scrubChanges)
+        assertEquals(0, completedSeeks)
+        assertTrue(controls.playRequested)
+        assertEquals(0, controls.positionMillis)
+        assertFalse(controls.seeking)
     }
 
     fun testInactiveVideoCannotExposeControls() {
@@ -176,10 +198,12 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             ui.onNodeWithContentDescription("下载原件").assertIsDisplayed()
             node("chat-media-video-surface").performClick()
             ui.waitUntil(20_000) {
-                ui.onAllNodes(hasTestTag("chat-media-video-play-pause") and isEnabled())
-                    .fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
+                ui.onAllNodes(hasTestTag("chat-media-video-play-pause") and hasClickAction() and isEnabled())
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1 &&
+                    ui.onAllNodes(hasTestTag("chat-media-video-progress") and isEnabled())
+                        .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
             }
-            node("chat-media-video-play-pause").performClick()
+            node("chat-media-video-play-pause").assertIsEnabled().assertHasClickAction().performClick()
             ui.onNodeWithContentDescription("播放").assertIsDisplayed()
             node("chat-media-video-progress").performTouchInput {
                 swipe(Offset(width * 0.2f, centerY), Offset(width * 0.7f, centerY), 200)

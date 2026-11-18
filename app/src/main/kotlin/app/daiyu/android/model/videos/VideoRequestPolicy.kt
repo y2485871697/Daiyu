@@ -9,14 +9,9 @@ import org.json.JSONObject
  * `model` is unchanged. Do not turn this into a routing-key denylist or relax the shared options.
  */
 internal object VideoRequestPolicy {
-    // Only scalar, standard sampling/output-budget controls; no arbitrary objects or extensions.
-    private val optionFields = setOf("temperature", "top_p", "max_output_tokens")
+    // Standard sampling/output budgets and validated reasoning only; no routing extensions.
+    private val optionFields = setOf("temperature", "top_p", "max_output_tokens", "reasoning")
     private val protocolFields = setOf("model", "input", "stream", "store", "include", "tools", "instructions", "reasoning")
-
-    fun disableReasoning(request: JSONObject) {
-        require(!app.daiyu.android.model.ReasoningRequestPolicy.hasReasoning(request)) { "Video reasoning policy conflicts with request options" }
-        request.put("reasoning", JSONObject().put("effort", "none"))
-    }
 
     fun preflight(settings: ModelSettings) {
         val options = settings.requestOptions
@@ -28,6 +23,7 @@ internal object VideoRequestPolicy {
         require(body.keys().asSequence().all { it in optionFields }) {
             "Video custom body permits only scalar sampling and output-budget options"
         }
+        app.daiyu.android.model.ReasoningRequestPolicy.validate(body, settings.protocol)
         validateScalars(body)
     }
 
@@ -38,10 +34,7 @@ internal object VideoRequestPolicy {
             "Video payload contains an unauthorized extension"
         }
         validateScalars(request)
-        val reasoning = request.optJSONObject("reasoning")
-        require(reasoning != null && reasoning.keys().asSequence().toSet() == setOf("effort") && reasoning.opt("effort") == "none") {
-            "Video requests require explicit reasoning.effort=none"
-        }
+        app.daiyu.android.model.ReasoningRequestPolicy.validate(request, settings.protocol)
         require(request.opt("model") == settings.model) { "Custom body cannot change the video model" }
         require(request.optJSONArray("input")?.toString() == input.toString()) {
             "Custom body cannot change frozen video history"

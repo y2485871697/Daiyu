@@ -4,6 +4,7 @@ import app.daiyu.android.domain.MessageBlock
 import app.daiyu.android.media.FrozenImageAttachment
 import app.daiyu.android.media.ImageAttachment
 import app.daiyu.android.media.ImageAttachmentOwner
+import app.daiyu.android.media.NativeFileImage
 import app.daiyu.android.media.NativeScreenImage
 import app.daiyu.android.model.images.ImageInputEncoder
 import app.daiyu.android.storage.ModelSettings
@@ -17,6 +18,8 @@ internal object ScreenToolImageInput {
     private data class Receipt(val id: String, val call: Call, val output: String)
     private data class Located(val row: Int, val part: Int, val receipt: Receipt)
     private data class Metadata(val location: Located, val value: String)
+    private data class Image(val location: Located, val bytes: ByteArray,
+        val width: Int, val height: Int, val label: String)
 
     data class Projection(val request: JSONObject, val imageSizes: Map<String, Pair<Int, Int>>)
 
@@ -41,10 +44,16 @@ internal object ScreenToolImageInput {
         val rows = request.optJSONArray(key) ?: return Projection(request, emptyMap())
         val sources = collect(sourceRows, protocol).map { it.receipt }.toSet()
         val metadata = mutableListOf<Metadata>()
+        val fileMetadata = mutableListOf<Metadata>()
         var latest: Located? = null
         for (location in collect(rows, protocol)) {
             if (cancelled()) throw app.daiyu.android.media.ImageAttachmentException(
                 app.daiyu.android.media.ImageAttachmentFailure.CANCELLED)
+            if (location.receipt.call.name == "read_image") {
+                if (location.receipt in sources) NativeFileImage.metadata("read_image",
+                    location.receipt.call.arguments, location.receipt.output)?.let { fileMetadata += Metadata(location, it) }
+                continue
+            }
             if (location.receipt.call.name != "screen") continue
             latest = null
             if (location.receipt !in sources) continue // Custom body cannot manufacture an image authority.
@@ -56,7 +65,7 @@ internal object ScreenToolImageInput {
             metadata += Metadata(location, value)
             latest = location
         }
-        if (metadata.isEmpty()) return Projection(request, emptyMap())
+        if (metadata.isEmpty() && fileMetadata.isEmpty()) return Projection(request, emptyMap())
         val candidate = latest?.takeIf { location ->
             (pendingCallIds == null || location.receipt.id in pendingCallIds) &&
             (location.row + 1 until rows.length()).all { isResultRow(rows.getJSONObject(it), protocol) }
@@ -67,20 +76,47 @@ internal object ScreenToolImageInput {
             }?.let { image -> location to image }
                 ?: throw IllegalStateException("屏幕图片读取失败，请重新观察屏幕")
         }
-        val imageBlock = selected?.let { (_, image) ->
+        val fileCandidates = fileMetadata.map { it.location }.filter { location ->
+            pendingCallIds != null && location.receipt.id in pendingCallIds &&
+                (location.row + 1 until rows.length()).all { isResultRow(rows.getJSONObject(it), protocol) }
+        }
+        require(fileCandidates.map { it.receipt.id }.distinct().size == fileCandidates.size) { "重复的文件图片调用身份" }
+        if (fileCandidates.isNotEmpty()) ImageInputEncoder().checkMetadataLimits(
+            existingImageBytes + listOfNotNull(selected?.second?.bytes?.size) + fileCandidates.map {
+                JSONObject(it.receipt.output).getJSONObject("image_asset").getInt("bytes")
+            })
+        val images = mutableListOf<Image>()
+        selected?.let { (location, image) ->
+            images += Image(location, image.bytes, image.width, image.height, image.inputLabel(location.receipt.id))
+        }
+        fileCandidates.forEach { location ->
+            if (cancelled()) throw app.daiyu.android.media.ImageAttachmentException(
+                app.daiyu.android.media.ImageAttachmentFailure.CANCELLED)
+            val image = NativeFileImage.parse("read_image", location.receipt.call.arguments, location.receipt.output) { receipt ->
+                readAsset?.invoke(location.receipt.id, receipt)
+            } ?: throw IllegalStateException("文件图片读取失败，请重新调用 read_image")
+            images += Image(location, image.bytes, image.width, image.height, image.inputLabel(location.receipt.id))
+        }
+        images.sortWith(compareBy<Image>({ it.location.row }, { it.location.part }))
+        val imageBlocks = if (images.isEmpty()) emptyList() else {
             require(protocol in setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS)) {
-                "当前协议尚不支持屏幕图片输入"
+                "当前协议尚不支持工具图片输入"
             }
             ImageInputEncoder.requireSupported(true, capability)
-            require(request.opt("model") == settings.model) { "自定义请求体不能替换屏幕图片绑定的模型" }
+            require(request.opt("model") == settings.model) { "自定义请求体不能替换工具图片绑定的模型" }
             val encoder = ImageInputEncoder()
-            encoder.checkMetadataLimits(existingImageBytes + image.bytes.size)
-            val digest = MessageDigest.getInstance("SHA-256").digest(image.bytes)
-                .joinToString("") { "%02x".format(it.toInt() and 255) }
-            val attachment = ImageAttachment(ImageAttachmentOwner("screen-tool", "wire"), "screen", "image/png",
-                image.bytes.size, digest, image.width, image.height)
-            encoder.encode(protocol, listOf(FrozenImageAttachment(attachment, image.bytes)), capability,
-                isCancelled = cancelled).single()
+            encoder.checkMetadataLimits(existingImageBytes + images.map { it.bytes.size })
+            val frozen = images.map { image ->
+                val digest = MessageDigest.getInstance("SHA-256").digest(image.bytes)
+                    .joinToString("") { "%02x".format(it.toInt() and 255) }
+                val isScreen = image.location.receipt.call.name == "screen"
+                val id = if (isScreen) "screen" else
+                    JSONObject(image.location.receipt.output).getJSONObject("image_asset").getString("id")
+                val attachment = ImageAttachment(ImageAttachmentOwner(if (isScreen) "screen-tool" else "read-image-tool", "wire"),
+                    id, "image/png", image.bytes.size, digest, image.width, image.height)
+                FrozenImageAttachment(attachment, image.bytes)
+            }
+            encoder.encode(protocol, frozen, capability, isCancelled = cancelled)
         }
         val projected = JSONObject(request.toString())
         val projectedRows = projected.getJSONArray(key)
@@ -99,13 +135,29 @@ internal object ScreenToolImageInput {
                 else -> Unit
             }
         }
-        if (selected != null && imageBlock != null) {
-            val location = selected.first
-            val label = selected.second.inputLabel(location.receipt.id)
+        fileMetadata.forEach { item ->
+            val row = projectedRows.getJSONObject(item.location.row)
+            val content = JSONObject(item.value).apply {
+                if (item.location in fileCandidates) put("image_attached", true)
+                else put("image_omitted", "consumed_read_image")
+            }.toString()
+            when (protocol) {
+                ProviderProtocol.RESPONSES -> row.put("output", content)
+                ProviderProtocol.CHAT_COMPLETIONS -> row.put("content", content)
+                ProviderProtocol.MESSAGES -> row.getJSONArray("content").getJSONObject(item.location.part).put("content", content)
+                ProviderProtocol.GEMINI -> row.getJSONArray("parts").getJSONObject(item.location.part)
+                    .getJSONObject("functionResponse").getJSONObject("response").put("output", content)
+                else -> Unit
+            }
+        }
+        if (images.isNotEmpty()) {
             val textType = if (protocol == ProviderProtocol.RESPONSES) "input_text" else "text"
-            val blocks = JSONArray().put(JSONObject().put("type", textType).put("text", label)).put(imageBlock)
+            val blocks = JSONArray()
+            images.zip(imageBlocks).forEach { (image, block) ->
+                blocks.put(JSONObject().put("type", textType).put("text", image.label)).put(block)
+            }
             // Complete the whole adjacent tool-result batch before adding the image.
-            var after = location.row
+            var after = images.minOf { it.location.row }
             while (after + 1 < projectedRows.length() && isResultRow(projectedRows.getJSONObject(after + 1), protocol)) after++
             if (protocol == ProviderProtocol.MESSAGES) {
                 val content = projectedRows.getJSONObject(after).getJSONArray("content")
@@ -119,9 +171,9 @@ internal object ScreenToolImageInput {
                 projected.put(key, inserted)
             }
         }
-        val sizes = if (selected != null && imageBlock != null) mapOf(
-            requireNotNull(RequestInputEstimate.payload(imageBlock)) to (selected.second.width to selected.second.height)
-        ) else emptyMap()
+        val sizes = images.zip(imageBlocks).associate { (image, block) ->
+            requireNotNull(RequestInputEstimate.payload(block)) to (image.width to image.height)
+        }
         return Projection(projected, sizes)
     }
 

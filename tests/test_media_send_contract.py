@@ -78,13 +78,25 @@ class MediaSendContract(unittest.TestCase):
         discovery = next(line for line in smoke.splitlines() if 'discovery_scope="targeted" if ' in line)
         self.assertIn("media_send_only", discovery.split(' else "full"', 1)[0].split(" if ", 1)[1].split(" or "))
 
-    def test_video_files_use_current_model_reasoning_and_ordinary_tool_route(self):
+    def test_video_capability_probe_falls_back_to_files_and_preserves_reasoning(self):
         controller = (SRC / "ChatController.kt").read_text()
         send = controller.split("val hasVideoFiles =", 1)[1].split("val preparedContext =", 1)[0]
         self.assertIn("videoAttempt?.prepareFiles", send)
         self.assertIn("messageVideoFiles.preflight", send)
         self.assertNotIn("ReasoningEffort.OFF", send)
-        self.assertNotIn("fetchSavedVideoEvidence", send)
+        self.assertIn("canProbeNativeVideo(requestProvider, videoInventory)", send)
+        self.assertIn("fetchSavedVideoEvidence(requestProvider, epoch", send)
+        self.assertIn("session.authorize(proof)", send)
+        self.assertIn("if (hasVideoFiles && nativeVideo == null)", send)
+        self.assertIn("ReasoningRequestPolicy.freeze", send)
+        self.assertIn("nativeVideo.first.bindOwner(realOwner)", controller)
+        self.assertIn("nativeVideo?.first?.accepted", controller)
+        policy = (SRC / "model/videos/VideoRequestPolicy.kt").read_text()
+        self.assertNotIn("disableReasoning", policy)
+        self.assertIn("ReasoningRequestPolicy.validate", policy)
+        route = (SRC / "ControllerVideoNativeRoute.kt").read_text()
+        for expected in ("ProviderProtocol.RESPONSES", "OpenRouterVideoCapability.ENDPOINT", "videos.sumOf", "VideoRequestPolicy.preflight"):
+            self.assertIn(expected, route)
         self.assertIn("messageVideoFiles.wrap(delegate, requestProvider", controller)
         ordinary = controller.split("val ordinaryRun =", 1)[1].split("val prepared = try", 1)[0]
         self.assertNotIn("video", ordinary)
@@ -108,6 +120,20 @@ class MediaSendContract(unittest.TestCase):
                          ".daiyu-video-inputs 中的原视频副本", "其他任务、用户的文件"):
             self.assertIn(expected, manifest)
         self.assertNotIn("及其已有工具", manifest)
+
+    def test_linux_frame_reader_is_owned_memory_only_and_attaches_actual_images(self):
+        tool = (SRC / "integration/tools/RunCommandTools.kt").read_text()
+        for expected in ('ToolDefinition("read_image", 1', 'registries["linux"]', "imageReceipt", "readLinuxTmpPng", "linux_terminal_exec_required_before_read_image"):
+            self.assertIn(expected, tool)
+        terminal = (SRC / "terminal/TerminalRegistry.kt").read_text()
+        for expected in ("memoryOnly = true", "O_NOFOLLOW", "MAX_TMP_PNG_BYTES = 128 * 1024", "linux_tmp_png_python3_required", "linux_tmp_png_incomplete_frame"):
+            self.assertIn(expected, terminal)
+        self.assertIn("if (job.memoryOnly) return", terminal)
+        controller = (SRC / "ChatController.kt").read_text()
+        self.assertIn("screenToolImages.fileReceipt(realOwner.conversationId.value, realOwner.runId.value", controller)
+        projection = (SRC / "model/ScreenToolImageInput.kt").read_text()
+        for expected in ("NativeFileImage", "pendingCallIds", "consumed_read_image"):
+            self.assertIn(expected, projection)
 
     def test_draft_video_uses_shared_fullscreen_player_and_orientation_controls(self):
         ui = (SRC / "ui/screens/chat/attachments/VideoAttachments.kt").read_text()

@@ -12,6 +12,8 @@ import java.util.concurrent.TimeUnit
 /** 管理终端会话、命令任务及其进程句柄；阻塞入口须在非主线程调用。
  * registry 关闭后仍保留进程句柄，应用重启后失效；路径映射由 LongShell/Linux 映射器负责。
  */
+internal class LinuxTmpPngReadException(val reason: String, val guidance: String) : java.io.IOException(reason)
+
 class TerminalRegistry(context: Context) : AutoCloseable {
     private val context=context.applicationContext
     private var configuration=TerminalConfiguration()
@@ -84,6 +86,137 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         return try { executeInternal(name, arguments) }
         finally { synchronized(dispatchLifecycle) { activeDispatches-- } }
     }
+    /** Host-only: image bytes stay in memory, never in terminal job logs. */
+    internal fun readLinuxTmpPng(path: String, cancelled: () -> Boolean): ByteArray {
+        val pathBytes = path.toByteArray(Charsets.UTF_8)
+        require(pathBytes.size <= 4096 && String(pathBytes, Charsets.UTF_8) == path &&
+            path.startsWith("/tmp/") && '\u0000' !in path &&
+            path.split('/').drop(2).none { it.isEmpty() || it == "." || it == ".." })
+        synchronized(dispatchLifecycle) {
+            check(!closed) { "run_session_closed" }
+            activeDispatches++
+        }
+        var job: Job? = null
+        fun checkActive() {
+            if (closed || cancelled() || Thread.currentThread().isInterrupted)
+                throw java.util.concurrent.CancellationException("linux_tmp_png_cancelled")
+        }
+        try {
+            checkActive()
+            check(configuration.backend == "linux" && configuration.linux != null) { "linux_backend_not_configured" }
+            check(synchronized(backendLock) { selected != null || backendOverride != null }) {
+                "linux_terminal_exec_required_before_read_image"
+            }
+            val binding = checkNotNull(journal) { "run_session_not_configured" }.verifyBinding()
+            check(binding.optBoolean("ok")) { binding.optString("error", "operation_binding_unavailable") }
+            val b = backend()
+            check(b.name.startsWith("linux:")) { "linux_backend_required" }
+            val session = synchronized(sessions) {
+                check(!closed) { "run_session_closed" }
+                checkNotNull(sessions.firstOrNull()) { "linux_terminal_exec_required_before_read_image" }
+            }
+            val id = UUID.randomUUID().toString()
+            val current = Job(id, checkNotNull(scope), checkNotNull(conversationOwner), session,
+                "sync", "", b, File(directory, "$id.log"), File(directory, "$id.script"), memoryOnly = true)
+            job = current
+            synchronized(jobs) {
+                jobs.values.forEach(::releaseFinishedResources)
+                jobs[id] = current
+            }
+            val encodedPath = java.util.Base64.getEncoder().encodeToString(pathBytes)
+            val command = "command -v python3 >/dev/null 2>&1 || { printf 'ERR:python3_missing\\n'; exit 127; }\n" +
+                "exec python3 -I -S -c '" + TMP_PNG_READER.replace("'", "'\\''") + "' '$encodedPath'"
+            checkActive()
+            synchronized(sessions) {
+                synchronized(current) {
+                    if (closed || session !in sessions || current.cancelRequested) {
+                        current.state = "cancelled_before_dispatch"
+                        throw java.util.concurrent.CancellationException("linux_tmp_png_cancelled")
+                    }
+                    current.state = "dispatching"
+                }
+            }
+            if (backendOverride == null && BackendSelection.paths(context, configuration) != selectedPaths)
+                throw BackendUnavailable("backend_path_changed_not_executed")
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+            val process = try {
+                if (b.rootScope != null) startRootProcess(b, command, id)
+                else startProcess(b.builder(b.shell + listOf("-c", command)).redirectErrorStream(true))
+            } catch (failure: PtyStartupFailure) {
+                current.startupCleanup = failure.cleanup
+                current.unknown = true
+                current.state = "startup_unknown"
+                throw java.io.IOException("linux_tmp_png_startup_unknown_not_replayed", failure)
+            }
+            val pid = try { processPidReader(process) } catch (_: Exception) { -1L } catch (_: LinkageError) { -1L }
+            val start = if (pid > 0) try { processStartReader(pid) } catch (_: Exception) { null } else null
+            synchronized(current) {
+                current.handle = OwnedProcess(process, pid, start)
+                current.state = "dispatched"
+            }
+            startLogPump(current, process)
+            if (b.rootScope == null) runCatching { process.outputStream.close() }
+            applyCancellation(current)
+            while (!current.pumpFinished || process.isAlive) {
+                checkActive()
+                if (current.cancelRequested) throw java.util.concurrent.CancellationException("linux_tmp_png_cancelled")
+                if (System.nanoTime() >= deadline) throw java.io.IOException("linux_tmp_png_timeout_not_replayed")
+                process.waitFor(50, TimeUnit.MILLISECONDS)
+                current.reader?.join(50)
+            }
+            checkActive()
+            check(!current.unknown && !current.truncated && current.outputComplete) { "linux_tmp_png_output_incomplete" }
+            val exit = if (process is RootScopeCommandProcess) process.exitCodeOrNull() else process.exitValue()
+            return decodeLinuxTmpPng(checkNotNull(current.memoryOutput).toByteArray(), exit)
+        } catch (failure: Exception) {
+            if (failure is InterruptedException) Thread.currentThread().interrupt()
+            job?.let {
+                if (it.handle == null && it.startupCleanup == null && it.state != "cancelled_before_dispatch")
+                    it.state = "start_failed"
+            }
+            throw failure
+        } finally {
+            val interrupted = Thread.interrupted()
+            try {
+                job?.let {
+                    if (it.startupCleanup != null || (it.handle != null && (!it.pumpFinished || it.unknown))) it.cancelRequested = true
+                    try { applyCancellation(it) } finally {
+                        it.memoryOutput = null
+                        synchronized(jobs) {
+                            it.dispatchFinished = true
+                            releaseFinishedResources(it)
+                        }
+                    }
+                }
+            } finally {
+                synchronized(dispatchLifecycle) { activeDispatches-- }
+                if (interrupted) Thread.currentThread().interrupt()
+            }
+        }
+    }
+
+    private fun decodeLinuxTmpPng(wire: ByteArray, exitCode: Int?): ByteArray {
+        check(wire.size <= MAX_TMP_PNG_WIRE_BYTES && wire.all { it >= 0 }) { "linux_tmp_png_invalid_ascii" }
+        val text = String(wire, Charsets.US_ASCII)
+        val line = when {
+            text.endsWith("\r\n") -> text.dropLast(2)
+            text.endsWith("\n") -> text.dropLast(1)
+            else -> throw java.io.IOException("linux_tmp_png_incomplete_frame")
+        }
+        if (line == "ERR:python3_missing" && exitCode == 127) throw LinuxTmpPngReadException("linux_tmp_png_python3_required",
+            "请用当前已授权 Linux 的 terminal_exec 和包管理器安装 python3；不要切换环境")
+        if (exitCode == 1 && line in setOf("ERR:invalid_path", "ERR:not_regular", "ERR:too_large", "ERR:not_png", "ERR:open_or_read_failed"))
+            throw LinuxTmpPngReadException("linux_tmp_png_" + line.removePrefix("ERR:"),
+                if (line == "ERR:too_large") "单张PNG不能超过128 KiB，请在当前Linux缩小尺寸后重试" else "请检查当前Linux /tmp下的本次PNG文件")
+        check(exitCode == 0 && line.startsWith("PNG:")) { "linux_tmp_png_reader_failed" }
+        val encoded = line.substring(4)
+        val bytes = try { java.util.Base64.getDecoder().decode(encoded) }
+            catch (failure: IllegalArgumentException) { throw java.io.IOException("linux_tmp_png_invalid_base64", failure) }
+        check(java.util.Base64.getEncoder().encodeToString(bytes) == encoded && bytes.size in 33..MAX_TMP_PNG_BYTES &&
+            bytes.copyOfRange(0, 8).contentEquals(PNG_SIGNATURE)) { "linux_tmp_png_invalid_png" }
+        return bytes
+    }
+
     private fun executeInternal(name:String,arguments:JSONObject):JSONObject {
         if(name !in names) return error("unknown_tool")
         if(scope==null) return error("run_session_not_configured")
@@ -239,12 +372,15 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     }
     private fun dispatchedError(job:Job,code:String)=identity(job.backend).put("ok",false).put("error",code).put("execution","unknown").put("job_id",job.id).put("state","dispatched")
     private fun startLogPump(job:Job,process:Process) {
+        val memory = job.memoryOutput
+        check(!job.memoryOnly || memory != null)
+        val quota = if (memory == null) MAX_LOG_BYTES else MAX_TMP_PNG_WIRE_BYTES
         job.reader=Thread {
             try {
-                process.inputStream.use { input -> java.io.FileOutputStream(job.log).use { output ->
+                process.inputStream.use { input -> (memory ?: java.io.FileOutputStream(job.log)).use { output ->
                     val bytes=ByteArray(8192); var retained=0; var n=input.read(bytes)
                     while(n>=0) {
-                        val keep=minOf(n,MAX_LOG_BYTES-retained)
+                        val keep=minOf(n,quota-retained)
                         if(keep>0) { output.write(bytes,0,keep); output.flush(); retained+=keep }
                         if(keep<n) job.truncated=true
                         n=input.read(bytes) // drain/discard beyond quota, never accumulate unbounded output
@@ -284,6 +420,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             .put("state","unknown_after_process_restart").put("exit_code",JSONObject.NULL).put("execution","unknown")
     }
     private fun page(job:Job,offset:Long,limit:Int):JSONObject = synchronized(job) {
+        if (job.memoryOnly) return@synchronized error("job_output_not_terminal_log").put("job_id", job.id)
         val completion = job.completion
         val process=job.handle?.process; val running=process?.isAlive ?: false
         val exitCode = if (completion != null) completion.exitCode else if (process == null || running) null else if (process is RootScopeCommandProcess)
@@ -448,7 +585,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
                 catch(_:Exception) { }
             }
         }
-        synchronized(jobs) { jobs.values.filter { owns(it) }.forEach { job ->
+        synchronized(jobs) { jobs.values.filter { owns(it) && !it.memoryOnly }.forEach { job ->
             records[job.id]=page(job,0,1)
             releaseFinishedResources(job)
         } }
@@ -475,6 +612,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     }
     private fun readRecord(file:File):JSONObject { check(file.length()<=16384); return JSONObject(file.readText()) }
     private fun saveJob(job:Job) {
+        if (job.memoryOnly) return
         beforeJobSave?.invoke()
         val file=File(directory,"${job.id}.json")
         val handle=job.handle
@@ -502,6 +640,49 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         val names=setOf("terminal_open","terminal_exec","terminal_poll","terminal_stop","terminal_close","terminal_list")
         private const val MAX_SCRIPT_BYTES=131072
         private const val MAX_LOG_BYTES=262144
+        private const val MAX_TMP_PNG_BYTES = 128 * 1024
+        private const val MAX_TMP_PNG_WIRE_BYTES = 4 * ((MAX_TMP_PNG_BYTES + 2) / 3) + 6
+        private val PNG_SIGNATURE = byteArrayOf(-119, 80, 78, 71, 13, 10, 26, 10)
+        private val TMP_PNG_READER = """
+            import os, sys, stat, base64
+            CAP = 128 * 1024
+            def fail(reason):
+                sys.stdout.write("ERR:" + reason + "\n")
+                raise SystemExit(1)
+            directory = fd = -1
+            try:
+                path = base64.b64decode(sys.argv[1], validate=True).decode("utf-8")
+                parts = path.split("/")
+                if len(parts) < 3 or parts[:2] != ["", "tmp"] or any(p in ("", ".", "..") for p in parts[2:]) or "\0" in path:
+                    fail("invalid_path")
+                flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+                directory = os.open("/", flags)
+                for part in parts[1:-1]:
+                    child = os.open(part, flags, dir_fd=directory)
+                    os.close(directory)
+                    directory = child
+                fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, dir_fd=directory)
+                info = os.fstat(fd)
+                if not stat.S_ISREG(info.st_mode):
+                    fail("not_regular")
+                if info.st_size > CAP:
+                    fail("too_large")
+                with os.fdopen(fd, "rb") as image:
+                    fd = -1
+                    data = image.read(CAP + 1)
+                if len(data) > CAP:
+                    fail("too_large")
+                if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+                    fail("not_png")
+            except (OSError, ValueError, UnicodeError):
+                fail("open_or_read_failed")
+            finally:
+                if fd >= 0:
+                    os.close(fd)
+                if directory >= 0:
+                    os.close(directory)
+            sys.stdout.buffer.write(b"PNG:" + base64.b64encode(data) + b"\n")
+        """.trimIndent()
         private val jobs=mutableMapOf<String,Job>() // Completed history holds no Process or Thread.
         private fun processPid(process: Process): Long = try {
             (Process::class.java.getMethod("pid").invoke(process) as? Long)?.takeIf { it > 0L } ?: -1L
@@ -516,7 +697,10 @@ class TerminalRegistry(context: Context) : AutoCloseable {
     }
     private data class JobCompletion(val state: String, val exitCode: Int?, val execution: String, val scopeDrained: Boolean)
     private data class OwnedProcess(val process: Process, val pid: Long, val start: String?)
-    private class Job(val id:String,val scope:String,val owner:String,val session:String,val mode:String,val command:String,val backend:SelectedBackend,val log:File,val script:File) {
+    private class Job(val id:String,val scope:String,val owner:String,val session:String,val mode:String,val command:String,
+        val backend:SelectedBackend,val log:File,val script:File,val memoryOnly:Boolean=false) {
+        @Volatile var memoryOutput: java.io.ByteArrayOutputStream? =
+            if (memoryOnly) java.io.ByteArrayOutputStream(MAX_TMP_PNG_WIRE_BYTES) else null
         @Volatile var dispatchFinished=false
         @Volatile var pumpFinished=false
         @Volatile var completion: JobCompletion? = null

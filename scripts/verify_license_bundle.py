@@ -29,6 +29,8 @@ NATIVE_SOURCES = tuple(ASSETS + "native-sources/" + name + ".tgz" for name in (
 ))
 # Copies are complete repository originals, not reconstructed license templates.
 COPIES = (
+    ("THIRD_PARTY/neoplayer/LICENSE", "neoplayer/LICENSE"),
+    ("THIRD_PARTY/neoplayer/NOTICE.md", "neoplayer/NOTICE.md"),
     ("LICENSE", "AGPL-3.0.txt"),
     ("THIRD_PARTY/rikkahub/NOTICE.md", "rikkahub/NOTICE.md"),
     ("THIRD_PARTY/rikkahub/model-icons/NOTICE.md", "rikkahub/model-icons/NOTICE.md"),

@@ -43,7 +43,7 @@ class CompressionSendGateContractTest(unittest.TestCase):
         self.assertLess(admission.index("return false"), admission.index("compactingRuntime?.cancel()"))
         legacy = source.split("fun supplement(", 1)[1].split("fun admitSupplement(", 1)[0]
         self.assertIn("if (compacting || terminal", legacy)
-        compact = source.split("fun compactAtBoundary()", 1)[1].split("fun contextSize()", 1)[0]
+        compact = source.split("fun compactAtBoundary(", 1)[1].split("fun contextSize(", 1)[0]
         self.assertLess(compact.index("compacting = true"), compact.index("manual?.create?.invoke"))
         self.assertLess(compact.index("compacting = false"), compact.index("finishedCompaction()"))
 if __name__ == "__main__": unittest.main()

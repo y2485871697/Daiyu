@@ -4257,8 +4257,9 @@ class ChatController internal constructor(private val application:Application,
                 val assembled = sessionModel?.invoke(requestProvider, assistantContext, screenSessionContext(conversationId, run.value))
                     ?: assistantModel?.invoke(requestProvider, assistantContext)
                     ?: if (videoPlan.images.hasImages) imageModel(requestProvider) else model(requestConfig)
-                val delegate = if (assembled is app.daiyu.android.model.ResponsesModel)
-                    assembled.withBackgroundResume(frozenReconnect.responsesBackground) else assembled
+                val background = frozenReconnect.responsesBackground
+                val delegate = if (background != null && assembled is app.daiyu.android.model.ResponsesModel)
+                    assembled.withBackgroundResume(background) else assembled
                 messageVideoFiles.wrap(delegate, requestProvider, conversationId, assistant.id,
                     videoPlan, workspace) { !isRunUnfenced(assistant) }
             } else {

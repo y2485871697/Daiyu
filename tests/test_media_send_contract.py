@@ -99,6 +99,16 @@ class MediaSendContract(unittest.TestCase):
         self.assertNotIn("MediaMetadataRetriever", source)
         self.assertNotIn("OpenRouterVideoCapability", source)
 
+    def test_video_frame_temporary_files_use_linux_tmp_and_cleanup_only_analysis_outputs(self):
+        source = (SRC / "ControllerVideoFiles.kt").read_text()
+        manifest = source.split("val manifest = buildString", 1)[1].split("row.copy(blocks", 1)[0]
+        for expected in ("当前 Linux 环境的包管理器安装", "Linux /tmp", "本次分析新建的独立临时目录",
+                         "mktemp -d /tmp/daiyu-video-XXXXXX", "完成分析后，立即删除", "失败或取消时也要清理",
+                         "不能在图片读取完成前删除", "不得清空整个 /tmp", "不得删除输入视频原件",
+                         ".daiyu-video-inputs 中的原视频副本", "其他任务、用户的文件"):
+            self.assertIn(expected, manifest)
+        self.assertNotIn("及其已有工具", manifest)
+
     def test_draft_video_uses_shared_fullscreen_player_and_orientation_controls(self):
         ui = (SRC / "ui/screens/chat/attachments/VideoAttachments.kt").read_text()
         self.assertIn("ChatMediaPreviewDialog(selection, onSaveDocument", ui)

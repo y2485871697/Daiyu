@@ -129,9 +129,16 @@ internal fun videoFileModelHistory(rows: List<Message>, files: List<ControllerVi
                     append("Linux 路径: ${JSONObject.quote(file.linuxPath)}\n")
                     append("Android 路径: ${JSONObject.quote(file.hostPath)}\n")
                 }
-                append("视频没有直接上传给模型。请使用当前已选 Linux 环境及其已有工具按需读取、抽帧，")
-                append("再通过图片读取工具查看提取的画面；请依据实际读取结果回答，不要仅凭文件名推测内容。")
-                append("不要切换 Linux 后端，也不要在 Android 环境下载替代工具。")
+                append("视频没有直接上传给模型。请使用当前已选 Linux 环境按需读取、抽帧；")
+                append("缺少抽帧工具时，可自行通过当前 Linux 环境的包管理器安装。")
+                append("抽帧图片及其他分析临时文件必须放在 Linux /tmp 下为本次分析新建的独立临时目录，")
+                append("例如使用 mktemp -d /tmp/daiyu-video-XXXXXX 创建；不要写入会话工作区。")
+                append("通过图片读取工具实际查看所需画面并完成分析后，立即删除本次生成的临时文件和该目录；")
+                append("失败或取消时也要清理，但不能在图片读取完成前删除。")
+                append("只清理本次分析产物，不得清空整个 /tmp，不得删除输入视频原件、")
+                append("会话工作区 .daiyu-video-inputs 中的原视频副本或其他任务、用户的文件。")
+                append("请依据实际读取结果回答，不要仅凭文件名推测内容。")
+                append("不要切换 Linux 后端，也不要在 Android 环境安装替代工具。")
             }
             row.copy(blocks = row.blocks + MessageBlock.Text("local-video-files", manifest))
         }

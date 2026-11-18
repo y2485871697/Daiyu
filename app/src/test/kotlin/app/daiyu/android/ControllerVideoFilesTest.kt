@@ -138,6 +138,16 @@ class ControllerVideoFilesTest {
         assertTrue(manifest.contains(files.single().linuxPath))
         assertTrue(manifest.contains(files.single().hostPath))
         assertTrue(manifest.contains("当前已选 Linux 环境"))
+        assertTrue(manifest.contains("包管理器安装"))
+        assertTrue(manifest.contains("Linux /tmp"))
+        assertTrue(manifest.contains("mktemp -d /tmp/daiyu-video-XXXXXX"))
+        assertTrue(manifest.contains("查看所需画面并完成分析后，立即删除"))
+        assertTrue(manifest.contains("失败或取消时也要清理"))
+        assertTrue(manifest.contains("不能在图片读取完成前删除"))
+        assertTrue(manifest.contains("不得清空整个 /tmp"))
+        assertTrue(manifest.contains("不得删除输入视频原件"))
+        assertTrue(manifest.contains(".daiyu-video-inputs 中的原视频副本"))
+        assertTrue(manifest.contains("其他任务、用户的文件"))
         assertFalse(manifest.contains("data:video/"))
         assertFalse(manifest.contains("fixture-secret"))
         assertNotNull(runCatching { videoFileModelHistory(listOf(assistant), files) }.exceptionOrNull())
@@ -181,5 +191,8 @@ class ControllerVideoFilesTest {
         cancelled = true
         assertNotNull(runCatching { port.open(rows, listOf(tool)) }.exceptionOrNull())
         assertEquals(4, opens); assertEquals(2, database.messages(attempt.conversationId).size)
+        val original = plan.files.single()
+        assertArrayEquals(bytes, File(original.hostPath).readBytes())
+        assets.openOriginal(original.owner, original.reference).use { assertArrayEquals(bytes, it.readBytes()) }
     }
 }

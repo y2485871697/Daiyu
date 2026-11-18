@@ -15,7 +15,10 @@ class ChildCompressionSettingsTest {
         val policy = ProductionCompressionPolicyResolver.resolve(child)
         assertTrue(child.automatic); assertTrue(policy.enabled)
         assertEquals(272000L, policy.contextTokens)
-        assertFalse(policy.shouldCompress(217599)); assertTrue(policy.shouldCompress(217600))
+        val spec = app.daiyu.android.domain.context.HarnessContextPolicy.resolve(272000, 4096)
+        assertFalse(policy.shouldCompress(spec.thresholdTokens - 1)); assertTrue(policy.shouldCompress(spec.thresholdTokens))
+        assertEquals(202368L, spec.thresholdTokens)
+        assertEquals(42864L, spec.retainTokens)
         assertEquals(267904L, policy.sendBudgetTokens)
         assertFalse(main.automatic); assertEquals(128000L, main.contextWindowTokens)
     }

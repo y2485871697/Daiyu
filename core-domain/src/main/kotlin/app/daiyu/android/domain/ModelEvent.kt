@@ -93,7 +93,11 @@ interface CheckpointedResumableModelSession : ResumableModelSession {
     /** Interrupt just the current read. Unlike cancel(), this does not revoke the session. */
     fun disconnectTransport()
 }
+/** No provider request was sent; selection changed after its context was prepared. */
+class ModelPreparationChangedException : IllegalStateException("model_preparation_changed")
+
 fun interface ModelPort {
+    fun prepareRequest() {}
     fun open(history: List<Message>): ModelSession
     fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession {
         if (tools.isNotEmpty()) throw UnsupportedOperationException("Model port does not support tools")

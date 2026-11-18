@@ -8,6 +8,22 @@ import org.junit.Test
 import org.json.JSONObject
 
 class SavedSubAgentRuntimeBindingsTest {
+    @Test fun childContextFactoryUsesEachFrozenSelectionWithoutOpeningTheModel() {
+        var contexts = 0
+        val initial = Message(MessageId("child-message"), ConversationId("conversation"), RunId("child-run"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+        val bindings = SavedSubAgentRuntimeBindings { error("model must remain unopened") }
+        val definition = bindings.freeze(owner, config, listOf(provider), { _, _ -> saved },
+            createContext = { snapshot, message ->
+                assertEquals(initial, message); assertEquals(saved.model, snapshot.model)
+                contexts++
+                null
+            }).getValue(profile.id)
+        assertEquals(0, contexts)
+        definition.current().contextFor(initial)
+        assertEquals(1, contexts)
+    }
+
     @Test fun checkedBindingSnapshotPublishesRoleAndTierWithoutOpeningModelsOrLeakingCredentials() {
         val created = mutableListOf<ProviderSnapshot>()
         val bindings = SavedSubAgentRuntimeBindings { created += it; noNetwork }

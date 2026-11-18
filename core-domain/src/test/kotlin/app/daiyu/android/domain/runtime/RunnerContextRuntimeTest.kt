@@ -14,6 +14,41 @@ class RunnerContextRuntimeTest {
         override fun commitCheckpoint(checkpoint: RunCheckpoint) { snapshots += checkpoint }
         override fun reconcileCheckpoint(checkpoint: RunCheckpoint) = error("no recovery")
     }
+    @Test fun reopenedSessionKeepsItsPreparedPolicyThroughItsFirstNext() {
+        var configured = "a"; var prepared = ""; var opens = 0; var tools = 0
+        val runtime = object : RunContextRuntime {
+            override val windowTokens = 272000L
+            override val pressureThresholdTokens = 999999L
+            override fun headerIdentity(tools: List<ToolDefinition>) = prepared
+            override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 10L
+            override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
+                request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
+                admit: () -> Unit, cancelled: () -> Boolean): List<Message>? = null
+        }
+        val model = object : ModelPort {
+            override fun prepareRequest() { prepared = configured }
+            override fun open(history: List<Message>): ModelSession {
+                val selected = prepared; val index = ++opens
+                if (index == 2) configured = "c"
+                return object : RequestRebindingModelSession {
+                    override fun needsRebind() = selected != configured
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        assertEquals(selected, prepared)
+                        if (index == 1) {
+                            configured = "b"
+                            sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("read"), "read", "{}")))
+                        } else sink(ModelEvent.TextFinal("answer", "done"))
+                    }
+                    override fun cancel() {}
+                }
+            }
+        }
+        val result = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+            BatteryTool { tools++; "once" }, RunnerOptions(contextRuntime = runtime)) {}.run(initial, listOf(user("u", "task")))
+        assertEquals(RunStatus.COMPLETED, result.status)
+        assertEquals(2, opens); assertEquals(1, tools); assertEquals("b", prepared)
+    }
+
     @Test fun realUsageCompactsWithinToolRunWithSameRequestCalibrationAndNoOutputReplay() {
         val store = Store(); var opens = 0; var tools = 0; var summaries = 0
         val retained = user("summary", "short")

@@ -9,6 +9,7 @@ internal class ChildModelAssignment(profileId: String, initial: ChildModelDefini
     val definition = ChildModelDefinition(initial.poolKey, initial.parallelLimit, initial.display,
         latest = { target.current() }, selection = Any(), valid = { target.isValid() },
         admissionAllowed = { target.acceptsNewTask() }, role = role) { target.create() }
+        .apply { if (initial.hasContext) withContext { target.current().contextFor(it) } }
         .identified(profileId, initial.modelIdentity.orEmpty(), initial.groupToken)
         .scheduling(candidates = { target.currentCandidates() }, select = { target.select(it) })
 

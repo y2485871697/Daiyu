@@ -33,7 +33,8 @@ internal class SavedSubAgentRuntimeBindings(
         profileCurrent: (String) -> Boolean = { true },
         modelDeleted: (SubAgentProfile) -> Boolean = { false },
         currentLifetime: ((String) -> Long)? = null,
-        runtimeStart: ConversationSubAgentPreferences.RuntimeStart? = null): FrozenSubAgentModels {
+        runtimeStart: ConversationSubAgentPreferences.RuntimeStart? = null,
+        createContext: ((ProviderSnapshot, app.daiyu.android.domain.Message) -> app.daiyu.android.domain.runtime.RunContextRuntime?)? = null): FrozenSubAgentModels {
         val frozen = config.detached(); frozen.validate()
         val enabled = if (frozen.enabled) frozen.profiles else emptyList()
         val selected = enabled.map { profile ->
@@ -81,6 +82,7 @@ internal class SavedSubAgentRuntimeBindings(
                 latest = null, selection = binding.child, valid = { profileCurrent(binding.profile.id) },
                 admissionAllowed = { !modelDeleted(binding.profile) },
                 role = if (binding.profile.role == "implementation") ChildModelRole.IMPLEMENTATION else ChildModelRole.REVIEW) { runModel(binding.child) }
+                .apply { if (createContext != null) withContext { initial -> createContext(binding.child, initial) } }
                 .identified(binding.profile.id, identity(binding.profile.providerId, binding.saved), frozen.presetApplicationToken)
                 .routed(binding.profile.providerId, binding.child.model)
             fun taskDefinition(): ChildModelDefinition {
@@ -166,6 +168,7 @@ internal class SavedSubAgentRuntimeBindings(
                             }
                         } }, selection = binding.child, valid = ::currentBinding,
                         admissionAllowed = { !deletedSelection() }, role = original.role) { runModel(binding.child) }
+                        .apply { if (createContext != null) withContext { initial -> createContext(binding.child, initial) } }
                         .identified(binding.profile.id, identity(binding.profile.providerId, binding.saved), frozen.presetApplicationToken)
                     .routed(binding.profile.providerId, binding.child.model)
                     .scheduling(candidates = { synchronized(lock) {

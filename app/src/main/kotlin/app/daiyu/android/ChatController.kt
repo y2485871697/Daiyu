@@ -1659,7 +1659,11 @@ class ChatController internal constructor(private val application:Application,
     private var runtimeStore:SQLiteRuntimeStore?=null
     private var childSupervisor:app.daiyu.android.domain.delegation.RetainedChildTasks?=null
     private val backgroundRuns=linkedMapOf<RunId,RunChildTasks>()
-    private val childRunFactories = linkedMapOf<RunId, (ProviderSnapshot) -> ModelPort>()
+    private class ChildRunModelFactory(val systemPrompt: String,
+        private val create: (ProviderSnapshot) -> ModelPort) : (ProviderSnapshot) -> ModelPort {
+        override fun invoke(snapshot: ProviderSnapshot): ModelPort = create(snapshot)
+    }
+    private val childRunFactories = linkedMapOf<RunId, ChildRunModelFactory>()
     private var childCommandReaders=0
     private var childrenClosing=false
     private var childrenClosed=false
@@ -1959,7 +1963,7 @@ class ChatController internal constructor(private val application:Application,
             readSavedChildProviderModel(profile.providerId, profile.modelId).model
         }
     private fun freezeSavedChildModels(key: SubAgentConfigKey.Conversation, hotUpdates: Boolean = true,
-        profileId: String? = null, runModel: (ProviderSnapshot) -> ModelPort): FrozenSubAgentModels {
+        profileId: String? = null, runModel: ChildRunModelFactory): FrozenSubAgentModels {
         val ownerState = childPreferences.ownerState(key)
         val runtimeStart = childPreferences.openRuntime(key)
         val config = runtimeStart.config
@@ -1988,7 +1992,12 @@ class ChatController internal constructor(private val application:Application,
             latestModels = if (hotUpdates) ({ freezeSavedChildModels(key, runModel = runModel) }) else null,
             profileCurrent = { id -> childPreferences.profileLifetime(key, id) == lifetimes[id] },
             modelDeleted = { (it.providerId to it.modelId) in deletedCatalogModels },
-            currentLifetime = { childPreferences.profileLifetime(key, it) }, runtimeStart = runtimeStart)
+            currentLifetime = { childPreferences.profileLifetime(key, it) }, runtimeStart = runtimeStart,
+            createContext = { childProvider, initial ->
+                app.daiyu.android.context.ProductionContextPreparation.childRuntime(application, initial, childProvider,
+                    "子代理 ${initial.runId.value.take(8)}", systemPrompt = runModel.systemPrompt,
+                    progress = ::postCompressionActivity)
+            })
         } catch (failure: app.daiyu.android.domain.ModelRequestException) {
             problem = failure.userMessage
             notifyChanged()
@@ -2121,7 +2130,7 @@ class ChatController internal constructor(private val application:Application,
             val key = SubAgentConfigKey.Conversation(conversation.value)
             var frozenAssistantId: String? = null
             var replyIdentity: AssistantReplyIdentity? = null
-            var directChildFactory: ((ProviderSnapshot) -> ModelPort)? = null
+            var directChildFactory: ChildRunModelFactory? = null
             val models = try {
                 val assistantId = database.assistantId(conversation) ?: throw MissingAssistantBindingException()
                 frozenAssistantId = assistantId
@@ -2130,7 +2139,7 @@ class ChatController internal constructor(private val application:Application,
                 val assistantContext = AssistantRunContext.capture(assistantStore, assistantId, assistantAssets)
                 replyIdentity = AssistantReplyIdentity.capture(assistantContext, assistantAssets)
                 check(assistantStore.read(assistantId) == profile) { "assistant_profile_changed" }
-                val factory: (ProviderSnapshot) -> ModelPort = { provider ->
+                val factory = ChildRunModelFactory(assistantContext.systemPrompt) { provider ->
                     val delegate = sessionModel?.invoke(provider, assistantContext, screenSessionContext(conversation))
                         ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
                     app.daiyu.android.model.usage.UsageRecorder.wrap(messageImages.wrap(delegate, provider), provider)
@@ -4089,7 +4098,7 @@ class ChatController internal constructor(private val application:Application,
         }
         val conversationId=platformAction?.conversationId ?: mcpPreparation?.scope?.conversationId ?: gui?.conversationId ?: terminalJobPreparation?.identity?.conversationId ?: virtualDisplay?.conversationId ?: terminalRun?.preview?.identity?.conversationId ?: videoAttempt?.conversationId ?: generation?.identity?.conversationId ?: browserPreparation?.identity?.conversationId ?: shizukuPreparation?.conversationId ?: conversation?.id ?: imageAttempt?.let {ConversationId(it.owner.conversationId)}
             ?: ConversationId(UUID.randomUUID().toString())
-        val childRunFactory: (ProviderSnapshot) -> ModelPort = { provider ->
+        val childRunFactory = ChildRunModelFactory(assistantContext.systemPrompt) { provider ->
             val delegate = sessionModel?.invoke(provider, assistantContext, screenSessionContext(conversationId))
                 ?: assistantModel?.invoke(provider, assistantContext) ?: model(provider.asModelSettings())
             app.daiyu.android.model.usage.UsageRecorder.wrap(messageImages.wrap(delegate, provider), provider)

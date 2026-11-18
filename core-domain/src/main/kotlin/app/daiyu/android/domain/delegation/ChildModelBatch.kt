@@ -18,6 +18,12 @@ data class ChildModelTask(val profileId: String, val prompt: String, val access:
 
 /** An exact host-frozen selection. Zero means no extra model-pool limit. */
 class ChildModelDefinition(val poolKey: String, val parallelLimit: Int, val display: ChildTaskDisplay?, val create: () -> ModelPort) {
+    private var contextFactory: ((Message) -> app.daiyu.android.domain.runtime.RunContextRuntime?)? = null
+    fun withContext(factory: (Message) -> app.daiyu.android.domain.runtime.RunContextRuntime?): ChildModelDefinition = apply {
+        contextFactory = factory
+    }
+    internal val hasContext: Boolean get() = contextFactory != null
+    fun contextFor(initial: Message) = contextFactory?.invoke(initial)
     var role: ChildModelRole = ChildModelRole.REVIEW
         private set
     var requestModel: ChildRequestModel? = null
@@ -487,7 +493,14 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                     override fun execute(invocation: ToolInvocation): String = error("child_tools_disabled")
                                 }
                                 val tools = assembly?.tools ?: noTools
+                                val childContext = if (definition.hasContext) ChildModelContextRuntime(initial) else null
+                                var preparedModel: ChildModelDefinition? = null
                                 val selected = object : ModelPort {
+                                    override fun prepareRequest() {
+                                        val candidate = awaitSelection()
+                                        childContext?.prepare(candidate)
+                                        preparedModel = candidate
+                                    }
                                     override fun open(history: List<Message>): ModelSession = open(history, tools.definitions)
                                     override fun open(history: List<Message>, definitions: List<app.daiyu.android.domain.ToolDefinition>): ModelSession {
                                         awaitTransportCleanup()
@@ -498,21 +511,13 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                         store?.get(record.owner)?.let { saved ->
                                             record = saved.copy(status = ChildTaskStatus.QUEUED, text = "", detail = null)
                                         }
-                                        var selectedModel: ChildModelDefinition
-                                        var port: ModelPort
-                                        while (true) {
-                                            selectedModel = awaitSelection()
-                                            port = selectedModel.create()
-                                            if (childPause.snapshot() != ChildTaskPauseState.ACTIVE) continue
-                                            if (!selectedModel.sameSelection(currentDefinition())) continue
-                                            if (lease?.leaveBoundary() == false) continue
-                                            recordSelection(selectedModel)
-                                            check(!cancelled() && beforeDeadline())
-                                            if (childPause.snapshot() != ChildTaskPauseState.ACTIVE) continue
-                                            if (!selectedModel.sameSelection(currentDefinition())) continue
-                                            if (lease?.leaveBoundary() == false) continue
-                                            break
-                                        }
+                                        val selectedModel = checkNotNull(preparedModel)
+                                        if (childPause.snapshot() != ChildTaskPauseState.ACTIVE ||
+                                            !selectedModel.sameSelection(currentDefinition()) || lease?.leaveBoundary() == false)
+                                            throw ModelPreparationChangedException()
+                                        val port = selectedModel.create()
+                                        if (!selectedModel.sameSelection(currentDefinition())) throw ModelPreparationChangedException()
+                                        recordSelection(selectedModel)
                                         val revoked = context.cancelled()
                                         synchronized(gate) {
                                             check(!closed && generation == current && !revoked && beforeDeadline())
@@ -555,6 +560,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                                 val first = firstNext
                                                 firstNext = false
                                                 if (!first && assembly != null) awaitRequestBoundary()
+                                                if (!first && (!selectedModel.sameRequest(checkNotNull(preparedModel)) ||
+                                                    !selectedModel.sameRequest(currentDefinition()))) throw ModelPreparationChangedException()
                                                 trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_STARTED)
                                                 var firstEvent = true
                                                 val texts = mutableMapOf<String, Int>()
@@ -662,7 +669,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                     }
                                 } }
                                 val runner = ChatRunner(selected, memory, tools, RunnerOptions(
-                                    receiptBatchExecutor = receipts, diagnostics = diagnostics,
+                                    receiptBatchExecutor = receipts, diagnostics = diagnostics, contextRuntime = childContext,
                                     onRequestCompletedBoundary = {
                                         trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_COMPLETED)
                                         lease?.enterBoundary(); currentDefinition(honorUserPause = false)

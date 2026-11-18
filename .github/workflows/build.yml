@@ -112,7 +112,7 @@ jobs:
             python -B -m unittest discover -s tests -p 'test_cloud*.py' -v
             python -B -m unittest discover -s tests -p 'test_child*.py' -v
           elif [[ "$CHECK_SCOPE" == "context" ]]; then
-            for pattern in 'test_cloud*.py' 'test_summary*.py' 'test_context*.py' 'test_cold_start_summary.py' 'test_cooperation_unit_scope.py' 'test_windows_unit_skips.py' 'test_delegation_checks_scope.py'; do
+            for pattern in 'test_cloud*.py' 'test_summary*.py' 'test_context*.py' 'test_child_auto_compression_contract.py' 'test_cold_start_summary.py' 'test_cooperation_unit_scope.py' 'test_windows_unit_skips.py' 'test_delegation_checks_scope.py'; do
               python -B -m unittest discover -s tests -p "$pattern" -v
             done
           else

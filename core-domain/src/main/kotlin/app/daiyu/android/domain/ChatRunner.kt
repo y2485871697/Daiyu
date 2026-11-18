@@ -333,6 +333,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var reopenAfterCompaction = false
         var contextInputOverhead = 0L
         var pressureChecked = false
+        var sessionAwaitingFirstNext = false
         var requestDefinitions = emptyList<ToolDefinition>()
         fun effectiveHistory(message: Message = current): List<Message> = if (contextRuntime == null) modelHistory else modelHistory +
             MessageHistory.expand(listOf(segmentHistory.project(message).copy(status = RunStatus.COMPLETED, error = null)))
@@ -626,6 +627,20 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             }
             return local
         }
+        var preparedContextHeader: String? = null
+        var contextHeaderPrepared = false
+        fun prepareContextRequest() {
+            model.prepareRequest()
+            val runtime = contextRuntime ?: return
+            val header = runtime.headerIdentity((tool as? CatalogTool)?.definitions.orEmpty())
+            if (contextHeaderPrepared && preparedContextHeader != header) {
+                pressureChecked = false
+                contextState = contextState?.copy(input = null, calibration = null, pressure = null,
+                    meter = ContextMeterCheckpoint())
+            }
+            preparedContextHeader = header
+            contextHeaderPrepared = true
+        }
         fun awaitContextCapacity() {
             if (stopped.get() || terminalReserved) throw InterruptedException()
             val controls = synchronized(terminalLock) {
@@ -669,6 +684,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     ownerBound = true
                 }
                 compactAtBoundary()
+                prepareContextRequest()
                 awaitContextCapacity()
                 val token = synchronized(terminalLock) {
                     if (stopped.get() || terminalReserved || terminal) throw InterruptedException()
@@ -697,6 +713,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             token.first != generation || token.second != pauseEpoch || pauseRequested || supplements.isNotEmpty() || pendingSupplements.isNotEmpty() || breakStream
                         }
                         if (invalidated) continue
+                        if (failure is ModelPreparationChangedException) { pressureChecked = false; continue }
                         if (recoverContextOverflow(failure)) continue
                         if (pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) {
                             boundary(); pressureChecked = false; continue
@@ -708,7 +725,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             pauseRequested || supplements.isNotEmpty() || pendingSupplements.isNotEmpty() || breakStream) false
                         else { session = opened; true }
                     }
-                    if (accept) { reopenAfterCompaction = false; return opened }
+                    if (accept) { reopenAfterCompaction = false; sessionAwaitingFirstNext = true; return opened }
                     cancelSession(opened)
                 } finally {
                     synchronized(terminalLock) { requestOpening = false }
@@ -721,7 +738,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             while (true) {
                 val rebind = round > 0 && (active as? RequestRebindingModelSession)?.needsRebind() == true
                 if (boundary(rebind)) { cancelSession(active); active = open() }
-                if (round > 0 && compactAtBoundary()) {
+                if (!sessionAwaitingFirstNext) prepareContextRequest()
+                if (!sessionAwaitingFirstNext && round > 0 && compactAtBoundary()) {
                     cancelSession(active); active = open()
                 }
                 awaitContextCapacity()
@@ -1142,6 +1160,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 }
                                 effectiveOutput = false
                                 invoked = true
+                                sessionAwaitingFirstNext = false
                                 if (attempt == 0 && tool is CatalogTool) {
                                     active.updateToolDefinitions(requestDefinitions)
                                 }
@@ -1299,6 +1318,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     continue
                 }
                 val requestFailure = transportFailure
+                if (requestFailure is ModelPreparationChangedException) {
+                    cancelSession(active); pressureChecked = false; active = open(); continue
+                }
                 if (requestFailure != null && pending.isEmpty() && !effectiveOutput && recoverContextOverflow(requestFailure)) {
                     cancelSession(active)
                     active = open()

@@ -8,6 +8,7 @@ import app.daiyu.android.model.videos.MessageVideoInput
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.storage.ConversationDatabase
 import app.daiyu.android.workspace.*
+import org.json.JSONTokener
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -135,8 +136,12 @@ class ControllerVideoFilesTest {
         assertEquals(assistant, projected.last())
         assertEquals(value.user.blocks, projected.first().blocks.dropLast(1))
         val manifest = (projected.first().blocks.last() as MessageBlock.Text).text
-        assertTrue(manifest.contains(files.single().linuxPath))
-        assertTrue(manifest.contains(files.single().hostPath))
+        fun manifestPath(prefix: String): String {
+            val encoded = manifest.lineSequence().single { it.startsWith(prefix) }.removePrefix(prefix)
+            return JSONTokener(encoded).nextValue() as String
+        }
+        assertEquals(files.single().linuxPath, manifestPath("Linux 路径: "))
+        assertEquals(files.single().hostPath, manifestPath("Android 路径: "))
         assertTrue(manifest.contains("当前已选 Linux 环境"))
         assertTrue(manifest.contains("包管理器安装"))
         assertTrue(manifest.contains("Linux /tmp"))

@@ -4,6 +4,7 @@ import android.test.InstrumentationTestCase
 import app.daiyu.android.delegation.ReasoningEffort
 import app.daiyu.android.domain.*
 import app.daiyu.android.media.video.VideoAttachmentOwner
+import org.json.JSONTokener
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -39,12 +40,15 @@ class ControllerVideoFilesEntryTest : InstrumentationTestCase() {
             assertEquals(VideoDraftOutcome.ACCEPTED, receipt.get()?.outcome)
             assertEquals(1, fixture.opens.get())
             assertEquals(ReasoningEffort.HIGH, fixture.controller.reasoningPreference.snapshot(owner.conversationId))
+            fun manifestPath(text: String, prefix: String): String {
+                val encoded = text.lineSequence().single { it.startsWith(prefix) }.removePrefix(prefix)
+                return JSONTokener(encoded).nextValue() as String
+            }
             val manifest = fixture.histories.single().first().blocks.filterIsInstance<MessageBlock.Text>().last().text
-            assertTrue(manifest.contains("Linux 路径:"))
-            assertTrue(manifest.contains("/workspace/.daiyu-video-inputs/"))
+            val linuxPath = manifestPath(manifest, "Linux 路径: ")
+            assertTrue(linuxPath.startsWith("/workspace/.daiyu-video-inputs/"))
             assertFalse(manifest.contains("data:video/"))
-            val hostLine = manifest.lineSequence().single { it.startsWith("Android 路径:") }.substringAfter(": ")
-            val hostPath = org.json.JSONArray("[$hostLine]").getString(0)
+            val hostPath = manifestPath(manifest, "Android 路径: ")
             assertTrue(clip.readBytes().contentEquals(File(hostPath).readBytes()))
             assertEquals("high", org.json.JSONObject(frozen.single().requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
             val conversation = fixture.database.conversations().single()
@@ -60,8 +64,9 @@ class ControllerVideoFilesEntryTest : InstrumentationTestCase() {
             assertNotNull(fixture.controller.send(conversation, "继续读取原视频"))
             assertTrue(follow.entered.await(20, TimeUnit.SECONDS))
             assertEquals(2, fixture.opens.get())
-            assertTrue(fixture.histories.last().first().blocks.filterIsInstance<MessageBlock.Text>()
-                .any { it.text.contains(hostPath) })
+            val followManifest = fixture.histories.last().first().blocks.filterIsInstance<MessageBlock.Text>().last().text
+            assertEquals(linuxPath, manifestPath(followManifest, "Linux 路径: "))
+            assertEquals(hostPath, manifestPath(followManifest, "Android 路径: "))
             assertEquals("high", org.json.JSONObject(frozen.last().requestOptions.customBody).getJSONObject("reasoning").getString("effort"))
             assertTrue(clip.readBytes().contentEquals(File(hostPath).readBytes()))
             follow.release.countDown()

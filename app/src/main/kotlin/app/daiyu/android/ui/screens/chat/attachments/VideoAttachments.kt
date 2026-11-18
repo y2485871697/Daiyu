@@ -76,9 +76,9 @@ internal typealias VideoDraftHandoff = (VideoDraftRequest, VideoDraftText, (Vide
  * viewLifecycleOwner in a Fragment). Unless [manageLifecycle] is false, this component owns the
  * lifecycle binding. A parent-managed binding must live outside keyed composer subcompositions.
  *
- * [enabled] is the parent's media-route gate (e.g. no image draft); [parentBusy] gates actions without
- * touching normal text/image send routes. Media operations are delegated to [host]; the parent
- * owns consumption of accepted editor revisions.
+ * [enabled] is the parent's media-route gate (e.g. no image draft); [parentBusy] gates submission and
+ * [selectionBusy] gates attachment editing without touching normal text/image send routes. Media
+ * operations are delegated to [host]; the parent owns consumption of accepted editor revisions.
  */
 @Composable
 internal fun VideoAttachments(
@@ -89,6 +89,7 @@ internal fun VideoAttachments(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     parentBusy: Boolean = false,
+    selectionBusy: Boolean = parentBusy,
     viewLifecycleOwner: LifecycleOwner = LocalLifecycleOwner.current,
     compact: Boolean = false,
     manageLifecycle: Boolean = true,
@@ -112,7 +113,8 @@ internal fun VideoAttachments(
     // Never display previous route's items before the lifecycle effect has entered the new slot.
     if (state.conversation != conversation) return
     key(host, state.owner, state.visit) {
-        VideoAttachmentsContent(host, state, text, onHandoff, picker, modifier, enabled && !parentBusy, compact, pickRequest, onControls, onControlsDisposed)
+        VideoAttachmentsContent(host, state, text, onHandoff, picker, modifier,
+            enabled && !selectionBusy, enabled && !parentBusy, compact, pickRequest, onControls, onControlsDisposed)
     }
 }
 
@@ -133,6 +135,7 @@ private fun VideoAttachmentsContent(
     picker: VideoPickerBinding,
     modifier: Modifier,
     enabled: Boolean,
+    sendEnabled: Boolean,
     compact: Boolean,
     pickRequest: Any?,
     onControls: (VideoComposerControls?) -> Unit,
@@ -143,7 +146,7 @@ private fun VideoAttachmentsContent(
     val controls by rememberUpdatedState(onControls)
     val releaseControls by rememberUpdatedState(onControlsDisposed)
     val canSelect = canEdit && !picker.selecting && state.remaining > 0 && state.items.none { it is VideoChatHost.Item.Importing }
-    val canSubmit = enabled && state.canSubmit && !picker.selecting
+    val canSubmit = sendEnabled && state.canSubmit && !picker.selecting
     fun send() {
         if (!canSubmit || !sameVideoVisit(state, host.state)) return
         host.submit(text.text, state) { request ->
@@ -152,7 +155,7 @@ private fun VideoAttachmentsContent(
             }
         }
     }
-    DisposableEffect(host, picker, state, text, enabled, picker.selecting, pickRequest) {
+    DisposableEffect(host, picker, state, text, enabled, sendEnabled, picker.selecting, pickRequest) {
         var live = true
         val published = VideoComposerControls(canSubmit,
             picker.selecting || state.fenced || state.storageFailed || state.recovering ||
@@ -216,7 +219,7 @@ private fun VideoAttachmentsContent(
                 }
             }
         }
-        if (!compact) TextButton(text = "发送原视频…", enabled = enabled && state.canSubmit && !picker.selecting,
+        if (!compact) TextButton(text = "发送原视频…", enabled = canSubmit,
             onClick = { send() },
             modifier = Modifier.heightIn(min = 48.dp).testTag("video_attachments_send"))
     }

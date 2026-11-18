@@ -939,6 +939,7 @@ class MainActivity : ComponentActivity() {
                     text.revision, text.text, true), settle)
             }, enabled = videoComposerAvailable(),
             parentBusy = videoSending || controller.active != null || !controller.ready || controller.dataBusy,
+            selectionBusy = videoSending || !controller.ready || controller.dataBusy,
             compact = true, manageLifecycle = false, pickRequest = pick, onControls = { controls ->
                 videoComposerControls = controls
                 if (controls != null && pick != null && videoPickEntry === pick) {
@@ -7725,6 +7726,7 @@ class MainActivity : ComponentActivity() {
             // Also catches new-chat -> persisted conversation after sending, without auto-playing.
             speechHost.syncConversation(selected?.id?.value)
             imageHost.syncConversation(selected?.id?.value)
+            if (videoHost.state.conversation != selected?.id?.value) videoHost.enter(selected?.id?.value)
             if (rowsChanged) refreshReplyIdentities()
             if (rowsChanged) questionRows = shown.mapNotNull { (_, message) ->
                 val retryCleanup = controller.canRetryQuestionCleanup(message)

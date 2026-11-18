@@ -140,6 +140,7 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
     private val mounted = mutableStateOf(true)
     private val text = mutableStateOf("first exact text")
     private val busy = mutableStateOf(false)
+    private val selectionBusy = mutableStateOf<Boolean?>(null)
     private val conversation = mutableStateOf<String?>(null)
     private var handed: VideoDraftRequest? = null
     private var frozenEditor: VideoDraftText? = null
@@ -150,6 +151,7 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         super.setUp()
         mounted.value = true; text.value = "first exact text"; busy.value = false; conversation.value = null
         handed = null; frozenEditor = null; deliver = null; textRevision.value = 1L
+        selectionBusy.value = null
         mainThread {
             media = Media()
             host = VideoChatHost(MemoryJournal(), media)
@@ -178,7 +180,8 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
                                 if (mounted.value) VideoAttachments(host, conversation.value,
                                     VideoDraftText(text.value, 7L, textRevision.value),
                                     onHandoff = { request, editor, settle -> handed = request; frozenEditor = editor; deliver = settle },
-                                    parentBusy = busy.value, viewLifecycleOwner = life, compact = compact,
+                                    parentBusy = busy.value, selectionBusy = selectionBusy.value ?: busy.value,
+                                    viewLifecycleOwner = life, compact = compact,
                                     onControls = { controls.value = it })
                             }
                             if (compact) ChatMenuLayer {
@@ -276,6 +279,24 @@ class VideoAttachmentsUiTest : WiredActivityTestCase() {
         val restored = node("chat-composer-surface").fetchSemanticsNode().boundsInRoot
         assertTrue(kotlin.math.abs(restored.height - empty.height) <= 1f)
         node("chat-send").assertIsNotEnabled()
+    }
+
+    fun testBusySubmissionStillAllowsSelectionButCannotSendUntilBusyEnds() {
+        mainThread { busy.value = true; selectionBusy.value = false }
+        show(compact = true)
+        ui.onNodeWithContentDescription("附件").performClick()
+        node("chat-attachment:ATTACH_VIDEO").performClick()
+        ui.waitUntil(5_000) { picker.launches.size == 1 }
+        mainThread { picker.result(picker.launches.single()) }
+        val id = awaitReady()
+        node("video_attachments_item:$id").assertIsDisplayed()
+        node("chat-send").assertIsNotEnabled()
+        assertNull(handed)
+        mainThread { busy.value = false }
+        node("chat-send").assertIsEnabled().performClick()
+        assertNotNull(handed)
+        assertEquals("first exact text", checkNotNull(handed).text)
+        assertEquals(listOf(id), checkNotNull(handed).videos.map { it.id })
     }
 
     fun testCompactComposerBlockedVideoNeverSendsCaptionAndSingleClickFreezesText() {

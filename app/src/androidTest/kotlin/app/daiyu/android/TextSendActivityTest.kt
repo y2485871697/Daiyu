@@ -150,6 +150,97 @@ class TextSendActivityTest : WiredActivityTestCase() {
         assertEquals(1, fixture.opens.get()); assertEquals(1, preparationCalls.get())
     }
 
+    fun testFirstTextAcceptanceKeepsVideoMenuLiveAcrossRealPickerCancellation() {
+        assertTrue(fixture.database.conversations().isEmpty())
+        val session = fixture.session(holdSeconds = 120)
+        setDraft("first text before video")
+        node("chat-send").performClick()
+        awaitPreparing()
+        releasePreparation.countDown()
+        awaitTextSendResult(activity)
+        assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+        val conversation = fixture.database.conversations().single()
+        assertEquals(conversation.id.value, fixture.controller.preferences.getString("selected", null))
+        mainThread {
+            val host = fixture.controller.videoHost
+            assertEquals(conversation.id.value, host.state.conversation)
+            val before = host.state
+            invokeHost(activity, "publishChat")
+            invokeHost(activity, "publishChat")
+            assertEquals(before.owner, host.state.owner)
+            assertEquals(before.visit, host.state.visit)
+        }
+        val caption = "caption retained after picker cancellation"
+        setDraft(caption)
+        val launches = AtomicInteger()
+        val picker = object : android.app.Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: android.content.Intent): android.app.Instrumentation.ActivityResult? {
+                if (intent.action == android.content.Intent.ACTION_GET_CONTENT && intent.type == "video/*") {
+                    assertTrue(intent.getBooleanExtra(android.content.Intent.EXTRA_ALLOW_MULTIPLE, false))
+                    launches.incrementAndGet()
+                }
+                return null // Observe only: the actual system picker must run and return its own result.
+            }
+        }
+        instrumentation.addMonitor(picker)
+        var testFailure: Throwable? = null
+        try {
+            repeat(2) { index ->
+                if (index == 0) assertNotNull(fixture.controller.active)
+                else {
+                    finish(session)
+                    mainThread {
+                        val before = fixture.controller.videoHost.state
+                        invokeHost(activity, "publishChat")
+                        assertEquals(before.visit, fixture.controller.videoHost.state.visit)
+                    }
+                }
+                ui.onNodeWithContentDescription("附件").performClick()
+                node("chat-attachment:ATTACH_VIDEO").assertIsDisplayed().assertIsEnabled().performClick()
+                awaitControl("video GET_CONTENT launch") { launches.get() == index + 1 }
+                awaitControl("actual picker stops the chat Activity") {
+                    !activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+                }
+                instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+                awaitControl("actual picker returns to the same chat") {
+                    activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED) &&
+                        invokeHost(activity, "getVideoPickEntry") == null
+                }
+                ui.waitForIdle()
+                node("video_attachments_selecting").assertDoesNotExist()
+                assertDraft(caption)
+                mainThread {
+                    assertEquals(conversation.id.value, fixture.controller.videoHost.state.conversation)
+                    assertTrue(fixture.controller.videoHost.state.items.isEmpty())
+                    assertTrue(fixture.controller.videoHost.state.visible)
+                }
+            }
+            assertEquals(2, launches.get())
+        } catch (failure: Throwable) {
+            testFailure = failure
+            throw failure
+        } finally {
+            session.release.countDown()
+            instrumentation.removeMonitor(picker)
+            try {
+                var pickerStillOpen = false
+                controlMain {
+                    pickerStillOpen = launches.get() > 0 && !activity.isFinishing && !activity.isDestroyed &&
+                        !activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+                }
+                if (pickerStillOpen) {
+                    instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+                    awaitControl("close remaining test picker") {
+                        activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+                    }
+                }
+            } catch (cleanupFailure: Throwable) {
+                val original = testFailure
+                if (original != null) original.addSuppressed(cleanupFailure) else throw cleanupFailure
+            }
+        }
+    }
+
     fun testCommittedReceiptKeepsPreparingControlUntilUiConsumesIt() = verifyUnconsumedReceipt(false)
 
     fun testRejectedReceiptKeepsPreparingControlUntilUiConsumesIt() = verifyUnconsumedReceipt(true)

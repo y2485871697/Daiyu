@@ -51,6 +51,9 @@ class FullRegressionEventBoundariesContractTest(unittest.TestCase):
         self.assertIn('!activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)', waiting)
         self.assertNotIn('Lifecycle.State.STARTED', waiting)
         back = 'instrumentation.uiAutomation.performGlobalAction('
+        focus = 'awaitHomeWindowSettled()'
+        self.assertLess(test.index(leave), test.index(focus))
+        self.assertLess(test.index(focus), test.index(back))
         self.assertLess(test.index(back), test.index('awaitControl("actual picker returns to the same chat")'))
         self.assertEqual(2, test.count(back))
         self.assertEqual(2, test.count('AccessibilityService.GLOBAL_ACTION_BACK'))

@@ -211,6 +211,8 @@ class TextSendActivityTest private constructor(
                 awaitControl("actual picker pauses or stops the chat Activity") {
                     !activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
                 }
+                // onPause precedes the picker's focused window; BACK must wait for that window.
+                awaitHomeWindowSettled()
                 assertTrue(instrumentation.uiAutomation.performGlobalAction(
                     android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK))
                 awaitControl("actual picker returns to the same chat") {

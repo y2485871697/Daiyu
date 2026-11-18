@@ -108,7 +108,7 @@ class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
                 ui.waitUntil(5_000) { launches.get() == index + 1 }
                 ui.waitForIdle()
                 assertDraft(original)
-                assertNull(MainActivity::class.java.getDeclaredField("videoPickEntry").apply { isAccessible = true }.get(activity))
+                assertNull(invokeHost(activity, "getVideoPickEntry"))
             }
             assertEquals(2, launches.get())
             assertEquals(0, fixture.opens.get())
@@ -137,7 +137,7 @@ class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
             node("chat-attachment:ATTACH_VIDEO").performClick()
             ui.waitForIdle()
             assertEquals(0, launches.get())
-            assertNotNull(MainActivity::class.java.getDeclaredField("videoPickEntry").apply { isAccessible = true }.get(activity))
+            assertNotNull(invokeHost(activity, "getVideoPickEntry"))
             mainThread { recovering.remove(host.state.owner); publish.invoke(host) }
             ui.waitUntil(5_000) { launches.get() == 1 }
             ui.waitForIdle()

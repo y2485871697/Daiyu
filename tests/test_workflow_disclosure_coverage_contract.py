@@ -188,7 +188,7 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         source = (CHAT / 'ChatMessageList.kt').read_text()
         self.assertIn('internal val ChatTailClearance = 8.dp', source)
         self.assertIn('bottom = composerBottomInset + ChatTailClearance', source)
-        self.assertIn('if (protect) clearance() else 0', source)
+        self.assertIn('if (protect) drawClearance() else 0', source)
         self.assertIn('val actualTop = list.localPositionOf(viewport, Offset.Zero).y', source)
         self.assertIn('!state.followCatchup', source)
         self.assertIn('(state.bounded || protect) && list != null', source)

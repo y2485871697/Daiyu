@@ -62,6 +62,11 @@ class TaskScrollSmokeScopeTests(unittest.TestCase):
         scope = scope.split("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'tool-receipts':", 1)[0]
         self.assertIn("'test_streaming_follow_contract.py'", scope)
         self.assertIn("'test_streaming_occlusion_contract.py'", scope)
+        selected = workflow.split('if [[ "$WORKFLOW_CHECK_SCOPE" == task-scroll ]]; then', 1)[1].split('fi', 1)[0]
+        self.assertIn('MarkdownAdmissionCompositionTest', selected)
+        expected = workflow.rsplit("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'task-scroll':", 1)[1]
+        expected = expected.split("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'page-performance':", 1)[0]
+        self.assertIn("'MarkdownAdmissionCompositionTest'", expected)
 
     def test_partial_extended_duplicate_and_other_modes_keep_full_selection(self):
         classes = ','.join(CLASSES)

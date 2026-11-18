@@ -245,7 +245,8 @@ jobs:
           fi
           if [[ "$WORKFLOW_CHECK_SCOPE" == task-scroll ]]; then
             classes=(MarkdownRevealTest MarkdownRevealInvalidationTest MarkdownRevealHapticsTest
-                     AssistantWorkflowCompositionTest WorkflowNarrationCompositionTest ReasoningStreamCompositionTest)
+                     AssistantWorkflowCompositionTest WorkflowNarrationCompositionTest ReasoningStreamCompositionTest
+                     MarkdownAdmissionCompositionTest)
           fi
           if [[ "$WORKFLOW_CHECK_SCOPE" == page-performance ]]; then
             classes=(MarkdownRevealTest MarkdownRevealInvalidationTest MarkdownRevealHapticsTest
@@ -359,7 +360,8 @@ jobs:
                           'StreamingHistoryRefreshTest', 'ToolReceiptSourceTest', 'ToolActivityUiTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'task-scroll':
               expected = {'MarkdownRevealTest', 'MarkdownRevealInvalidationTest', 'MarkdownRevealHapticsTest',
-                          'AssistantWorkflowCompositionTest', 'WorkflowNarrationCompositionTest', 'ReasoningStreamCompositionTest'}
+                          'AssistantWorkflowCompositionTest', 'WorkflowNarrationCompositionTest', 'ReasoningStreamCompositionTest',
+                          'MarkdownAdmissionCompositionTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'page-performance':
               expected = {'MarkdownRevealTest', 'MarkdownRevealInvalidationTest', 'MarkdownRevealHapticsTest',
                           'AssistantWorkflowCompositionTest', 'WorkflowNarrationCompositionTest', 'ReasoningStreamCompositionTest',

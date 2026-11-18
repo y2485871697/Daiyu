@@ -155,6 +155,7 @@ internal fun StreamingTailContainer(
     },
     initialContent: Boolean = false,
     followIntent: () -> Boolean = follows,
+    drawClearance: () -> Int = clearance,
     content: @Composable () -> Unit,
 ) {
     val questionArrival = remember(state, initialContent) {
@@ -195,7 +196,7 @@ internal fun StreamingTailContainer(
                 val viewport = state.viewportCoordinates?.takeIf { it.isAttached }
                 val bottom = if ((state.bounded || protect) && list != null && viewport != null) {
                     val actualTop = list.localPositionOf(viewport, Offset.Zero).y
-                    (list.size.height - actualTop - if (protect) clearance() else 0).coerceAtLeast(0f)
+                    (list.size.height - actualTop - if (protect) drawClearance() else 0).coerceAtLeast(0f)
                 } else size.height
                 // A temporary follow gate must not shrink the physical safe edge during catchup.
                 val followingCatchup = state.bounded && state.followCatchup && followIntent()
@@ -283,6 +284,8 @@ internal fun ChatMessageList(
     retainUnconfirmedRows: Boolean = false,
     onTurnComposed: ((String) -> Unit)? = null,
     userMessageEntrance: UserMessageEntranceMotion? = null,
+    composerVisualTopInset: Dp = 0.dp,
+    hasTurnExtras: (ChatTurnUi.Assistant) -> Boolean = { true },
 ) {
     val incomingTurns = turns
     var retainedTurns by remember { mutableStateOf(turns, androidx.compose.runtime.referentialEqualityPolicy()) }
@@ -363,6 +366,7 @@ internal fun ChatMessageList(
     val occlusionPx = with(density) { composerBottomInset.roundToPx() }
     val currentDensity by rememberUpdatedState(density.density)
     val currentOcclusionPx by rememberUpdatedState(occlusionPx)
+    val currentVisualTopInsetPx by rememberUpdatedState(with(density) { composerVisualTopInset.coerceAtLeast(0.dp).roundToPx() })
     val currentFollowClearancePx by rememberUpdatedState(with(density) { ChatTailClearance.roundToPx() })
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
@@ -1026,12 +1030,26 @@ internal fun ChatMessageList(
                 }) {
                     val viewportState = nestedStates[turn.listKey]
                     if (turn is ChatTurnUi.Assistant && viewportState != null) {
+                        val tailViewportHeight = {
+                            viewportHeightPx.intValue - currentOcclusionPx - with(density) { 11.dp.roundToPx() + ChatTailClearance.roundToPx() }
+                        }
+                        val plainStreamingBody = turn.isPlainStreamingBody() && !hasTurnExtras(turn) &&
+                            reconnectPartsByKey.getValue(turn.listKey).placedIds.isEmpty() &&
+                            fallbackAfter[turn.listKey].isNullOrEmpty() && compressionAfter[turn.listKey].isNullOrEmpty()
                         StreamingTailContainer(viewportState, { clearanceLayout.coordinates }, turn.listKey,
                             userScrollEnabled = pageActive && !initialPositionPending && !retainingRows && presentationActive,
                             follows = { turn.listKey == assistantOwnerKey && followBottom && (initialPositionPending || canFollowBottom()) },
                             clearance = { currentOcclusionPx + currentFollowClearancePx },
                             protectClearance = { turn.listKey == assistantOwnerKey && followBottom },
-                            viewportHeight = { viewportHeightPx.intValue - currentOcclusionPx - with(density) { 11.dp.roundToPx() + ChatTailClearance.roundToPx() } },
+                            viewportHeight = tailViewportHeight,
+                            drawClearance = {
+                                if (plainStreamingBody && turn.listKey == assistantOwnerKey && turn.listKey == currentTailKey &&
+                                    viewportState.bounded && viewportState.contentHeight > 0 &&
+                                    viewportState.contentHeight <= tailViewportHeight()) {
+                                    // Keep the smooth follow target, but do not cut glyphs in the transparent gap above the editor.
+                                    (currentOcclusionPx - currentVisualTopInsetPx).coerceAtLeast(0)
+                                } else currentOcclusionPx + currentFollowClearancePx
+                            },
                             listViewportHeight = { viewportHeightPx.intValue },
                             initialContent = initialQuestionContent,
                             followIntent = { turn.listKey == assistantOwnerKey && followBottom },

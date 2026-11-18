@@ -83,6 +83,15 @@ internal fun ChatTurnUi.Assistant.hasBodyTextActions(): Boolean =
     else leadingContent.any { it.text.isNotBlank() } ||
         if (finalContent.isNotEmpty()) finalContent.any { it.text.isNotBlank() } else finalText.isNotBlank()
 
+internal fun ChatTurnUi.Assistant.isPlainStreamingBody(): Boolean {
+    if (status != RunStatus.RUNNING || !isStreaming || stopRequested || !error.isNullOrBlank() ||
+        workProcess != null || reportedReasoning.isNotEmpty() || leadingContent.isNotEmpty() || reconnectSource != null) return false
+    val source = workflowContent()
+    return source.work == null && source.steps.isEmpty() && source.leading.isEmpty() && source.pending.isEmpty() &&
+        source.body.isNotEmpty() && source.body.all { it is MessageContentUi.Text } &&
+        source.body.any { it is MessageContentUi.Text && it.text.isNotBlank() }
+}
+
 internal fun MessageContentUi.workflowKey(index: Int): String = when (this) {
     is MessageContentUi.Reasoning -> "reasoning:${reported.itemId}"
     is MessageContentUi.Tool -> "tool:${step.renderKey}"

@@ -2587,6 +2587,8 @@ class MainActivity : ComponentActivity() {
                                         if (routeActive && pageCurrent && presented && turn.segmentIndex == 0) {
                                             QuestionCleanup(turn.id)
                                         }
+                                    }, hasTurnExtras = { turn ->
+                                        turn.segmentIndex == 0 && questionRows[turn.id]?.retryCleanup == true
                                     }, speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId,
                                         onPresentationReady = onReady,
                                         callEntryMotion = floatingCallButtonMotion.takeIf {

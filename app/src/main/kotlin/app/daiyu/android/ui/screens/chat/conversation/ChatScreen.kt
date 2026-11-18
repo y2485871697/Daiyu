@@ -142,6 +142,7 @@ internal fun DaiyuChatScreen(
     speechPreparingMessageId: String? = null,
     menuAvailable: Boolean = true,
     onPresentationReady: (Boolean) -> Unit = {},
+    hasTurnExtras: (ChatTurnUi.Assistant) -> Boolean = { true },
 ) {
     val presentationActive = LocalChatPresentationActive.current &&
         app.daiyu.android.ui.navigation.LocalPageContentActive.current
@@ -238,7 +239,8 @@ internal fun DaiyuChatScreen(
                     state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset, state.timeline, state.compressionActivity,
                     speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId, compressionActivities = state.compressionActivities,
                     onPresentationReady = onPresentationReady, historyReady = state.historyReady,
-                    retainUnconfirmedRows = !state.historyReady, userMessageEntrance = userMessageEntrance)
+                    retainUnconfirmedRows = !state.historyReady, userMessageEntrance = userMessageEntrance,
+                    composerVisualTopInset = ChatComposerVisualTopInset, hasTurnExtras = hasTurnExtras)
             }
         }, composer = { backdrop ->
             ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop,

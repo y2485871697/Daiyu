@@ -37,9 +37,292 @@ import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.domain.*
 import app.daiyu.android.ui.app.AgentAppTheme
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.PixelMap
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.sp
+import kotlin.math.abs
+import kotlin.math.ceil
+import kotlin.math.floor
 import top.yukonga.miuix.kmp.basic.Text
 
 class ChatStreamingOcclusionTest : WiredActivityTestCase() {
+    private val inkSurfaceColor = Color(0xFFE0E0E0)
+    private var inkReference by mutableStateOf(false)
+    private data class InkGlyph(val layout: TextLayoutResult, val at: Offset)
+    private var inkGlyph: InkGlyph? = null
+    private data class InkShot(
+        val actual: PixelMap,
+        val reference: PixelMap,
+        val ink: Int,
+        val lost: Int,
+        val first: Int,
+        val last: Int,
+    )
+
+    private fun inkDark(c: Color) = c.red < .8f && c.green < .8f && c.blue < .8f
+    private fun inkDelta(a: Color, b: Color) =
+        maxOf(abs(a.red - b.red), abs(a.green - b.green), abs(a.blue - b.blue))
+
+    @Composable
+    private fun InkEditor() {
+        Box(Modifier.fillMaxWidth().height(96.dp).testTag("ink-editor")) {
+            Box(Modifier.fillMaxSize().padding(top = ChatComposerVisualTopInset, start = 12.dp, end = 12.dp)) {
+                Box(Modifier.fillMaxSize().background(inkSurfaceColor).testTag("ink-surface"))
+            }
+        }
+    }
+
+    @Composable
+    private fun InkReferenceLayer() {
+        Canvas(Modifier.fillMaxSize()) {
+            if (inkReference) inkGlyph?.let { p ->
+                drawRect(Color.White, p.at,
+                    Size(p.layout.size.width.toFloat(), p.layout.size.height.toFloat()))
+                drawText(p.layout, topLeft = p.at)
+            }
+        }
+    }
+
+    private fun inkRect(host: String, tag: String): androidx.compose.ui.geometry.Rect {
+        val h = ui.onNodeWithTag(host).fetchSemanticsNode().layoutInfo.coordinates
+        val c = ui.onNodeWithTag(tag).fetchSemanticsNode().layoutInfo.coordinates
+        val p = c.positionInRoot() - h.positionInRoot()
+        return androidx.compose.ui.geometry.Rect(p.x, p.y, p.x + c.size.width, p.y + c.size.height)
+    }
+
+    private fun readInkGlyph(host: String, matcher: SemanticsMatcher): InkGlyph {
+        val h = ui.onNodeWithTag(host).fetchSemanticsNode()
+        val pairs = ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().map { n ->
+            val results = mutableListOf<TextLayoutResult>()
+            ui.runOnUiThread { n.config[SemanticsActions.GetTextLayoutResult].action!!(results) }
+            n to results.single()
+        }
+        val (n, r) = pairs.maxBy { (node, result) ->
+            node.positionInRoot.y + result.getLineBottom(result.lineCount - 1)
+        }
+        return InkGlyph(r, n.positionInRoot - h.positionInRoot)
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun inkShot(host: String, matcher: SemanticsMatcher): InkShot {
+        val target = ui.onNodeWithTag(host)
+        val node = target.fetchSemanticsNode()
+        assertEquals(0f, node.positionOnScreen.x % 1f, 0f)
+        assertEquals(0f, node.positionOnScreen.y % 1f, 0f)
+        val p = readInkGlyph(host, matcher)
+        val clock = ui.mainClock.currentTime
+        ui.runOnUiThread { inkGlyph = p; inkReference = false }
+        val actual = captureScreenNode(target, advanceAnimationClock = false).toPixelMap()
+        val reference = try {
+            ui.runOnUiThread { inkReference = true }
+            captureScreenNode(target, advanceAnimationClock = false).toPixelMap()
+        } finally {
+            ui.runOnUiThread { inkReference = false }
+        }
+        assertEquals(clock, ui.mainClock.currentTime)
+        val after = readInkGlyph(host, matcher)
+        assertEquals(p.at, after.at)
+        assertEquals(p.layout.layoutInput, after.layout.layoutInput)
+        assertEquals(p.layout.size, after.layout.size)
+        val r = p.layout
+        val line = r.lineCount - 1
+        val left = floor(p.at.x + r.getLineLeft(line)).toInt()
+        val right = ceil(p.at.x + r.getLineRight(line)).toInt()
+        val top = floor(p.at.y + r.getLineTop(line)).toInt()
+        val bottom = ceil(p.at.y + r.getLineBottom(line)).toInt()
+        check(left >= 0 && top >= 0 && right <= actual.width && bottom <= actual.height)
+        var ink = 0
+        var lost = 0
+        var first = Int.MAX_VALUE
+        var last = -1
+        var expectedInk = 0
+        for (y in top until bottom) for (x in left until right) {
+            val a = actual[x, y]
+            val b = reference[x, y]
+            if (inkDark(a)) ink++
+            if (inkDark(b)) {
+                expectedInk++
+                first = minOf(first, y)
+                last = maxOf(last, y)
+                if (inkDelta(a, b) > .025f) lost++
+            }
+        }
+        assertTrue("Reference must contain a complete glyph", expectedInk > 2 && last - first > 2)
+        return InkShot(actual, reference, ink, lost, first, last)
+    }
+
+    private fun assertNoSurfaceInk(host: String, shot: InkShot) {
+        val surface = inkRect(host, "ink-surface")
+        var leaked = 0
+        // Include the transparent sides: an opaque editor must not hide an invalid draw edge.
+        for (y in ceil(surface.top).toInt() until shot.actual.height) {
+            for (x in 0 until shot.actual.width) {
+                val expected = if (x + .5f >= surface.left && x + .5f < surface.right &&
+                    y + .5f < surface.bottom) inkSurfaceColor else Color.White
+                if (inkDelta(shot.actual[x, y], expected) > .025f) leaked++
+            }
+        }
+        assertEquals("No content may paint at/below the Surface top, including its sides", 0, leaked)
+    }
+
+    fun testShortTextDrawClearancePreservesGlyphButStopsAtSurface() {
+        val state = StreamingTailViewport(initiallyBounded = true)
+        var hostCoordinates: LayoutCoordinates? = null
+        var origin by mutableStateOf(0)
+        var visualEdge by mutableStateOf(false)
+        var hostPx = 0
+        var viewportPx = 0
+        var occlusionPx = 0
+        var topInsetPx = 0
+        var layoutInsetPx = 0
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    val d = LocalDensity.current
+                    hostPx = with(d) { 360.dp.roundToPx() }
+                    viewportPx = with(d) { 240.dp.roundToPx() }
+                    occlusionPx = with(d) { 96.dp.roundToPx() }
+                    topInsetPx = with(d) { ChatComposerVisualTopInset.roundToPx() }
+                    layoutInsetPx = occlusionPx + with(d) { ChatTailClearance.roundToPx() }
+                    Box(Modifier.size(320.dp, 360.dp).background(Color.White)
+                        .onPlaced { hostCoordinates = it }.testTag("ink-host")) {
+                        // Draw the Surface first so any leaking text would remain observable.
+                        Box(Modifier.align(Alignment.BottomStart)) { InkEditor() }
+                        Box(Modifier.offset { IntOffset(0, origin) }.wrapContentHeight(unbounded = true)) {
+                            StreamingTailContainer(state, { hostCoordinates }, "ink-tail",
+                                userScrollEnabled = false, follows = { true }, protectClearance = { true },
+                                clearance = { layoutInsetPx },
+                                drawClearance = {
+                                    if (visualEdge) maxOf(0, occlusionPx - topInsetPx) else layoutInsetPx
+                                },
+                                viewportHeight = { viewportPx }, listViewportHeight = { hostPx }) {
+                                BasicText("HHHH\nHHHHHH", Modifier.fillMaxWidth().testTag("ink-text"),
+                                    style = TextStyle(color = Color.Black, fontFamily = FontFamily.Monospace,
+                                        fontSize = 20.sp, lineHeight = 28.sp))
+                            }
+                        }
+                        InkReferenceLayer()
+                    }
+                }
+            }
+        }
+        val matcher = hasTestTag("ink-text") and SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult)
+        fun geometry(): List<Any> = listOf(inkRect("ink-host", "ink-text"),
+            inkRect("ink-host", "chat-stream-viewport:ink-tail"), state.contentHeight,
+            state.maxOffset, state.viewportOffset, state.scrollOffset)
+        ui.mainClock.autoAdvance = false
+        try {
+            val full = inkShot("ink-host", matcher)
+            assertEquals("First validate the independent renderer", 0, full.lost)
+            assertTrue(state.contentHeight < viewportPx)
+            assertEquals(0, state.maxOffset)
+            val oldLine = hostPx - layoutInsetPx
+            val surface = inkRect("ink-host", "ink-surface").top.toInt()
+            assertEquals(hostPx - occlusionPx + topInsetPx, surface)
+            for (cut in listOf((full.first + full.last + 1) / 2, full.last - 1)) {
+                ui.runOnUiThread { origin = oldLine - cut; visualEdge = false }
+                frame()
+                val before = geometry()
+                val old = inkShot("ink-host", matcher)
+                assertTrue(old.first < oldLine && old.last >= oldLine)
+                assertTrue("Whole glyph must be above the visible Surface", old.last < surface)
+                assertTrue("The former ink>2 probe would miss this", old.ink > 2)
+                assertTrue("Old O+8 draw boundary must demonstrably cut ink", old.lost > 0)
+                ui.runOnUiThread { visualEdge = true }
+                frame()
+                assertEquals("drawClearance cannot change geometry", before, geometry())
+                val fixed = inkShot("ink-host", matcher)
+                assertEquals("All reference glyph pixels must survive", 0, fixed.lost)
+                assertNoSurfaceInk("ink-host", fixed)
+            }
+            ui.runOnUiThread { origin = surface - (full.first + full.last + 1) / 2; visualEdge = true }
+            frame()
+            val guarded = inkShot("ink-host", matcher)
+            assertTrue(guarded.first < surface && guarded.last >= surface)
+            assertTrue(guarded.ink > 2 && guarded.lost > 0)
+            var referenceBelow = 0
+            for (y in surface until guarded.reference.height) for (x in 0 until guarded.reference.width) {
+                if (inkDark(guarded.reference[x, y])) referenceBelow++
+            }
+            assertTrue("There must really be reference ink to suppress below Surface", referenceBelow > 2)
+            assertNoSurfaceInk("ink-host", guarded)
+        } finally { ui.mainClock.autoAdvance = true }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testRunningPlainMarkdownUsesVisualComposerDrawBoundary() {
+        val texts = listOf("稳定前文。", "稳定前文。\n\n第一行新增正文。",
+            "稳定前文。\n\n第一行新增正文。\n\n第二行新增正文。")
+        for (parser in listOf(defaultMarkdownParser, streamingMarkdownParser)) for (text in texts) {
+            markdownProjectionCache.put(MarkdownProjection(listOf(text), mapOf(text to parser(text)), parser))
+        }
+        var body by mutableStateOf(texts.first())
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(themeMode =
+                    app.daiyu.android.data.model.AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
+                    density = LocalDensity.current.density
+                    Box(Modifier.size(320.dp, 420.dp).background(Color.White).testTag("ink-wire-host")) {
+                        ChatConversationLayers(Modifier.size(320.dp, 420.dp), messages = { inset ->
+                            ChatMessageList(List(6) { ChatTurnUi.User("ink-u$it", "history $it") } +
+                                ChatTurnUi.Assistant("ink-wire-tail", finalText = body,
+                                    status = RunStatus.RUNNING, isStreaming = true),
+                                ChatScreenActions(), scrollRequest = ChatScrollRequest(1), composerBottomInset = inset,
+                                composerVisualTopInset = ChatComposerVisualTopInset, hasTurnExtras = { false })
+                        }, composer = { InkEditor() })
+                        InkReferenceLayer()
+                    }
+                }
+            }
+        }
+        val host = "ink-wire-host"
+        val matcher = SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult) and
+            (hasTestTag("message-content-text:0") or hasAnyAncestor(hasTestTag("message-content-text:0"))) and
+            hasAnyAncestor(hasTestTag("chat-turn:ink-wire-tail"))
+        ui.onNodeWithTag("work-process-header").assertDoesNotExist()
+        ui.mainClock.autoAdvance = false
+        try {
+            assertEquals("Validate the real Markdown reference before growth", 0, inkShot(host, matcher).lost)
+            for (next in texts.drop(1)) {
+                var eligible = 0
+                ui.runOnUiThread { body = next }
+                repeat(90) {
+                    frame()
+                    val row = ui.onNodeWithTag("chat-turn:ink-wire-tail").fetchSemanticsNode()
+                    assertTrue("Must remain shorter than the original viewport",
+                        row.size.height <= (420f - 96f - 11f - ChatTailClearance.value) * density)
+                    val oldLine = inkRect(host, "ink-editor").top - ChatTailClearance.value * density
+                    val surface = inkRect(host, "ink-surface").top
+                    val p = readInkGlyph(host, matcher)
+                    val line = p.layout.lineCount - 1
+                    if (p.at.y + p.layout.getLineBottom(line) > oldLine &&
+                        p.at.y + p.layout.getLineTop(line) < surface) {
+                        val shot = inkShot(host, matcher)
+                        assertNoSurfaceInk(host, shot)
+                        if (shot.last >= ceil(oldLine).toInt() && shot.last < surface) {
+                            eligible++
+                            assertEquals("Production plain-text wiring must preserve full glyphs", 0, shot.lost)
+                        }
+                    }
+                }
+                assertTrue("Each burst must exercise ink below O+8 but above Surface", eligible > 0)
+                ui.onNodeWithText(next.substringAfterLast("\n\n"), substring = true).assertExists()
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+        assertEquals(0, fixture.opens.get())
+    }
+
     private var density = 1f
     private var height by mutableStateOf(600.dp)
     private var editorHeight by mutableStateOf(96.dp)

@@ -90,6 +90,8 @@ import app.daiyu.android.ui.icons.daiyuIconColor
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
+internal val ChatComposerVisualTopInset = 10.dp
+
 @OptIn(ExperimentalFoundationApi::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifier: Modifier = Modifier, assistant: AssistantDisplay? = null,
@@ -172,7 +174,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     }
     val workspaceGestureEnabled = state.text.isEmpty()
     val workspacePointers = remember(state.editorGeneration) { WorkspacePullUpPointers() }
-    Column(modifier.observeWorkspacePointers(workspacePointers).managedInput().fillMaxWidth().padding(start = 9.dp, end = 9.dp, top = 10.dp, bottom = 16.dp)) {
+    Column(modifier.observeWorkspacePointers(workspacePointers).managedInput().fillMaxWidth().padding(start = 9.dp, end = 9.dp, top = ChatComposerVisualTopInset, bottom = 16.dp)) {
         ChatComposerSurface(backdrop) {
         val openWorkspace = {
             lifecycleDismissInProgress = true

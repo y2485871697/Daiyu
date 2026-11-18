@@ -8,6 +8,47 @@ DEVICE = ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/co
 
 
 class StreamingOcclusionContract(unittest.TestCase):
+    def test_plain_streaming_draw_edge_is_separate_from_the_follow_target(self):
+        source = CHAT.read_text()
+        viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
+        self.assertIn("drawClearance: () -> Int = clearance", viewport)
+        drawing, placement = viewport.split(".drawWithContent {", 1)[1].split(".scrollable", 1)
+        self.assertIn("if (protect) drawClearance() else 0", drawing)
+        self.assertIn("val safeBottom = currentListHeight - clearance()", placement)
+        self.assertNotIn("drawClearance()", placement)
+        for token in ("composerVisualTopInset: Dp = 0.dp", "hasTurnExtras: (ChatTurnUi.Assistant) -> Boolean = { true }", "!hasTurnExtras(turn)", "val plainStreamingBody = turn.isPlainStreamingBody()",
+                      "viewportState.contentHeight <= tailViewportHeight()",
+                      "(currentOcclusionPx - currentVisualTopInsetPx).coerceAtLeast(0)",
+                      "else currentOcclusionPx + currentFollowClearancePx",
+                      "turn.listKey == currentTailKey", "compressionAfter[turn.listKey].isNullOrEmpty()"):
+            self.assertIn(token, source)
+        workflow = (CHAT.parent / "AssistantWorkflowContent.kt").read_text()
+        classifier = workflow.split("internal fun ChatTurnUi.Assistant.isPlainStreamingBody()", 1)[1].split("internal fun MessageContentUi.workflowKey", 1)[0]
+        for token in ("status != RunStatus.RUNNING", "!isStreaming", "stopRequested", "!error.isNullOrBlank()",
+                      "workProcess != null", "reportedReasoning.isNotEmpty()", "leadingContent.isNotEmpty()",
+                      "reconnectSource != null", "val source = workflowContent()", "source.pending.isEmpty()",
+                      "source.body.all { it is MessageContentUi.Text }"):
+            self.assertIn(token, classifier)
+        self.assertNotIn("withResolvedTerminalCards", classifier)
+        composer = (CHAT.parent / "ChatComposer.kt").read_text()
+        self.assertIn("internal val ChatComposerVisualTopInset = 10.dp", composer)
+        self.assertIn("top = ChatComposerVisualTopInset", composer)
+        screen = (CHAT.parent / "ChatScreen.kt").read_text()
+        self.assertIn("composerVisualTopInset = ChatComposerVisualTopInset", screen)
+        self.assertIn("hasTurnExtras = hasTurnExtras", screen)
+        self.assertIn("turn.segmentIndex == 0 && questionRows[turn.id]?.retryCleanup == true",
+                      (ROOT / "app/src/main/kotlin/app/daiyu/android/MainActivity.kt").read_text())
+
+    def test_glyph_regression_compares_the_full_last_line_and_checks_editor_sides(self):
+        device = DEVICE.read_text()
+        for token in ("testShortTextDrawClearancePreservesGlyphButStopsAtSurface",
+                      "testRunningPlainMarkdownUsesVisualComposerDrawBoundary", "drawText(p.layout, topLeft = p.at)",
+                      "Old O+8 draw boundary must demonstrably cut ink", "All reference glyph pixels must survive",
+                      "shot.last < surface", "eligible > 0", "assertNoSurfaceInk(host, shot)",
+                      "No content may paint at/below the Surface top, including its sides",
+                      "referenceBelow > 2", "Production plain-text wiring must preserve full glyphs"):
+            self.assertIn(token, device)
+
     def test_terminal_append_retains_only_its_measured_action_slot(self):
         source = CHAT.read_text()
         assistant = source.split('internal fun AssistantTurn(', 1)[1].split('private fun AssistantTextContent', 1)[0]
@@ -250,7 +291,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         geometry = drawing.split("val actualTop = ", 1)[1].split("} else size.height", 1)[0]
         self.assertEqual(
             "list.localPositionOf(viewport, Offset.Zero).y "
-            "(list.size.height - actualTop - if (protect) clearance() else 0).coerceAtLeast(0f)",
+            "(list.size.height - actualTop - if (protect) drawClearance() else 0).coerceAtLeast(0f)",
             " ".join(geometry.split()),
         )
         self.assertIn("clipRect(bottom = clipBottom)", drawing)

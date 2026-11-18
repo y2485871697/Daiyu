@@ -27,6 +27,42 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [30])
 class AssistantWorkflowCompositionTest {
+    @Test fun onlyLivePlainTextBodiesCanUseTheEditorVisualEdge() {
+        val thought = ReportedReasoning("r1", "first summary", 0L, 1L, blockOffset = 0)
+        val plain = ChatTurnUi.Assistant("plain", finalText = "正文", status = RunStatus.RUNNING, isStreaming = true)
+        assertTrue(plain.isPlainStreamingBody())
+        assertTrue(plain.copy(finalText = "", finalContent = listOf(MessageContentUi.Text("final", "正文"))).isPlainStreamingBody())
+        assertTrue(plain.copy(finalText = "", content = listOf(MessageContentUi.Text("mixed", "正文"))).isPlainStreamingBody())
+        for (turn in listOf(plain.copy(isStreaming = false), plain.copy(stopRequested = true),
+            plain.copy(error = "failed"), plain.copy(finalText = " "),
+            plain.copy(leadingContent = listOf(MessageContentUi.Text("leading", "前置"))),
+            plain.copy(reportedReasoning = listOf(thought.copy(text = ""))),
+            plain.copy(workProcess = WorkProcessUi(emptyList(), "进行中", running = true)))) {
+            assertFalse(turn.toString(), turn.isPlainStreamingBody())
+        }
+        for (status in RunStatus.entries.filter { it != RunStatus.RUNNING }) {
+            assertFalse(plain.copy(status = status).isPlainStreamingBody())
+        }
+    }
+
+    @Test fun unresolvedToolsAndNonTextBodiesRetainTheOriginalProtectedDrawEdge() {
+        val thought = ReportedReasoning("r1", "first summary", 0L, 1L, blockOffset = 0)
+        val plain = ChatTurnUi.Assistant("plain", finalText = "正文", status = RunStatus.RUNNING, isStreaming = true)
+        val hidden = WorkStepUi("hidden", "执行命令", "排队中", WorkStepState.PENDING, category = "terminal")
+        assertFalse(hidden.isVisibleInWorkflow)
+        val mixed = plain.copy(content = listOf(MessageContentUi.Tool(hidden), MessageContentUi.Text("answer", "正文")))
+        assertTrue(mixed.workflowContent().withResolvedTerminalCards().steps.isEmpty())
+        assertFalse(mixed.isPlainStreamingBody())
+        assertFalse(plain.copy(content = listOf(MessageContentUi.Text("answer", "正文")),
+            workProcess = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(hidden))), "进行中", running = true)).isPlainStreamingBody())
+        val owner = app.daiyu.android.domain.MessageImageOwner("c", "a")
+        val image = MessageImageUi(owner, app.daiyu.android.domain.MessageImageReference(owner, "00000000-0000-0000-0000-000000000001",
+            "image/png", 1, "0".repeat(64), 1, 1))
+        assertFalse(plain.copy(content = listOf(MessageContentUi.Text("answer", "正文"), MessageContentUi.Image(image))).isPlainStreamingBody())
+        assertFalse(plain.copy(content = listOf(MessageContentUi.Reasoning(thought), MessageContentUi.Text("answer", "正文"))).isPlainStreamingBody())
+    }
+
+
     private class NoNodes : AbstractApplier<Unit>(Unit) {
         override fun insertBottomUp(index: Int, instance: Unit) = Unit
         override fun insertTopDown(index: Int, instance: Unit) = Unit

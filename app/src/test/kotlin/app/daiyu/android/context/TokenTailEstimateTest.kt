@@ -67,8 +67,8 @@ class TokenTailEstimateTest {
     }
 
     @Test fun sendPreparationUsesTheFrozenPolicyForHistoricalImages() {
-        val owner = app.daiyu.android.media.MessageImageOwner("c", "u")
-        val image = app.daiyu.android.media.MessageImageReference(owner, "image", "image/jpeg",
+        val owner = MessageImageOwner("c", "u")
+        val image = MessageImageReference(owner, "00000000-0000-0000-0000-000000000001", "image/jpeg",
             385198, "a".repeat(64), 1216, 2640)
         val row = Message(MessageId("u"), ConversationId("c"), RunId("r"), "user",
             listOf(MessageBlock.Image(image)), RunStatus.COMPLETED)

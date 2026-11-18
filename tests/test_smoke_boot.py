@@ -145,7 +145,7 @@ class SourceTests(unittest.TestCase):
             if line.strip().startswith('SMOKE_SHARD_COUNT:')
         ]
         self.assertEqual(shard_count_lines, [
-            "SMOKE_SHARD_COUNT: ${{ (inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == 'app.daiyu.android.ui.screens.chat.conversation.WorkflowDisclosureDirectionTest,app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest') && '1' || (inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == 'app.daiyu.android.terminal.TerminalCommandPagerTest') && '1' || (inputs.mode == 'daily' || (inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == 'app.daiyu.android.terminal.TerminalScreenTest')) && '1' || '4' }}"
+            "SMOKE_SHARD_COUNT: ${{ (inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == 'app.daiyu.android.ChatMediaPreviewVideoControlsUiTest') && '1' || (inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == 'app.daiyu.android.ui.screens.chat.conversation.WorkflowDisclosureDirectionTest,app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest') && '1' || (inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == 'app.daiyu.android.terminal.TerminalCommandPagerTest') && '1' || (inputs.mode == 'daily' || (inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == 'app.daiyu.android.terminal.TerminalScreenTest')) && '1' || '4' }}"
         ])
         matrix = re.search(r"\|\| '(\[[^']*\])'\) }}", smoke).group(1)
         self.assertEqual({(v['api'], v['shard']) for v in json.loads(matrix)},
@@ -188,10 +188,11 @@ class SourceTests(unittest.TestCase):
     def test_api26_has_pinned_emulator_without_changing_image_or_formal_matrix(self):
         smoke = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:\n', 1)[1]
         matrices = [json.loads(value) for value in re.findall(r"'(\[[^']*\])'", smoke)]
-        self.assertEqual(len(matrices), 7)
+        self.assertEqual(len(matrices), 8)
         dual_api_single_shard = {(api, 0) for api in ('26', '37.2')}
         single_shard_json = '[{"api":"26","target":"google_apis","ram":4096,"shard":0},{"api":"37.2","target":"google_apis_ps16k","ram":6144,"shard":0}]'
         single_shard_classes = (
+            'app.daiyu.android.ChatMediaPreviewVideoControlsUiTest',
             'app.daiyu.android.ui.screens.chat.conversation.WorkflowDisclosureDirectionTest,'
             'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
             'app.daiyu.android.terminal.TerminalScreenTest',
@@ -211,7 +212,7 @@ class SourceTests(unittest.TestCase):
             include_lines[0].split(" || inputs.mode == 'daily' && ", 1)[0],
             expected_prefix,
         )
-        for matrix in matrices[:4]:
+        for matrix in matrices[:5]:
             self.assertEqual({(item['api'], item['shard']) for item in matrix}, dual_api_single_shard)
         for matrix in matrices:
             for item in matrix:

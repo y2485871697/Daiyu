@@ -207,7 +207,7 @@ class TextSendActivityTest private constructor(
                 }
                 ui.onNodeWithContentDescription("附件").performClick()
                 node("chat-attachment:ATTACH_VIDEO").assertIsDisplayed().assertIsEnabled().performClick()
-                awaitControl("video GET_CONTENT launch") { launches.get() == index + 1 }
+                ui.waitUntil(5_000) { launches.get() == index + 1 }
                 awaitControl("actual picker stops the chat Activity") {
                     !activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
                 }

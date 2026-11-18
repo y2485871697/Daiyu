@@ -70,6 +70,7 @@ class FrozenContextPreparation internal constructor(
     val cancellation: ContextPreparationCancellation,
     internal val runtimeModel: ((BoundSummaryUsagePort) -> BoundSummaryModel)? = null,
     internal val summaryIdentity: app.daiyu.android.timeline.SummaryModelIdentity? = null,
+    internal val runtimeSnapshot: (() -> RuntimeCompressionConfiguration)? = null,
 ) {
     val pendingMessages: List<Message> = freezeContextMessages(pending)
     internal val consumed = AtomicBoolean(false)
@@ -100,6 +101,7 @@ class ContextPreparationCoordinator(
     private val settingsSnapshot: () -> CompressionSettings,
     private val policies: CompressionPolicyResolver,
     private val models: SummaryModelResolver,
+    private val liveSettingsSnapshot: (() -> CompressionSettings)? = null,
     private val chatModel: ((ProviderSnapshot, Long, BoundSummaryUsagePort?, app.daiyu.android.model.ProviderProtocol?) -> BoundSummaryModel)? = null,
 ) {
     constructor(service: ContextService, settings: CompressionSettingsStore,
@@ -140,10 +142,24 @@ class ContextPreparationCoordinator(
         }
         require(binding == null || bound == null || bound.binding == binding) { "摘要模型绑定已变化；未回退主模型" }
         cancellation.check()
+        val runtimeSnapshot = liveSettingsSnapshot?.let { readSettings ->
+            {
+                val current = readSettings()
+                RuntimeCompressionConfiguration(current.automatic && policy.contextTokens != null) { usage ->
+                    val currentBinding = current.summaryModel
+                    val model = if (currentBinding != null) models.resolve(currentBinding, usage, current.summaryProtocol)
+                    else checkNotNull(chatModel) { "当前聊天摘要解析器不可用" }.invoke(
+                        checkNotNull(chatProvider) { "需要本次冻结的聊天模型" },
+                        checkNotNull(policy.contextTokens), usage, current.summaryProtocol)
+                    require(currentBinding == null || model == null || model.binding == currentBinding) { "摘要模型绑定已变化；未回退主模型" }
+                    requireNotNull(model) { "压缩模型不可用" }
+                }
+            }
+        }
         return FrozenContextPreparation(this, conversationId, settings, policy, pending,
             bound?.let { first -> ModelContextSummarizer(first, cancellation, nextModel = nextSummaryUsage?.let { next ->
                 { checkNotNull(first.rebind) { "摘要模型不支持分块用量绑定" }.invoke(next()) }
-            }) }, cancellation, bound?.rebind, bound?.displayIdentity)
+            }) }, cancellation, bound?.rebind, bound?.displayIdentity, runtimeSnapshot)
     }
 
     fun prepare(frozen: FrozenContextPreparation): PreparedSendContext =

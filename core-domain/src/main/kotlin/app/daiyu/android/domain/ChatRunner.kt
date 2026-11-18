@@ -503,8 +503,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             checkpoint()
             return acceptedUsers != null
         }
-        fun compactAtBoundary(pressureTrigger: Boolean = false, overflow: Boolean = false): Boolean {
-            val base = contextRuntime ?: return false
+        fun compactAtBoundary(pressureTrigger: Boolean = false, overflow: Boolean = false,
+            boundaryRuntime: RunContextRuntime? = null): Boolean {
+            val base = boundaryRuntime ?: contextRuntime?.compressionSnapshot() ?: return false
             if (!base.canCompact) return false
             val pressure = contextState?.pressure
             val selected = synchronized(terminalLock) {
@@ -615,8 +616,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 }
             }
         }
-        fun contextSize(): Long {
-            val runtime = contextRuntime ?: return 0
+        fun contextSize(boundaryRuntime: RunContextRuntime? = contextRuntime): Long {
+            val runtime = boundaryRuntime ?: return 0
             val local = runtime.localTokens(meterHistory(), requestDefinitions)
             val header = runtime.headerIdentity(requestDefinitions)
             val meter = contextState?.meter
@@ -647,22 +648,22 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()
             }
             if (controls && boundary()) { reopenAfterCompaction = true; pressureChecked = false }
-            if (synchronized(terminalLock) { pendingCompact != null }) compactAtBoundary()
+            val runtime = contextRuntime?.compressionSnapshot() ?: return
+            if (synchronized(terminalLock) { pendingCompact != null }) compactAtBoundary(boundaryRuntime = runtime)
             requestDefinitions = (tool as? CatalogTool)?.definitions.orEmpty().toList()
-            val runtime = contextRuntime ?: return
             if (pressureChecked || !runtime.automatic || !runtime.canCompact) return
             pressureChecked = true
             val threshold = runtime.pressureThresholdTokens ?: return
             repeat(app.daiyu.android.domain.context.HarnessContextPolicy.COMPACTION_RETRIES + 1) {
-                if (contextSize() < threshold) return
-                if (!compactAtBoundary(pressureTrigger = true)) return
+                if (contextSize(runtime) < threshold) return
+                if (!compactAtBoundary(pressureTrigger = true, boundaryRuntime = runtime)) return
             }
             // Harness pre-step pressure compression is best-effort; provider rejection owns overflow recovery.
         }
         fun recoverContextOverflow(failure: Exception): Boolean {
             val rejected = failure as? ModelRequestException ?: return false
             if (rejected.failure != ModelFailure.CONTEXT_LIMIT && rejected.diagnostic?.rejection != RequestRejection.CONTEXT_LIMIT) return false
-            val runtime = contextRuntime ?: return false
+            val runtime = contextRuntime?.compressionSnapshot() ?: return false
             val state = contextState ?: return false
             val attempts = state.meter?.overflowRetries ?: 0
             if (!runtime.automatic || !runtime.canCompact || attempts >= app.daiyu.android.domain.context.HarnessContextPolicy.MAX_OVERFLOW_RETRIES ||
@@ -670,7 +671,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             contextState = state.copy(meter = (state.meter ?: ContextMeterCheckpoint()).copy(overflowRetries = attempts + 1))
             requestUnconfirmed = false
             checkpoint()
-            if (!compactAtBoundary(overflow = true)) return false
+            if (!compactAtBoundary(overflow = true, boundaryRuntime = runtime)) return false
             if (stopped.get() || pauseRequested || terminalReserved || breakStream) return false
             pressureChecked = true
             checkpoint()

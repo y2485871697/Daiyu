@@ -6,6 +6,11 @@ import app.daiyu.android.domain.context.estimateTokens
 import app.daiyu.android.domain.runtime.*
 import java.util.UUID
 
+internal data class RuntimeCompressionConfiguration(
+    val automatic: Boolean,
+    val resolve: (BoundSummaryUsagePort) -> BoundSummaryModel,
+)
+
 /** A narrow live-run projection. Original rows and the tool journal are never replaced. */
 internal class ProductionRunContext(
     private val policy: app.daiyu.android.domain.context.CompressionPolicy,
@@ -19,13 +24,22 @@ internal class ProductionRunContext(
     private val requestHeader: String = "",
     private val manualRetention: Boolean = false,
     override val initialMeter: ContextMeterCheckpoint? = null,
+    private val runtimeSnapshot: (() -> RuntimeCompressionConfiguration)? = null,
     private val progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit = {},
 ) : RunContextRuntime {
     constructor(frozen: FrozenContextPreparation, parent: Message,
         systemPrompt: String = "", requestHeader: String = "", initialMeter: ContextMeterCheckpoint? = null,
         progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit = {}) :
         this(frozen.policy, parent, frozen.runtimeModel, frozen.policy.enabled && frozen.runtimeModel != null,
-            systemPrompt = systemPrompt, requestHeader = requestHeader, initialMeter = initialMeter, progress = progress)
+            systemPrompt = systemPrompt, requestHeader = requestHeader, initialMeter = initialMeter,
+            runtimeSnapshot = frozen.runtimeSnapshot, progress = progress)
+    override fun compressionSnapshot(): RunContextRuntime {
+        val current = runtimeSnapshot?.invoke() ?: return this
+        return ProductionRunContext(policy, parent, current.resolve, current.automatic,
+            agentLabel = agentLabel, taskId = taskId, canCompact = canCompact, systemPrompt = systemPrompt,
+            requestHeader = requestHeader, manualRetention = manualRetention, initialMeter = initialMeter, progress = progress)
+            .also { it.definitions = definitions.toList() }
+    }
     override val windowTokens = checkNotNull(policy.contextTokens)
     override val sendBudgetTokens = checkNotNull(policy.sendBudgetTokens).coerceAtLeast(0)
     override val pressureThresholdTokens get() = policy.compactSpec?.thresholdTokens

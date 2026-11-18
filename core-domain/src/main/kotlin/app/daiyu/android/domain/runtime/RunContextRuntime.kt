@@ -54,6 +54,8 @@ interface RunSummaryRequests {
 interface RunContextRuntime {
     val systemPrompt: String get() = ""
     val automatic: Boolean get() = true
+    /** Read saved compression options once on the runner worker; keep this boundary snapshot fixed. */
+    fun compressionSnapshot(): RunContextRuntime = this
     val canCompact: Boolean get() = true
     val windowTokens: Long
     val sendBudgetTokens: Long get() = windowTokens

@@ -21,6 +21,7 @@ CLOUD_SCOPES = {**SCOPES, 'delegation': (
 CLOUD_SCOPES['context'] = (
     ':core-domain:test --tests app.daiyu.android.domain.context.* '
     '--tests app.daiyu.android.domain.runtime.RunnerContextRuntimeTest '
+    '--tests app.daiyu.android.domain.runtime.RunnerCompressionRefreshTest '
     '--tests app.daiyu.android.domain.delegation.ChildModelBatchTest '
     '--tests app.daiyu.android.domain.delegation.ChildModelContextRuntimeTest '
     ':app:testDebugUnitTest --tests app.daiyu.android.context.* '
@@ -42,6 +43,7 @@ CONTEXT_STORAGE_CLASSES = {
 }
 CONTEXT_EXACT_CLASSES = {
     ('core-domain', 'app.daiyu.android.domain.runtime.RunnerContextRuntimeTest'),
+    ('core-domain', 'app.daiyu.android.domain.runtime.RunnerCompressionRefreshTest'),
     ('core-domain', 'app.daiyu.android.domain.delegation.ChildModelBatchTest'),
     ('core-domain', 'app.daiyu.android.domain.delegation.ChildModelContextRuntimeTest'),
     ('app', 'app.daiyu.android.delegation.SavedSubAgentRuntimeBindingsTest'),

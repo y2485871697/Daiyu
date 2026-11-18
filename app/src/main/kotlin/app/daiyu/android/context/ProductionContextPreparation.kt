@@ -9,12 +9,14 @@ import android.os.Looper
 internal object ProductionContextPreparation {
     fun create(context: Context, service: ContextService): ContextPreparationCoordinator {
         val app = context.applicationContext ?: context
+        val readSettings = {
+            requireWorker()
+            ProductionCompressionSettingsStore(app).snapshot().coordinatorSettings()
+        }
         return ContextPreparationCoordinator(
             service = service,
-            settingsSnapshot = {
-                requireWorker()
-                ProductionCompressionSettingsStore(app).snapshot().coordinatorSettings()
-            },
+            settingsSnapshot = readSettings,
+            liveSettingsSnapshot = readSettings,
             policies = ProductionCompressionPolicyResolver,
             chatModel = { snapshot, window, usage, protocol ->
                 requireWorker()
@@ -57,7 +59,19 @@ internal object ProductionContextPreparation {
         return ProductionRunContext(policy, parent, { usage ->
             requireNotNull(ProviderSummaryModelResolver { configuration }.resolve(configuration.binding, usage)) { "子代理摘要模型不可用" }
         }, automatic = true, agentLabel = agentLabel, taskId = parent.runId.value,
-            systemPrompt = systemPrompt, requestHeader = HarnessRequestPolicy.header(snapshot, systemPrompt), progress = progress)
+            systemPrompt = systemPrompt, requestHeader = HarnessRequestPolicy.header(snapshot, systemPrompt),
+            runtimeSnapshot = {
+                requireWorker()
+                val current = ProductionCompressionSettingsStore(app).snapshot().childSettings(snapshot)
+                RuntimeCompressionConfiguration(automatic = true) { usage ->
+                    val latest = CatalogSummaryExecutionPolicy.childConfiguration(snapshot,
+                        checkNotNull(policy.contextTokens), current.summaryModel, current.summaryProtocol) { binding ->
+                        if (CatalogSummaryBindings.decode(binding) == null) SummaryProfileStore(app).configuration(binding)
+                        else catalogSummaryConfiguration(app, binding)
+                    }
+                    requireNotNull(ProviderSummaryModelResolver { latest }.resolve(latest.binding, usage)) { "子代理摘要模型不可用" }
+                }
+            }, progress = progress)
     }
 
     private fun requireWorker() {

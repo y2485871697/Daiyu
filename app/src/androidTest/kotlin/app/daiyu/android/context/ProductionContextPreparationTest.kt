@@ -122,4 +122,25 @@ class ProductionContextPreparationTest : InstrumentationTestCase() {
         }
         assertTrue(failure.get() is IllegalStateException)
     }
+    fun testActiveRunRefreshesSavedCompressionConfigurationWithoutRestart() {
+        val settings = ProductionCompressionSettingsStore(base)
+        settings.save(ProductionCompressionSettings(false, 32000, summaryModel = binding))
+        val coordinator = ProductionContextPreparation.create(guarded { name ->
+            check(name == ProductionCompressionSettingsStore.NAMESPACE)
+        }, service)
+        val root = ProductionRunContext(coordinator.freeze(ConversationId("fixture"), emptyList()),
+            Message(MessageId("assistant"), ConversationId("fixture"), RunId("run"),
+                Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
+        assertFalse(root.compressionSnapshot().automatic)
+        settings.save(settings.snapshot().copy(automatic = true))
+        val selected = root.compressionSnapshot()
+        assertTrue(selected.automatic)
+        assertEquals(root.windowTokens, selected.windowTokens)
+        assertEquals(root.sendBudgetTokens, selected.sendBudgetTokens)
+        settings.save(settings.snapshot().copy(automatic = false,
+            summaryProtocol = app.daiyu.android.model.ProviderProtocol.RESPONSES))
+        assertFalse(root.compressionSnapshot().automatic)
+        assertTrue(selected.automatic)
+    }
+
 }

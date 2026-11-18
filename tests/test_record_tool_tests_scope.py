@@ -263,6 +263,24 @@ class VideoFilesPreviewToolTestsScopeTest(unittest.TestCase):
 
 
 
+
+class VideoMessageDisplayToolTestsScopeTest(VideoFilesPreviewToolTestsScopeTest):
+    CLASSES = VideoFilesPreviewToolTestsScopeTest.CLASSES + (
+        "app.daiyu.android.AcceptedHistoryActivityTest",
+        "app.daiyu.android.ui.screens.chat.conversation.MessageMediaLayoutGeometryTest",
+    )
+
+    def test_exact_permutations_keep_only_explicit_contracts(self):
+        self.assertEqual(self.CLASSES, recorder.VIDEO_MESSAGE_DISPLAY_PLATFORM_CLASSES)
+        self.assertEqual(self.MODULES, recorder.MEDIA_SEND_MODULES)
+        for selected in (self.CLASSES, tuple(reversed(self.CLASSES)), self.CLASSES[2:] + self.CLASSES[:2]):
+            command, scope = recorder.command_for("python3", dict(
+                SMOKE_MODE="smoke", SMOKE_TEST_CLASSES=",".join(selected)))
+            self.assertEqual("media-send-targeted", scope)
+            self.assertEqual(["python3", "-B", "-m", "unittest", *self.MODULES, "-v"], command)
+            self.assertNotIn("discover", command)
+
+
 class RecordToolTestsScopeTest(unittest.TestCase):
 
     def test_media_send_scope_is_exact_and_preserves_full_fallback(self):

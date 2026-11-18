@@ -10,6 +10,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -237,6 +238,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             val users = mutableListOf(top("start-user"))
             val histories = mutableListOf(top("tail"))
             val lengths = mutableListOf<Int>()
+            var paintedPartial = false
             ui.runOnUiThread {
                 screen = screen.copy(turns = history + pending.copy(pending = false) +
                     ChatTurnUi.Assistant("start-reply", finalText = first, status = RunStatus.RUNNING, isStreaming = true))
@@ -246,11 +248,33 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                 ui.waitForIdle()
                 users += top("start-user")
                 histories += top("tail")
-                val texts = ui.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text) and
+                val textNodes = ui.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text) and
                     hasAnyAncestor(hasTestTag("chat-turn:start-reply")), useUnmergedTree = true).fetchSemanticsNodes()
-                    .flatMap { it.config[SemanticsProperties.Text] }.map { it.text }
+                val texts = textNodes.flatMap { it.config[SemanticsProperties.Text] }.map { it.text }
                     .filter { it.isNotEmpty() && first.startsWith(it) }
                 lengths += texts.maxOfOrNull { it.length } ?: 0
+                val partial = textNodes.firstOrNull { node ->
+                    node.config[SemanticsProperties.Text].any { it.text.length in 1 until first.length && first.startsWith(it.text) }
+                }
+                if (!paintedPartial && partial != null) {
+                    val origin = partial.layoutInfo.coordinates.positionInRoot()
+                    val size = partial.layoutInfo.coordinates.size
+                    if (origin.y + size.height <= composer.top - (10f + ChatTailClearance.value) * density + 1f) {
+                        val clock = ui.mainClock.currentTime
+                        val host = ui.onNodeWithTag("spacing-host")
+                        val pixels = captureScreenNode(host, advanceAnimationClock = false).toPixelMap()
+                        assertEquals("A partial-body screenshot must not advance typing", clock, ui.mainClock.currentTime)
+                        val hostOrigin = host.fetchSemanticsNode().layoutInfo.coordinates.positionInRoot()
+                        val left = (origin.x - hostOrigin.x).toInt().coerceIn(0, pixels.width)
+                        val top = (origin.y - hostOrigin.y).toInt().coerceIn(0, pixels.height)
+                        val right = (origin.x - hostOrigin.x + size.width).toInt().coerceIn(left, pixels.width)
+                        val bottom = (origin.y - hostOrigin.y + size.height).toInt().coerceIn(top, pixels.height)
+                        for (y in top until bottom) for (x in left until right) {
+                            val pixel = pixels[x, y]
+                            if (pixel.red < .6f && pixel.green < .6f && pixel.blue < .6f) paintedPartial = true
+                        }
+                    }
+                }
                 assertEquals("The real composer must remain anchored", composer,
                     ui.onNodeWithTag("chat-composer-surface").fetchSemanticsNode().boundsInRoot)
             }
@@ -259,6 +283,12 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             assertTrue("The first chunk must actually type, not become a full baseline: $lengths",
                 lengths.any { it in 1 until first.length })
             assertEquals(first.length, lengths.last())
+            assertTrue("A partial prefix must actually paint inside the body ROI", paintedPartial)
+            ui.onNode(hasText(first) and hasAnyAncestor(hasTestTag("chat-turn:start-reply")),
+                useUnmergedTree = true).assertIsDisplayed()
+            val reply = ui.onNodeWithTag("chat-turn:start-reply").fetchSemanticsNode().layoutInfo.coordinates
+            assertTrue("The completed first chunk must retain the original outer-composer clearance",
+                reply.positionInRoot().y + reply.size.height <= composer.top - (10f + ChatTailClearance.value) * density + 1f)
             assertTrue("A live reply must not pay its entire new height in one frame: $userSteps",
                 userSteps.all { it <= 14f * density + 1f })
             assertTrue("Following must not reverse the sent row: $userSteps", userSteps.all { it >= -1f })

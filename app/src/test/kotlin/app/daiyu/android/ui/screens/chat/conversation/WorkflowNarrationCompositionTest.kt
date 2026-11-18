@@ -416,6 +416,18 @@ class WorkflowNarrationCompositionTest {
         assertTrue(gate.blockedText(steps + textAfterLast).isEmpty())
     }
 
+    @Test fun newLiveBodyHasAnEmptyFirstBaselineButRemountAndHistoryStaySilent() {
+        val sources = listOf(MarkdownTypingSource("answer", "first live chunk"))
+        val owners = WorkflowVisualAdmissions(setOf("history"))
+        assertEquals(sources, owners.scope("history", false).bodyBaseline("body", sources, live = true))
+        val live = owners.scope("live", false)
+        assertTrue(live.bodyBaseline("body", sources, live = true).isEmpty())
+        assertEquals("A lazy remount must not replay an admitted chunk", sources,
+            live.bodyBaseline("body", sources, live = true))
+        assertEquals(sources, owners.scope("terminal", false).bodyBaseline("body", sources, live = false))
+        assertEquals(sources, owners.scope("restoring", true).bodyBaseline("body", sources, live = true))
+    }
+
     @Test fun restoredAndTerminalOwnersHaveSilentBaselinesAndSurviveLazyRemount() {
         val text = MessageContentUi.Text("text", "already visible")
         val tool = MessageContentUi.Tool(WorkStepUi("tool", "lookup", "done", WorkStepState.OK))

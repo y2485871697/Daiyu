@@ -25,6 +25,9 @@ internal class WorkflowVisualAdmissions(initialOwners: Set<String>) {
 }
 
 internal class WorkflowVisualScope(private val baseline: Boolean) {
+    private val bodyOwners = mutableSetOf<String>()
+    fun bodyBaseline(key: String, sources: List<MarkdownTypingSource>, live: Boolean): List<MarkdownTypingSource> =
+        if (bodyOwners.add(key) && !baseline && live) emptyList() else sources.toList()
     private val owners = mutableMapOf<String, WorkflowVisualAdmission>()
     private val motions = mutableMapOf<String, WorkflowNodeMotions>()
     fun motions(key: String, steps: List<MessageContentUi>, running: Boolean) = motions.getOrPut(key) {

@@ -119,10 +119,12 @@ internal val LocalStreamingTextClearance = staticCompositionLocalOf<StreamingTex
 internal class StreamingTextClearance {
     private data class Geometry(val viewport: LayoutCoordinates?, val offset: Int, val bottom: Float, val height: Int)
     private var geometry by mutableStateOf<Geometry?>(null)
-    val held: Boolean get() = geometry?.let { it.height > it.bottom + .01f } == true
+    private var drawn by mutableStateOf(false)
+    val held: Boolean get() = !drawn || geometry?.let { it.height > it.bottom + .01f } == true
 
     fun update(viewport: LayoutCoordinates?, offset: Int, bottom: Float, height: Int, protect: Boolean) {
         geometry = if (protect) Geometry(viewport, offset, bottom + offset, height) else null
+        drawn = true
     }
 
     fun fits(coordinates: LayoutCoordinates?, height: Int): Boolean {
@@ -549,11 +551,16 @@ internal fun ChatMessageList(
                     } ?: return
                 }
                 // Ordinary live text uses the frame follower, not a line-sized layout correction.
-                if (shortBoundedTail && activeTail?.status == RunStatus.RUNNING && activeTail.isStreaming &&
-                    activeTail.hasBodyTextActions() && activeTail.workflowContent().work == null &&
-                    !resumeFollowPending && !nestedTail.followCatchup &&
+                val liveTextTail = activeTail?.let {
+                    it.status == RunStatus.RUNNING &&
+                        (it.isStreaming && it.hasBodyTextActions() && it.workflowContent().work == null ||
+                            it.hasPlainTextBody(allowEmpty = true) && !hasTurnExtras(it) &&
+                                reconnectPartsByKey.getValue(it.listKey).placedIds.isEmpty() &&
+                                fallbackAfter[it.listKey].isNullOrEmpty() && compressionAfter[it.listKey].isNullOrEmpty())
+                } == true
+                if (shortBoundedTail && liveTextTail && !resumeFollowPending && !nestedTail.followCatchup &&
                     clearanceLayout.followViewport == Triple(layout.viewportSize,
-                        layout.beforeContentPadding, layout.afterContentPadding)) return
+                        layout.beforeContentPadding, currentOcclusionPx + currentFollowClearancePx)) return
                 if (!listState.canScrollForward) return
                 // Keep measured text above the editor while terminal reveal is still advancing.
                 // Move the outer list, not a header-clipping inner offset.
@@ -791,7 +798,8 @@ internal fun ChatMessageList(
                 layout.visibleItemsInfo.none { it.key == tail.listKey } ||
                 readyTurns[tail.listKey] == tail && revealedTurns[tail.listKey] == tail
             Triple(canFollowBottom(), Triple(index, last?.offset ?: Int.MIN_VALUE, last?.size ?: 0),
-                Triple(layout.viewportSize, layout.beforeContentPadding to layout.afterContentPadding,
+                Triple(layout.viewportSize, Triple(layout.beforeContentPadding, layout.afterContentPadding,
+                    currentOcclusionPx + currentFollowClearancePx),
                     resumeReady to currentNestedTail.contentHeight))
         }.collect { target ->
             if (target == null) { motion.reset(); return@collect }
@@ -826,7 +834,8 @@ internal fun ChatMessageList(
                         it.index == index && it.key == currentTailKey
                     } ?: return@collect
                 }
-                val viewport = Triple(layout.viewportSize, layout.beforeContentPadding, layout.afterContentPadding)
+                val viewport = Triple(layout.viewportSize, layout.beforeContentPadding,
+                    currentOcclusionPx + currentFollowClearancePx)
                 if (observedViewport != null && observedViewport != viewport) alignViewport = true
                 observedViewport = viewport
                 val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
@@ -1224,10 +1233,16 @@ internal fun AssistantTurn(
     val blockedSources = remember(ordered.body, bodyVisible) {
         if (bodyVisible) emptySet() else ordered.body.filterIsInstance<MessageContentUi.Text>().map { it.itemId }.toSet()
     }
+    val visualScope = LocalWorkflowVisualScope.current
+    val initialBaseline = remember(turn.listKey, visualScope, revealResetEpoch) {
+        visualScope?.bodyBaseline(turn.listKey, bodySources,
+            turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty())
+    }
     val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,
         terminal = generationComplete, resetEpoch = revealResetEpoch,
         onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources,
-        live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true)
+        live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true,
+        initialBaseline = initialBaseline)
     SideEffect { if (canReleaseWithoutWorkflow && ordered.body.isNotEmpty()) answerReleased = true }
     val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true
     SideEffect { onContentReady(contentReady) }

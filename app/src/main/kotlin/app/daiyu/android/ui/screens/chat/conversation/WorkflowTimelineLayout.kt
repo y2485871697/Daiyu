@@ -4,10 +4,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.testTag
@@ -21,6 +26,7 @@ internal class WorkflowItemLayout {
     var motion: WorkflowLineMotion? = null
     var spacingAfter: Dp = Dp.Unspecified
     var appearance: WorkflowToolAppearance? = null
+    var allocatedHeight by mutableIntStateOf(0)
     private var fullyVisible = false
     private var releasedGap = 0f
 
@@ -78,7 +84,10 @@ internal fun WorkflowTimelineItem(item: MessageContentUi, motion: WorkflowLineMo
     layout.motion = motion
     layout.spacingAfter = spacingAfter
     CompositionLocalProvider(LocalWorkflowItemLayout provides layout) {
-        Box(Modifier.layoutId(layout)) { content() }
+        Box(Modifier.layoutId(layout).drawWithContent {
+            // Extra space below the rail is blank, not permission to paint a queued item.
+            clipRect(bottom = layout.allocatedHeight.toFloat()) { this@drawWithContent.drawContent() }
+        }) { content() }
     }
 }
 
@@ -94,11 +103,14 @@ internal fun WorkflowTimelineColumn(timeline: Boolean, content: @Composable () -
         CompositionLocalProvider(LocalWorkflowTimelineLayout provides true) { content() }
     }, modifier = Modifier.clipToBounds().testTag("workflow-timeline-extent")) { measurables, constraints ->
         val placeables = measurables.map { it.measure(constraints.copy(minHeight = 0)) }
+        val itemLayouts = measurables.map { it.layoutId as? WorkflowItemLayout }
+        val naturalTops = IntArray(placeables.size)
         var naturalTop = 0
         var extent = 0
         var prefixVisible = true
         placeables.forEachIndexed { index, child ->
-            val item = measurables[index].layoutId as? WorkflowItemLayout
+            val item = itemLayouts[index]
+            naturalTops[index] = naturalTop
             val allocated = when {
                 !enabled -> {
                     item?.let { it.consumeDisplayed(it.spacingAfter.roundToPx()) }
@@ -108,10 +120,47 @@ internal fun WorkflowTimelineColumn(timeline: Boolean, content: @Composable () -
                 item == null -> child.height
                 else -> item.extent(child.height, item.spacingAfter.roundToPx(), 17.dp.toPx(), 27.dp.toPx())
             }
+            item?.allocatedHeight = allocated
             prefixVisible = prefixVisible && allocated >= child.height
             // A queued lower row contributes no space merely because its natural top is lower.
             if (allocated > 0) extent = maxOf(extent, naturalTop + allocated)
             naturalTop += child.height
+        }
+        if (enabled) {
+            val outgoingRows = itemLayouts.withIndex().mapNotNull { (index, item) ->
+                item?.motion?.outgoing?.progress?.let { it to index }
+            }.toMap()
+            itemLayouts.forEachIndexed { targetIndex, target ->
+                val incoming = target?.motion?.incoming ?: return@forEachIndexed
+                val sourceIndex = outgoingRows[incoming.progress] ?: return@forEachIndexed
+                if (incoming.progress.value <= 0f) return@forEachIndexed
+                val source = itemLayouts[sourceIndex] ?: return@forEachIndexed
+                val sourceBottom = naturalTops[sourceIndex] + placeables[sourceIndex].height - source.spacingAfter.roundToPx()
+                val targetBottom = naturalTops[targetIndex] + placeables[targetIndex].height - target.spacingAfter.roundToPx()
+                val start = naturalTops[sourceIndex] + 27.dp.toPx()
+                val end = naturalTops[targetIndex] + 17.dp.toPx()
+                var frontier = start
+                for (index in sourceIndex..targetIndex) {
+                    val line = itemLayouts[index]?.motion ?: continue
+                    val part = when (index) {
+                        sourceIndex -> line.outgoing
+                        targetIndex -> line.incoming
+                        else -> line.through
+                    } ?: continue
+                    if (part.progress !== incoming.progress || part.fraction() <= 0f) continue
+                    val localEnd = when (index) {
+                        sourceIndex -> 27.dp.toPx() + (placeables[index].height - 27.dp.toPx()) * part.fraction()
+                        targetIndex -> 17.dp.toPx() * part.fraction()
+                        else -> placeables[index].height * part.fraction()
+                    }
+                    frontier = maxOf(frontier, naturalTops[index] + localEnd)
+                }
+                // Interpolate the measured row tails along the painted rail, not another animation.
+                // This reaches the complete target height before its arrival-triggered fade begins.
+                val travel = ((frontier - start) / (end - start)).coerceIn(0f, 1f)
+                val occupied = sourceBottom + (targetBottom - sourceBottom) * travel
+                extent = maxOf(extent, occupied.roundToInt().coerceAtMost(naturalTop))
+            }
         }
         val width = placeables.maxOfOrNull { it.width } ?: constraints.minWidth
         layout(constraints.constrainWidth(width), constraints.constrainHeight(extent)) {

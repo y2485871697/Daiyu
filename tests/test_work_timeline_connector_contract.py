@@ -118,6 +118,27 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
         self.assertIn('fun testFirstFreshNodeReleasesHeightWithItsOwnEntrance()', source)
         self.assertIn('fun testQueuedNodePreventsFollowingNarrationFromReservingHeight()', source)
 
+    def test_motion_regression_samples_shell_bottom_inset_on_every_frame(self):
+        layout = (CHAT / 'WorkflowTimelineLayout.kt').read_text()
+        for token in ('allocatedHeight by mutableIntStateOf(0)',
+                      'clipRect(bottom = layout.allocatedHeight.toFloat())',
+                      'item?.allocatedHeight = allocated',
+                      'val sourceBottom =', 'val targetBottom =',
+                      'val travel = ((frontier - start) / (end - start)).coerceIn(0f, 1f)',
+                      'val occupied = sourceBottom + (targetBottom - sourceBottom) * travel',
+                      'occupied.roundToInt().coerceAtMost(naturalTop)'):
+            self.assertIn(token, layout)
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNodeMotionTest.kt').read_text()
+        for token in ('assertShellBottomInset(p, sample)', 'sample.bottomBandBlank',
+                      'border and painted line must grow together',
+                      'growing connector must retain the measured bottom inset',
+                      'distance(p[i, y], background)', 'actual bottom border pixels must be visible',
+                      'paintedBottom - sample.frontier',
+                      'shell sampling must not advance the animation clock',
+                      'testMixedLiveToolReasoningToolReasoningWaitsForEachFrontier',
+                      'testLegacyLiveToolReasoningToolReasoningWaitsForEachFrontier'):
+            self.assertIn(token, source)
+
     def test_queued_connectors_keep_their_duration_without_per_edge_eased_stops(self):
         motion = (CHAT / 'WorkflowNodeMotion.kt').read_text()
         lines = motion[motion.index('internal fun rememberWorkflowLineMotions'):motion.index('internal class WorkflowToolAppearance')]

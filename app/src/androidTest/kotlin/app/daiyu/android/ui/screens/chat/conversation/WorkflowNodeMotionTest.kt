@@ -37,6 +37,7 @@ import kotlinx.coroutines.runBlocking
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.math.roundToInt
 
 private class WorkflowTestScale : MotionDurationScale {
     var factor = 1f
@@ -256,7 +257,10 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
 
     private data class ArrivalSample(val connector: List<Float>, val ink: Float, val body: Float, val bodyY: Float)
 
-    private data class PhysicalSample(val bottom: Float, val following: Float, val frontier: Float, val body: Float, val reached: Boolean)
+    private data class PhysicalSample(
+        val bottom: Float, val following: Float, val frontier: Float, val body: Float, val reached: Boolean,
+        val anchor: Float, val targetAnchor: Float, val targetBottom: Float, val bottomBandBlank: Boolean,
+    )
 
     private fun physicalSample(p: PixelMap, fromTag: String, toTag: String): PhysicalSample {
         val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()
@@ -265,10 +269,21 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         val rail = line(p, fromTag, toTag)
         val last = rail.indexOfLast { it > lineContrast * .35f }
         val start = ceil(source.top - raster.top + with(density) { 28.dp.toPx() })
-        val frontier = if (last < 0) source.bottom else raster.top + start + last + 1f
+        val anchor = source.top + with(density) { 27.dp.toPx() }
+        val frontier = if (last < 0) anchor else raster.top + start + last + 1f
         val following = ui.onNodeWithTag("motion-following").fetchSemanticsNode().physicalBounds().top
         val reached = rail.isNotEmpty() && rail.all { it >= lineContrast * .9f }
-        return PhysicalSample(raster.bottom, following, minOf(frontier, target.top + with(density) { 17.dp.toPx() }), bodyInk(p, toTag), reached)
+        val timeline = ui.onNodeWithTag("workflow-timeline-extent").fetchSemanticsNode().physicalBounds()
+        val x = source.left - raster.left + with(density) { 5.dp.toPx() }
+        val xs = floor(x - .5f).toInt()..ceil(x + .5f).toInt()
+        val ys = ceil(timeline.bottom - raster.top - with(density) { 8.dp.toPx() }).toInt() until
+            floor(timeline.bottom - raster.top - 1f).toInt()
+        assertTrue("bottom inset pixels must exist inside the actual bitmap", !ys.isEmpty() &&
+            ys.first >= 0 && ys.last < p.height && xs.first >= 0 && xs.last < p.width)
+        // Sample the real image, without line()'s timeline-bottom masking or pixel()'s fallback.
+        val bottomBandBlank = ys.all { y -> xs.all { i -> distance(p[i, y], background) < lineContrast * .1f } }
+        return PhysicalSample(raster.bottom, following, minOf(frontier, target.top + with(density) { 17.dp.toPx() }),
+            bodyInk(p, toTag), reached, anchor, target.top + with(density) { 17.dp.toPx() }, target.bottom, bottomBandBlank)
     }
 
     private fun assertPhysicalArrival(beforeBottom: Float, samples: List<PhysicalSample>, fullBody: Float, tailPadding: Float = 0f) {
@@ -276,8 +291,15 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         val hidden = samples.filter { it.body <= maxOf(.03f, fullBody * .01f) }
         val tolerance = with(density) { 2.dp.toPx() }
         waiting.forEachIndexed { frame, sample ->
-            assertTrue("physical height ran ahead of the painted line at $frame: $sample before=$beforeBottom",
-                sample.bottom <= maxOf(beforeBottom, sample.frontier + tailPadding) + tolerance)
+            val travel = ((sample.frontier - sample.anchor) / (sample.targetAnchor - sample.anchor)).coerceIn(0f, 1f)
+            val expected = beforeBottom + (sample.targetBottom + tailPadding - beforeBottom) * travel
+            assertEquals("border and painted line must grow together at $frame: $sample before=$beforeBottom",
+                expected, sample.bottom, tolerance)
+            val minimumInset = minOf(beforeBottom - sample.anchor,
+                sample.targetBottom + tailPadding - sample.targetAnchor)
+            assertTrue("growing connector must retain the measured bottom inset at $frame: $sample",
+                sample.bottom - sample.frontier >= minimumInset - 2f)
+            assertTrue("raw bottom gutter must stay blank while the connector grows at $frame: $sample", sample.bottomBandBlank)
         }
         samples.forEach { sample ->
             assertEquals("following content must see the same physical extent", sample.bottom, sample.following, 1f)
@@ -391,7 +413,9 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
         ui.mainClock.autoAdvance = false
         try {
             show()
+            val beforeBottom = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds().bottom
             instrumentation.runOnMainSync { rows = rows + target }
+            val physical = mutableListOf<PhysicalSample>()
             val samples = mutableListOf<ToolHandoffSample>()
             var arrivalImage: androidx.compose.ui.graphics.ImageBitmap? = null
             var entryImage: androidx.compose.ui.graphics.ImageBitmap? = null
@@ -405,6 +429,7 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                 val rail = line(frame)
                 val reached = rail.isNotEmpty() && rail.all { it >= lineContrast * .9f }
                 val ink = bodyInk(frame)
+                physical += physicalSample(frame, "tool-step:motion-a", "tool-step:motion-b")
                 samples += ToolHandoffSample(time, reached, ink, lowerOperationInk(frame),
                     ui.onNodeWithTag("tool-step-body:motion-b").fetchSemanticsNode().physicalBounds().bottom,
                     ui.onNodeWithTag("workflow-timeline-extent").fetchSemanticsNode().physicalBounds().bottom)
@@ -427,6 +452,8 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                 } }
             }
             java.io.File(directory, "$name.txt").writeText("fullInk=$fullInk fullLowerInk=$fullLowerInk\n" + samples.joinToString("\n"))
+            java.io.File(directory, "$name-clearance.txt").writeText("beforeBottom=$beforeBottom\n" + physical.joinToString("\n"))
+            assertPhysicalArrival(beforeBottom, physical, fullInk)
             assertTrue("final tool and lower operation pixels must be nonempty", fullInk > 1f && fullLowerInk > 1f)
             assertTrue("must observe both connector arrival and tool entry: $samples", arrived >= 0 && visible >= 0)
             val frameMillis = samples[1].time - samples[0].time
@@ -689,6 +716,22 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
                 .fetchSemanticsNodes().flatMap { it.config.getOrNull(SemanticsProperties.Text).orEmpty() }
                 .joinToString("") { it.text }
         }
+        fun assertShellBottomInset(p: PixelMap, sample: PhysicalSample) {
+            val raster = ui.onNodeWithTag("motion-raster").fetchSemanticsNode().physicalBounds()
+            val shell = ui.onNodeWithTag("work-process-surface").fetchSemanticsNode().physicalBounds()
+            val x = ((shell.left + shell.right) / 2f - raster.left).roundToInt()
+            val bottom = floor(shell.bottom - raster.top).toInt() - 1
+            val top = ceil(shell.bottom - raster.top - with(density) { 2.dp.toPx() }).toInt()
+            assertTrue("shell border must be inside the captured image", top >= 0 && bottom < p.height && x in 0 until p.width)
+            val border = (top..bottom).lastOrNull { distance(p[x, it], background) > contrast * .35f }
+            assertNotNull("actual bottom border pixels must be visible", border)
+            val paintedBottom = raster.top + border!! + 1f
+            assertEquals("measured shell bottom must match its painted border", shell.bottom, paintedBottom, 2f)
+            if (!sample.reached) {
+                assertTrue("connector must not touch the actual growing shell border",
+                    paintedBottom - sample.frontier >= with(density) { 12.dp.toPx() })
+            }
+        }
         fun observe(tags: List<String>, beforeBottom: Float? = null) {
             val target = tags.last()
             val physical = mutableListOf<PhysicalSample>()
@@ -701,9 +744,15 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             repeat(64) { index ->
                 frame()
                 val present = ui.onAllNodesWithTag(target).fetchSemanticsNodes().isNotEmpty()
+                val time = ui.mainClock.currentTime
                 val image = ui.onNodeWithTag("motion-raster").captureToImage()
+                assertEquals("shell sampling must not advance the animation clock", time, ui.mainClock.currentTime)
                 val p = image.toPixelMap()
-                if (present && beforeBottom != null) physical += physicalSample(p, tags[tags.lastIndex - 1], target)
+                if (present && beforeBottom != null) {
+                    val sample = physicalSample(p, tags[tags.lastIndex - 1], target)
+                    physical += sample
+                    assertShellBottomInset(p, sample)
+                }
                 val visibleTags = if (present) tags else tags.dropLast(1)
                 for ((from, to) in visibleTags.zipWithNext()) {
                     val rail = line(p, from, to)
@@ -775,7 +824,12 @@ class WorkflowNodeMotionTest private constructor(private val scale: WorkflowTest
             assertTrue("target node must eventually appear", nodeInk(p, target) > 1f)
             val finalBody = bodyInk(p, target)
             assertTrue("target header must eventually appear", finalBody > 1f)
-            beforeBottom?.let { assertPhysicalArrival(it, physical, finalBody, tailPadding) }
+            beforeBottom?.let {
+                val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/workflow-arrival").apply { mkdirs() }
+                java.io.File(directory, "clearance-${if (legacy) "legacy" else "mixed"}-${tags.size}.txt")
+                    .writeText("beforeBottom=$it tailPadding=$tailPadding\n" + physical.joinToString("\n"))
+                assertPhysicalArrival(it, physical, finalBody, tailPadding)
+            }
         }
         fun type(id: String, seed: String, full: String, update: () -> Unit) {
             ui.waitUntil(5_000) { frame(); text(id) == seed }

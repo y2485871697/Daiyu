@@ -133,13 +133,15 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         val p = painted ?: candidate
         val clock = ui.mainClock.currentTime
         ui.runOnUiThread { inkGlyph = p; inkFrame = expected; inkReference = false }
-        val actual = captureScreenNode(target, advanceAnimationClock = false).toPixelMap()
-        val reference = try {
+        val actualImage = captureScreenNode(target, advanceAnimationClock = false)
+        val actual = actualImage.toPixelMap()
+        val referenceImage = try {
             ui.runOnUiThread { inkReference = true }
-            captureScreenNode(target, advanceAnimationClock = false).toPixelMap()
+            captureScreenNode(target, advanceAnimationClock = false)
         } finally {
             ui.runOnUiThread { inkReference = false }
         }
+        val reference = referenceImage.toPixelMap()
         assertEquals(clock, ui.mainClock.currentTime)
         val after = readInkGlyph(host, matcher)
         assertEquals(candidate.at, after.at)
@@ -172,6 +174,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         expected?.let { frame ->
             var missingBodyInk = 0
             var unexpectedBodyInk = 0
+            val differences = mutableListOf<String>()
             for (region in frame.regions) {
                 val y0 = maxOf(0, ceil(frame.top).toInt(), floor(region.top).toInt())
                 val y1 = minOf(actual.height, ceil(frame.bottom).toInt(), ceil(region.bottom).toInt())
@@ -181,8 +184,24 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     val b = reference[x, y]
                     if (inkDelta(a, b) > .025f) {
                         if (inkDark(b)) missingBodyInk++ else if (inkDark(a)) unexpectedBodyInk++
+                        if (differences.size < 96) differences += "$x,$y actual=$a expected=$b"
                     }
                 }
+            }
+            if (missingBodyInk != 0 || unexpectedBodyInk != 0) {
+                val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics").apply { mkdirs() }
+                val name = "plain-safety-${android.os.Build.VERSION.SDK_INT}-$clock"
+                for ((suffix, image) in listOf("actual" to actualImage, "reference" to referenceImage)) {
+                    java.io.File(directory, "$name-$suffix.png").outputStream().use {
+                        check(image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                    }
+                }
+                val geometry = "clock=$clock missing=$missingBodyInk unexpected=$unexpectedBodyInk top=${frame.top} bottom=${frame.bottom}\n" +
+                    "regions=${frame.regions}\n" + frame.glyphs.joinToString("\n") {
+                        "at=${it.at} size=${it.layout.size} text=${it.layout.layoutInput.text.text}"
+                    } + "\n" + differences.joinToString("\n")
+                java.io.File(directory, "$name.txt").writeText(geometry)
+                android.util.Log.e("PlainSafetyPixels", geometry)
             }
             assertEquals("Approved body glyphs cannot disappear during AST node replacement", 0, missingBodyInk)
             assertEquals("New unsafe leaves cannot paint even a partial candidate glyph", 0, unexpectedBodyInk)
@@ -297,11 +316,12 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     fun testPlainMarkdownCrossesViewportWithoutDroppingApprovedGlyph() = exercisePlainTextSafety(false, true)
 
     private fun exercisePlainTextSafety(longBody: Boolean, crossViewport: Boolean = false) {
-        val initial = if (longBody || crossViewport) (0 until if (longBody) 14 else 7).joinToString("\n\n") {
+        val initial = if (longBody || crossViewport) (0 until if (longBody) 14 else 3).joinToString("\n\n") {
             "历史完整段落 $it。"
         } else "稳定前文。"
         val texts = listOf(initial, initial + "\n\n第一行新增正文。",
-            initial + "\n\n第一行新增正文。\n\n- 第二行新增正文。")
+            initial + "\n\n第一行新增正文。\n\n- 第二行新增正文。" +
+                if (crossViewport) (0 until 8).joinToString("\n\n", prefix = "\n\n") { "跨视口新增段落 $it。" } else "")
         for (parser in listOf(defaultMarkdownParser, streamingMarkdownParser)) for (text in texts) {
             markdownProjectionCache.put(MarkdownProjection(listOf(text), mapOf(text to parser(text)), parser))
         }
@@ -386,11 +406,16 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         ui.onNodeWithTag("work-process-header").assertDoesNotExist()
         ui.mainClock.autoAdvance = false
         try {
+            val initialExtent = inkRect(host, "chat-turn:ink-wire-tail").height
+            val initialViewport = (420f - 96f - 11f - ChatTailClearance.value) * density
+            sawShort = initialExtent <= initialViewport
+            sawLong = initialExtent > initialViewport
+            if (crossViewport) assertTrue("Cross-viewport fixture must begin below H=V: H=$initialExtent V=$initialViewport", sawShort)
             verify(force = true)
             for (next in texts.drop(1)) {
                 val beforeUnsafe = unsafeCandidates
                 ui.runOnUiThread { body = next }
-                repeat(90) { tick ->
+                repeat(if (crossViewport) 240 else 90) { tick ->
                     frame()
                     val extent = inkRect(host, "chat-turn:ink-wire-tail").height
                     val viewport = (420f - 96f - 11f - ChatTailClearance.value) * density
@@ -421,13 +446,22 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             assertTrue("Must inspect the original 220ms catchup's intermediate frames", intermediate >= 20)
             if (!longBody) assertTrue("Short growth must really premeasure text beyond the safety edge", unsafeCandidates > 0)
             if (longBody) {
-                ui.onNodeWithTag("chat-messages").performTouchInput { swipeDown(durationMillis = 320) }
+                val readingAnchor = "历史完整段落 13。"
+                val beforeDrag = ui.onNodeWithText(readingAnchor).fetchSemanticsNode().positionInRoot.y
+                ui.onNodeWithTag("chat-stream-viewport:ink-wire-tail").performTouchInput {
+                    swipe(Offset(center.x, top + 70f * density),
+                        Offset(center.x, top + 110f * density), durationMillis = 1000)
+                }
                 repeat(20) { frame() }
                 val anchor = inkRect(host, "chat-turn:ink-wire-tail").top
+                val readingTop = ui.onNodeWithText(readingAnchor).assertIsDisplayed().fetchSemanticsNode().positionInRoot.y
+                assertTrue("The bounded slow drag must really move the reading position", readingTop > beforeDrag + density)
                 ui.runOnUiThread { body += "\n\n手动阅读新增末行。" }
                 repeat(90) { frame() }
                 assertEquals("Detached plain text must not pull the reader back to the bottom", anchor,
                     inkRect(host, "chat-turn:ink-wire-tail").top, 1f)
+                assertEquals("Detached append must preserve the same visible paragraph", readingTop,
+                    ui.onNodeWithText(readingAnchor).assertIsDisplayed().fetchSemanticsNode().positionInRoot.y, 1f)
                 ui.onNodeWithText("手动阅读新增末行。", substring = true).assertExists()
             }
         } finally { ui.mainClock.autoAdvance = true }

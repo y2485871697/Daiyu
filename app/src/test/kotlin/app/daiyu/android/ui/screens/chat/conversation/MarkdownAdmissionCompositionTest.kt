@@ -3,6 +3,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.compose.runtime.AbstractApplier
 import androidx.compose.runtime.BroadcastFrameClock
 import androidx.compose.runtime.Composition
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Recomposer
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.Snapshot
@@ -31,6 +32,50 @@ class MarkdownAdmissionCompositionTest {
         override fun move(from: Int, to: Int, count: Int) = Unit
         override fun remove(index: Int, count: Int) = Unit
         override fun onClear() = Unit
+    }
+
+    @Test fun protectedBodyDoesNotConsumeItsFirstChunkBeforeContainerDraw() = runBlocking {
+        val clock = BroadcastFrameClock()
+        val recomposer = Recomposer(coroutineContext + clock)
+        val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
+        val composition = Composition(NoNodes(), recomposer)
+        val clearance = StreamingTextClearance()
+        val first = "一二三四五六七八九十一二三四五六七八九十一二三"
+        val sources = mutableStateOf(emptyList<MarkdownTypingSource>())
+        val parsed = mutableStateOf(projectMarkdown(emptyList()))
+        var reveal: MarkdownReveal? = null
+        var time = 1_000_000_000L
+        var advances = 0
+        suspend fun frame() {
+            Snapshot.sendApplyNotifications()
+            repeat(12) { yield() }
+            time += 16_000_000L
+            if (clock.hasAwaiters) clock.sendFrame(time)
+            repeat(12) { yield() }
+        }
+        try {
+            composition.setContent {
+                CompositionLocalProvider(LocalStreamingTextClearance provides clearance) {
+                    reveal = rememberMarkdownReveal(sources.value, parsed.value, streaming = true,
+                        terminal = false, onVisibleAdvance = { advances++ }, live = true)
+                }
+            }
+            repeat(530) { frame() }
+            sources.value = listOf(MarkdownTypingSource("answer", first))
+            parsed.value = projectMarkdown(listOf(first))
+            repeat(30) { frame() }
+            assertEquals("A protected container without a draw must not spend the first chunk", 0, reveal!!.limit("answer"))
+            assertEquals(0, advances)
+            // Model a completed container draw with protection relinquished, as during manual reading.
+            clearance.update(null, 0, Float.MAX_VALUE, 0, protect = false)
+            val lengths = mutableListOf<Int>()
+            repeat(40) { frame(); lengths += reveal!!.limit("answer") }
+            assertTrue("The first admitted chunk must contain intermediate prefixes: $lengths",
+                lengths.any { it in 1 until first.length })
+            assertTrue(lengths.zipWithNext().all { (before, after) -> after >= before })
+            assertEquals(first.length, lengths.last())
+            assertTrue(advances > 0)
+        } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
     }
 
     @Test fun terminalBodyDoesNotTypeOrEmitFeedbackBeforeAdmission() = verifyAdmission(terminal = true)

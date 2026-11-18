@@ -30,7 +30,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
     private fun answer(marker: String, lines: Int = 60) =
         List(lines) { "正文第${it + 1}行，检查长回复末尾与输入区的间距。" }.joinToString("\n") + "\n\n$marker"
 
-    private fun show(scale: Float, dark: Boolean = false, running: Boolean = false) {
+    private fun show(scale: Float, dark: Boolean = false, running: Boolean = false, plainText: Boolean = false) {
         mainThread {
             attachmentHeight = 0.dp
             screen = ChatScreenState("间距回归", turns = listOf(
@@ -45,7 +45,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     val currentDensity = LocalDensity.current.density
                     SideEffect { density = currentDensity }
                     Box(Modifier.requiredWidth(320.dp).fillMaxHeight().testTag("spacing-host")) {
-                        DaiyuChatScreen(screen, ChatScreenActions(), composerAttachments = {
+                        DaiyuChatScreen(screen, ChatScreenActions(), hasTurnExtras = { !plainText }, composerAttachments = {
                             if (attachmentHeight > 0.dp) Box(Modifier.height(attachmentHeight).testTag("spacing-attachment"))
                         })
                     }
@@ -217,6 +217,55 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             assertCompactTail("流式安全间距第6行")
             assertEquals(0, fixture.opens.get())
         }
+    }
+
+    fun testFirstLiveChunkTypesWithoutSnappingTheSentUserAndHistory() {
+        show(1f, plainText = true)
+        val history = screen.turns
+        val pending = ChatTurnUi.User("start-user", "检查首段逐字输出", pending = true)
+        val first = "一二三四五六七八九十一二三四五六七八九十一二三"
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.runOnUiThread {
+                screen = screen.copy(turns = history + pending,
+                    composer = screen.composer.copy(phase = ComposerPhase.RUNNING), scrollRequest = ChatScrollRequest(2))
+            }
+            repeat(60) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+            fun top(id: String): Float = ui.onNodeWithTag("chat-turn:$id").fetchSemanticsNode()
+                .layoutInfo.coordinates.positionInRoot().y
+            val composer = ui.onNodeWithTag("chat-composer-surface").fetchSemanticsNode().boundsInRoot
+            val users = mutableListOf(top("start-user"))
+            val histories = mutableListOf(top("tail"))
+            val lengths = mutableListOf<Int>()
+            ui.runOnUiThread {
+                screen = screen.copy(turns = history + pending.copy(pending = false) +
+                    ChatTurnUi.Assistant("start-reply", finalText = first, status = RunStatus.RUNNING, isStreaming = true))
+            }
+            repeat(90) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                users += top("start-user")
+                histories += top("tail")
+                val texts = ui.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text) and
+                    hasAnyAncestor(hasTestTag("chat-turn:start-reply")), useUnmergedTree = true).fetchSemanticsNodes()
+                    .flatMap { it.config[SemanticsProperties.Text] }.map { it.text }
+                    .filter { it.isNotEmpty() && first.startsWith(it) }
+                lengths += texts.maxOfOrNull { it.length } ?: 0
+                assertEquals("The real composer must remain anchored", composer,
+                    ui.onNodeWithTag("chat-composer-surface").fetchSemanticsNode().boundsInRoot)
+            }
+            val userSteps = users.zipWithNext { before, after -> before - after }
+            val historySteps = histories.zipWithNext { before, after -> before - after }
+            assertTrue("The first chunk must actually type, not become a full baseline: $lengths",
+                lengths.any { it in 1 until first.length })
+            assertEquals(first.length, lengths.last())
+            assertTrue("A live reply must not pay its entire new height in one frame: $userSteps",
+                userSteps.all { it <= 14f * density + 1f })
+            assertTrue("Following must not reverse the sent row: $userSteps", userSteps.all { it >= -1f })
+            assertTrue("History and the sent row must share the same outer motion",
+                userSteps.zip(historySteps).all { (user, older) -> kotlin.math.abs(user - older) <= 1f })
+            assertEquals(0, fixture.opens.get())
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
     fun testShortReplyKeepsTopAlignmentRatherThanBeingForcedAgainstComposer() {

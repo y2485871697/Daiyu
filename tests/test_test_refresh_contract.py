@@ -311,8 +311,10 @@ class TestRefreshContract(unittest.TestCase):
         self.assertIn('verify_test_refresh.py bind', workflow)
         self.assertIn("subprocess.check_call(['python3', 'scripts/verify_test_refresh.py', 'check'], env=env)", workflow)
         self.assertIn('source-delivery', workflow)
-        self.assertIn("SMOKE_SHARD_COUNT: ${{ inputs.smoke_classes == "
-                      "'app.daiyu.android.VoiceCallFloatingWindowTest' && '1' || '4' }}", workflow)
+        self.assertIn("SMOKE_SHARD_COUNT: ${{ (inputs.smoke_classes == "
+                      "'app.daiyu.android.VoiceCallFloatingWindowTest' || "
+                      "(inputs.smoke_classes == 'app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest' "
+                      "&& inputs.smoke_shard == '0')) && '1' || '4' }}", workflow)
         guard = (ROOT / 'scripts/cooperation/test_refresh_only.init.gradle').read_text()
         self.assertIn("!t.name.toLowerCase().contains('androidtest')", guard)
         self.assertIn('install|uninstall|connected|managedDevice', guard)

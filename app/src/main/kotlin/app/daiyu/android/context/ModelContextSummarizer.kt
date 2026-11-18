@@ -32,6 +32,12 @@ fun interface SummaryModelTransport {
     fun openReplay(history: List<Message>, tools: List<ToolDefinition>, systemPrompt: String,
         deadline: SummaryRequestDeadline, cancellation: ContextPreparationCancellation): ModelSession =
         openWithoutTools(history, deadline, app.daiyu.android.model.SummaryReasoningLevel.OFF, cancellation)
+    fun openReplay(history: List<Message>, tools: List<ToolDefinition>, systemPrompt: String,
+        deadline: SummaryRequestDeadline, reasoning: app.daiyu.android.model.SummaryReasoningLevel,
+        cancellation: ContextPreparationCancellation): ModelSession {
+        require(reasoning == app.daiyu.android.model.SummaryReasoningLevel.OFF)
+        return openReplay(history, tools, systemPrompt, deadline, cancellation)
+    }
 
     fun openWithoutTools(history: List<Message>, deadline: SummaryRequestDeadline,
         reasoning: app.daiyu.android.model.SummaryReasoningLevel): ModelSession {

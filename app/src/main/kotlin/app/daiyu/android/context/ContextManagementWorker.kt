@@ -189,12 +189,14 @@ internal class ContextManagementWorker(
             val policy = policies.resolve(selected.copy(automatic = true))
             val bound = requireNotNull(profiles.freeze(target, operation.port)) { "所选摘要模型不可用，请重新选择" }
             require(bound.binding == target.binding) { "摘要目标不匹配；请刷新后重新确认" }
-            val summarizer: ContextSummarizer = if (policy.tokenTail) HarnessContextSummarizer(bound, lease.cancellation)
-                else ModelContextSummarizer(bound, lease.cancellation, nextModel = {
-                    checkLease(lease)
-                    val next = service.manualSummaryUsage(lease).also { operations += it }
-                    checkNotNull(bound.rebind) { "摘要模型不支持分块用量绑定" }.invoke(next.port)
-                })
+            fun nextSummaryModel(): BoundSummaryModel {
+                checkLease(lease)
+                val next = service.manualSummaryUsage(lease).also { operations += it }
+                return checkNotNull(bound.rebind) { "摘要模型不支持独立请求用量绑定" }.invoke(next.port)
+            }
+            val summarizer: ContextSummarizer = if (policy.tokenTail)
+                HarnessContextSummarizer(bound, lease.cancellation, nextModel = ::nextSummaryModel)
+                else ModelContextSummarizer(bound, lease.cancellation, nextModel = ::nextSummaryModel)
             checkLease(lease)
             require(settings() == saved) { "压缩设置已改变；请刷新后重新确认" }
             val archive = service.compress(expected.conversationId, policy, summarizer,

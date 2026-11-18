@@ -102,8 +102,9 @@ class ModelContextSummarizerContractTest {
     }
     @Test fun tooManySourceChunksFailsBeforeAnyPostAndCancellationNeverOpens() {
         val f = Fixture { checkpoint() }
+        // Exceed 32 full windows even at the Harness density of four UTF-16 units per token.
         try {
-            ModelContextSummarizer(f.model(), ContextPreparationCancellation(), f::model).summarize(input("中".repeat(100000)))
+            ModelContextSummarizer(f.model(), ContextPreparationCancellation(), f::model).summarize(input("中".repeat(32 * 2500 * 4 + 1)))
             fail("too many chunks accepted")
         } catch (_: IllegalArgumentException) {}
         assertTrue(f.prompts.isEmpty())

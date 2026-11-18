@@ -114,7 +114,8 @@ internal class ProductionRunContext(
                 anchor = boundary ?: app.daiyu.android.timeline.TimelineAnchor.at(logical, logical.lastIndex))
             lastActivity = activity
             progress(activity)
-            val text = HarnessContextSummarizer(model, cancellation, definitions, systemPrompt).summarize(
+            val text = HarnessContextSummarizer(model, cancellation, definitions, systemPrompt,
+                nextModel = model.rebind?.let { rebind -> { rebind(usage()) } }).summarize(
                 CompressionInput(logical.take(cut), ContextRevision.digest(prefix))).trim()
             if (cancelled()) return null
             require(text.isNotEmpty()) { "摘要为空；保留原文" }

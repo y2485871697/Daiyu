@@ -49,6 +49,101 @@ class RunnerContextRuntimeTest {
         assertEquals(2, opens); assertEquals(1, tools); assertEquals("b", prepared)
     }
 
+    @Test fun selectionChangeDuringPreparationSealsCompletedToolsBeforeOpeningTheNewModel() {
+        var prepared = "a"; var preparations = 0; var opens = 0; var sends = 0; var tools = 0
+        val runtime = object : RunContextRuntime {
+            override val automatic = false
+            override val windowTokens = 272000L
+            override fun headerIdentity(tools: List<ToolDefinition>) = prepared
+            override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 10L
+            override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
+                request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
+                admit: () -> Unit, cancelled: () -> Boolean): List<Message>? = null
+        }
+        val model = object : ModelPort {
+            override fun prepareRequest() { if (++preparations == 2) prepared = "b" }
+            override fun open(history: List<Message>): ModelSession {
+                val selected = prepared; val index = ++opens
+                if (index == 2) {
+                    val calls = MessageHistory.expand(history).flatMap { it.blocks }.filterIsInstance<MessageBlock.Tool>()
+                    assertEquals("once", calls.single().result)
+                    assertEquals(ToolCallId("read"), calls.single().invocation.id)
+                }
+                return object : RequestRebindingModelSession {
+                    override fun needsRebind() = selected != prepared
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        if (selected != prepared) throw ModelPreparationChangedException()
+                        sends++
+                        assertTrue(outputs.isEmpty())
+                        if (index == 1) sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("read"), "read", "{}")))
+                        else sink(ModelEvent.TextFinal("answer", "done"))
+                    }
+                    override fun cancel() {}
+                }
+            }
+        }
+        val result = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+            BatteryTool { tools++; "once" }, RunnerOptions(contextRuntime = runtime)) {}.run(initial, listOf(user("u", "task")))
+        assertEquals(RunStatus.COMPLETED, result.status)
+        assertEquals(2, opens); assertEquals(2, sends); assertEquals(1, tools)
+    }
+
+    @Test fun reopenedSessionKeepsItsFirstNextAcrossAnExplicitBoundaryPause() {
+        var configured = "a"; var prepared = ""; var opens = 0
+        val pauseOnce = java.util.concurrent.atomic.AtomicBoolean()
+        val paused = java.util.concurrent.CountDownLatch(1)
+        lateinit var runner: ChatRunner
+        val runtime = object : RunContextRuntime {
+            override val automatic: Boolean get() {
+                if (opens == 2 && pauseOnce.compareAndSet(false, true)) assertTrue(runner.pause())
+                return false
+            }
+            override val windowTokens = 272000L
+            override fun headerIdentity(tools: List<ToolDefinition>) = prepared
+            override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 10L
+            override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
+                request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
+                admit: () -> Unit, cancelled: () -> Boolean): List<Message>? = null
+        }
+        val store = object : AtomicRuntimeStore {
+            override fun commitCheckpoint(checkpoint: RunCheckpoint) {
+                if (checkpoint.phase == ExecutionPhase.PAUSED) paused.countDown()
+            }
+            override fun reconcileCheckpoint(checkpoint: RunCheckpoint) = error("no recovery")
+        }
+        val model = object : ModelPort {
+            override fun prepareRequest() { prepared = configured }
+            override fun open(history: List<Message>): ModelSession {
+                val selected = prepared; val index = ++opens
+                return object : RequestRebindingModelSession {
+                    override fun needsRebind() = selected != configured
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        assertEquals(selected, prepared)
+                        if (index == 1) {
+                            configured = "b"
+                            sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("read"), "read", "{}")))
+                        } else {
+                            assertEquals("b", selected)
+                            sink(ModelEvent.TextFinal("answer", "done"))
+                        }
+                    }
+                    override fun cancel() {}
+                }
+            }
+        }
+        runner = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+            BatteryTool { "once" }, RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}
+        val result = java.util.concurrent.FutureTask { runner.run(initial, listOf(user("u", "task"))) }
+        val worker = Thread(result); worker.start()
+        try {
+            assertTrue(paused.await(5, java.util.concurrent.TimeUnit.SECONDS))
+            configured = "c"
+            assertTrue(runner.resume())
+            assertEquals(RunStatus.COMPLETED, result.get(5, java.util.concurrent.TimeUnit.SECONDS).status)
+            assertEquals(2, opens); assertEquals("b", prepared)
+        } finally { runner.stop(); worker.join(5000) }
+    }
+
     @Test fun realUsageCompactsWithinToolRunWithSameRequestCalibrationAndNoOutputReplay() {
         val store = Store(); var opens = 0; var tools = 0; var summaries = 0
         val retained = user("summary", "short")

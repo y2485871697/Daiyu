@@ -140,7 +140,12 @@ internal class ProviderSummaryModelPort(
         openSession(history, deadline, reasoning) { cancellation.check(); deadline.check() }
 
     override fun openReplay(history: List<Message>, tools: List<ToolDefinition>, systemPrompt: String,
-        deadline: SummaryRequestDeadline, cancellation: ContextPreparationCancellation): ModelSession {
+        deadline: SummaryRequestDeadline, cancellation: ContextPreparationCancellation): ModelSession =
+        openReplay(history, tools, systemPrompt, deadline, app.daiyu.android.model.SummaryReasoningLevel.OFF, cancellation)
+
+    override fun openReplay(history: List<Message>, tools: List<ToolDefinition>, systemPrompt: String,
+        deadline: SummaryRequestDeadline, reasoning: app.daiyu.android.model.SummaryReasoningLevel,
+        cancellation: ContextPreparationCancellation): ModelSession {
         fun checkLive() { cancellation.check(); deadline.check() }
         checkLive()
         val frozen = freezeContextMessages(history)
@@ -167,7 +172,7 @@ internal class ProviderSummaryModelPort(
         checkLive()
         val replayOutput = configuration.maxOutputTokens
         val provider = SummaryProviderFactory.create(configuration.provider, replayOutput,
-            system, connect = connect, beforeConnect = ::checkLive, oauthHeaders = oauthHeaders, replay = true)
+            system, connect = connect, beforeConnect = ::checkLive, oauthHeaders = oauthHeaders, reasoning = reasoning, replay = true)
         val session = app.daiyu.android.model.usage.UsageRecorder.wrap(provider, configuration.provider,
             usagePort?.conversationId ?: frozen.first().conversationId.value).open(messages, tools)
         return try {

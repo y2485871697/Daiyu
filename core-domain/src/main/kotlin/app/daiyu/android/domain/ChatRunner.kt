@@ -736,7 +736,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             var active = open()
             if (stopped.get()) { cancelSession(active); throw InterruptedException() }
             while (true) {
-                val rebind = round > 0 && (active as? RequestRebindingModelSession)?.needsRebind() == true
+                val rebind = !sessionAwaitingFirstNext && round > 0 &&
+                    (active as? RequestRebindingModelSession)?.needsRebind() == true
                 if (boundary(rebind)) { cancelSession(active); active = open() }
                 if (!sessionAwaitingFirstNext) prepareContextRequest()
                 if (!sessionAwaitingFirstNext && round > 0 && compactAtBoundary()) {
@@ -1319,7 +1320,11 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 }
                 val requestFailure = transportFailure
                 if (requestFailure is ModelPreparationChangedException) {
-                    cancelSession(active); pressureChecked = false; active = open(); continue
+                    cancelSession(active)
+                    boundary(rebind = true)
+                    pressureChecked = false
+                    active = open()
+                    continue
                 }
                 if (requestFailure != null && pending.isEmpty() && !effectiveOutput && recoverContextOverflow(requestFailure)) {
                     cancelSession(active)

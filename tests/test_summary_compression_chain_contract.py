@@ -21,7 +21,7 @@ class SummaryCompressionChainContract(unittest.TestCase):
         queued = runner.split("fun requestCompaction(", 1)[1].split("@Volatile private var pauseRequested", 1)[0]
         self.assertIn("pendingCompact = CompactRequest", queued)
         self.assertNotIn("cancel", queued)
-        self.assertIn("pendingCompact == null && (!base.automatic || pressure == null)", runner)
+        self.assertIn("pendingCompact == null && !pressureTrigger && !overflow && (!base.automatic || pressure == null)", runner)
         opened = runner.split("fun open(): ModelSession", 1)[1].split("val token =", 1)[0]
         self.assertIn("compactAtBoundary()", opened)
 

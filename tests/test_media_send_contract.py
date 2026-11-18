@@ -116,4 +116,4 @@ class MediaSendContract(unittest.TestCase):
         self.assertIn("ActivityResultContracts.CreateDocument(item.mimeType)", save)
         self.assertIn("result.await()", save)
         self.assertIn("saveScope.cancel()", source)
-        self.assertIn("file.delete()", save)
+        self.assertIn("staged?.delete()", save)

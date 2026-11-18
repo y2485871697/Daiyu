@@ -149,7 +149,20 @@ class ControllerVideoFilesEntryTest : InstrumentationTestCase() {
             }
             awaitControl("video receipt") { receipt.get() != null }
             assertEquals(fixture.controller.problem, VideoDraftOutcome.ACCEPTED, receipt.get()?.outcome)
-            assertTrue(session.entered.await(20, TimeUnit.SECONDS))
+            if (!session.entered.await(20, TimeUnit.SECONDS)) {
+                val storedAssistant = fixture.database.messages(conversation.id).map { it.second }
+                    .lastOrNull { it.role == Message.ASSISTANT_ROLE }
+                val checkpoint = storedAssistant?.let {
+                    app.daiyu.android.storage.SQLiteRuntimeStore.readCheckpointSnapshot(
+                        fixture.database.readableDatabase, it.id.value)
+                }
+                val state = AtomicReference<String>()
+                controlMain { state.set("active=${fixture.controller.active?.status}; problem=${fixture.controller.problem}") }
+                fail("video model did not enter: opens=${fixture.opens.get()}; ${state.get()}; " +
+                    "storedStatus=${storedAssistant?.status}; storedError=${storedAssistant?.error}; " +
+                    "phase=${checkpoint?.phase}; capacity=${checkpoint?.context?.capacity}; " +
+                    "checkpointError=${checkpoint?.message?.error}")
+            }
             assertEquals(1, fixture.opens.get())
             val projected = fixture.histories.single()
             assertEquals(oldUser, projected.first())

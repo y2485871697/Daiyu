@@ -91,7 +91,8 @@ class ReasoningTypewriterContract(unittest.TestCase):
         self.assertIn('return rememberMarkdownReveal(sources, prefixProjection, turn.isStreaming, turn.status != RunStatus.RUNNING && prefix.size == turn.content.size,', ' '.join(typing.split()))
         self.assertIn('motion.update(parts, baselineLength, streaming, targetTerminal, live, paceTerminal)', typing)
         self.assertEqual(1, typing.count('withFrameNanos { frameNanos ->'))
-        self.assertIn('val textClearance by rememberUpdatedState(LocalStreamingTextClearance.current)', typing)
+        self.assertIn('val clearance = LocalStreamingTextClearance.current\n'
+                      '    val textClearance by rememberUpdatedState(clearance)', typing)
         self.assertIn('if (currentCanAdvance && textClearance?.held != true) motion.advance(current, frameNanos, end) { currentAdvance() }', typing)
         self.assertIn('else { motion.pause(current); motion.visible(current) }', typing)
         self.assertIn('rememberUpdatedState(onVisibleAdvance)', typing)

@@ -141,7 +141,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("(frameLast.offset + frameLast.size - frameVisibleBottom).coerceAtLeast(0)", follow)
         self.assertIn("val followDistance = maxOf(overflow.toFloat(), obscuredTail.toFloat())", follow)
         self.assertIn("val frameFollowDistance = maxOf(frameOverflow.toFloat(), frameObscuredTail.toFloat())", follow)
-        self.assertIn("delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity)", follow)
+        self.assertIn("delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity, continuous = currentNestedTail.textClearance.typingPending)", " ".join(follow.split()))
         self.assertNotIn("delta = maxOf(", follow)
         self.assertIn("while (canFollowBottom())", follow)
         self.assertIn("withFrameNanos { frameTimeNanos ->", follow)

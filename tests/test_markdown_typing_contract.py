@@ -35,7 +35,8 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources,", self.chat)
         self.assertIn("live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty()", self.chat)
         self.assertIn("if (currentCanAdvance && textClearance?.held != true) motion.advance(current, frameNanos, end) { currentAdvance() }", self.typing)
-        self.assertIn("val textClearance by rememberUpdatedState(LocalStreamingTextClearance.current)", self.typing)
+        self.assertIn("val clearance = LocalStreamingTextClearance.current\n"
+                      "    val textClearance by rememberUpdatedState(clearance)", self.typing)
         self.assertIn("target, canAdvance, advanceLimit", self.typing)
         self.assertIn("val currentCanAdvance by rememberUpdatedState(canAdvance)", self.typing)
         for source in [self.typing, self.reveal]:

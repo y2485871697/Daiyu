@@ -94,6 +94,43 @@ class BottomFollowMotionTest {
         }
     }
 
+    @Test fun protectedFrontiersSettleWithoutSerialExponentialWaits() {
+        for (density in listOf(1f, 2f, 3f)) for (hz in listOf(60, 90, 120)) {
+            val motion = BottomFollowMotion()
+            var frame = 0L
+            for (frontierDp in listOf(38f, 19f, 24f, 26f)) {
+                var distance = frontierDp * density
+                var moved = 0f
+                motion.step(distance, frame * 1_000_000_000L / hz, density)
+                repeat(hz * 2 / 5) {
+                    frame++
+                    val step = motion.step(distance, frame * 1_000_000_000L / hz, density)
+                    assertTrue(step >= 0f && step <= distance)
+                    assertTrue(step <= 14f * density)
+                    distance -= step
+                    moved += step
+                }
+                assertEquals("${frontierDp}dp at ${hz}Hz must release its protected frontier", 0f, distance, 0f)
+                assertEquals(frontierDp * density, moved, 0.002f)
+                assertEquals(0f, motion.velocityPxPerSecond, 0f)
+            }
+        }
+    }
+
+    @Test fun steadyFollowerKeepsStalledFramesWithinFourteenDp() {
+        for (density in listOf(1f, 2f, 3f)) for (stallMs in listOf(33L, 50L, 200L)) {
+            val motion = BottomFollowMotion()
+            val distance = 10_000f * density
+            motion.step(distance, 0L, density)
+            repeat(60) { motion.step(distance, (it + 1) * 16_666_667L, density) }
+            val stalledAt = 60 * 16_666_667L + stallMs * 1_000_000L
+            val stalled = motion.step(distance, stalledAt, density)
+            assertTrue(stalled > 0f && stalled <= 14f * density)
+            val resumed = motion.step(distance - stalled, stalledAt + 16_666_667L, density)
+            assertTrue(resumed > 0f && resumed <= 14f * density)
+        }
+    }
+
     @Test fun stopAndInvalidInputsClearMomentum() {
         val motion = BottomFollowMotion()
         motion.step(200f, 0L, 1f)

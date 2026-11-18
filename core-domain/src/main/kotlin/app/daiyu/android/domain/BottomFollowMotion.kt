@@ -27,24 +27,25 @@ class BottomFollowMotion {
         val acceleration = 2400f * density
         var remaining = distancePx
         var movement = 0f
-        while (timeLeft > 0.000001f && remaining > 0f) {
+        val frameLimit = min(distancePx, 14f * density)
+        while (timeLeft > 0.000001f && remaining > 0f && movement < frameLimit) {
             val dt = min(timeLeft, 1f / 240f)
-            val targetVelocity = min(720f * density, min(remaining / 0.16f, sqrt(2f * acceleration * remaining)))
+            val targetVelocity = min(720f * density, sqrt(2f * acceleration * remaining))
             val nextVelocity = targetVelocity.coerceIn(
                 (velocityPxPerSecond - acceleration * dt).coerceAtLeast(0f),
                 velocityPxPerSecond + acceleration * dt,
             )
-            val delta = min(remaining, (velocityPxPerSecond + nextVelocity) * 0.5f * dt)
+            val delta = min(min(remaining, frameLimit - movement), (velocityPxPerSecond + nextVelocity) * 0.5f * dt)
             velocityPxPerSecond = nextVelocity
             movement += delta
             remaining -= delta
             timeLeft -= dt
         }
         // Eliminate the asymptotic subpixel tail without a visible snap.
-        if (remaining <= 0.5f && movement > 0f) {
+        if (remaining <= 0.5f && movement > 0f && distancePx <= frameLimit) {
             movement = distancePx
             reset()
         }
-        return movement.coerceIn(0f, distancePx)
+        return movement.coerceIn(0f, frameLimit)
     }
 }

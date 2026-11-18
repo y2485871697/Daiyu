@@ -68,6 +68,18 @@ class TaskScrollSmokeScopeTests(unittest.TestCase):
         expected = expected.split("if os.environ['WORKFLOW_CHECK_SCOPE'] == 'page-performance':", 1)[0]
         self.assertIn("'MarkdownAdmissionCompositionTest'", expected)
 
+    def test_task_scroll_runs_and_records_protected_frontier_domain_tests(self):
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / '.github/workflows/chat-workflow-checks.yml').read_text()
+        self.assertIn('domain_tasks=(:core-domain:test --tests app.daiyu.android.domain.BottomFollowMotionTest)', workflow)
+        self.assertIn('"${domain_tasks[@]}" :app:compileDebugKotlin :app:testDebugUnitTest "${filters[@]}"', workflow)
+        self.assertIn("if record['check_scope'] == 'task-scroll':", workflow)
+        self.assertIn("{'app.daiyu.android.domain.BottomFollowMotionTest'}", workflow)
+        self.assertIn("record['domain_checks']", workflow)
+        self.assertIn("assert ':core-domain:test' in graph", workflow)
+        self.assertIn("domain_task.group(1) not in ('NO-SOURCE', 'SKIPPED')", workflow)
+        self.assertIn('core-domain/build/test-results/test/', workflow)
+
     def test_partial_extended_duplicate_and_other_modes_keep_full_selection(self):
         classes = ','.join(CLASSES)
         for raw in ('', ','.join(CLASSES[:-1]), classes + ',app.daiyu.android.UnknownTest',

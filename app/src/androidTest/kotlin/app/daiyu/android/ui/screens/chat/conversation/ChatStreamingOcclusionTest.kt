@@ -315,6 +315,131 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
 
     fun testPlainMarkdownCrossesViewportWithoutDroppingApprovedGlyph() = exercisePlainTextSafety(false, true)
 
+    fun testFixedArrivedParagraphKeepsPaintingAcrossWrappedLines() = exercisePaintCadence(false)
+
+    fun testFixedArrivedListKeepsPaintingAcrossLeafTransitions() = exercisePaintCadence(true)
+
+    private fun exercisePaintCadence(list: Boolean) {
+        val leaves = if (list) "甲乙丙丁戊己".map { "$it 天地玄黄宇宙洪荒日月盈昃辰宿列张".replace(" ", "") }
+            else listOf("天地玄黄宇宙洪荒日月盈昃辰宿列张".repeat(7))
+        val text = if (list) leaves.joinToString("\n") { "- $it" } else leaves.single()
+        for (parser in listOf(defaultMarkdownParser, streamingMarkdownParser)) {
+            markdownProjectionCache.put(MarkdownProjection(listOf(text), mapOf(text to parser(text)), parser))
+        }
+        var body by mutableStateOf("")
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(themeMode =
+                    app.daiyu.android.data.model.AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
+                    density = LocalDensity.current.density
+                    Box(Modifier.size(320.dp, 420.dp).background(Color.White).testTag("cadence-host")) {
+                        ChatConversationLayers(Modifier.size(320.dp, 420.dp), messages = { inset ->
+                            ChatMessageList(List(6) { ChatTurnUi.User("cadence-u$it", "history $it") } +
+                                ChatTurnUi.Assistant("cadence-tail", finalText = body,
+                                    status = RunStatus.RUNNING, isStreaming = true),
+                                ChatScreenActions(), scrollRequest = ChatScrollRequest(1), composerBottomInset = inset,
+                                hasTurnExtras = { false })
+                        }, composer = { InkEditor() })
+                        InkReferenceLayer()
+                    }
+                }
+            }
+        }
+        ui.waitForIdle()
+        val host = ui.onNodeWithTag("cadence-host")
+        val matcher = SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult) and
+            (hasTestTag("message-content-text:0") or hasAnyAncestor(hasTestTag("message-content-text:0"))) and
+            hasAnyAncestor(hasTestTag("chat-turn:cadence-tail"))
+        val offsets = leaves.indices.map { index -> leaves.take(index).sumOf { it.length } }
+        val total = leaves.sumOf { it.length }
+        val confirmed = BooleanArray(total)
+        val traces = ArrayDeque<String>()
+        var paintedThrough = 0
+        var partialFrames = 0
+        var lastAdvanceAt: Long? = null
+        var previousTop: Float? = null
+        var completed = false
+        ui.mainClock.autoAdvance = false
+        try {
+            val editor = inkRect("cadence-host", "ink-editor")
+            ui.runOnUiThread { body = text }
+            for (tick in 0 until 500) {
+                frame()
+                val clock = ui.mainClock.currentTime
+                val origin = host.fetchSemanticsNode().positionInRoot
+                val safe = editor.top - kotlin.math.round(ChatTailClearance.value * density)
+                val viewportTop = maxOf(0f, inkRect("cadence-host", "chat-stream-viewport:cadence-tail").top)
+                val glyphs = ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().mapNotNull { node ->
+                    val layouts = mutableListOf<TextLayoutResult>()
+                    ui.runOnUiThread { node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts) }
+                    val layout = layouts.single()
+                    val source = layout.layoutInput.text.text
+                    if (source.isEmpty() || leaves.none { it.startsWith(source) }) null
+                    else InkGlyph(layout, node.positionInRoot - origin)
+                }
+                if (glyphs.isEmpty()) continue
+                ui.runOnUiThread { inkReference = false }
+                val actual = captureScreenNode(host, advanceAnimationClock = false).toPixelMap()
+                val reference = try {
+                    ui.runOnUiThread {
+                        inkFrame = InkFrame(glyphs, glyphs.map {
+                            androidx.compose.ui.geometry.Rect(it.at, Size(it.layout.size.width.toFloat(), it.layout.size.height.toFloat()))
+                        }, viewportTop, safe)
+                        inkReference = true
+                    }
+                    captureScreenNode(host, advanceAnimationClock = false).toPixelMap()
+                } finally { ui.runOnUiThread { inkReference = false } }
+                assertEquals("Paint probes cannot advance typing", clock, ui.mainClock.currentTime)
+                var next = paintedThrough
+                for (glyph in glyphs) {
+                    val source = glyph.layout.layoutInput.text.text
+                    val leaf = leaves.indexOfFirst { it.startsWith(source) }
+                    for (index in source.indices) {
+                        val box = glyph.layout.getBoundingBox(index).translate(glyph.at)
+                        if (box.top < viewportTop || box.bottom > safe || box.left < 0f || box.right > actual.width) continue
+                        var expectedInk = 0
+                        var missing = 0
+                        for (y in floor(box.top).toInt().coerceAtLeast(0) until ceil(box.bottom).toInt().coerceAtMost(actual.height)) {
+                            for (x in floor(box.left).toInt().coerceAtLeast(0) until ceil(box.right).toInt().coerceAtMost(actual.width)) {
+                                if (inkDark(reference[x, y])) {
+                                    expectedInk++
+                                    if (inkDelta(actual[x, y], reference[x, y]) > .025f) missing++
+                                }
+                            }
+                        }
+                        if (expectedInk > 2 && missing == 0) confirmed[offsets[leaf] + index] = true
+                    }
+                }
+                while (next < total && confirmed[next]) next++
+                val top = inkRect("cadence-host", "chat-turn:cadence-tail").top
+                previousTop?.let { before ->
+                    assertTrue("Cadence follow cannot reverse or jump a line: before=$before after=$top",
+                        before - top in -1f..(14f * density + 1f))
+                }
+                previousTop = top
+                assertEquals("Composer stays anchored during continuous reveal", editor, inkRect("cadence-host", "ink-editor"))
+                traces.addLast("tick=$tick time=$clock paint=$next top=$top candidates=${glyphs.map { it.layout.layoutInput.text.length }}")
+                if (traces.size > 24) traces.removeFirst()
+                if (lastAdvanceAt != null && paintedThrough < total) {
+                    val gap = clock - lastAdvanceAt!!
+                    assertTrue("Already arrived text must not stop painting at each line; gap=${gap}ms trace=$traces", gap <= 128L)
+                }
+                if (next > paintedThrough) {
+                    paintedThrough = next
+                    lastAdvanceAt = clock
+                    if (next < total) partialFrames++
+                }
+                if (paintedThrough == total) { completed = true; break }
+            }
+            assertTrue("Fixed arrived body must actually finish painting: $paintedThrough/$total trace=$traces", completed)
+            assertTrue("A fixed arrived body must reveal through multiple actual painted prefixes", partialFrames >= 6)
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            ui.mainClock.autoAdvance = true
+            ui.runOnUiThread { inkReference = false; inkFrame = null }
+        }
+    }
+
     private fun exercisePlainTextSafety(longBody: Boolean, crossViewport: Boolean = false) {
         val initial = if (longBody || crossViewport) (0 until if (longBody) 14 else 3).joinToString("\n\n") {
             "历史完整段落 $it。"

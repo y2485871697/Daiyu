@@ -1,6 +1,8 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -135,7 +137,8 @@ internal fun rememberMarkdownReveal(
     }
     val canAdvance = enabled && sourcesCompatible
     val currentCanAdvance by rememberUpdatedState(canAdvance)
-    val textClearance by rememberUpdatedState(LocalStreamingTextClearance.current)
+    val clearance = LocalStreamingTextClearance.current
+    val textClearance by rememberUpdatedState(clearance)
     val frame = produceState(MarkdownTypingFrame(target, target?.start ?: 0), target, canAdvance, advanceLimit) {
         val current = target ?: return@produceState
         var shown = motion.visible(current)
@@ -150,6 +153,15 @@ internal fun rememberMarkdownReveal(
             value = MarkdownTypingFrame(current, shown)
         }
         if (end < current.total) motion.pause(current)
+    }
+    val typingPending by remember(frame, target, canAdvance, advanceLimit) { derivedStateOf {
+        canAdvance && target != null && frame.value.let { progress ->
+            (if (progress.target === target) progress.visible else target.start) < minOf(target.total, advanceLimit)
+        }
+    } }
+    SideEffect { clearance?.typingPending = typingPending }
+    DisposableEffect(clearance) {
+        onDispose { clearance?.typingPending = false }
     }
     val exact = exactProjection && baselineLength != null && target != null &&
         target.parts == parts && target.parts.map { it.source } == sources

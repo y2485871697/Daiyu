@@ -120,6 +120,7 @@ internal class StreamingTextClearance {
     private data class Geometry(val viewport: LayoutCoordinates?, val offset: Int, val bottom: Float, val height: Int)
     private var geometry by mutableStateOf<Geometry?>(null)
     private var drawn by mutableStateOf(false)
+    var typingPending by mutableStateOf(false)
     val held: Boolean get() = !drawn || geometry?.let { it.height > it.bottom + .01f } == true
 
     fun update(viewport: LayoutCoordinates?, offset: Int, bottom: Float, height: Int, protect: Boolean) {
@@ -786,6 +787,7 @@ internal fun ChatMessageList(
         clearanceLayout.followViewport = null
         var alignViewport = false
         val motion = BottomFollowMotion()
+        var motionOwner: String? = null
         // Process each measured target update through a frame; collectLatest would cancel a
         // pending motion step whenever the streaming item's size changes again.
         snapshotFlow {
@@ -800,12 +802,16 @@ internal fun ChatMessageList(
             Triple(canFollowBottom(), Triple(index, last?.offset ?: Int.MIN_VALUE, last?.size ?: 0),
                 Triple(layout.viewportSize, Triple(layout.beforeContentPadding, layout.afterContentPadding,
                     currentOcclusionPx + currentFollowClearancePx),
-                    resumeReady to currentNestedTail.contentHeight))
+                    Triple(resumeReady, currentNestedTail.contentHeight, currentNestedTail.textClearance.typingPending)))
         }.collect { target ->
             if (target == null) { motion.reset(); return@collect }
             currentNestedTail.followDiagnostic = "target"
             var observedViewport = clearanceLayout.followViewport
             while (canFollowBottom()) {
+                if (motionOwner != currentTailKey) {
+                    motion.reset()
+                    motionOwner = currentTailKey
+                }
                 val index = currentTailIndex
                 if (index < 0) { motion.reset(); return@collect }
                 var layout = listState.layoutInfo
@@ -870,10 +876,21 @@ internal fun ChatMessageList(
                             continue
                         }
                     }
-                    motion.reset()
                     resumeFollowPending = false
                     alignViewport = false
                     clearanceLayout.followViewport = observedViewport
+                    if (currentNestedTail.textClearance.typingPending) {
+                        withFrameNanos { frameTimeNanos ->
+                            if (motionOwner != currentTailKey) {
+                                motion.reset()
+                                return@withFrameNanos
+                            }
+                            motion.step(0f, frameTimeNanos, currentDensity,
+                                continuous = currentNestedTail.textClearance.typingPending)
+                        }
+                        continue
+                    }
+                    motion.reset()
                     return@collect
                 }
                 val alignment = alignViewport || resumeFollowPending
@@ -883,6 +900,10 @@ internal fun ChatMessageList(
                     // A settled LazyColumn may not emit another layout snapshot after the first
                     // zero-velocity sample, so the next frame must be sampled here directly.
                     withFrameNanos { frameTimeNanos ->
+                        if (motionOwner != currentTailKey) {
+                            motion.reset()
+                            return@withFrameNanos
+                        }
                         if (canFollowBottom()) {
                             val frameLayout = listState.layoutInfo
                             val frameLast = frameLayout.visibleItemsInfo.lastOrNull {
@@ -896,9 +917,11 @@ internal fun ChatMessageList(
                                     (frameLast.offset + frameLast.size - frameVisibleBottom).coerceAtLeast(0) else 0
                                 val frameFollowDistance = maxOf(frameOverflow.toFloat(), frameObscuredTail.toFloat())
                                 if (frameFollowDistance > 0f) {
-                                    delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity)
+                                    delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity,
+                                        continuous = currentNestedTail.textClearance.typingPending)
                                 } else {
-                                    motion.reset()
+                                    motion.step(0f, frameTimeNanos, currentDensity,
+                                        continuous = currentNestedTail.textClearance.typingPending)
                                 }
                             }
                         }

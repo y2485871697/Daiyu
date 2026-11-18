@@ -14,9 +14,14 @@ class BottomFollowMotion {
         lastFrameNanos = null
     }
 
-    fun step(distancePx: Float, frameTimeNanos: Long, density: Float): Float {
-        if (!distancePx.isFinite() || distancePx <= 0f || !density.isFinite() || density <= 0f) {
+    fun step(distancePx: Float, frameTimeNanos: Long, density: Float, continuous: Boolean = false): Float {
+        if (!distancePx.isFinite() || distancePx < 0f || !density.isFinite() || density <= 0f) {
             reset()
+            return 0f
+        }
+        if (distancePx == 0f) {
+            // Active reveal clocks its idle frames without inventing scroll or losing momentum.
+            if (continuous) lastFrameNanos = frameTimeNanos else reset()
             return 0f
         }
         val previous = lastFrameNanos
@@ -30,7 +35,8 @@ class BottomFollowMotion {
         val frameLimit = min(distancePx, 14f * density)
         while (timeLeft > 0.000001f && remaining > 0f && movement < frameLimit) {
             val dt = min(timeLeft, 1f / 240f)
-            val targetVelocity = min(720f * density, sqrt(2f * acceleration * remaining))
+            val targetVelocity = if (continuous) 720f * density
+                else min(720f * density, sqrt(2f * acceleration * remaining))
             val nextVelocity = targetVelocity.coerceIn(
                 (velocityPxPerSecond - acceleration * dt).coerceAtLeast(0f),
                 velocityPxPerSecond + acceleration * dt,
@@ -44,7 +50,7 @@ class BottomFollowMotion {
         // Eliminate the asymptotic subpixel tail without a visible snap.
         if (remaining <= 0.5f && movement > 0f && distancePx <= frameLimit) {
             movement = distancePx
-            reset()
+            if (!continuous) reset()
         }
         return movement.coerceIn(0f, frameLimit)
     }

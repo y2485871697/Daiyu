@@ -131,6 +131,56 @@ class BottomFollowMotionTest {
         }
     }
 
+    @Test fun activeTypingKeepsMomentumAcrossSettledLineFrontiers() {
+        for (density in listOf(1f, 2f, 3f)) for (hz in listOf(60, 90, 120)) {
+            val motion = BottomFollowMotion()
+            var frame = 0L
+            fun tick(distance: Float): Float {
+                frame++
+                val delta = motion.step(distance, frame * 1_000_000_000L / hz, density, continuous = true)
+                assertTrue(delta >= 0f && delta <= minOf(distance, 14f * density))
+                return delta
+            }
+            var first = 26f * density
+            repeat(hz / 2) { if (first > 0f) first -= tick(first) }
+            assertEquals(0f, first, 0f)
+            assertTrue(motion.velocityPxPerSecond > 0f)
+            repeat(6) {
+                val momentum = motion.velocityPxPerSecond
+                // Revealing an already arrived line can take longer than a fixed idle timeout.
+                repeat(hz / 2) { assertEquals(0f, tick(0f), 0f) }
+                assertEquals(momentum, motion.velocityPxPerSecond, 0f)
+                var distance = 26f * density
+                var frames = 0
+                while (distance > 0f && frames++ < hz) distance -= tick(distance)
+                assertEquals(0f, distance, 0f)
+                assertTrue("A warm line must not restart its cold acceleration: ${frames} frames at ${hz}Hz",
+                    frames * 1_000f / hz <= 100f)
+            }
+            assertEquals(0f, motion.step(0f, ++frame * 1_000_000_000L / hz, density), 0f)
+            assertEquals(0f, motion.velocityPxPerSecond, 0f)
+            assertEquals(0f, motion.step(26f * density, ++frame * 1_000_000_000L / hz, density), 0f)
+        }
+    }
+
+    @Test fun activeTypingStillBoundsStalledFramesAndResetStopsIt() {
+        for (density in listOf(1f, 2f, 3f)) {
+            val motion = BottomFollowMotion()
+            var time = 0L
+            motion.step(1_000f * density, time, density, continuous = true)
+            repeat(60) { time += 16_666_667L; motion.step(1_000f * density, time, density, continuous = true) }
+            repeat(20) { time += 16_666_667L; assertEquals(0f, motion.step(0f, time, density, continuous = true), 0f) }
+            time += 200_000_000L
+            val step = motion.step(26f * density, time, density, continuous = true)
+            assertTrue(step > 0f && step <= 14f * density)
+            motion.reset()
+            assertEquals(0f, motion.velocityPxPerSecond, 0f)
+            assertEquals(0f, motion.step(26f * density, time + 16_666_667L, density, continuous = true), 0f)
+            assertEquals(0f, motion.step(-1f, time + 33_333_334L, density, continuous = true), 0f)
+            assertEquals(0f, motion.velocityPxPerSecond, 0f)
+        }
+    }
+
     @Test fun stopAndInvalidInputsClearMomentum() {
         val motion = BottomFollowMotion()
         motion.step(200f, 0L, 1f)

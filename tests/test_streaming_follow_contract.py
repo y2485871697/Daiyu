@@ -45,7 +45,7 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("val alignment = alignViewport || resumeFollowPending", self.follow)
         self.assertIn("var delta = if (alignment) followDistance else 0f", self.follow)
         self.assertIn("val frameFollowDistance = maxOf(frameOverflow.toFloat(), frameObscuredTail.toFloat())", self.follow)
-        self.assertIn("delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity)", self.follow)
+        self.assertIn("delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity,", self.follow)
         self.assertNotIn("delta = maxOf(", self.follow)
         self.assertNotIn("System.nanoTime()", self.follow)
         self.assertIn("listState.scrollBy(delta)", self.follow)
@@ -56,7 +56,7 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("maxOf(frameOverflow.toFloat(), frameObscuredTail.toFloat())", self.follow)
 
     def test_settled_follow_observes_real_extent_and_reconciles_only_stale_lazy_geometry(self):
-        self.assertIn("resumeReady to currentNestedTail.contentHeight", self.follow)
+        self.assertIn("Triple(resumeReady, currentNestedTail.contentHeight, currentNestedTail.textClearance.typingPending)", self.follow)
         self.assertIn("currentNestedTail.bounded && currentTailKey == assistantOwnerKey", self.follow)
         self.assertIn("currentNestedTail.contentHeight > 0 && last.size != currentNestedTail.contentHeight", self.follow)
         stale = self.follow.split("last.size != currentNestedTail.contentHeight", 1)[1].split("val viewport =", 1)[0]
@@ -64,7 +64,22 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("layout = listState.layoutInfo", stale)
         self.assertIn("it.index == index && it.key == currentTailKey", stale)
         self.assertNotIn("scrollBy", stale)
-        self.assertIn("delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity)", self.follow)
+        self.assertIn("delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity,", self.follow)
+
+    def test_pending_text_preserves_only_the_current_owner_motion_phase(self):
+        self.assertIn("var motionOwner: String? = null", self.follow)
+        self.assertIn("if (motionOwner != currentTailKey)", self.follow)
+        self.assertIn("motionOwner = currentTailKey", self.follow)
+        self.assertIn("continuous = currentNestedTail.textClearance.typingPending", self.follow)
+        idle = self.follow.split("if (followDistance <= 0f)", 1)[1].split("val alignment =", 1)[0]
+        self.assertIn("if (currentNestedTail.textClearance.typingPending)", idle)
+        self.assertIn("motion.step(0f, frameTimeNanos, currentDensity,", idle)
+        self.assertIn("motion.reset()", idle)
+        typing = (CHAT.parent / "MarkdownTyping.kt").read_text()
+        self.assertIn("if (progress.target === target) progress.visible else target.start", typing)
+        self.assertIn("minOf(target.total, advanceLimit)", typing)
+        self.assertIn("onDispose { clearance?.typingPending = false }", typing)
+        self.assertIn("textClearance?.held != true", typing)
 
     def test_explicit_scroll_and_touch_keep_ownership(self):
         self.assertIn("if (target == null) { motion.reset(); return@collect }", self.follow)

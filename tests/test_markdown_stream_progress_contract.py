@@ -69,7 +69,8 @@ class MarkdownStreamProgressContract(unittest.TestCase):
     def test_resume_follow_accepts_displayed_streaming_prefix_without_relaxing_exact_readiness(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()
         self.assertIn('val resumeReady = !resumeFollowPending || tail == null || tail.isStreaming ||', chat)
-        self.assertEqual(2, chat.count('if (resumeFollowPending && tail != null && !tail.isStreaming &&'))
+        self.assertIn('if (!protectMeasuredTail && resumeFollowPending && tail != null && !tail.isStreaming &&', chat)
+        self.assertIn('if (resumeFollowPending && tail != null && !tail.isStreaming &&', chat)
         self.assertGreaterEqual(chat.count('(readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)'), 2)
         self.assertIn('onContentDisplayed(hasDisplayBody || contentReady)', chat)
         self.assertIn('onContentDisplayed(false)', chat)

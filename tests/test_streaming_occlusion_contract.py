@@ -34,7 +34,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         markdown = (CHAT.parent / "MessageMarkdown.kt").read_text()
         for token in ("remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }",
                       "clearance.fits(frame.coordinates, size.height.toInt())", "painted[paintOffset] = it",
-                      "clearance.fits(frame.coordinates, it.size.height)", "drawText(it)",
+                      "clearance.fits(frame.coordinates, previous.size.height)", "drawText(it)",
                       "paintOffset + offset", "paintOffset + offsets[column]",
                       "previous.canPaintPrefixOf(it)", "current.text.text.startsWith(previous.text.text)",
                       "previous.constraints.maxWidth != current.constraints.maxWidth",

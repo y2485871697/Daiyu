@@ -520,4 +520,29 @@ class ContextServiceTest : InstrumentationTestCase() {
             }
         }
     }
+    fun testActiveRunRefreshesSavedCompressionConfigurationWithoutRestart() {
+        val settings = ProductionCompressionSettingsStore(context)
+        settings.save(ProductionCompressionSettings(false, 32000, summaryModel = SummaryModelBinding("summary-provider", "summary-model")))
+        val coordinator = ProductionContextPreparation.create(object : ContextWrapper(context) {
+            override fun getApplicationContext(): Context = this
+            override fun getSharedPreferences(name: String, mode: Int): android.content.SharedPreferences {
+                check(name == ProductionCompressionSettingsStore.NAMESPACE)
+                return super.getSharedPreferences(name, mode)
+            }
+        }, service)
+        val root = ProductionRunContext(coordinator.freeze(ConversationId("fixture"), emptyList()),
+            Message(MessageId("assistant"), ConversationId("fixture"), RunId("run"),
+                Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
+        assertFalse(root.compressionSnapshot().automatic)
+        settings.save(settings.snapshot().copy(automatic = true))
+        val selected = root.compressionSnapshot()
+        assertTrue(selected.automatic)
+        assertEquals(root.windowTokens, selected.windowTokens)
+        assertEquals(root.sendBudgetTokens, selected.sendBudgetTokens)
+        settings.save(settings.snapshot().copy(automatic = false,
+            summaryProtocol = app.daiyu.android.model.ProviderProtocol.RESPONSES))
+        assertFalse(root.compressionSnapshot().automatic)
+        assertTrue(selected.automatic)
+    }
+
 }

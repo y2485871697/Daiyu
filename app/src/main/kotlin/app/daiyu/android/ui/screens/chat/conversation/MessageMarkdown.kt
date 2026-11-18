@@ -42,6 +42,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
@@ -145,22 +150,63 @@ internal fun ParsedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, m
 ) {
     val uriHandler = LocalUriHandler.current
     val feedbackView = LocalView.current
-    val openLink: (String) -> Unit = remember(uriHandler, feedbackView) { { url ->
+    val textClearance = LocalStreamingTextClearance.current
+    val openLink: (String) -> Unit = remember(uriHandler, feedbackView, textClearance) { { url ->
         // Recheck at the capability boundary; tolerate a missing external handler.
-        if (MarkdownText.isSafeLink(url)) TouchHaptics.action(feedbackView) { runCatching { uriHandler.openUri(url) } }
+        if (textClearance?.held != true && MarkdownText.isSafeLink(url)) TouchHaptics.action(feedbackView) { runCatching { uriHandler.openUri(url) } }
         Unit
     } }
     val visible = visibility ?: rememberUpdatedState(visibleCharacters)
-    SelectionContainer {
+    val clearance = LocalStreamingTextClearance.current
+    val painted = if (clearance != null) remember(clearance) { mutableMapOf<Int, TextLayoutResult>() } else null
+    CompositionLocalProvider(LocalMarkdownPaintedText provides painted) {
+      SelectionContainer {
         if (visibility == null && visibleCharacters <= 0) Box(modifier)
-        else if (blocks == null) BasicText(text, modifier = modifier, style = messageBodyStyle())
+        else if (blocks == null) ClearanceText(AnnotatedString(text), 0, modifier, messageBodyStyle())
         else if (blocks.singleOrNull() is MarkdownBlock.Paragraph) {
             // Preserve the existing tagged/selectable text node for ordinary message segments.
             MarkdownInlineText((blocks.single() as MarkdownBlock.Paragraph).content, openLink, modifier, visibility = visible)
         } else Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             MarkdownBlocks(blocks, openLink, visible, generationComplete)
         }
+      }
     }
+}
+
+private val LocalMarkdownPaintedText = staticCompositionLocalOf<MutableMap<Int, TextLayoutResult>?> { null }
+private class MarkdownTextFrame {
+    var coordinates: LayoutCoordinates? = null
+    var layout: TextLayoutResult? = null
+}
+
+@Composable
+private fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: Modifier, style: TextStyle) {
+    val clearance = LocalStreamingTextClearance.current
+    val painted = LocalMarkdownPaintedText.current
+    if (clearance == null || painted == null) {
+        BasicText(text, modifier, style)
+        return
+    }
+    val frame = remember { MarkdownTextFrame() }
+    BasicText(text, modifier.onPlaced { frame.coordinates = it }.drawWithContent {
+        if (clearance.fits(frame.coordinates, size.height.toInt())) {
+            drawContent()
+            if (paintOffset != null) frame.layout?.let { painted[paintOffset] = it }
+        } else paintOffset?.let { painted[it] }?.takeIf { previous ->
+            frame.layout?.let { previous.canPaintPrefixOf(it) } == true &&
+                clearance.fits(frame.coordinates, previous.size.height)
+        }?.let { drawText(it) }
+    }, style, onTextLayout = { frame.layout = it })
+}
+
+private fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boolean {
+    val previous = layoutInput
+    val current = candidate.layoutInput
+    if (!current.text.text.startsWith(previous.text.text) ||
+        previous.constraints.maxWidth != current.constraints.maxWidth || previous.style != current.style ||
+        previous.density != current.density || previous.layoutDirection != current.layoutDirection) return false
+    val prefix = current.text.subSequence(0, previous.text.length)
+    return previous.text.spanStyles == prefix.spanStyles && previous.text.paragraphStyles == prefix.paragraphStyles
 }
 
 @Composable
@@ -176,6 +222,7 @@ private fun MarkdownInlineText(
     style: TextStyle = messageBodyStyle(),
     visibleCharacters: Int = Int.MAX_VALUE,
     visibility: State<Int>? = null,
+    paintOffset: Int = 0,
 ) {
     val limit = visibility?.value ?: visibleCharacters
     if (limit <= 0) return
@@ -199,19 +246,20 @@ private fun MarkdownInlineText(
         val visible = remember(body, end) {
             if (end >= body.length) body else body.subSequence(0, end)
         }
-        BasicText(visible, modifier, style)
+        ClearanceText(visible, paintOffset, modifier, style)
     }
 }
 
 @Composable
 private fun MarkdownBlocks(blocks: List<MarkdownBlock>, openLink: (String) -> Unit, visibility: State<Int>,
     generationComplete: Boolean = true,
+    paintOffset: Int = 0,
 ) {
     val lengths = remember(blocks) { blocks.map(::markdownBlockLength) }
     var offset = 0
     for ((index, block) in blocks.withIndex()) {
         val budget = rememberMarkdownVisibility(visibility, offset, lengths[index])
-        MarkdownBlockBody(block, openLink, budget, generationComplete)
+        MarkdownBlockBody(block, openLink, budget, generationComplete, paintOffset + offset)
         offset += lengths[index]
     }
 }
@@ -219,16 +267,17 @@ private fun MarkdownBlocks(blocks: List<MarkdownBlock>, openLink: (String) -> Un
 @Composable
 private fun MarkdownBlockBody(block: MarkdownBlock, openLink: (String) -> Unit, visibility: State<Int>,
     generationComplete: Boolean,
+    paintOffset: Int,
 ) {
     val shown = remember(visibility) { derivedStateOf { visibility.value > 0 } }
     if (!shown.value) return
     when (block) {
-        is MarkdownBlock.Paragraph -> MarkdownInlineText(block.content, openLink, visibility = visibility)
+        is MarkdownBlock.Paragraph -> MarkdownInlineText(block.content, openLink, visibility = visibility, paintOffset = paintOffset)
         is MarkdownBlock.Heading -> {
             val size = headingSize(block.level)
             MarkdownInlineText(block.content, openLink, style = messageBodyStyle().copy(
                 fontWeight = FontWeight.Bold, fontSize = size.sp, lineHeight = (size + 8).sp,
-            ), visibility = visibility)
+            ), visibility = visibility, paintOffset = paintOffset)
         }
         is MarkdownBlock.Code -> MarkdownCodeBlock(block, visibility.value, generationComplete)
         is MarkdownBlock.Quote -> {
@@ -238,7 +287,7 @@ private fun MarkdownBlockBody(block: MarkdownBlock, openLink: (String) -> Unit, 
                 drawRect(ruleColor, Offset(if (layoutDirection == LayoutDirection.Ltr) 0f else size.width - width, 0f),
                     Size(width, size.height))
             }.padding(start = 15.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                MarkdownBlocks(block.blocks, openLink, visibility, generationComplete)
+                MarkdownBlocks(block.blocks, openLink, visibility, generationComplete, paintOffset)
             }
         }
         is MarkdownBlock.Items -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -246,11 +295,11 @@ private fun MarkdownBlockBody(block: MarkdownBlock, openLink: (String) -> Unit, 
             var offset = 0
             for ((index, item) in block.items.withIndex()) {
                 MarkdownListItem(item, block.ordered, block.start + index, openLink,
-                    rememberMarkdownVisibility(visibility, offset, lengths[index]), generationComplete)
+                    rememberMarkdownVisibility(visibility, offset, lengths[index]), generationComplete, paintOffset + offset)
                 offset += lengths[index]
             }
         }
-        is MarkdownBlock.Table -> MarkdownTable(block, openLink, visibility)
+        is MarkdownBlock.Table -> MarkdownTable(block, openLink, visibility, paintOffset = paintOffset)
         MarkdownBlock.Rule -> Box(Modifier.fillMaxWidth().padding(vertical = 6.dp).height(1.dp)
             .background(MiuixTheme.colorScheme.outline.copy(alpha = 0.5f)))
     }
@@ -258,7 +307,7 @@ private fun MarkdownBlockBody(block: MarkdownBlock, openLink: (String) -> Unit, 
 
 @Composable
 private fun MarkdownListItem(item: MarkdownBlock.Item, ordered: Boolean, number: Int,
-    openLink: (String) -> Unit, visibility: State<Int>, generationComplete: Boolean,
+    openLink: (String) -> Unit, visibility: State<Int>, generationComplete: Boolean, paintOffset: Int,
 ) {
     val shown = remember(visibility) { derivedStateOf { visibility.value > 0 } }
     if (!shown.value) return
@@ -267,9 +316,10 @@ private fun MarkdownListItem(item: MarkdownBlock.Item, ordered: Boolean, number:
             true -> "☑"; false -> "☐"
             null -> if (ordered) "$number." else "•"
         }
-        BasicText(if (item.showMarker) bullet else "", Modifier.widthIn(min = 24.dp).padding(end = 6.dp), messageBodyStyle())
+        ClearanceText(AnnotatedString(if (item.showMarker) bullet else ""), null,
+            Modifier.widthIn(min = 24.dp).padding(end = 6.dp), messageBodyStyle())
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            MarkdownBlocks(item.blocks, openLink, visibility, generationComplete)
+            MarkdownBlocks(item.blocks, openLink, visibility, generationComplete, paintOffset)
         }
     }
 }
@@ -277,7 +327,7 @@ private fun MarkdownListItem(item: MarkdownBlock.Item, ordered: Boolean, number:
 /** Header widths and row-major reveal offsets do not move when body rows are appended. */
 @Composable
 private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit,
-    visibility: State<Int>, cellOffsets: List<List<Int>>? = null,
+    visibility: State<Int>, cellOffsets: List<List<Int>>? = null, paintOffset: Int = 0,
 ) {
     val offsets = cellOffsets ?: remember(table) { markdownTableCellOffsets(table) }
     val shown = remember(visibility, offsets) { derivedStateOf { visibility.value > offsets[0][0] } }
@@ -294,7 +344,7 @@ private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit
         } }
         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
             groups.forEachIndexed { index, group ->
-                MarkdownTable(group, openLink, visibility, groupOffsets[index])
+                MarkdownTable(group, openLink, visibility, groupOffsets[index], paintOffset)
             }
         }
         return
@@ -321,7 +371,7 @@ private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit
             val row = if (rowIndex == 0) table.header else table.rows[rowIndex - 1]
             MarkdownTableRow(row, rowIndex, offsets[rowIndex], cellLengths[rowIndex], table.alignment, widths,
                 visibility, openLink, style, gridStroke, gridColor, headerBackground,
-                firstVisibleRow = rowIndex == if (table.headerVisible) 0 else 1)
+                firstVisibleRow = rowIndex == if (table.headerVisible) 0 else 1, paintOffset = paintOffset)
         }
     }
 }
@@ -330,7 +380,7 @@ private fun MarkdownTable(table: MarkdownBlock.Table, openLink: (String) -> Unit
 private fun MarkdownTableRow(row: List<List<MarkdownInline>>, rowIndex: Int, offsets: List<Int>, lengths: List<Int>,
     alignment: List<MarkdownBlock.Alignment>, widths: List<androidx.compose.ui.unit.Dp>, visibility: State<Int>,
     openLink: (String) -> Unit, style: TextStyle, gridStroke: Int, gridColor: Color, headerBackground: Color,
-    firstVisibleRow: Boolean,
+    firstVisibleRow: Boolean, paintOffset: Int,
 ) {
     val shown = remember(visibility, offsets) { derivedStateOf { visibility.value > offsets[0] } }
     if (!shown.value) return
@@ -355,7 +405,7 @@ private fun MarkdownTableRow(row: List<List<MarkdownInline>>, rowIndex: Int, off
             Box(Modifier.width(widths[column]).padding(horizontal = 10.dp, vertical = 7.dp)) {
                 MarkdownInlineText(cell, openLink, Modifier.fillMaxWidth(), style.copy(
                     textAlign = align, fontWeight = if (rowIndex == 0) FontWeight.Bold else FontWeight.Normal,
-                ), visibility = budget)
+                ), visibility = budget, paintOffset = paintOffset + offsets[column])
             }
         }
     }

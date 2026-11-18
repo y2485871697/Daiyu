@@ -135,6 +135,7 @@ internal fun rememberMarkdownReveal(
     }
     val canAdvance = enabled && sourcesCompatible
     val currentCanAdvance by rememberUpdatedState(canAdvance)
+    val textClearance by rememberUpdatedState(LocalStreamingTextClearance.current)
     val frame = produceState(MarkdownTypingFrame(target, target?.start ?: 0), target, canAdvance, advanceLimit) {
         val current = target ?: return@produceState
         var shown = motion.visible(current)
@@ -143,7 +144,7 @@ internal fun rememberMarkdownReveal(
         val end = maxOf(shown, minOf(current.total, advanceLimit))
         while (shown < end) {
             shown = withFrameNanos { frameNanos ->
-                if (currentCanAdvance) motion.advance(current, frameNanos, end) { currentAdvance() }
+                if (currentCanAdvance && textClearance?.held != true) motion.advance(current, frameNanos, end) { currentAdvance() }
                 else { motion.pause(current); motion.visible(current) }
             }
             value = MarkdownTypingFrame(current, shown)

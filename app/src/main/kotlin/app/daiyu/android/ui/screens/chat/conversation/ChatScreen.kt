@@ -242,7 +242,7 @@ internal fun DaiyuChatScreen(
                     speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId, compressionActivities = state.compressionActivities,
                     onPresentationReady = onPresentationReady, historyReady = state.historyReady,
                     retainUnconfirmedRows = !state.historyReady, userMessageEntrance = userMessageEntrance,
-                    composerVisualTopInset = ChatComposerVisualTopInset, hasTurnExtras = hasTurnExtras)
+                    hasTurnExtras = hasTurnExtras)
             }
         }, composer = { backdrop ->
             ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop,

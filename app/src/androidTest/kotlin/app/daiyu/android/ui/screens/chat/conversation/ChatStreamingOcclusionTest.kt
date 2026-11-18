@@ -9,6 +9,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
@@ -23,8 +24,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
@@ -61,6 +60,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     private var inkReference by mutableStateOf(false)
     private data class InkGlyph(val layout: TextLayoutResult, val at: Offset)
     private var inkGlyph: InkGlyph? = null
+    private data class InkFrame(val glyphs: List<InkGlyph>, val regions: List<androidx.compose.ui.geometry.Rect>,
+        val top: Float, val bottom: Float)
+    private var inkFrame: InkFrame? = null
     private data class InkShot(
         val actual: PixelMap,
         val reference: PixelMap,
@@ -86,10 +88,16 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     @Composable
     private fun InkReferenceLayer() {
         Canvas(Modifier.fillMaxSize()) {
-            if (inkReference) inkGlyph?.let { p ->
-                drawRect(Color.White, p.at,
-                    Size(p.layout.size.width.toFloat(), p.layout.size.height.toFloat()))
-                drawText(p.layout, topLeft = p.at)
+            if (inkReference) {
+                val frame = inkFrame
+                if (frame != null) clipRect(top = frame.top, bottom = frame.bottom) {
+                    frame.regions.forEach { drawRect(Color.White, it.topLeft, it.size) }
+                    frame.glyphs.forEach { drawText(it.layout, topLeft = it.at) }
+                } else inkGlyph?.let { p ->
+                    drawRect(Color.White, p.at,
+                        Size(p.layout.size.width.toFloat(), p.layout.size.height.toFloat()))
+                    drawText(p.layout, topLeft = p.at)
+                }
             }
         }
     }
@@ -115,14 +123,16 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     }
 
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-    private fun inkShot(host: String, matcher: SemanticsMatcher): InkShot {
+    private fun inkShot(host: String, matcher: SemanticsMatcher, painted: InkGlyph? = null,
+        expected: InkFrame? = null): InkShot {
         val target = ui.onNodeWithTag(host)
         val node = target.fetchSemanticsNode()
         assertEquals(0f, node.positionOnScreen.x % 1f, 0f)
         assertEquals(0f, node.positionOnScreen.y % 1f, 0f)
-        val p = readInkGlyph(host, matcher)
+        val candidate = readInkGlyph(host, matcher)
+        val p = painted ?: candidate
         val clock = ui.mainClock.currentTime
-        ui.runOnUiThread { inkGlyph = p; inkReference = false }
+        ui.runOnUiThread { inkGlyph = p; inkFrame = expected; inkReference = false }
         val actual = captureScreenNode(target, advanceAnimationClock = false).toPixelMap()
         val reference = try {
             ui.runOnUiThread { inkReference = true }
@@ -132,9 +142,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         }
         assertEquals(clock, ui.mainClock.currentTime)
         val after = readInkGlyph(host, matcher)
-        assertEquals(p.at, after.at)
-        assertEquals(p.layout.layoutInput, after.layout.layoutInput)
-        assertEquals(p.layout.size, after.layout.size)
+        assertEquals(candidate.at, after.at)
+        assertEquals(candidate.layout.layoutInput, after.layout.layoutInput)
+        assertEquals(candidate.layout.size, after.layout.size)
         val r = p.layout
         val line = r.lineCount - 1
         val left = floor(p.at.x + r.getLineLeft(line)).toInt()
@@ -159,6 +169,24 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             }
         }
         assertTrue("Reference must contain a complete glyph", expectedInk > 2 && last - first > 2)
+        expected?.let { frame ->
+            var missingBodyInk = 0
+            var unexpectedBodyInk = 0
+            for (region in frame.regions) {
+                val y0 = maxOf(0, ceil(frame.top).toInt(), floor(region.top).toInt())
+                val y1 = minOf(actual.height, ceil(frame.bottom).toInt(), ceil(region.bottom).toInt())
+                for (y in y0 until y1) for (x in maxOf(0, floor(region.left).toInt()) until
+                    minOf(actual.width, ceil(region.right).toInt())) {
+                    val a = actual[x, y]
+                    val b = reference[x, y]
+                    if (inkDelta(a, b) > .025f) {
+                        if (inkDark(b)) missingBodyInk++ else if (inkDark(a)) unexpectedBodyInk++
+                    }
+                }
+            }
+            assertEquals("Approved body glyphs cannot disappear during AST node replacement", 0, missingBodyInk)
+            assertEquals("New unsafe leaves cannot paint even a partial candidate glyph", 0, unexpectedBodyInk)
+        }
         return InkShot(actual, reference, ink, lost, first, last)
     }
 
@@ -244,6 +272,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 assertEquals("drawClearance cannot change geometry", before, geometry())
                 val fixed = inkShot("ink-host", matcher)
                 assertEquals("All reference glyph pixels must survive", 0, fixed.lost)
+                assertTrue("O-10 demonstrably paints into the original O+8 safety gap", fixed.last >= oldLine)
                 assertNoSurfaceInk("ink-host", fixed)
             }
             ui.runOnUiThread { origin = surface - (full.first + full.last + 1) / 2; visualEdge = true }
@@ -261,13 +290,23 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testRunningPlainMarkdownUsesVisualComposerDrawBoundary() {
-        val texts = listOf("稳定前文。", "稳定前文。\n\n第一行新增正文。",
-            "稳定前文。\n\n第一行新增正文。\n\n第二行新增正文。")
+    fun testRunningPlainMarkdownKeepsFullGlyphAboveOriginalSafetyLine() = exercisePlainTextSafety(false)
+
+    fun testLongPlainMarkdownKeepsFullGlyphDuringFollowAndCompletion() = exercisePlainTextSafety(true)
+
+    fun testPlainMarkdownCrossesViewportWithoutDroppingApprovedGlyph() = exercisePlainTextSafety(false, true)
+
+    private fun exercisePlainTextSafety(longBody: Boolean, crossViewport: Boolean = false) {
+        val initial = if (longBody || crossViewport) (0 until if (longBody) 14 else 7).joinToString("\n\n") {
+            "历史完整段落 $it。"
+        } else "稳定前文。"
+        val texts = listOf(initial, initial + "\n\n第一行新增正文。",
+            initial + "\n\n第一行新增正文。\n\n- 第二行新增正文。")
         for (parser in listOf(defaultMarkdownParser, streamingMarkdownParser)) for (text in texts) {
             markdownProjectionCache.put(MarkdownProjection(listOf(text), mapOf(text to parser(text)), parser))
         }
         var body by mutableStateOf(texts.first())
+        var live by mutableStateOf(true)
         mainThread {
             activity.setContent {
                 AgentAppTheme(AppearanceSettings(themeMode =
@@ -277,9 +316,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                         ChatConversationLayers(Modifier.size(320.dp, 420.dp), messages = { inset ->
                             ChatMessageList(List(6) { ChatTurnUi.User("ink-u$it", "history $it") } +
                                 ChatTurnUi.Assistant("ink-wire-tail", finalText = body,
-                                    status = RunStatus.RUNNING, isStreaming = true),
+                                    status = if (live) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = live),
                                 ChatScreenActions(), scrollRequest = ChatScrollRequest(1), composerBottomInset = inset,
-                                composerVisualTopInset = ChatComposerVisualTopInset, hasTurnExtras = { false })
+                                hasTurnExtras = { false })
                         }, composer = { InkEditor() })
                         InkReferenceLayer()
                     }
@@ -290,34 +329,106 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         val matcher = SemanticsMatcher.keyIsDefined(SemanticsActions.GetTextLayoutResult) and
             (hasTestTag("message-content-text:0") or hasAnyAncestor(hasTestTag("message-content-text:0"))) and
             hasAnyAncestor(hasTestTag("chat-turn:ink-wire-tail"))
+        val approved = mutableMapOf<Int, TextLayoutResult>()
+        var unsafeCandidates = 0
+        var compared = 0
+        var intermediate = 0
+        var lastProbe = ""
+        var pendingLeaves = false
+        var completedWhileHeld = false
+        var sawShort = false
+        var sawLong = false
+        val prefixes = mutableSetOf<String>()
+        fun verify(force: Boolean = false) {
+            val safe = inkRect(host, "ink-editor").top - kotlin.math.round(ChatTailClearance.value * density)
+            val h = ui.onNodeWithTag(host).fetchSemanticsNode().positionInRoot
+            val glyphs = ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().map { node ->
+                val layouts = mutableListOf<TextLayoutResult>()
+                ui.runOnUiThread { node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts) }
+                InkGlyph(layouts.single(), node.positionInRoot - h)
+            }.sortedWith(compareBy<InkGlyph> { it.at.y }.thenBy { it.at.x })
+            prefixes += glyphs.joinToString("|") { it.layout.layoutInput.text.text }
+            pendingLeaves = glyphs.any { it.at.y + it.layout.size.height > safe + .01f }
+            val visible = glyphs.mapIndexedNotNull { index, candidate ->
+                if (candidate.at.y + candidate.layout.size.height <= safe + .01f) {
+                    approved[index] = candidate.layout
+                } else unsafeCandidates++
+                approved[index]?.takeIf { candidate.at.y + it.size.height <= safe + .01f }?.let {
+                    InkGlyph(it, candidate.at)
+                }
+            }.filter { it.at.y + it.layout.getLineTop(it.layout.lineCount - 1) >= 0f }
+            val p = visible.maxWithOrNull(compareBy<InkGlyph> {
+                it.at.y + it.layout.getLineBottom(it.layout.lineCount - 1)
+            }.thenBy { it.at.x }) ?: return
+            val signature = "${p.at}:${p.layout.layoutInput.text}:${glyphs.lastOrNull()?.layout?.layoutInput?.text}"
+            if (!force && signature == lastProbe) return
+            lastProbe = signature
+            val regions = glyphs.mapIndexed { index, candidate ->
+                val saved = approved[index]
+                androidx.compose.ui.geometry.Rect(candidate.at, Size(
+                    maxOf(candidate.layout.size.width, saved?.size?.width ?: 0).toFloat(),
+                    maxOf(candidate.layout.size.height, saved?.size?.height ?: 0).toFloat()))
+            }
+            val frame = InkFrame(visible, regions,
+                maxOf(0f, inkRect(host, "chat-stream-viewport:ink-wire-tail").top), safe)
+            val shot = inkShot(host, matcher, p, frame)
+            assertEquals("A painted trailing line must retain its complete reference glyph", 0, shot.lost)
+            assertTrue("The actual glyph must stay above the original O+8 safety line", shot.last < ceil(safe).toInt())
+            val surface = inkRect(host, "ink-surface").top
+            var unsafeInk = 0
+            for (y in ceil(safe).toInt() until ceil(surface).toInt()) for (x in 0 until shot.actual.width) {
+                if (inkDelta(shot.actual[x, y], Color.White) > .025f) unsafeInk++
+            }
+            assertEquals("The complete original safety gap, including its sides, must remain empty", 0, unsafeInk)
+            assertNoSurfaceInk(host, shot)
+            compared++
+        }
         ui.onNodeWithTag("work-process-header").assertDoesNotExist()
         ui.mainClock.autoAdvance = false
         try {
-            assertEquals("Validate the real Markdown reference before growth", 0, inkShot(host, matcher).lost)
+            verify(force = true)
             for (next in texts.drop(1)) {
-                var eligible = 0
+                val beforeUnsafe = unsafeCandidates
                 ui.runOnUiThread { body = next }
-                repeat(90) {
+                repeat(90) { tick ->
                     frame()
-                    val row = ui.onNodeWithTag("chat-turn:ink-wire-tail").fetchSemanticsNode()
-                    assertTrue("Must remain shorter than the original viewport",
-                        row.size.height <= (420f - 96f - 11f - ChatTailClearance.value) * density)
-                    val oldLine = inkRect(host, "ink-editor").top - ChatTailClearance.value * density
-                    val surface = inkRect(host, "ink-surface").top
-                    val p = readInkGlyph(host, matcher)
-                    val line = p.layout.lineCount - 1
-                    if (p.at.y + p.layout.getLineBottom(line) > oldLine &&
-                        p.at.y + p.layout.getLineTop(line) < surface) {
-                        val shot = inkShot(host, matcher)
-                        assertNoSurfaceInk(host, shot)
-                        if (shot.last >= ceil(oldLine).toInt() && shot.last < surface) {
-                            eligible++
-                            assertEquals("Production plain-text wiring must preserve full glyphs", 0, shot.lost)
-                        }
+                    val extent = inkRect(host, "chat-turn:ink-wire-tail").height
+                    val viewport = (420f - 96f - 11f - ChatTailClearance.value) * density
+                    sawLong = sawLong || extent > viewport
+                    sawShort = sawShort || extent <= viewport
+                    if (!crossViewport) assertEquals("Exercise both sides of H versus V without changing the geometry",
+                        longBody, extent > viewport)
+                    if (tick in 1..12) intermediate++
+                    verify()
+                    if (!longBody && !crossViewport && next == texts.last() && !completedWhileHeld &&
+                        unsafeCandidates > beforeUnsafe) {
+                        ui.runOnUiThread { live = false }
+                        completedWhileHeld = true
                     }
                 }
-                assertTrue("Each burst must exercise ink below O+8 but above Surface", eligible > 0)
-                ui.onNodeWithText(next.substringAfterLast("\n\n"), substring = true).assertExists()
+                ui.onNodeWithText(next.substringAfterLast("\n\n").removePrefix("- "), substring = true).assertExists()
+                verify(force = true)
+                assertFalse("The complete candidate must eventually enter the safety edge and paint", pendingLeaves)
+            }
+            ui.runOnUiThread { live = false }
+            repeat(30) { frame(); verify() }
+            verify(force = true)
+            assertFalse("Completion cannot strand an unpainted candidate", pendingLeaves)
+            assertTrue("Must observe real per-character candidate growth", prefixes.size >= 8)
+            assertTrue("Must compare real complete glyphs, not merely find some ink", compared >= 6)
+            if (crossViewport) assertTrue("Real Markdown growth must cross H=V", sawShort && sawLong)
+            if (!longBody && !crossViewport) assertTrue("Finish while a candidate is still behind the safety gate", completedWhileHeld)
+            assertTrue("Must inspect the original 220ms catchup's intermediate frames", intermediate >= 20)
+            if (!longBody) assertTrue("Short growth must really premeasure text beyond the safety edge", unsafeCandidates > 0)
+            if (longBody) {
+                ui.onNodeWithTag("chat-messages").performTouchInput { swipeDown(durationMillis = 320) }
+                repeat(20) { frame() }
+                val anchor = inkRect(host, "chat-turn:ink-wire-tail").top
+                ui.runOnUiThread { body += "\n\n手动阅读新增末行。" }
+                repeat(90) { frame() }
+                assertEquals("Detached plain text must not pull the reader back to the bottom", anchor,
+                    inkRect(host, "chat-turn:ink-wire-tail").top, 1f)
+                ui.onNodeWithText("手动阅读新增末行。", substring = true).assertExists()
             }
         } finally { ui.mainClock.autoAdvance = true }
         assertEquals(0, fixture.opens.get())

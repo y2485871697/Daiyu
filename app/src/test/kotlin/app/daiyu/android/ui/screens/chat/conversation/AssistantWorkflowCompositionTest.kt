@@ -63,6 +63,32 @@ class AssistantWorkflowCompositionTest {
     }
 
 
+    @Test fun plainTextSafetyOutlivesTheStreamingFlagButNeverAcceptsHiddenTools() {
+        val plain = ChatTurnUi.Assistant("plain", finalText = "正文", status = RunStatus.RUNNING, isStreaming = true)
+        assertTrue(plain.hasPlainTextBody())
+        assertTrue(plain.copy(status = RunStatus.COMPLETED, isStreaming = false).hasPlainTextBody())
+        assertTrue(plain.copy(stopRequested = true).hasPlainTextBody())
+        assertTrue(plain.copy(finalText = "").hasPlainTextBody(allowEmpty = true))
+        assertFalse(plain.copy(finalText = "").hasPlainTextBody())
+        val hidden = WorkStepUi("hidden", "执行命令", "排队中", WorkStepState.PENDING, category = "terminal")
+        assertFalse(plain.copy(content = listOf(MessageContentUi.Tool(hidden), MessageContentUi.Text("answer", "正文")))
+            .hasPlainTextBody(allowEmpty = true))
+    }
+
+    @Test fun manualReadingReleasesTextBackpressureWithoutMovingEitherViewportOffset() {
+        val viewport = StreamingTailViewport(true)
+        viewport.scrollOffset = 44.25f
+        viewport.viewportOffset = 12
+        viewport.textClearance.update(null, 44, 20f, 100, protect = true)
+        assertTrue(viewport.textClearance.held)
+        assertFalse(viewport.textClearance.fits(null, 1))
+        viewport.textClearance.update(null, 44, 20f, 100, protect = false)
+        assertFalse(viewport.textClearance.held)
+        assertTrue(viewport.textClearance.fits(null, 100))
+        assertEquals(44.25f, viewport.scrollOffset, 0f)
+        assertEquals(12, viewport.viewportOffset)
+    }
+
     private class NoNodes : AbstractApplier<Unit>(Unit) {
         override fun insertBottomUp(index: Int, instance: Unit) = Unit
         override fun insertTopDown(index: Int, instance: Unit) = Unit

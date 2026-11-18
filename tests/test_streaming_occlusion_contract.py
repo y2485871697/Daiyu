@@ -8,45 +8,63 @@ DEVICE = ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/co
 
 
 class StreamingOcclusionContract(unittest.TestCase):
-    def test_plain_streaming_draw_edge_is_separate_from_the_follow_target(self):
+    def test_plain_text_reserves_height_without_lowering_the_original_safety_edge(self):
         source = CHAT.read_text()
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
-        self.assertIn("drawClearance: () -> Int = clearance", viewport)
         drawing, placement = viewport.split(".drawWithContent {", 1)[1].split(".scrollable", 1)
         self.assertIn("if (protect) drawClearance() else 0", drawing)
         self.assertIn("val safeBottom = currentListHeight - clearance()", placement)
         self.assertNotIn("drawClearance()", placement)
-        for token in ("composerVisualTopInset: Dp = 0.dp", "hasTurnExtras: (ChatTurnUi.Assistant) -> Boolean = { true }", "!hasTurnExtras(turn)", "val plainStreamingBody = turn.isPlainStreamingBody()",
-                      "viewportState.contentHeight <= tailViewportHeight()",
-                      "(currentOcclusionPx - currentVisualTopInsetPx).coerceAtLeast(0)",
-                      "else currentOcclusionPx + currentFollowClearancePx",
-                      "turn.listKey == currentTailKey", "compressionAfter[turn.listKey].isNullOrEmpty()"):
+        production = source.split("val plainTextBody =", 1)[1].split("else turnContent()", 1)[0]
+        self.assertNotIn("drawClearance =", production)
+        self.assertNotIn("currentVisualTopInsetPx", source)
+        self.assertNotIn("composerVisualTopInset", source)
+        for token in ("clearance = { currentOcclusionPx + currentFollowClearancePx }",
+                      "turn.hasPlainTextBody(allowEmpty = true)", "!hasTurnExtras(turn)",
+                      "preserveTextClearance = plainTextBody && turn.listKey == currentTailKey",
+                      "compressionAfter[turn.listKey].isNullOrEmpty()"):
             self.assertIn(token, source)
+        self.assertIn("state.textClearance.update(viewport, state.scrollOffset.roundToInt(), clipBottom", drawing)
+        self.assertIn("preserveTextClearance && protect && followIntent()", drawing)
+        self.assertIn("body.placeRelative(0, -state.scrollOffset.roundToInt())", placement)
+        self.assertIn("viewport.localPositionOf(leaf, Offset.Zero).y + current.offset", source)
+        typing = (CHAT.parent / "MarkdownTyping.kt").read_text()
+        self.assertIn("currentCanAdvance && textClearance?.held != true", typing)
+        self.assertIn("else { motion.pause(current); motion.visible(current) }", typing)
+        markdown = (CHAT.parent / "MessageMarkdown.kt").read_text()
+        for token in ("remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }",
+                      "clearance.fits(frame.coordinates, size.height.toInt())", "painted[paintOffset] = it",
+                      "clearance.fits(frame.coordinates, it.size.height)", "drawText(it)",
+                      "paintOffset + offset", "paintOffset + offsets[column]",
+                      "previous.canPaintPrefixOf(it)", "current.text.text.startsWith(previous.text.text)",
+                      "previous.constraints.maxWidth != current.constraints.maxWidth",
+                      "previous.text.spanStyles == prefix.spanStyles", "textClearance?.held != true"):
+            self.assertIn(token, markdown)
         workflow = (CHAT.parent / "AssistantWorkflowContent.kt").read_text()
-        classifier = workflow.split("internal fun ChatTurnUi.Assistant.isPlainStreamingBody()", 1)[1].split("internal fun MessageContentUi.workflowKey", 1)[0]
-        for token in ("status != RunStatus.RUNNING", "!isStreaming", "stopRequested", "!error.isNullOrBlank()",
-                      "workProcess != null", "reportedReasoning.isNotEmpty()", "leadingContent.isNotEmpty()",
-                      "reconnectSource != null", "val source = workflowContent()", "source.pending.isEmpty()",
-                      "source.body.all { it is MessageContentUi.Text }"):
+        classifier = workflow.split("internal fun ChatTurnUi.Assistant.hasPlainTextBody", 1)[1].split("internal fun MessageContentUi.workflowKey", 1)[0]
+        self.assertNotIn("RunStatus", classifier)
+        self.assertNotIn("isStreaming", classifier)
+        for token in ("!error.isNullOrBlank()", "workProcess != null", "reportedReasoning.isNotEmpty()",
+                      "leadingContent.isNotEmpty()", "reconnectSource != null", "val source = workflowContent()",
+                      "source.pending.isEmpty()", "source.body.all { it is MessageContentUi.Text }"):
             self.assertIn(token, classifier)
         self.assertNotIn("withResolvedTerminalCards", classifier)
-        composer = (CHAT.parent / "ChatComposer.kt").read_text()
-        self.assertIn("internal val ChatComposerVisualTopInset = 10.dp", composer)
-        self.assertIn("top = ChatComposerVisualTopInset", composer)
-        screen = (CHAT.parent / "ChatScreen.kt").read_text()
-        self.assertIn("composerVisualTopInset = ChatComposerVisualTopInset", screen)
-        self.assertIn("hasTurnExtras = hasTurnExtras", screen)
+        self.assertIn("hasTurnExtras = hasTurnExtras", (CHAT.parent / "ChatScreen.kt").read_text())
         self.assertIn("turn.segmentIndex == 0 && questionRows[turn.id]?.retryCleanup == true",
                       (ROOT / "app/src/main/kotlin/app/daiyu/android/MainActivity.kt").read_text())
 
-    def test_glyph_regression_compares_the_full_last_line_and_checks_editor_sides(self):
+    def test_glyph_regression_rejects_the_visual_edge_and_verifies_committed_complete_lines(self):
         device = DEVICE.read_text()
         for token in ("testShortTextDrawClearancePreservesGlyphButStopsAtSurface",
-                      "testRunningPlainMarkdownUsesVisualComposerDrawBoundary", "drawText(p.layout, topLeft = p.at)",
-                      "Old O+8 draw boundary must demonstrably cut ink", "All reference glyph pixels must survive",
-                      "shot.last < surface", "eligible > 0", "assertNoSurfaceInk(host, shot)",
-                      "No content may paint at/below the Surface top, including its sides",
-                      "referenceBelow > 2", "Production plain-text wiring must preserve full glyphs"):
+                      "testRunningPlainMarkdownKeepsFullGlyphAboveOriginalSafetyLine",
+                      "testLongPlainMarkdownKeepsFullGlyphDuringFollowAndCompletion",
+                      "drawText(p.layout, topLeft = p.at)", "O-10 demonstrably paints into the original O+8 safety gap",
+                      "A painted trailing line must retain its complete reference glyph",
+                      "The complete original safety gap, including its sides, must remain empty",
+                      "assertNoSurfaceInk(host, shot)", "unsafeCandidates > 0",
+                      "Detached plain text must not pull the reader back to the bottom",
+                      "referenceBelow > 2", "Old O+8 draw boundary must demonstrably cut ink",
+                      "assertEquals(candidate.layout.layoutInput, after.layout.layoutInput)"):
             self.assertIn(token, device)
 
     def test_terminal_append_retains_only_its_measured_action_slot(self):

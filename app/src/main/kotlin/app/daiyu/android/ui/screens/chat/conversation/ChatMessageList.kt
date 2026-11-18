@@ -114,7 +114,28 @@ private class FollowClearanceLayout : RemeasurementModifier {
 // offset a, so its *unclipped* origin is itemOrigin + q - a, not itemOrigin.
 internal val LocalQuestionCardArrival = staticCompositionLocalOf<(String) -> Unit> { {} }
 
+internal val LocalStreamingTextClearance = staticCompositionLocalOf<StreamingTextClearance?> { null }
+
+internal class StreamingTextClearance {
+    private data class Geometry(val viewport: LayoutCoordinates?, val offset: Int, val bottom: Float, val height: Int)
+    private var geometry by mutableStateOf<Geometry?>(null)
+    val held: Boolean get() = geometry?.let { it.height > it.bottom + .01f } == true
+
+    fun update(viewport: LayoutCoordinates?, offset: Int, bottom: Float, height: Int, protect: Boolean) {
+        geometry = if (protect) Geometry(viewport, offset, bottom + offset, height) else null
+    }
+
+    fun fits(coordinates: LayoutCoordinates?, height: Int): Boolean {
+        val current = geometry ?: return true
+        val viewport = current.viewport?.takeIf { it.isAttached } ?: return false
+        val leaf = coordinates?.takeIf { it.isAttached } ?: return false
+        val top = viewport.localPositionOf(leaf, Offset.Zero).y + current.offset
+        return top + height <= current.bottom + .01f
+    }
+}
+
 internal class StreamingTailViewport(initiallyBounded: Boolean) {
+    val textClearance = StreamingTextClearance()
     var bounded by mutableStateOf(initiallyBounded)
     var migrating by mutableStateOf(false)
     var scrollOffset by mutableStateOf(0f)
@@ -158,6 +179,7 @@ internal fun StreamingTailContainer(
     initialContent: Boolean = false,
     followIntent: () -> Boolean = follows,
     drawClearance: () -> Int = clearance,
+    preserveTextClearance: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val questionArrival = remember(state, initialContent) {
@@ -185,7 +207,8 @@ internal fun StreamingTailContainer(
         }
     }, content = {
         Layout(content = {
-            CompositionLocalProvider(LocalQuestionCardArrival provides questionArrival) {
+            CompositionLocalProvider(LocalQuestionCardArrival provides questionArrival,
+                LocalStreamingTextClearance provides state.textClearance.takeIf { preserveTextClearance }) {
                 Column(content = { content() })
             }
         }, modifier = Modifier
@@ -203,6 +226,9 @@ internal fun StreamingTailContainer(
                 // A temporary follow gate must not shrink the physical safe edge during catchup.
                 val followingCatchup = state.bounded && state.followCatchup && followIntent()
                 val clipBottom = if (protect && !followingCatchup) minOf(size.height, bottom) else bottom
+                // Reserve the candidate height first; text commits only once its complete line fits.
+                state.textClearance.update(viewport, state.scrollOffset.roundToInt(), clipBottom,
+                    state.contentHeight, preserveTextClearance && protect && followIntent())
                 clipRect(bottom = clipBottom) { this@drawWithContent.drawContent() }
             }
             .scrollable(innerScroll, Orientation.Vertical, enabled = userScrollEnabled && state.bounded)
@@ -286,7 +312,6 @@ internal fun ChatMessageList(
     retainUnconfirmedRows: Boolean = false,
     onTurnComposed: ((String) -> Unit)? = null,
     userMessageEntrance: UserMessageEntranceMotion? = null,
-    composerVisualTopInset: Dp = 0.dp,
     hasTurnExtras: (ChatTurnUi.Assistant) -> Boolean = { true },
 ) {
     val incomingTurns = turns
@@ -374,7 +399,6 @@ internal fun ChatMessageList(
     val occlusionPx = with(density) { composerBottomInset.roundToPx() }
     val currentDensity by rememberUpdatedState(density.density)
     val currentOcclusionPx by rememberUpdatedState(occlusionPx)
-    val currentVisualTopInsetPx by rememberUpdatedState(with(density) { composerVisualTopInset.coerceAtLeast(0.dp).roundToPx() })
     val currentFollowClearancePx by rememberUpdatedState(with(density) { ChatTailClearance.roundToPx() })
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
@@ -1060,7 +1084,7 @@ internal fun ChatMessageList(
                         val tailViewportHeight = {
                             viewportHeightPx.intValue - currentOcclusionPx - with(density) { 11.dp.roundToPx() + ChatTailClearance.roundToPx() }
                         }
-                        val plainStreamingBody = turn.isPlainStreamingBody() && !hasTurnExtras(turn) &&
+                        val plainTextBody = turn.hasPlainTextBody(allowEmpty = true) && !hasTurnExtras(turn) &&
                             reconnectPartsByKey.getValue(turn.listKey).placedIds.isEmpty() &&
                             fallbackAfter[turn.listKey].isNullOrEmpty() && compressionAfter[turn.listKey].isNullOrEmpty()
                         StreamingTailContainer(viewportState, { clearanceLayout.coordinates }, turn.listKey,
@@ -1069,14 +1093,7 @@ internal fun ChatMessageList(
                             clearance = { currentOcclusionPx + currentFollowClearancePx },
                             protectClearance = { turn.listKey == assistantOwnerKey && followBottom },
                             viewportHeight = tailViewportHeight,
-                            drawClearance = {
-                                if (plainStreamingBody && turn.listKey == assistantOwnerKey && turn.listKey == currentTailKey &&
-                                    viewportState.bounded && viewportState.contentHeight > 0 &&
-                                    viewportState.contentHeight <= tailViewportHeight()) {
-                                    // Keep the smooth follow target, but do not cut glyphs in the transparent gap above the editor.
-                                    (currentOcclusionPx - currentVisualTopInsetPx).coerceAtLeast(0)
-                                } else currentOcclusionPx + currentFollowClearancePx
-                            },
+                            preserveTextClearance = plainTextBody && turn.listKey == currentTailKey,
                             listViewportHeight = { viewportHeightPx.intValue },
                             initialContent = initialQuestionContent,
                             followIntent = { turn.listKey == assistantOwnerKey && followBottom },

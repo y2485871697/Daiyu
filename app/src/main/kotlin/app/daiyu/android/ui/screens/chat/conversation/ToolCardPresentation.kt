@@ -16,6 +16,7 @@ internal object ToolCardPresentations {
         group("terminal", "terminal_exec" to "执行命令", "terminal_read" to "读取命令输出", "terminal_pty_step" to "执行终端步骤", "terminal_pty_read" to "读取输出", "shizuku_execute" to "执行命令")
         group("background_job", "terminal_job_start" to "启动后台任务", "terminal_job_read" to "读取后台结果")
         group("files", "list_files" to "列目录", "file_metadata" to "读取文件信息", "read_text_file" to "读取文件")
+        group("image_read", "read_image" to "读取图片")
         group("browser", "browser_read" to "读取网页", "browser_write" to "操作网页")
         group("gui", "launch_app" to "提交应用启动", "screen" to "查看屏幕", "screen_action" to "操作屏幕", "r08_virtual_display_step" to "执行虚拟显示步骤", "r08_virtual_display_read" to "读取虚拟显示状态")
         group("apps", "search_apps" to "查找应用")

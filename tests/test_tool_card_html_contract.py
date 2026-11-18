@@ -25,15 +25,21 @@ class ToolCardHtmlContractTest(unittest.TestCase):
     def test_ordinary_command_catalog_names_are_classified_and_have_terminal_glyphs(self):
         catalog = (ROOT / "app/src/main/kotlin/app/daiyu/android/integration/tools/RunCommandTools.kt").read_text()
         registered = set(re.findall(r'ToolDefinition\("([^"]+)"', catalog))
-        self.assertEqual({"terminal_exec", "terminal_read"}, registered)
+        terminal_names = {"terminal_exec", "terminal_read"}
+        self.assertEqual(terminal_names | {"read_image"}, registered)
         presentation = (CHAT / "ToolCardPresentation.kt").read_text()
         terminal_group = re.search(r'group\("terminal", ([^\n]+)\)', presentation).group(1)
         glyph = (CHAT / "ToolOperationGlyph.kt").read_text()
-        for name in registered:
+        for name in terminal_names:
             self.assertIn(f'"{name}" to ', terminal_group)
             line = next(line for line in glyph.splitlines() if f'"{name}"' in line)
             self.assertIn('-> "terminal"' if name == "terminal_exec" else '-> "output"', line)
+        image_group = re.search(r'group\("image_read", ([^\n]+)\)', presentation).group(1)
+        self.assertIn('"read_image" to "读取图片"', image_group)
+        image_line = next(line for line in glyph.splitlines() if '"read_image"' in line)
+        self.assertIn('-> "file"', image_line)
         regression = (ROOT / "app/src/test/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolCardPresentationTest.kt").read_text()
+        self.assertIn("readImageUsesImagePresentationWithoutChangingReceiptOrIdentity", regression)
         self.assertIn("ordinaryCommandToolsUseTerminalPresentationWithoutChangingReceiptOrIdentity", regression)
         self.assertIn("WorkStepState.entries", regression)
         self.assertIn("WorkStepState.UNKNOWN, withoutReceipt", regression)

@@ -709,7 +709,7 @@ class ScreenToolImageInputTest {
             val capability = app.daiyu.android.model.videos.OpenRouterVideoCapability.grant(
                 config.model, config.requestEndpoint(), true, true)
             val plan = app.daiyu.android.model.videos.FrozenMessageVideoPlan.freeze(listOf(user), ProviderSnapshot.capture(config),
-                capability, listOf(app.daiyu.android.media.video.MessageVideoInput(videoOwner, listOf(ref))), videoStore,
+                capability, listOf(app.daiyu.android.model.videos.MessageVideoInput(videoOwner, listOf(ref))), videoStore,
                 { app.daiyu.android.media.video.MessageVideoOwner(it.conversationId.value, it.id.value) })
             val frames = app.daiyu.android.media.ScreenToolImageStore(java.io.File(root, "frames"))
             val bytes = png()

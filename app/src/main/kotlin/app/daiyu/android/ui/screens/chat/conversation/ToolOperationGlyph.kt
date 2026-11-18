@@ -30,7 +30,7 @@ internal fun toolOperationGlyph(toolName: String, argumentJson: ToolPresentation
         "terminal_job_read" -> "receive"
         "list_files" -> "list"
         "file_metadata" -> "inspect"
-        "read_text_file" -> "file"
+        "read_text_file", "read_image" -> "file"
         "browser_read", "browser_write" -> when (args?.optString("action")) {
             "list_tabs", "new_tab", "close_tab" -> "tabs"
             "get_readable", "get_text" -> "article"

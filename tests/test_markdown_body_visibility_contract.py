@@ -67,19 +67,23 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         blocks = ui.split('private fun MarkdownBlocks(', 1)[1].split('private fun MarkdownBlockBody(', 1)[0]
         self.assertNotIn('visibility.value', blocks)
         self.assertIn('rememberMarkdownVisibility(visibility, offset, lengths[index])', blocks)
-        self.assertIn('MarkdownBlockBody(block, openLink, budget, generationComplete)', blocks)
+        self.assertIn('MarkdownBlockBody(block, openLink, budget, generationComplete, paintOffset + offset)', blocks)
         leaf = ui.split('private fun MarkdownBlockBody(', 1)[1].split('private fun MarkdownListItem(', 1)[0]
         self.assertIn('derivedStateOf { visibility.value > 0 }', leaf)
-        self.assertIn('MarkdownBlocks(block.blocks, openLink, visibility, generationComplete)', leaf)
-        self.assertIn('MarkdownInlineText(block.content, openLink, visibility = visibility)', leaf)
+        self.assertIn('MarkdownBlocks(block.blocks, openLink, visibility, generationComplete, paintOffset)', leaf)
+        self.assertIn('MarkdownInlineText(block.content, openLink, visibility = visibility, paintOffset = paintOffset)', leaf)
 
     def test_table_cell_budget_and_visible_semantics_are_preserved(self):
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         row = ui.split('private fun MarkdownTableRow(', 1)[1].split('private fun headingSize', 1)[0]
         self.assertIn('derivedStateOf { visibility.value > offsets[0] }', row)
         self.assertIn('rememberMarkdownVisibility(visibility, offsets[column], lengths[column])', row)
-        self.assertIn('visibility = budget)', row)
-        self.assertIn('BasicText(visible, modifier, style)', ui)
+        self.assertIn('visibility = budget, paintOffset = paintOffset + offsets[column])', row)
+        inline = ui.split('private fun MarkdownInlineText(', 1)[1].split('private fun MarkdownBlocks(', 1)[0]
+        self.assertIn('ClearanceText(visible, paintOffset, modifier, style)', inline)
+        clearance = ui.split('private fun ClearanceText(', 1)[1].split('private fun TextLayoutResult.canPaintPrefixOf', 1)[0]
+        self.assertIn('BasicText(text, modifier.onPlaced', clearance)
+        self.assertIn('clearance.fits(frame.coordinates, size.height.toInt())', clearance)
         self.assertIn('SelectionContainer {', ui)
         helper = (BASE / 'MarkdownVisibility.kt').read_text()
         self.assertIn('derivedStateOf { (parent.value - start).coerceIn(0, length) }', helper)

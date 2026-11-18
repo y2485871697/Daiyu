@@ -3,6 +3,7 @@ package app.daiyu.android.integration.tools
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.RunExecutionOwner
 import app.daiyu.android.domain.tools.*
+import app.daiyu.android.terminal.LinuxTmpPngReadException
 import app.daiyu.android.terminal.TerminalConfiguration
 import org.json.JSONObject
 import org.junit.Assert.*

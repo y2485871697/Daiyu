@@ -237,4 +237,33 @@ class ToolCardPresentationTest {
         }
     }
 
+    @Test fun readImageUsesImagePresentationWithoutChangingReceiptOrIdentity() {
+        val invocation = ToolInvocation(ToolCallId("image-call"), "read_image",
+            """{"path":"/tmp/daiyu-video-fixture/frame.png"}""")
+        val payload = """{"ok":true,"summary":"已记录画面摘要","bytes":128}"""
+        val original = MessageBlock.Tool(invocation, payload)
+        val message = Message(MessageId("image-message"), ConversationId("chat"), RunId("run"),
+            Message.ASSISTANT_ROLE, listOf(original), RunStatus.COMPLETED)
+        WorkStepState.entries.forEach { state ->
+            val turn = ChatTurnMapper.map(listOf(message), toolState = { _, _ -> state }).single() as ChatTurnUi.Assistant
+            val step = turn.workProcess!!.segments.flatMap { it.steps }.single()
+            assertEquals("image_read", step.category)
+            assertEquals("读取图片", step.name)
+            assertEquals("file", step.operationGlyph)
+            assertEquals(state, step.state)
+            assertEquals(invocation.id.value, step.toolCallId)
+            assertEquals(invocation.name, step.toolName)
+            assertEquals(WorkStepOwnerUi("chat", "run", message.id.value), step.owner)
+            assertEquals("媒体与产物", step.categoryDetails!!.heading)
+        }
+        val withoutReceipt = ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant
+        assertEquals(WorkStepState.UNKNOWN, withoutReceipt.workProcess!!.segments.flatMap { it.steps }.single().state)
+        assertEquals(listOf(original), message.blocks)
+        assertEquals(invocation, message.blocks.filterIsInstance<MessageBlock.Tool>().single().invocation)
+        for (unknown in listOf("future_read_image", "functions.read_image", "read.image")) {
+            assertEquals("generic", ToolCardPresentations.present(unknown, "{}", null).category)
+            assertEquals("generic", toolOperationGlyph(unknown, "{}"))
+        }
+    }
+
 }

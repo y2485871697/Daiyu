@@ -95,6 +95,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 internal val ChatTailClearance = 8.dp
+private val ChatTurnSpacing = 26.dp
 
 private class FollowClearanceLayout : RemeasurementModifier {
     var remeasurement: Remeasurement? = null
@@ -308,6 +309,12 @@ internal fun ChatMessageList(
         compressionActivities + listOfNotNull(compressionActivity), timeline)
     val tailCompressions = compressionAfter[null].orEmpty()
     val compressionVisible = compressionAfter.isNotEmpty()
+    // Accepted adds an empty reply item and its spacing. Reserve that same gap before it exists.
+    val lastUser = turns.lastOrNull() as? ChatTurnUi.User
+    val pendingReplyGap = if (tailCompressions.isEmpty() && lastUser != null &&
+        (lastUser.pending || userMessageEntrance?.request?.let {
+            lastUser.matchesKey(it.key) || lastUser.matchesKey(it.messageId)
+        } == true)) ChatTurnSpacing else 0.dp
     val tailIndex = turns.lastIndex + tailCompressions.size
     val currentTailIndex by rememberUpdatedState(tailIndex)
     val currentTailKey by rememberUpdatedState(
@@ -698,8 +705,8 @@ internal fun ChatMessageList(
                     nestedTail.bounded = true
                 }
                 listState.scrollToItem(tailIndex)
-                if (initialPositionPending) {
-                    // Initial placement is layout restoration, not streaming output to animate.
+                if (initialPositionPending || userMessageEntrance?.request?.claimed == false) {
+                    // Restore and place a new send before revealing it; live output keeps its follower.
                     while (true) {
                         withFrameNanos { }
                         if (!scrollResumed || !pageActive || currentRetainingRows) return@LaunchedEffect
@@ -947,18 +954,23 @@ internal fun ChatMessageList(
         }.collect { ready -> currentPresentationReady(ready) }
     }
 
+    DisposableEffect(userMessageEntrance, listState) {
+        onDispose { userMessageEntrance?.updatePlacement(listState, false) }
+    }
     LaunchedEffect(userMessageEntrance, listState) {
         val entrance = userMessageEntrance ?: return@LaunchedEffect
         snapshotFlow {
             val layout = listState.layoutInfo
             presentationActive && pageActive && scrollResumed && !initialPositionPending && !currentRetainingRows &&
                 (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial) &&
+                (!followBottom || !listState.canScrollForward) &&
                 layout.visibleItemsInfo.any { item ->
                     (item.key == entrance.request.key || item.key == entrance.request.messageId) &&
                         item.size > 0 && item.offset < layout.viewportEndOffset - currentOcclusionPx &&
-                        item.offset + item.size > layout.viewportStartOffset
+                        item.offset + item.size > layout.viewportStartOffset &&
+                        item.offset + item.size <= layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx + 1
                 }
-        }.collect { visible -> if (visible) entrance.positioned = true }
+        }.collect { positioned -> entrance.updatePlacement(listState, positioned) }
     }
 
     val viewportHeightPx = remember { mutableIntStateOf(0) }
@@ -992,8 +1004,8 @@ internal fun ChatMessageList(
                 disclosureViewport.pointerUp()
             }
         },
-            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 11.dp, bottom = composerBottomInset + ChatTailClearance),
-            verticalArrangement = Arrangement.spacedBy(26.dp)) {
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 11.dp, bottom = composerBottomInset + ChatTailClearance + pendingReplyGap),
+            verticalArrangement = Arrangement.spacedBy(ChatTurnSpacing)) {
             items(turns, key = { it.listKey }, contentType = { if (it is ChatTurnUi.User) "user" else "assistant" }) { turn ->
                 val turnContent: @Composable () -> Unit = {
                     if (onTurnComposed != null) SideEffect { onTurnComposed(turn.listKey) }

@@ -1,6 +1,9 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -52,11 +55,20 @@ private class ChatPageVisit(val owner: Any?, var content: PageContent) {
     var ready by mutableStateOf(false)
     var placed by mutableStateOf(false)
 }
-private class PageFrame { var recorded = false }
+private class PageFrame {
+    var recorded = false
+    var imeBottom = Int.MIN_VALUE
+}
 
 /** Keep the old live composition until the latest whole page is positioned and formatted. */
 @Composable
-internal fun ChatPageHost(owner: Any?, modifier: Modifier = Modifier, content: PageContent) {
+internal fun ChatPageHost(
+    owner: Any?,
+    modifier: Modifier = Modifier,
+    motionInsets: WindowInsets = WindowInsets.ime,
+    content: PageContent,
+) {
+    val density = LocalDensity.current
     val active = LocalPageContentActive.current
     val parentInputOwned = LocalPageInputOwned.current
     val parentAuthorized = LocalChatPresentationActive.current
@@ -99,9 +111,12 @@ internal fun ChatPageHost(owner: Any?, modifier: Modifier = Modifier, content: P
                     }.drawWithContent {
                         @Suppress("UNUSED_VARIABLE") val epoch = ChatPageHostProbe.drawEpoch
                         if (drawn) {
-                            if (requested || !frame.recorded) {
+                            val imeBottom = motionInsets.getBottom(density)
+                            // Retain the old page, not a frozen keyboard position during its handoff.
+                            if (requested || !frame.recorded || active && parentAuthorized && frame.imeBottom != imeBottom) {
                                 layer.record { this@drawWithContent.drawContent() }
                                 frame.recorded = true
+                                frame.imeBottom = imeBottom
                             }
                             if (frame.recorded) {
                                 drawLayer(layer)

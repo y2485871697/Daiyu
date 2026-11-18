@@ -3,8 +3,13 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.height
@@ -310,6 +315,198 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
         change { turn = turn.copy(pending = false) }
         ui.onNodeWithContentDescription("复制回答").performClick()
         assertEquals("the settled real action must remain connected", 1, actionCalls)
+    }
+
+    @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+    fun testRetainedPagePaintKeepsFollowingImeUntilTheCandidateIsCommitted() {
+        val ime = androidx.compose.foundation.layout.MutableWindowInsets(WindowInsets(bottom = 200))
+        var owner by mutableStateOf("old")
+        var allowNext by mutableStateOf(false)
+        var painted: Any? = null
+        ChatPageHostProbe.observer = ChatPageHostProbe.Observer(
+            allowReady = { it == "old" || allowNext },
+            onDraw = { page, _, _ -> painted = page },
+        )
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    density = LocalDensity.current.density
+                    val page = owner
+                    Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
+                        ChatPageHost(owner, Modifier.width(320.dp).height(420.dp).testTag("ime-handoff-raster"), motionInsets = ime) { _, ready ->
+                            SideEffect { ready(true) }
+                            Box(Modifier.fillMaxSize().background(if (page == "old") Color.White else Color.LightGray).windowInsetsPadding(ime)) {
+                                Box(Modifier.align(androidx.compose.ui.Alignment.BottomCenter).fillMaxWidth().height(18.dp).background(Color.Green))
+                            }
+                        }
+                    }
+                }
+            } }
+            ui.waitForIdle()
+            ui.mainClock.autoAdvance = false
+            fun assertPaintedBottom(inset: Int, page: String) {
+                val before = ui.mainClock.currentTime
+                val image = captureScreenNode(ui.onNodeWithTag("ime-handoff-raster"), advanceAnimationClock = false)
+                assertEquals(before, ui.mainClock.currentTime)
+                val pixels = image.toPixelMap()
+                val rows = (0 until pixels.height).filter { y ->
+                    val c = pixels[pixels.width / 2, y]
+                    c.green > .8f && c.red < .2f && c.blue < .2f
+                }
+                assertTrue("the presented composer marker must be painted", rows.isNotEmpty())
+                assertEquals("cached paint must follow the same IME position, not just layout", (pixels.height - inset).toFloat(), (rows.last() + 1).toFloat(), 1f)
+                assertEquals(page, painted)
+                val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/user-message-entrance").apply { mkdirs() }
+                java.io.File(directory, "ime-handoff-$page-$inset.png").outputStream().use {
+                    check(image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                }
+            }
+            assertPaintedBottom(200, "old")
+            change { owner = "next" }
+            for (inset in listOf(160, 100, 40, 0)) {
+                change { ime.insets = WindowInsets(bottom = inset) }
+                assertPaintedBottom(inset, "old")
+            }
+            change { allowNext = true }
+            ui.mainClock.advanceTimeBy(64)
+            ui.waitForIdle()
+            assertPaintedBottom(0, "next")
+        } finally {
+            mainThread { ChatPageHostProbe.observer = null }
+        }
+    }
+
+    fun testShortSendFirstPaintAndFastAcceptedReplyKeepTheFinalTailGap() {
+        assertSendTailContinuity("首帧就是安全间距", acceptAfter = 80)
+    }
+
+    fun testMultilineSendKeepsTheTailGapWhenAcceptanceArrivesAfterTheEntrance() {
+        assertSendTailContinuity("多行消息也应该从最终安全间距开始，不在回执到来后整块上跳。".repeat(3), acceptAfter = 360)
+    }
+
+    fun testZeroDurationSendFromEarlierHistoryIsPlacedBeforeItsFirstPaint() {
+        scale.factor = 0f
+        assertSendTailContinuity("零动画时长也不能先出现在输入框旁再上跳", acceptAfter = 32, fromEarlierHistory = true)
+    }
+
+    private fun sendPhysicalBounds(tag: String): androidx.compose.ui.geometry.Rect {
+        val node = ui.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode()
+        val before = ui.mainClock.currentTime
+        var bounds = androidx.compose.ui.geometry.Rect.Zero
+        instrumentation.runOnMainSync {
+            val coordinates = node.layoutInfo.coordinates
+            check(coordinates.isAttached)
+            bounds = androidx.compose.ui.geometry.Rect(coordinates.positionInRoot(),
+                androidx.compose.ui.geometry.Size(coordinates.size.width.toFloat(), coordinates.size.height.toFloat()))
+        }
+        assertEquals("reading physical geometry must not advance the animation clock", before, ui.mainClock.currentTime)
+        return bounds
+    }
+
+    private fun assertSendTailContinuity(text: String, acceptAfter: Long, fromEarlierHistory: Boolean = false) {
+        val history: List<ChatTurnUi> = List(24) { ChatTurnUi.User("history-$it", "更早的历史消息 $it") }
+        var rows by mutableStateOf(history)
+        var preview by mutableStateOf<ChatSubmissionPreview?>(null)
+        var navigation by mutableStateOf(ChatScrollRequest(1, messageId = if (fromEarlierHistory) "history-12" else null,
+            followBottom = !fromEarlierHistory))
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                background = conversationColors().surface.copy(alpha = 1f)
+                density = LocalDensity.current.density
+                val current = rememberUserMessageEntrance(request, active = true, awaitPlacement = true)
+                SideEffect { motion = current }
+                Box(Modifier.windowInsetsPadding(WindowInsets.safeDrawing)) {
+                    Box(Modifier.width(320.dp).height(420.dp).background(background).testTag("entrance-raster")) {
+                        ChatMessageList(submissionTurns(rows, preview), ChatScreenActions(), Modifier.fillMaxSize(),
+                            scrollRequest = navigation, composerBottomInset = 96.dp, userMessageEntrance = current,
+                            hasTurnExtras = { false })
+                        Box(Modifier.align(androidx.compose.ui.Alignment.BottomCenter).fillMaxWidth().height(96.dp)
+                            .background(background).testTag("tail-composer"))
+                    }
+                }
+            }
+        } }
+        ui.waitForIdle()
+        ui.mainClock.autoAdvance = false
+        val ticket = UserMessageEntrance("new-send")
+        change {
+            request = ticket
+            preview = ChatSubmissionPreview(ticket.key, text)
+            navigation = ChatScrollRequest(2)
+        }
+        var frames = 0
+        while (progress() == 0f && frames++ < 60) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+        }
+        assertTrue("a safely placed send must become visible", progress() > 0f)
+        assertTrue("the first visible frame must contain real bubble paint", bubbleBackgroundContrast() > .001f)
+        val baseline = sendPhysicalBounds("chat-turn:new-send")
+        val composerTop = sendPhysicalBounds("tail-composer").top
+        val expectedGap = (8f + 26f) * density
+        val diagnostic = StringBuilder()
+        fun sample(key: String, stage: String) {
+            val row = sendPhysicalBounds("chat-turn:$key")
+            val actions = sendPhysicalBounds("message-user-actions:$key")
+            val composer = sendPhysicalBounds("tail-composer")
+            val gap = composer.top - actions.bottom
+            assertEquals("composer must not be displaced by action opacity", composerTop, composer.top, 1f)
+            assertEquals("$stage: the first painted send already owns the reply gap", expectedGap, gap, 1.5f)
+            assertEquals("$stage: the whole user row cannot jump after first paint", baseline.top, row.top, 1.5f)
+            assertEquals("$stage: action slot cannot jump after first paint", baseline.bottom, actions.bottom, 1.5f)
+            diagnostic.append("{\"stage\":\"").append(stage).append("\",\"clock\":").append(ui.mainClock.currentTime)
+                .append(",\"rowTop\":").append(row.top).append(",\"actionsBottom\":").append(actions.bottom)
+                .append(",\"composerTop\":").append(composer.top).append(",\"gap\":").append(gap).append("}\n")
+        }
+        sample(ticket.key, "first-paint")
+        var elapsed = 0L
+        while (elapsed < acceptAfter) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+            sample(ticket.key, "preparing")
+            elapsed += 16
+        }
+        val sameMotion = checkNotNull(motion)
+        // A durable assistant can arrive before history publishes its user. Keep the real projection order.
+        val assistant = ChatTurnUi.Assistant("accepted-assistant", status = app.daiyu.android.domain.RunStatus.RUNNING, isStreaming = true)
+        change {
+            ticket.messageId = "saved-user"
+            preview = ChatSubmissionPreview(ticket.key, text, settledUserId = "saved-user", settledAssistantId = assistant.id)
+            rows = history + assistant
+        }
+        sample(ticket.key, "accepted-preview")
+        repeat(4) {
+            ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            sample(ticket.key, "accepted-preview")
+        }
+        change {
+            rows = history + ChatTurnUi.User("saved-user", text) + assistant
+            preview = null
+            navigation = ChatScrollRequest(3)
+        }
+        repeat(24) {
+            ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            sample("saved-user", "durable-history")
+            assertSame("history cannot replace the entrance clock", sameMotion, motion)
+        }
+        assertEquals(1f, progress(), .001f)
+        val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/user-message-entrance").apply { mkdirs() }
+        java.io.File(directory, "tail-$acceptAfter-${scale.factor}-$fromEarlierHistory.jsonl").writeText(diagnostic.toString())
+    }
+
+
+    fun testAnOldPageCannotRevokeTheNewPagesPlacement() {
+        val entrance = UserMessageEntranceMotion(UserMessageEntrance("placement-owner"), androidx.compose.animation.core.Animatable(0f))
+        val old = Any()
+        val next = Any()
+        entrance.updatePlacement(old, true)
+        entrance.updatePlacement(next, false)
+        assertTrue(entrance.positioned)
+        entrance.updatePlacement(next, true)
+        entrance.updatePlacement(old, false)
+        assertTrue(entrance.positioned)
+        entrance.updatePlacement(next, false)
+        assertFalse(entrance.positioned)
     }
 
 }

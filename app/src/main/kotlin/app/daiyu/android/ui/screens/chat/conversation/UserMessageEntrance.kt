@@ -41,6 +41,17 @@ internal class UserMessageEntranceMotion(
     val progress: Animatable<Float, AnimationVector1D>,
 ) {
     var positioned by mutableStateOf(false)
+    private var placementOwner: Any? = null
+
+    fun updatePlacement(owner: Any, ready: Boolean) {
+        if (ready) {
+            placementOwner = owner
+            positioned = true
+        } else if (placementOwner === owner) {
+            placementOwner = null
+            positioned = false
+        }
+    }
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -80,6 +91,8 @@ internal fun rememberUserMessageEntrance(
                 }.first { it }
             }
         }
+        // IME travel may invalidate the placement that originally admitted this send.
+        snapshotFlow { !awaitPlacement || motion.positioned }.first { it }
         if (request.claim()) progress.animateTo(1f, tween(300, easing = LinearEasing))
     }
     return motion

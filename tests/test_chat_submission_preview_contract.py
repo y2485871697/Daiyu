@@ -143,5 +143,44 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
         self.assertIn('alpha = userMessageActionEntranceAlpha(entering.progress.value)', rows)
         self.assertIn('interactionEnabled = actionsAvailable', rows)
 
+    def test_send_first_paint_waits_for_current_tail_geometry_and_reserves_the_reply_gap(self):
+        main = (APP / 'MainActivity.kt').read_text()
+        send = main.split('private fun sendDraft(', 1)[1].split('private fun cancelPendingTextSend(', 1)[0]
+        self.assertIn('publishChat(rowsChanged = true, scrollRequest =', send)
+        self.assertIn('if (queued) ChatScrollRequest(++scrollSerial) else chatState.scrollRequest', send)
+        self.assertNotIn('jumpToBottom()', send)
+        rows = (CHAT / 'ChatMessageList.kt').read_text()
+        for token in ('private val ChatTurnSpacing = 26.dp', 'val pendingReplyGap =',
+                      'lastUser.matchesKey(it.key) || lastUser.matchesKey(it.messageId)',
+                      'composerBottomInset + ChatTailClearance + pendingReplyGap',
+                      'Arrangement.spacedBy(ChatTurnSpacing)',
+                      'initialPositionPending || userMessageEntrance?.request?.claimed == false',
+                      '(!followBottom || !listState.canScrollForward)',
+                      'item.offset + item.size <= layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx + 1',
+                      'entrance.updatePlacement(listState, positioned)'):
+            self.assertIn(token, rows)
+        motion = (CHAT / 'UserMessageEntrance.kt').read_text()
+        self.assertIn('else if (placementOwner === owner)', motion)
+        after_ime = motion.split('withTimeoutOrNull(240)', 1)[1]
+        self.assertLess(after_ime.index('snapshotFlow { !awaitPlacement || motion.positioned }'), after_ime.index('if (request.claim())'))
+
+    def test_retained_chat_page_refreshes_only_ime_geometry_during_the_handoff(self):
+        host = (CHAT / 'ChatPageHost.kt').read_text()
+        self.assertIn('motionInsets: WindowInsets = WindowInsets.ime', host)
+        self.assertIn('val imeBottom = motionInsets.getBottom(density)', host)
+        self.assertIn('active && parentAuthorized && frame.imeBottom != imeBottom', host)
+        self.assertIn('frame.imeBottom = imeBottom', host)
+        self.assertLess(host.index('if (drawn) {'), host.index('val imeBottom ='))
+        device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/UserMessageEntranceTest.kt').read_text()
+        for oracle in ('testRetainedPagePaintKeepsFollowingImeUntilTheCandidateIsCommitted',
+                       'testShortSendFirstPaintAndFastAcceptedReplyKeepTheFinalTailGap',
+                       'testMultilineSendKeepsTheTailGapWhenAcceptanceArrivesAfterTheEntrance',
+                       'testZeroDurationSendFromEarlierHistoryIsPlacedBeforeItsFirstPaint',
+                       'testAnOldPageCannotRevokeTheNewPagesPlacement',
+                       'cached paint must follow the same IME position, not just layout',
+                       'the first visible frame must contain real bubble paint',
+                       'accepted-preview', 'durable-history'):
+            self.assertIn(oracle, device)
+
 if __name__ == "__main__":
     unittest.main()

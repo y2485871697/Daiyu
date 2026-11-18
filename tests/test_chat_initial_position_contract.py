@@ -58,7 +58,7 @@ class ChatInitialPositionContract(unittest.TestCase):
 
     def test_initial_alignment_waits_for_measured_ready_content_and_snaps(self):
         chat = CHAT.read_text()
-        initial = chat.split('if (initialPositionPending) {', 1)[1].split('consumedScrollSerial = request.serial', 1)[0]
+        initial = chat.split('if (initialPositionPending || userMessageEntrance?.request?.claimed == false) {', 1)[1].split('consumedScrollSerial = request.serial', 1)[0]
         for token in ('withFrameNanos', 'layout.viewportSize.height', 'layout.visibleItemsInfo',
                       'readyTurns[it.listKey] != it', 'it.listKey in visibleKeys && it.status != RunStatus.RUNNING', 'revealedTurns[it.listKey] != it',
                       'layout.afterContentPadding - layout.viewportEndOffset', 'listState.canScrollForward',

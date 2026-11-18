@@ -7218,8 +7218,8 @@ class MainActivity : ComponentActivity() {
             toast(if (unknown) "发送结果未确认" else "本次发送未受理")
         }
         if (queued) userMessageEntrance = UserMessageEntrance(pending.ticket.previewKey, waitForIme = true)
-        publishChat()
-        if (queued) jumpToBottom()
+        publishChat(rowsChanged = true, scrollRequest =
+            if (queued) ChatScrollRequest(++scrollSerial) else chatState.scrollRequest)
     }
     private fun cancelPendingTextSend(pending: PendingTextSend) {
         if (activityUsable() && pendingTextSend === pending) {

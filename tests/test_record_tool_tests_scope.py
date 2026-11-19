@@ -1596,3 +1596,80 @@ class MediaPresentationHandoffToolTestsScopeTest(unittest.TestCase):
             _, scope = recorder.command_for('python3', {'SMOKE_MODE': 'smoke',
                 'SMOKE_TEST_CLASSES': ','.join(selection)})
             self.assertEqual('full', scope)
+
+
+class MediaPresentationPreviewToolTestsScopeTest(unittest.TestCase):
+    HANDOFF_CLASSES = (
+        'app.daiyu.android.ui.screens.chat.conversation.UserMessageEntranceTest',
+        'app.daiyu.android.ui.screens.chat.conversation.UserMessageMediaEntranceTest',
+        'app.daiyu.android.ui.screens.chat.conversation.MessageMediaLayoutGeometryTest',
+        'app.daiyu.android.ui.screens.chat.conversation.ChatComposerActionMotionTest',
+        'app.daiyu.android.ui.screens.chat.attachments.ImageAttachmentsUiTest',
+        'app.daiyu.android.ui.screens.chat.attachments.VideoAttachmentsUiTest',
+        'app.daiyu.android.ChatSubmissionActivityTest',
+        'app.daiyu.android.ControllerVideoProductionEntryTest',
+    )
+    CLASSES = HANDOFF_CLASSES + ('app.daiyu.android.ChatMediaPreviewVideoControlsUiTest',)
+
+    def test_exact_nine_classes_add_video_contract_without_full_discovery(self):
+        self.assertEqual(self.HANDOFF_CLASSES, recorder.MEDIA_PRESENTATION_HANDOFF_PLATFORM_CLASSES)
+        classes = self.CLASSES
+        expected = tuple(dict.fromkeys(recorder.USER_MESSAGE_ENTRANCE_MODULES + recorder.MEDIA_SEND_MODULES +
+            ('test_media_presentation_handoff_contract',
+             'test_test_refresh_contract.TestRefreshContract.test_video_controls_refresh_uses_only_shard_zero')))
+        for selected in (classes, tuple(reversed(classes))):
+            command, scope = recorder.command_for('python3', dict(
+                SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=','.join(selected)))
+            self.assertEqual('user-message-entrance-targeted', scope)
+            self.assertEqual(['python3', '-B', '-m', 'unittest', *expected, '-v'], command)
+            self.assertNotIn('discover', command)
+
+    def test_inexact_nine_classes_and_other_modes_keep_full_fallback(self):
+        classes = self.CLASSES
+        raw = ','.join(classes)
+        invalid = [' ' + raw, raw + ' ', raw + ',', ',' + raw,
+                   raw + ',unknown.Class', raw + ',' + classes[-1]]
+        invalid += [','.join(classes[:index] + classes[index + 1:]) for index in range(len(classes) - 1)]
+        full = (['python3', '-B', '-m', 'unittest', 'discover', '-s', 'tests', '-v'], 'full')
+        for selected in invalid:
+            self.assertEqual(full, recorder.command_for('python3', dict(
+                SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=selected)))
+        for mode in ('', 'checks', 'build', 'compile', 'candidate', 'daily', 'release'):
+            self.assertEqual(full, recorder.command_for('python3', dict(
+                SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw)))
+
+    def test_nine_scope_receipt_keeps_frozen_tools_cwd_source_and_real_exit(self):
+        classes = self.CLASSES
+        expected = tuple(dict.fromkeys(recorder.USER_MESSAGE_ENTRANCE_MODULES + recorder.MEDIA_SEND_MODULES +
+            ('test_media_presentation_handoff_contract',
+             'test_test_refresh_contract.TestRefreshContract.test_video_controls_refresh_uses_only_shard_zero')))
+        expected_command = ['python3', '-B', '-m', 'unittest', *expected, '-v']
+        old = Path.cwd()
+        for code in (0, 9):
+            with tempfile.TemporaryDirectory() as directory:
+                try:
+                    os.chdir(directory)
+                    env = dict(GITHUB_SHA='b' * 40, EXPECTED_SHA='a' * 40,
+                               GITHUB_RUN_ID='42', GITHUB_RUN_ATTEMPT='1', SMOKE_MODE='smoke',
+                               SMOKE_TEST_CLASSES=','.join(classes))
+                    with patch.dict(os.environ, env, clear=True), patch.object(
+                            recorder.subprocess, 'check_output', return_value='a' * 40 + '\n'), patch.object(
+                            recorder.subprocess, 'call', return_value=code) as call, patch.object(
+                            recorder.sys, 'stdout', SimpleNamespace(buffer=io.BytesIO())):
+                        self.assertEqual(code, recorder.record('python3'))
+                    receipt = json.loads(Path('tool-evidence/receipt.json').read_text())
+                    self.assertEqual(dict(sha='a' * 40, run_id=42, attempt=1), receipt['identity'])
+                    self.assertEqual('b' * 40, receipt['validation_tools_sha'])
+                    self.assertEqual('user-message-entrance-targeted', receipt['scope'])
+                    self.assertEqual(code, receipt['exit_code'])
+                    call.assert_called_once()
+                    self.assertEqual(expected_command, receipt['command'])
+                    self.assertEqual(expected_command, call.call_args.args[0])
+                    self.assertNotIn('discover', receipt['command'])
+                    self.assertNotIn('discover', call.call_args.args[0])
+                    base = Path(recorder.__file__).resolve().parents[2]
+                    self.assertEqual(base, call.call_args.kwargs['cwd'])
+                    self.assertEqual(str(base / 'tests') + os.pathsep,
+                                     call.call_args.kwargs['env']['PYTHONPATH'])
+                finally:
+                    os.chdir(old)

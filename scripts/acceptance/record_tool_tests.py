@@ -991,6 +991,13 @@ def command_for(python, env):
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(VIDEO_PICKER_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *VIDEO_PICKER_MODULES, "-v"], "video-picker-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(
+                MEDIA_PRESENTATION_HANDOFF_PLATFORM_CLASSES + ("app.daiyu.android.ChatMediaPreviewVideoControlsUiTest",))):
+        modules = tuple(dict.fromkeys(USER_MESSAGE_ENTRANCE_MODULES + MEDIA_SEND_MODULES +
+                                     ("test_media_presentation_handoff_contract",
+                                      "test_test_refresh_contract.TestRefreshContract.test_video_controls_refresh_uses_only_shard_zero")))
+        return [python, "-B", "-m", "unittest", *modules, "-v"], "user-message-entrance-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(MEDIA_PRESENTATION_HANDOFF_PLATFORM_CLASSES)):
         modules = tuple(dict.fromkeys(USER_MESSAGE_ENTRANCE_MODULES + MEDIA_SEND_MODULES +
                                      ("test_media_presentation_handoff_contract",)))

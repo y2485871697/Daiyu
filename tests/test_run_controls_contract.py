@@ -15,7 +15,10 @@ class RunControlsContractTest(unittest.TestCase):
         self.assertIn('val textAction = hasText', composer)
         self.assertIn('else actions.onSupplement(state.text)', composer)
         self.assertIn('onLongClick = if (preparingSend) actions.onCancelSend else if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE)', composer)
-        self.assertIn('ComposerPhase.PAUSED, ComposerPhase.RUNNING -> text.isNotBlank() && supplementAvailable', model)
+        self.assertIn('phase == ComposerPhase.IDLE || presentationOnly -> text.isNotBlank() || editingMessageCanSubmit || imageSendAvailable || videoSendAvailable', model)
+        self.assertIn('else -> text.isNotBlank() && supplementAvailable', model)
+        self.assertIn('if (state.phase == ComposerPhase.IDLE || state.presentationOnly) actions.onSend(state.text)', composer)
+        self.assertIn('textAction && state.phase != ComposerPhase.IDLE && !state.presentationOnly -> ChatPreviewIcons.Append', composer)
 
     def test_append_outline_ink_center_and_stroke_stay_inside_viewport(self):
         icons = (APP / 'ui/icons/ChatPreviewIcons.kt').read_text()

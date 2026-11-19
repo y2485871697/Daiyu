@@ -310,8 +310,9 @@ class ContextServiceTest : InstrumentationTestCase() {
                     override fun cancel() {}
                 }
             }
-            val liveContext = ProductionRunContext(policy, assistant, { _ ->
+            val liveContext = ProductionRunContext(policy, assistant, { usage ->
                 BoundSummaryModel(SummaryModelBinding("fixture", "summary"), SummaryModelTransport { _, _ ->
+                    usage.claim()
                     summaries++
                     object : ModelSession {
                         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
@@ -334,6 +335,7 @@ class ContextServiceTest : InstrumentationTestCase() {
             } finally { runtime.close() }
             assertEquals(original, service.displayHistory(owner).take(original.size))
             db.close(); db = ConversationDatabase(context); service = ContextService(context, db)
+            assertEquals(original, service.displayHistory(owner).take(original.size))
             val reopened = service.prepareSend(owner)
             if (automatic) {
                 assertNotNull(reopened.archiveId)

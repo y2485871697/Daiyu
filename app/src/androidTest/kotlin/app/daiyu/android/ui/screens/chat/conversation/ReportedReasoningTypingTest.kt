@@ -40,12 +40,27 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         texts.forEach { source -> projectMarkdown(listOf(source), parser = streamingMarkdownParser) }
     }
 
+    private var lastObservedText = ""
+
     private fun visibleText(): String = ui.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text),
         useUnmergedTree = true).fetchSemanticsNodes().flatMap { it.config[SemanticsProperties.Text] }
-        .joinToString("\n") { it.text }
+        .joinToString("\n") { it.text }.also { lastObservedText = it }
 
     private fun await(predicate: () -> Boolean) {
-        ui.waitUntil(5_000) { ui.mainClock.advanceTimeBy(16); predicate() }
+        val startedAt = android.os.SystemClock.elapsedRealtime()
+        val clockAtStart = ui.mainClock.currentTime
+        val textAtStart = lastObservedText
+        var polls = 0
+        try {
+            ui.waitUntil(5_000) { polls++; ui.mainClock.advanceTimeBy(16); predicate() }
+        } catch (failure: ComposeTimeoutException) {
+            failure.addSuppressed(AssertionError("Reasoning wait test=<$name>, polls=$polls, " +
+                "virtualMs=${ui.mainClock.currentTime - clockAtStart}, " +
+                "wallMs=${android.os.SystemClock.elapsedRealtime() - startedAt}, " +
+                "autoAdvance=${ui.mainClock.autoAdvance}, windowDraw=$requiresWindowDraw, " +
+                "initialText=<$textAtStart>, lastText=<$lastObservedText>"))
+            throw failure
+        }
     }
 
     private fun assertLivePath(path: Path) {

@@ -108,7 +108,10 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         val parsing = CountDownLatch(1)
         val release = CountDownLatch(1)
         val parser: (String) -> List<app.daiyu.android.MarkdownBlock> = { source ->
-            if (source == pending) { parsing.countDown(); release.await() }
+            if (source == pending) {
+                parsing.countDown()
+                check(release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+            }
             MarkdownParser.parse(source)
         }
         ui.mainClock.autoAdvance = false
@@ -711,10 +714,14 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                 phase = ComposerPhase.IDLE
             }
             await { parsing.count == 0L }
+            assertNull(markdownProjectionCache.getBlocks(pending, parser))
             node("chat-control").assertContentDescriptionEquals("暂停").performClick()
             ui.mainClock.advanceTimeBy(32)
             node("chat-control").assertContentDescriptionEquals("继续")
             release.countDown()
+            await { markdownProjectionCache.getBlocks(pending, parser) != null }
+            mainThread { }
+            ui.waitForIdle()
             ui.mainClock.advanceTimeBy(32)
             ui.onNodeWithText("已暂停").assertExists()
             val paused = count()
@@ -731,6 +738,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             assertTrue(visibleText().contains(baseline))
             node("chat-control").assertContentDescriptionEquals("继续").performClick()
             await { visibleText().contains(pending) }
+            captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
             assertEquals(240, count())
             await { ui.onAllNodesWithTag("chat-control").fetchSemanticsNodes().isEmpty() }
             node("chat-send").assertContentDescriptionEquals("发送")

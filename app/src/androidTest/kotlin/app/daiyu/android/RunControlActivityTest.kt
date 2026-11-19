@@ -9,6 +9,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicReference
 import app.daiyu.android.ui.screens.chat.conversation.projectMarkdown
+import app.daiyu.android.ui.screens.chat.conversation.defaultMarkdownParser
+import app.daiyu.android.ui.screens.chat.conversation.markdownProjectionCache
 import kotlinx.coroutines.runBlocking
 
 class RunControlActivityTest : WiredActivityTestCase() {
@@ -276,12 +278,19 @@ class RunControlActivityTest : WiredActivityTestCase() {
             captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
             val beforePause = visibleTailCharacters()
             assertEquals("The drawn baseline must precede the late parsed suffix", 80, beforePause)
+            val pending = fixture.database.messages(owner.conversationId).single { it.second.id == owner.id }
+                .second.blocks.filterIsInstance<MessageBlock.Text>().single().text
+            assertEquals(400, pending.count { it == '甲' })
+            assertNull(markdownProjectionCache.getBlocks(pending, defaultMarkdownParser))
             node("chat-control").performClick()
             ui.mainClock.advanceTimeBy(32)
             node("chat-control").assertContentDescriptionEquals("继续")
             val paused = visibleTailCharacters()
             assertEquals("Pause must retain the received drawn baseline", beforePause, paused)
             parserGates.last().release.countDown()
+            ui.waitUntil(5_000) { markdownProjectionCache.getBlocks(pending, defaultMarkdownParser) != null }
+            controlMain { }
+            ui.waitForIdle()
             repeat(12) {
                 ui.mainClock.advanceTimeByFrame()
                 assertEquals("Late parsing must not cross the paused paint frontier", paused, visibleTailCharacters())
@@ -296,6 +305,7 @@ class RunControlActivityTest : WiredActivityTestCase() {
                 ui.mainClock.advanceTimeBy(16)
                 visibleTailCharacters() == 400
             }
+            captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
             repeat(12) {
                 ui.mainClock.advanceTimeByFrame()
                 assertEquals("Without new input the received frontier must not grow", 400, visibleTailCharacters())

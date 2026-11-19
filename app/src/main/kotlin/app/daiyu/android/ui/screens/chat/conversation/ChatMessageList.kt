@@ -796,9 +796,9 @@ internal fun ChatMessageList(
                             continue
                         }
                         val visibleKeys = layout.visibleItemsInfo.map { it.key }.toSet()
+                        // Hidden initial rows cannot acknowledge a draw until this positioning gate opens.
                         if (currentTurns.filterIsInstance<ChatTurnUi.Assistant>().any {
-                            it.listKey in visibleKeys && it.status != RunStatus.RUNNING &&
-                                (readyTurns[it.listKey] != it || revealedTurns[it.listKey] != it)
+                            it.listKey in visibleKeys && it.status != RunStatus.RUNNING && readyTurns[it.listKey] != it
                         }) continue
                         initialPositionPending = retainInitialChatPosition(initialPositionPending, followBottom, aligned = true)
                         break

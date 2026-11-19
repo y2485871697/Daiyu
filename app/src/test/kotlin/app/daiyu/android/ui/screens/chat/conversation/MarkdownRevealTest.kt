@@ -285,10 +285,10 @@ class MarkdownRevealTest {
     }
 
     @Test fun terminalBodyKeepsItsNormalCharacterPacePastTheOldDrainDeadline() {
-        for (frameMillis in listOf(8L, 16L)) {
+        for (frameMillis in listOf(8L, 16L)) for (terminal in listOf(false, true)) {
             val state = MarkdownTypingState(emptyList())
             state.update(emptyList(), 0, streaming = false, terminal = false, live = true)
-            val answer = state.update(listOf(part("字".repeat(500))), 0, streaming = false, terminal = true,
+            val answer = state.update(listOf(part("字".repeat(500))), 0, streaming = false, terminal = terminal,
                 paceTerminal = true)!!
             var time = 1_000_000_000L
             state.advance(answer, time)
@@ -312,6 +312,7 @@ class MarkdownRevealTest {
                 previous = next
             }
             assertEquals(answer.total, previous)
+            state.update(answer.parts, 0, streaming = false, terminal = true, paceTerminal = true)
             val edited = state.update(listOf(part("字".repeat(501))), 0, streaming = false, terminal = true,
                 paceTerminal = true)!!
             assertEquals("Editing a completed answer stays silent", 501, edited.start)

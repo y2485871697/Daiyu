@@ -6,7 +6,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.neverEqualPolicy
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -113,7 +112,8 @@ internal class MarkdownCodeClip(private val layout: TextLayoutResult) {
 }
 
 private class MarkdownCodeViewportFrame {
-    var coordinates by mutableStateOf<LayoutCoordinates?>(null, neverEqualPolicy())
+    var coordinates: LayoutCoordinates? = null
+    var availableHeight by mutableStateOf(0f)
     var paintedToken: Any? = null
 }
 
@@ -129,12 +129,13 @@ internal fun Modifier.markdownCodeViewportClearance(block: MarkdownBlock.Code, v
     fun pending(): Boolean = frame.paintedToken !== token || !admitted()
     fun positioned(coordinates: LayoutCoordinates) {
         frame.coordinates = coordinates
+        frame.availableHeight = clearance.availableHeight(coordinates)
         publication?.setPending(frame, pending())
     }
     SideEffect { publication?.setPending(frame, pending()) }
     DisposableEffect(publication, frame) { onDispose { publication?.setPending(frame, false) } }
     return onPlaced(::positioned).onGloballyPositioned(::positioned).drawWithContent {
-        if (clearance.fits(frame.coordinates, kotlin.math.ceil(size.height).toInt())) {
+        if (size.height <= frame.availableHeight + .01f && clearance.fits(frame.coordinates, kotlin.math.ceil(size.height).toInt())) {
             drawContent()
             frame.paintedToken = token
         }

@@ -224,6 +224,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     val measurer = rememberTextMeasurer(cacheSize = 1)
     val publication = LocalMarkdownPaintPublication.current
     val displayed = if (playback?.paused == true) frame.drawn else frame.committed
+    val candidateText = if (playback?.paused == true) displayed?.layoutInput?.text ?: AnnotatedString("") else text
     val owner = remember(frame) { Any() }
     fun published(): Boolean = text.isEmpty() || frame.drawn?.let { actual ->
         actual.layoutInput.text == text && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
@@ -248,7 +249,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     SideEffect { publication?.setPending(owner, !published()) }
     DisposableEffect(publication, owner) { onDispose { publication?.setPending(owner, false) } }
     BasicText(displayed?.layoutInput?.text ?: AnnotatedString(""), modifier.layout { measurable, constraints ->
-        val candidate = measurer.measure(text, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
+        val candidate = measurer.measure(candidateText, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
         frame.layout = candidate
         val committed = measurable.measure(constraints.copy(minHeight = 0))
         layout(constraints.constrainWidth(maxOf(candidate.size.width, committed.width)),
@@ -269,7 +270,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             if (paintOffset != null) painted[paintOffset] = actual
         }
         publication?.setPending(owner, !published())
-    }, displayed?.layoutInput?.style ?: style, softWrap = softWrap, onTextLayout = {
+    }, style, softWrap = softWrap, onTextLayout = {
         frame.rendered = it
     })
 }

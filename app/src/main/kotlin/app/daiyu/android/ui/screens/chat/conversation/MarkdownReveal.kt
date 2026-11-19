@@ -229,7 +229,7 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         if (lastFrame == 0L) lastFrame = frameNanos
         val elapsed = ((frameNanos - lastFrame).coerceAtLeast(0L) / 1_000_000_000.0).coerceAtMost(0.05)
         lastFrame = frameNanos
-        if (expected.streaming || expected.terminal && expected.paceTerminal) {
+        if (expected.streaming || expected.paceTerminal) {
             // A newly admitted answer is output, not a 250 ms terminal catch-up.
             val speed = if (expected.streaming) maxOf(70.0, (end - position) * 7.0) else 70.0
             position = (position + speed * elapsed).coerceAtMost(end.toDouble())

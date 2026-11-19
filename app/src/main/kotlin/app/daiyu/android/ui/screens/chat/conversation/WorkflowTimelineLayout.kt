@@ -6,7 +6,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.neverEqualPolicy
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
@@ -189,7 +188,8 @@ internal fun WorkflowTimelineColumn(timeline: Boolean, content: @Composable () -
 }
 
 private class WorkflowPaintFrame {
-    var coordinates by mutableStateOf<LayoutCoordinates?>(null, neverEqualPolicy())
+    var coordinates: LayoutCoordinates? = null
+    var availableHeight by mutableStateOf(0f)
 }
 
 /** The candidate keeps its measured extent; the visible surface ends at the same safe edge as its ink. */
@@ -198,21 +198,25 @@ internal fun Modifier.streamingWorkflowSurface(background: Color, border: Color,
     highlight: Color? = null): Modifier {
     val clearance = LocalStreamingTextClearance.current
     val frame = remember(clearance) { WorkflowPaintFrame() }
-    return onPlaced { frame.coordinates = it }.drawWithContent {
-        val available = clearance?.availableHeight(frame.coordinates) ?: Float.POSITIVE_INFINITY
+    fun positioned(coordinates: LayoutCoordinates) {
+        frame.coordinates = coordinates
+        frame.availableHeight = clearance?.availableHeight(coordinates) ?: Float.POSITIVE_INFINITY
+    }
+    return onPlaced(::positioned).onGloballyPositioned(::positioned).drawWithContent {
+        val available = minOf(frame.availableHeight, clearance?.availableHeight(frame.coordinates) ?: Float.POSITIVE_INFINITY)
         val height = minOf(size.height, available)
         if (height > 0f) {
-            val corner = minOf(radius.toPx(), size.width / 2f, height / 2f)
-            val path = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, height, CornerRadius(corner))) }
-            clipPath(path) {
-                drawRoundRect(background, size = Size(size.width, height), cornerRadius = CornerRadius(corner))
+            val corner = minOf(radius.toPx(), size.width / 2f, size.height / 2f)
+            val path = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(corner))) }
+            clipRect(bottom = height) { clipPath(path) {
+                drawRoundRect(background, size = size, cornerRadius = CornerRadius(corner))
                 this@drawWithContent.drawContent()
                 highlight?.let { drawLine(it, Offset(0f, .5.dp.toPx()), Offset(size.width, .5.dp.toPx()), 1.dp.toPx()) }
                 val stroke = 1.dp.toPx()
-                if (height >= stroke && size.width >= stroke) drawRoundRect(border,
-                    topLeft = Offset(stroke / 2f, stroke / 2f), size = Size(size.width - stroke, height - stroke),
+                if (size.height >= stroke && size.width >= stroke) drawRoundRect(border,
+                    topLeft = Offset(stroke / 2f, stroke / 2f), size = Size(size.width - stroke, size.height - stroke),
                     cornerRadius = CornerRadius((corner - stroke / 2f).coerceAtLeast(0f)), style = Stroke(stroke))
-            }
+            } }
         }
     }
 }
@@ -223,13 +227,17 @@ internal fun Modifier.workflowInkClearance(): Modifier {
     val clearance = LocalStreamingTextClearance.current
     val item = LocalWorkflowItemLayout.current
     val frame = remember(clearance, item) { WorkflowPaintFrame() }
-    return onPlaced { frame.coordinates = it }.onGloballyPositioned { frame.coordinates = it }.drawWithContent {
+    fun positioned(coordinates: LayoutCoordinates) {
+        frame.coordinates = coordinates
+        frame.availableHeight = clearance?.availableHeight(coordinates) ?: Float.POSITIVE_INFINITY
+    }
+    return onPlaced(::positioned).onGloballyPositioned(::positioned).drawWithContent {
         val coordinates = frame.coordinates
         val parent = item?.coordinates
         val height = kotlin.math.ceil(size.height).toInt()
         val allocated = if (item != null && coordinates?.isAttached == true && parent?.isAttached == true)
             parent.localPositionOf(coordinates, Offset.Zero).y + size.height <= item.allocatedHeight + .01f
         else item == null
-        if (allocated && clearance?.fits(coordinates, height) != false) drawContent()
+        if (allocated && height <= frame.availableHeight + .01f && clearance?.fits(coordinates, height) != false) drawContent()
     }
 }

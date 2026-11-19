@@ -71,6 +71,9 @@ class StreamingOcclusionContract(unittest.TestCase):
         leaf = markdown.split("internal fun ClearanceText", 1)[1].split("internal fun TextLayoutResult.canPaintPrefixOf", 1)[0]
         self.assertIn("val displayed = if (playback?.paused == true) frame.drawn else frame.committed", leaf)
         self.assertIn("playback?.paused == true -> frame.drawn", leaf)
+        self.assertIn('val candidateText = if (playback?.paused == true) displayed?.layoutInput?.text ?: AnnotatedString("") else text', leaf)
+        self.assertIn("measurer.measure(candidateText, style", leaf)
+        self.assertIn("}, style, softWrap = softWrap, onTextLayout", leaf)
         self.assertIn("fun published(): Boolean = text.isEmpty() || frame.drawn?.let", leaf)
         self.assertIn("!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text", leaf)
         placed, drawn = leaf.split(".drawWithContent {", 1)
@@ -80,6 +83,19 @@ class StreamingOcclusionContract(unittest.TestCase):
         layout = drawn.split("onTextLayout = {", 1)[1]
         self.assertIn("frame.rendered = it", layout)
         self.assertNotIn("publication?.setPending", layout)
+
+    def test_code_and_workflow_placement_publish_only_changed_height_and_keep_full_border_geometry(self):
+        code = (CHAT.parent / "MarkdownCodeReveal.kt").read_text()
+        frame = code.split("private class MarkdownCodeViewportFrame", 1)[1].split("@Composable", 1)[0]
+        self.assertIn("var coordinates: LayoutCoordinates? = null", frame)
+        self.assertIn("var availableHeight by mutableStateOf(0f)", frame)
+        self.assertNotIn("neverEqualPolicy", frame)
+        workflow = (CHAT.parent / "WorkflowTimelineLayout.kt").read_text()
+        surface = workflow.split("internal fun Modifier.streamingWorkflowSurface", 1)[1].split("internal fun Modifier.workflowInkClearance", 1)[0]
+        self.assertIn("clipRect(bottom = height)", surface)
+        self.assertIn("size.width, size.height, CornerRadius(corner)", surface)
+        self.assertIn("Size(size.width - stroke, size.height - stroke)", surface)
+        self.assertNotIn("Size(size.width - stroke, height - stroke)", surface)
 
     def test_glyph_regression_rejects_the_visual_edge_and_verifies_committed_complete_lines(self):
         device = DEVICE.read_text()

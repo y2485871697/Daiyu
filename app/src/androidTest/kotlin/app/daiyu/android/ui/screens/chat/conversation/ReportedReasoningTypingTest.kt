@@ -691,6 +691,10 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             ui.onNodeWithText("已暂停").assertExists()
             val paused = count()
             assertTrue(paused in 1 until 240)
+            repeat(12) {
+                ui.mainClock.advanceTimeByFrame()
+                assertEquals("Paused paint frontier must not admit a late prefix", paused, count())
+            }
             ui.mainClock.advanceTimeBy(1200)
             assertEquals(paused, count())
             node("chat-control").performClick()

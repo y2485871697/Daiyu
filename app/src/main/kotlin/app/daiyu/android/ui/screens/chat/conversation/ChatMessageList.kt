@@ -15,6 +15,7 @@ import androidx.compose.foundation.MutatePriority
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
@@ -118,8 +119,9 @@ internal val LocalStreamingTextClearance = staticCompositionLocalOf<StreamingTex
 
 internal class StreamingTextClearance {
     private data class Geometry(val list: LayoutCoordinates?, val viewport: LayoutCoordinates?, val offset: Int,
-        val clearance: Int, val height: Int, val clampToViewport: Boolean)
-    private var geometry by mutableStateOf<Geometry?>(null, neverEqualPolicy())
+        val clearance: Int, val height: Int, val clampToViewport: Boolean,
+        val listHeight: Int, val viewportTop: Float, val viewportHeight: Int)
+    private var geometry by mutableStateOf<Geometry?>(null)
     private var positioned by mutableStateOf(false)
     private val typingOwners = mutableStateMapOf<Any, Unit>()
     val typingPending: Boolean get() = typingOwners.isNotEmpty()
@@ -141,7 +143,11 @@ internal class StreamingTextClearance {
 
     fun update(list: LayoutCoordinates?, viewport: LayoutCoordinates?, offset: Int, clearance: Int,
         height: Int, protect: Boolean, clampToViewport: Boolean) {
-        geometry = if (protect) Geometry(list, viewport, offset, clearance, height, clampToViewport) else null
+        val attached = list?.isAttached == true && viewport?.isAttached == true
+        geometry = if (protect) Geometry(list, viewport, offset, clearance, height, clampToViewport,
+            if (attached) list!!.size.height else 0,
+            if (attached) list!!.localPositionOf(viewport!!, Offset.Zero).y else 0f,
+            if (attached) viewport!!.size.height else 0) else null
         positioned = true
     }
 
@@ -151,9 +157,9 @@ internal class StreamingTextClearance {
         val list = current.list?.takeIf { it.isAttached } ?: return 0f
         val viewport = current.viewport?.takeIf { it.isAttached } ?: return 0f
         val leaf = coordinates?.takeIf { it.isAttached } ?: return 0f
-        val viewportTop = list.localPositionOf(viewport, Offset.Zero).y
-        val safeBottom = list.size.height - current.clearance.toFloat()
-        val bottom = if (current.clampToViewport) minOf(safeBottom, viewportTop + viewport.size.height) else safeBottom
+        val safeBottom = current.listHeight - current.clearance.toFloat()
+        val bottom = if (current.clampToViewport)
+            minOf(safeBottom, current.viewportTop + current.viewportHeight) else safeBottom
         return (bottom - list.localPositionOf(leaf, Offset.Zero).y).coerceAtLeast(0f)
     }
 
@@ -241,6 +247,12 @@ internal fun StreamingTailContainer(
         }, modifier = Modifier
             .testTag("chat-stream-viewport:$itemKey")
             .onPlaced { viewport ->
+                state.viewportCoordinates = viewport
+                val followingCatchup = state.bounded && state.followCatchup && followIntent()
+                state.textClearance.update(listCoordinates(), viewport, state.scrollOffset.roundToInt(), drawClearance(),
+                    state.contentHeight, preserveTextClearance && protectClearance() && followIntent(), !followingCatchup)
+            }
+            .onGloballyPositioned { viewport ->
                 state.viewportCoordinates = viewport
                 val followingCatchup = state.bounded && state.followCatchup && followIntent()
                 state.textClearance.update(listCoordinates(), viewport, state.scrollOffset.roundToInt(), drawClearance(),
@@ -778,16 +790,16 @@ internal fun ChatMessageList(
                             listState.scrollToItem(index)
                             continue
                         }
-                        val visibleKeys = layout.visibleItemsInfo.map { it.key }.toSet()
-                        if (currentTurns.filterIsInstance<ChatTurnUi.Assistant>().any {
-                            it.listKey in visibleKeys && it.status != RunStatus.RUNNING &&
-                                (readyTurns[it.listKey] != it || revealedTurns[it.listKey] != it)
-                        }) continue
                         val overflow = last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset
                         if (overflow > 0 && listState.canScrollForward) {
                             listState.scrollBy(overflow.toFloat())
                             continue
                         }
+                        val visibleKeys = layout.visibleItemsInfo.map { it.key }.toSet()
+                        if (currentTurns.filterIsInstance<ChatTurnUi.Assistant>().any {
+                            it.listKey in visibleKeys && it.status != RunStatus.RUNNING &&
+                                (readyTurns[it.listKey] != it || revealedTurns[it.listKey] != it)
+                        }) continue
                         initialPositionPending = retainInitialChatPosition(initialPositionPending, followBottom, aligned = true)
                         break
                     }
@@ -1295,13 +1307,12 @@ internal fun AssistantTurn(
     val blockedSources = remember(ordered.body, bodyVisible) {
         if (bodyVisible) emptySet() else ordered.body.filterIsInstance<MessageContentUi.Text>().map { it.itemId }.toSet()
     }
-    val bodyRevealEpoch = remember(turn.listKey) { revealResetEpoch }
-    val initialBaseline = remember(turn.listKey) {
+    val initialBaseline = remember(turn.listKey, visualScope, revealResetEpoch) {
         visualScope?.bodyBaseline(turn.listKey, bodySources,
             turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty())
     }
     val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,
-        terminal = generationComplete, resetEpoch = bodyRevealEpoch,
+        terminal = generationComplete, resetEpoch = revealResetEpoch,
         onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources,
         live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true,
         initialBaseline = initialBaseline, presentationLane = "body:${turn.listKey}")
@@ -1417,7 +1428,9 @@ internal fun rememberAssistantTextBody(plainNarration: Set<String>, sources: Lis
             val visibility = currentReveal.value.visibility(text.itemId)
             val boundaries = remember(displayed) { MarkdownTextBoundaries(displayed) }
             val end by remember(visibility, boundaries) { androidx.compose.runtime.derivedStateOf { boundaries.end(visibility.value) } }
-            Text(displayed.take(end), modifier.fillMaxWidth().onPlaced { currentReveal.value.presented(text.itemId) }, color = conversationColors().muted,
+            val sourceReady = currentReveal.value.ready(text.itemId, displayed, text.markdownWindow)
+            SideEffect { if (sourceReady) currentReveal.value.presented(text.itemId) }
+            Text(displayed.take(end), modifier.fillMaxWidth(), color = conversationColors().muted,
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
         } else RevealedMessageMarkdown(displayed, accepted?.blocksAt(index),
             currentReveal.value, text.itemId, modifier,

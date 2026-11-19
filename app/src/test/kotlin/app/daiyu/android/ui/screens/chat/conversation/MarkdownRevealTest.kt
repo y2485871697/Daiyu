@@ -362,4 +362,18 @@ class MarkdownRevealTest {
         assertEquals(current.total, state.advance(current, 20_000_000_000L))
     }
 
+    @Test fun paintAdmissionBlocksOnlyItsOwnerAndCanReleaseWithoutAnotherTarget() {
+        val publication = MarkdownPaintPublication()
+        val first = Any()
+        val second = Any()
+        assertTrue(publication.ready)
+        publication.setPending(first, true)
+        publication.setPending(second, true)
+        assertFalse(publication.ready)
+        publication.setPending(first, false)
+        assertFalse(publication.ready)
+        publication.setPending(second, false)
+        assertTrue(publication.ready)
+    }
+
 }

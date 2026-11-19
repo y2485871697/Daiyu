@@ -13,7 +13,7 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
         self.assertIn("RevealedMessageMarkdown(", source)
         self.assertIn("deferBlockReveal = true", source)
         leaf = (CHAT / "MessageMarkdown.kt").read_text().split("internal fun RevealedMessageMarkdown(", 1)[1].split("@Composable", 1)[0]
-        self.assertIn("val presented = modifier.onPlaced { reveal.presented(partId) }", leaf)
+        self.assertIn("val sourceReady = reveal.ready(partId, text, sourceWindow)", leaf)
         self.assertIn(
             "if (deferBlockReveal) ProjectedMessageMarkdown(text, blocks, presented,\n"
             "            generationComplete = generationComplete, visibility = reveal.visibility(partId), sourceWindow = sourceWindow)",
@@ -60,7 +60,7 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
         source = (CHAT / "ChatMessageList.kt").read_text()
         self.assertNotIn('Text("正在思考…"', source)
         card = (CHAT / "ReportedReasoningCard.kt").read_text()
-        self.assertIn('reasoningDisplayLabel(isThinking, displayThinking, displayPaused)', card)
+        self.assertIn('reasoningDisplayLabel(isThinking, isThinking || waitingForReveal, displayPaused)', card)
 
     def test_reply_identity_waits_for_content_without_blocking_readiness(self):
         source = (CHAT / "ChatMessageList.kt").read_text()

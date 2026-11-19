@@ -191,12 +191,15 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
                 Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
                 Box(Modifier.fillMaxWidth().heightIn(max = maxBodyHeight).clip(RoundedCornerShape(bottomStart = 8.dp, bottomEnd = 8.dp))
                     .testTag("markdown-code-viewport")
+                    .markdownCodeViewportClearance(block, visibleCharacters)
                     .then(if (verticalScrollEnabled) Modifier.nestedScroll(containedScroll) else Modifier)
                     .verticalScroll(vertical, enabled = verticalScrollEnabled).horizontalScroll(horizontal)
                     .padding(horizontal = 12.dp, vertical = 4.dp)) {
-                    MarkdownCodeText(block, visibleCharacters, Modifier.testTag("markdown-code-text"),
-                        style = TextStyle(color = colors.text, fontFamily = FontFamily.Monospace,
-                            fontSize = 14.sp, lineHeight = 22.sp, textAlign = TextAlign.Left))
+                    CompositionLocalProvider(LocalStreamingTextClearance provides null) {
+                        MarkdownCodeText(block, visibleCharacters, Modifier.testTag("markdown-code-text"),
+                            style = TextStyle(color = colors.text, fontFamily = FontFamily.Monospace,
+                                fontSize = 14.sp, lineHeight = 22.sp, textAlign = TextAlign.Left))
+                    }
                 }
             }
         }

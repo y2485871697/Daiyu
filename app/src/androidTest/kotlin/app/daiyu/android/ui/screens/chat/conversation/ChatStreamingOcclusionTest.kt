@@ -59,7 +59,7 @@ import top.yukonga.miuix.kmp.basic.Text
 class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     private val inkSurfaceColor = Color(0xFFE0E0E0)
     private var inkReference by mutableStateOf(false)
-    private data class InkGlyph(val layout: TextLayoutResult, val at: Offset)
+    private data class InkGlyph(val layout: TextLayoutResult, val at: Offset, val extent: Int = layout.size.height)
     private var inkGlyph: InkGlyph? = null
     private data class InkFrame(val glyphs: List<InkGlyph>, val regions: List<androidx.compose.ui.geometry.Rect>,
         val top: Float, val bottom: Float)
@@ -222,6 +222,108 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             }
         }
         assertEquals("No content may paint at/below the Surface top, including its sides", 0, leaked)
+    }
+
+    fun testFixedPrefixPublishesAfterAncestorMovesWithoutAnotherTextChunk() {
+        val state = StreamingTailViewport(initiallyBounded = false)
+        val publication = MarkdownPaintPublication().apply { active = true }
+        val text = "HHHH\nHHHHHH"
+        var hostCoordinates: LayoutCoordinates? = null
+        var origin by mutableStateOf(240.dp)
+        var hostPx = 0
+        var clearancePx = 0
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val d = LocalDensity.current
+                hostPx = with(d) { 360.dp.roundToPx() }
+                clearancePx = with(d) { (96.dp + ChatTailClearance).roundToPx() }
+                Box(Modifier.size(320.dp, 360.dp).onPlaced { hostCoordinates = it }) {
+                    Box(Modifier.offset(y = origin)) {
+                        StreamingTailContainer(state, { hostCoordinates }, "fixed-prefix",
+                            userScrollEnabled = false, follows = { true }, clearance = { clearancePx },
+                            viewportHeight = { hostPx - clearancePx }, listViewportHeight = { hostPx },
+                            preserveTextClearance = true) {
+                            androidx.compose.runtime.CompositionLocalProvider(LocalMarkdownPaintPublication provides publication) {
+                                ClearanceText(androidx.compose.ui.text.AnnotatedString(text), 0,
+                                    Modifier.fillMaxWidth().testTag("fixed-prefix-text"),
+                                    TextStyle(color = Color.Black, fontFamily = FontFamily.Monospace,
+                                        fontSize = 20.sp, lineHeight = 28.sp))
+                            }
+                        }
+                    }
+                }
+            }
+        } }
+        ui.waitForIdle()
+        assertFalse("Unsafe initial prefix must remain pending", publication.ready)
+        mainThread { origin = 0.dp }
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithText(text, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() && publication.ready
+        }
+        ui.onNodeWithTag("fixed-prefix-text").assertTextEquals(text)
+        mainThread { origin = 240.dp }
+        ui.waitForIdle()
+        ui.onNodeWithTag("fixed-prefix-text").assertTextEquals(text)
+        assertFalse("Moving outside the edge must not falsely acknowledge paint", publication.ready)
+        mainThread { origin = 0.dp }
+        ui.waitUntil(5_000) { publication.ready }
+        ui.onNodeWithTag("fixed-prefix-text").assertTextEquals(text)
+    }
+
+    fun testProtectedCodeViewportKeepsInkAndPublishesAfterReturningToTop() {
+        val state = StreamingTailViewport(initiallyBounded = false)
+        val publication = MarkdownPaintPublication().apply { active = true }
+        val text = (1..80).joinToString("\n") { "echo HHHH $it" }
+        var code by mutableStateOf(app.daiyu.android.MarkdownBlock.Code(text, "sh", closed = true))
+        var hostCoordinates: LayoutCoordinates? = null
+        var hostPx = 0
+        var clearancePx = 0
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(themeMode =
+                app.daiyu.android.data.model.AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
+                val d = LocalDensity.current
+                hostPx = with(d) { 420.dp.roundToPx() }
+                clearancePx = with(d) { (96.dp + ChatTailClearance).roundToPx() }
+                Box(Modifier.size(320.dp, 420.dp).background(Color.White)
+                    .onPlaced { hostCoordinates = it }.testTag("protected-code-host")) {
+                    StreamingTailContainer(state, { hostCoordinates }, "protected-code-tail",
+                        userScrollEnabled = false, follows = { true }, clearance = { clearancePx },
+                        viewportHeight = { hostPx - clearancePx }, listViewportHeight = { hostPx },
+                        preserveTextClearance = true) {
+                        androidx.compose.runtime.CompositionLocalProvider(LocalMarkdownPaintPublication provides publication) {
+                            MarkdownCodeBlock(code, Int.MAX_VALUE, true)
+                        }
+                    }
+                }
+            }
+        } }
+        ui.mainClock.autoAdvance = false
+        try {
+            val viewport = ui.onNodeWithTag("markdown-code-viewport", useUnmergedTree = true)
+            fun range() = viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+            fun assertInk() {
+                val image = captureScreenNode(ui.onNodeWithTag("protected-code-host"), advanceAnimationClock = false).toPixelMap()
+                val rect = inkRect("protected-code-host", "markdown-code-viewport")
+                var ink = 0
+                for (y in ceil(rect.top + 6f).toInt() until minOf(image.height, floor(rect.bottom - 6f).toInt()))
+                    for (x in ceil(rect.left + 16f).toInt() until minOf(image.width, floor(rect.right - 16f).toInt()))
+                        if (inkDark(image[x, y])) ink++
+                assertTrue("The protected code viewport must contain actual text pixels", ink > 20)
+            }
+            ui.waitUntil(5_000) { ui.mainClock.advanceTimeByFrame(); publication.ready }
+            assertTrue(range().maxValue() > 0f)
+            assertEquals(0f, range().value(), 1f)
+            assertInk()
+            mainThread { code = code.copy(closed = false) }
+            repeat(8) { ui.mainClock.advanceTimeByFrame() }
+            assertEquals(range().maxValue(), range().value(), 1f)
+            mainThread { code = code.copy(closed = true) }
+            repeat(20) { ui.mainClock.advanceTimeBy(32); assertInk() }
+            ui.waitUntil(5_000) { ui.mainClock.advanceTimeByFrame(); publication.ready }
+            assertEquals(0f, range().value(), 1f)
+            ui.onNodeWithTag("markdown-code-text", useUnmergedTree = true).assertTextEquals(text)
+            assertInk()
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
     fun testShortTextDrawClearancePreservesGlyphButStopsAtSurface() {
@@ -492,14 +594,16 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             val glyphs = ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().map { node ->
                 val layouts = mutableListOf<TextLayoutResult>()
                 ui.runOnUiThread { node.config[SemanticsActions.GetTextLayoutResult].action!!(layouts) }
-                InkGlyph(layouts.single(), node.positionInRoot - h)
+                InkGlyph(layouts.single(), node.positionInRoot - h, node.size.height)
             }.sortedWith(compareBy<InkGlyph> { it.at.y }.thenBy { it.at.x })
             prefixes += glyphs.joinToString("|") { it.layout.layoutInput.text.text }
-            pendingLeaves = glyphs.any { it.at.y + it.layout.size.height > safe + .01f }
+            pendingLeaves = glyphs.any { it.at.y + it.extent > safe + .01f }
             val visible = glyphs.mapIndexedNotNull { index, candidate ->
-                if (candidate.at.y + candidate.layout.size.height <= safe + .01f) {
+                if (candidate.at.y + candidate.extent > safe + .01f) unsafeCandidates++
+                if (candidate.layout.layoutInput.text.any { !it.isWhitespace() } &&
+                    candidate.at.y + candidate.layout.size.height <= safe + .01f) {
                     approved[index] = candidate.layout
-                } else unsafeCandidates++
+                }
                 approved[index]?.takeIf { candidate.at.y + it.size.height <= safe + .01f }?.let {
                     InkGlyph(it, candidate.at)
                 }

@@ -113,13 +113,17 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                     ui.onNodeWithText("正在显示…").assertExists()
                     ui.onNodeWithText("已思考").assertDoesNotExist()
                     ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)
-                        .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "正在显示"))
-                    ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertDoesNotExist()
+                        .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))
+                    ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertExists()
+                    ui.onNodeWithText("正在思考…").assertDoesNotExist()
+                    ui.onNodeWithTag("work-process-header").assert(
+                        SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
                     pendingFrames++
                     false
                 } else true
             }
             assertTrue("Must observe actual draining frames", pendingFrames > 0)
+            await { ui.onAllNodesWithText("正在显示…").fetchSemanticsNodes().isEmpty() }
             ui.onNodeWithText("已思考").assertExists()
             ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))

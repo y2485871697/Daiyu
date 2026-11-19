@@ -81,19 +81,19 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn('revealResetEpoch = revealResetEpoch', self.chat)
         self.assertIn(
             'rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming, '
-            'terminal = generationComplete, resetEpoch = bodyRevealEpoch, '
+            'terminal = generationComplete, resetEpoch = revealResetEpoch, '
             'onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources, '
             'live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true, '
             'initialBaseline = initialBaseline, presentationLane = "body:${turn.listKey}")',
             ' '.join(self.chat.split()),
         )
         self.assertIn(
-            'val initialBaseline = remember(turn.listKey) { '
+            'val initialBaseline = remember(turn.listKey, visualScope, revealResetEpoch) { '
             'visualScope?.bodyBaseline(turn.listKey, bodySources, '
             'turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty()) }',
             ' '.join(self.chat.split()),
         )
-        self.assertIn('val bodyRevealEpoch = remember(turn.listKey) { revealResetEpoch }', self.chat)
+        self.assertNotIn('val bodyRevealEpoch = remember(turn.listKey)', self.chat)
         narration = (BASE / 'WorkflowNarration.kt').read_text()
         self.assertIn('private val bodyOwners = mutableSetOf<String>()', narration)
         self.assertIn('if (bodyOwners.add(key) && !baseline && live) emptyList() else sources.toList()', narration)

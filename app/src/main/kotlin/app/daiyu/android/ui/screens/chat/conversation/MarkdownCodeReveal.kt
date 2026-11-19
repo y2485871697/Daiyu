@@ -2,6 +2,14 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.neverEqualPolicy
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -101,5 +109,35 @@ internal class MarkdownCodeClip(private val layout: TextLayoutResult) {
         val line = layout.getLineForOffset(end)
         width = ceil(maxOf(precedingWidths[line], layout.getHorizontalPosition(end, usePrimaryDirection = true))).toInt()
         height = ceil(layout.getLineBottom(line)).toInt()
+    }
+}
+
+private class MarkdownCodeViewportFrame {
+    var coordinates by mutableStateOf<LayoutCoordinates?>(null, neverEqualPolicy())
+    var paintedToken: Any? = null
+}
+
+@Composable
+internal fun Modifier.markdownCodeViewportClearance(block: MarkdownBlock.Code, visibleCharacters: Int): Modifier {
+    val clearance = LocalStreamingTextClearance.current ?: return this
+    val publication = LocalMarkdownPaintPublication.current
+    val frame = remember(clearance) { MarkdownCodeViewportFrame() }
+    val token = remember(block.text, block.windowEnd, visibleCharacters) { Any() }
+    fun admitted(): Boolean = frame.coordinates?.takeIf { it.isAttached }?.let {
+        clearance.fits(it, it.size.height)
+    } == true
+    fun pending(): Boolean = frame.paintedToken !== token || !admitted()
+    fun positioned(coordinates: LayoutCoordinates) {
+        frame.coordinates = coordinates
+        publication?.setPending(frame, pending())
+    }
+    SideEffect { publication?.setPending(frame, pending()) }
+    DisposableEffect(publication, frame) { onDispose { publication?.setPending(frame, false) } }
+    return onPlaced(::positioned).onGloballyPositioned(::positioned).drawWithContent {
+        if (clearance.fits(frame.coordinates, kotlin.math.ceil(size.height).toInt())) {
+            drawContent()
+            frame.paintedToken = token
+        }
+        publication?.setPending(frame, pending())
     }
 }

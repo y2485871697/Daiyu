@@ -29,14 +29,17 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("preserveTextClearance && protectClearance() && followIntent()", admission)
         self.assertNotIn("state.textClearance.update(", drawing)
         self.assertIn("body.placeRelative(0, -state.scrollOffset.roundToInt())", placement)
-        self.assertIn("val safeBottom = list.size.height - current.clearance.toFloat()", source)
+        self.assertIn("val safeBottom = current.listHeight - current.clearance.toFloat()", source)
         self.assertIn("bottom - list.localPositionOf(leaf, Offset.Zero).y", source)
+        self.assertIn(".onGloballyPositioned { viewport ->", admission)
+        self.assertIn("val listHeight: Int, val viewportTop: Float, val viewportHeight: Int", source)
+        self.assertIn("if (attached) list!!.localPositionOf(viewport!!, Offset.Zero).y", source)
         typing = (CHAT.parent / "MarkdownTyping.kt").read_text()
         self.assertIn("currentCanAdvance && textClearance?.held != true", typing)
         self.assertIn("else { motion.pause(current); motion.visible(current) }", typing)
         markdown = (CHAT.parent / "MessageMarkdown.kt").read_text()
         for token in ("remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }",
-                      "clearance.fits(coordinates, candidate.size.height)", "painted[paintOffset] = accepted",
+                      "clearance.fits(coordinates, candidate.size.height)", "painted[paintOffset] = it",
                       "clearance.fits(frame.coordinates, displayed.size.height)", "frame.committed",
                       'BasicText(displayed?.layoutInput?.text ?: AnnotatedString("")',
                       "paintOffset + offset", "paintOffset + offsets[column]",

@@ -21,6 +21,7 @@ import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -222,13 +223,13 @@ internal fun Modifier.workflowInkClearance(): Modifier {
     val clearance = LocalStreamingTextClearance.current
     val item = LocalWorkflowItemLayout.current
     val frame = remember(clearance, item) { WorkflowPaintFrame() }
-    return onPlaced { frame.coordinates = it }.graphicsLayer {
+    return onPlaced { frame.coordinates = it }.onGloballyPositioned { frame.coordinates = it }.drawWithContent {
         val coordinates = frame.coordinates
         val parent = item?.coordinates
-        val height = coordinates?.takeIf { it.isAttached }?.size?.height ?: 0
+        val height = kotlin.math.ceil(size.height).toInt()
         val allocated = if (item != null && coordinates?.isAttached == true && parent?.isAttached == true)
-            parent.localPositionOf(coordinates, Offset.Zero).y + height <= item.allocatedHeight + .01f
+            parent.localPositionOf(coordinates, Offset.Zero).y + size.height <= item.allocatedHeight + .01f
         else item == null
-        alpha = if (height > 0 && allocated && clearance?.fits(coordinates, height) != false) 1f else 0f
+        if (allocated && clearance?.fits(coordinates, height) != false) drawContent()
     }
 }

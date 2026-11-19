@@ -52,6 +52,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.drawText
@@ -124,9 +125,13 @@ internal fun RevealedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?,
     sourceWindow: app.daiyu.android.MarkdownSourceWindow? = null,
 ) {
     val publication = reveal.publication
-    SideEffect { publication.active = true }
+    val sourceReady = reveal.ready(partId, text, sourceWindow)
+    SideEffect {
+        publication.active = true
+        if (sourceReady && blocks != null) reveal.presented(partId)
+    }
     CompositionLocalProvider(LocalMarkdownPaintPublication provides publication) {
-        val presented = modifier.onPlaced { reveal.presented(partId) }
+        val presented = modifier
         if (deferBlockReveal) ProjectedMessageMarkdown(text, blocks, presented,
             generationComplete = generationComplete, visibility = reveal.visibility(partId), sourceWindow = sourceWindow)
         else ProjectedMessageMarkdown(text, blocks, presented, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)
@@ -204,7 +209,15 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
         BasicText(text, modifier, style, softWrap = softWrap)
         return
     }
-    val frame = remember(clearance, paintOffset) { MarkdownTextFrame() }
+    val frame = remember(clearance, paintOffset) {
+        MarkdownTextFrame().apply {
+            committed = paintOffset?.let { painted[it] }?.takeIf { previous ->
+                val input = previous.layoutInput
+                input.style == style && input.softWrap == softWrap && text.length >= input.text.length &&
+                    text.subSequence(0, input.text.length) == input.text
+            }
+        }
+    }
     val measurer = rememberTextMeasurer(cacheSize = 1)
     val publication = LocalMarkdownPaintPublication.current
     val displayed = frame.committed
@@ -213,6 +226,21 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
         actual.layoutInput.text == text && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
             clearance.fits(frame.coordinates, actual.size.height)
     } == true
+    fun placed(coordinates: LayoutCoordinates) {
+        frame.coordinates = coordinates
+        frame.layout?.let { candidate ->
+            val previous = frame.committed ?: paintOffset?.let { painted[it] }
+            val accepted = when {
+                clearance.fits(coordinates, candidate.size.height) -> candidate
+                previous?.canPaintPrefixOf(candidate) == true -> previous
+                else -> null
+            }
+            if (frame.committed?.layoutInput != accepted?.layoutInput || frame.committed?.size != accepted?.size)
+                frame.committed = accepted
+            accepted?.let { if (paintOffset != null) painted[paintOffset] = it }
+        }
+        publication?.setPending(owner, !published())
+    }
     SideEffect { publication?.setPending(owner, !published()) }
     DisposableEffect(publication, owner) { onDispose { publication?.setPending(owner, false) } }
     BasicText(displayed?.layoutInput?.text ?: AnnotatedString(""), modifier.layout { measurable, constraints ->
@@ -221,25 +249,18 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
         val committed = measurable.measure(constraints.copy(minHeight = 0))
         layout(constraints.constrainWidth(maxOf(candidate.size.width, committed.width)),
             constraints.constrainHeight(maxOf(candidate.size.height, committed.height))) {
+            androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
+                frame.coordinates?.let(::placed)
+            }
             committed.placeRelative(0, 0)
         }
-    }.onPlaced { coordinates ->
-        frame.coordinates = coordinates
-        frame.layout?.let { candidate ->
-            val previous = frame.committed ?: paintOffset?.let { painted[it] }
-            frame.committed = when {
-                clearance.fits(coordinates, candidate.size.height) -> candidate
-                previous?.canPaintPrefixOf(candidate) == true &&
-                    clearance.fits(coordinates, previous.size.height) -> previous
-                else -> null
-            }
-            frame.committed?.let { accepted -> if (paintOffset != null) painted[paintOffset] = accepted }
-        }
+    }.onPlaced(::placed).onGloballyPositioned(::placed).drawWithContent {
+        if (displayed != null && frame.layout?.let { displayed.canPaintPrefixOf(it) } == true &&
+            clearance.fits(frame.coordinates, displayed.size.height)) drawContent()
+    }, displayed?.layoutInput?.style ?: style, softWrap = softWrap, onTextLayout = {
+        frame.rendered = it
         publication?.setPending(owner, !published())
-    }.graphicsLayer {
-        alpha = if (displayed != null && frame.layout?.let { displayed.canPaintPrefixOf(it) } == true &&
-            clearance.fits(frame.coordinates, displayed.size.height)) 1f else 0f
-    }, displayed?.layoutInput?.style ?: style, softWrap = softWrap, onTextLayout = { frame.rendered = it })
+    })
 }
 
 internal fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boolean {

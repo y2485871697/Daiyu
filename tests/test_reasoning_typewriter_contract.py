@@ -74,7 +74,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
     def test_terminal_state_is_independent_of_first_display_backlog(self):
         card = (CHAT / 'ReportedReasoningCard.kt').read_text()
         for token in ('val displayThinking = isThinking',
-                      'reasoningDisplayLabel(isThinking, displayThinking, displayPaused)', 'visualScope?.claimReasoning(ownerKey, summary.itemId)',
+                      'reasoningDisplayLabel(isThinking, isThinking || waitingForReveal, displayPaused)', 'visualScope?.claimReasoning(ownerKey, summary.itemId)',
                       'ticket.take() && revealGate && !stopped', 'paceTerminal = firstPresentation',
                       'initialBaseline = if (firstPresentation || queuedEmptyBaseline) emptyList() else null',
                       'enabled = revealEnabled && !paused', 'leadingIndicator?.invoke(displayThinking)',
@@ -87,6 +87,8 @@ class ReasoningTypewriterContract(unittest.TestCase):
         self.assertIn('completion.value && publication.settled(target)', typing)
         self.assertIn('published[it.source.id] == it.source', typing)
         self.assertNotIn('clearance?.paintPending', typing)
+        self.assertIn('val ready: Boolean get() = pending.isEmpty()', typing)
+        self.assertIn('if (sourceReady && blocks != null) reveal.presented(partId)', (CHAT / 'MessageMarkdown.kt').read_text())
         self.assertIn('firstPresentation || hasDisplayText || queuedEmptyBaseline && arrived', card)
         scope = (CHAT / 'WorkflowNarration.kt').read_text()
         self.assertIn('reasoningClaims.add(owner to itemId) && !baseline', scope)
@@ -104,7 +106,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
         self.assertEqual(1, typing.count('withFrameNanos { frameNanos ->'))
         self.assertIn('val clearance = LocalStreamingTextClearance.current\n'
                       '    val textClearance by rememberUpdatedState(clearance)', typing)
-        self.assertIn('if (currentCanAdvance && textClearance?.held != true) motion.advance(current, frameNanos, end) { currentAdvance() }', typing)
+        self.assertIn('if (currentCanAdvance && textClearance?.held != true && publication.ready) motion.advance(current, frameNanos, end) { currentAdvance() }', typing)
         self.assertIn('else { motion.pause(current); motion.visible(current) }', typing)
         self.assertIn('rememberUpdatedState(onVisibleAdvance)', typing)
 

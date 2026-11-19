@@ -12,7 +12,7 @@ class MarkdownStreamOptimizationContract(unittest.TestCase):
         self.assertIn("val frame = produceState(", typing)
         self.assertNotIn("val frame by produceState(", typing)
         self.assertIn("private val completion = derivedStateOf", typing)
-        self.assertIn("remember(identity, resetEpoch, frame) { MarkdownRevealBudgets(currentTarget, frame) }", typing)
+        self.assertIn("remember(identity, resetEpoch, frame, publication) { MarkdownRevealBudgets(currentTarget, frame, publication) }", typing)
         self.assertIn("remember(target, frame, exact, budgets)", typing)
         self.assertNotIn("reveal.limit(", chat)
         self.assertIn("reveal.limit(partId)", ui)

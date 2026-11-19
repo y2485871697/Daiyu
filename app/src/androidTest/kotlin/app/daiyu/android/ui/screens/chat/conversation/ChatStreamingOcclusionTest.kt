@@ -291,7 +291,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                         viewportHeight = { hostPx - clearancePx }, listViewportHeight = { hostPx },
                         preserveTextClearance = true) {
                         androidx.compose.runtime.CompositionLocalProvider(LocalMarkdownPaintPublication provides publication) {
-                            MarkdownCodeBlock(code, Int.MAX_VALUE, true)
+                            MarkdownCodeBlock(code, Int.MAX_VALUE, generationComplete = code.closed)
                         }
                     }
                 }

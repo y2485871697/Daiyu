@@ -693,6 +693,30 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
                     kotlin.math.abs(pixel.green - accent.green) < 0.06f &&
                     kotlin.math.abs(pixel.blue - accent.blue) < 0.06f) matches++
             }
+            val failure = if (matches < 8) junit.framework.AssertionFailedError(
+                "Expected progress accent in control, matching pixels=$matches") else null
+            if (failure != null) {
+                runCatching {
+                    val directory = java.io.File(activity.getExternalFilesDir(null),
+                        "visual-diagnostics/video-control-accent").apply { mkdirs() }
+                    java.io.File(directory, "state.txt").writeText(
+                        "matches=$matches pixels=${pixels.width}x${pixels.height} " +
+                            "accent=$accent density=${ui.density.density} " +
+                            "clock=${ui.mainClock.currentTime} autoAdvance=${ui.mainClock.autoAdvance}\n" +
+                            target.printToString())
+                    java.io.File(directory, "control.png").outputStream().use {
+                        image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                    instrumentation.uiAutomation.takeScreenshot()?.let { screen ->
+                        try {
+                            java.io.File(directory, "screen.png").outputStream().use {
+                                screen.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                            }
+                        } finally { screen.recycle() }
+                    }
+                }.onFailure { failure.addSuppressed(it) }
+                throw failure
+            }
             assertTrue("Expected progress accent in control, matching pixels=$matches", matches >= 8)
         } finally {
             image.asAndroidBitmap().recycle()

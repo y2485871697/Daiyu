@@ -6,6 +6,54 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownRevealTest {
+    @Test fun streamingKeepsSeventyCharactersPerSecondRegardlessOfBacklog() {
+        for (frameMillis in listOf(8L, 16L)) for (length in listOf(500, 5_000)) {
+            val state = MarkdownTypingState(emptyList())
+            state.update(emptyList(), 0, streaming = true, terminal = false)
+            val target = state.update(listOf(part("字".repeat(length))), 0, streaming = true, terminal = false)!!
+            val origin = 1_000_000_000L
+            assertEquals(0, state.advance(target, origin))
+            var elapsed = 0L
+            var shown = 0
+            var advances = 0
+            while (elapsed < 1_000_000_000L) {
+                elapsed = minOf(elapsed + frameMillis * 1_000_000L, 1_000_000_000L)
+                val next = state.advance(target, origin + elapsed) { advances++ }
+                val ideal = (elapsed * 70L / 1_000_000_000L).toInt()
+                assertTrue("No backlog acceleration: frame=$frameMillis elapsed=$elapsed next=$next", next in (ideal - 1)..ideal)
+                assertTrue("Each frame keeps the native pace", next - shown in 0..2)
+                shown = next
+            }
+            assertTrue("One second reveals 70 characters, not the backlog: $shown", shown in 69..70)
+            assertTrue(advances > 40)
+        }
+    }
+
+    @Test fun streamingPauseAndTerminalHandoffKeepTheSameCharacterPace() {
+        val state = MarkdownTypingState(emptyList())
+        state.update(emptyList(), 0, streaming = true, terminal = false)
+        val parts = listOf(part("字".repeat(500)))
+        val streaming = state.update(parts, 0, streaming = true, terminal = false)!!
+        var time = 1_000_000_000L
+        state.advance(streaming, time)
+        repeat(60) { time += 16_000_000L; state.advance(streaming, time) }
+        val paused = state.visible(streaming)
+        assertTrue(paused in 66..68)
+        state.pause(streaming)
+        time += 10_000_000_000L
+        assertEquals("Resuming cannot pay paused time as catch-up", paused, state.advance(streaming, time))
+        time += 16_000_000L
+        val resumed = state.advance(streaming, time)
+        assertTrue(resumed in paused + 1..paused + 2)
+        val terminal = state.update(parts, 0, streaming = false, terminal = true, paceTerminal = true)!!
+        assertEquals(resumed, terminal.start)
+        time += 16_000_000L
+        val next = state.advance(terminal, time)
+        assertTrue("Completion must not flush pending text", next in resumed..resumed + 2)
+        repeat(500) { time += 16_000_000L; state.advance(terminal, time) }
+        assertEquals(terminal.total, state.visible(terminal))
+    }
+
     @Test fun queuedFrameSeesPauseBeforeRecompositionAndResumeDoesNotCatchUp() {
         val control = ReplyPresentationControl(null, initiallyLive = true)
         val playback = ReplyPlayback(control, runtimePaused = false)

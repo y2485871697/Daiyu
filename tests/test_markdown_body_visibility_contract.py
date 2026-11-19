@@ -54,7 +54,8 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('initialBaseline = initialBaseline, presentationLane = "body:${turn.listKey}")', chat)
         self.assertNotIn('paceTerminal = true', narration)
         self.assertIn('expected.streaming || expected.paceTerminal', motion)
-        self.assertIn('else 70.0', motion)
+        self.assertIn('val speed = 70.0', motion)
+        self.assertNotIn('(end - position) * 7.0', motion)
         self.assertIn('250_000_000.0', motion)
         device = (Path(__file__).resolve().parents[1] /
                   'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ReasoningWorkflowTest.kt').read_text()

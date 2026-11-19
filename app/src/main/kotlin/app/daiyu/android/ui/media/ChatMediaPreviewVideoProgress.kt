@@ -54,14 +54,7 @@ internal fun ChatMediaPreviewVideoProgress(
     val interactions = remember { MutableInteractionSource() }
     val dragged by interactions.collectIsDraggedAsState()
     val scrubbing = seeking || dragged
-    val target = value.coerceIn(0f, 1f)
-    val position = remember { Animatable(target) }
-    val immediate = scrubbing || !playing || target == 0f || target == 1f || target < position.value
-    val fraction = if (immediate) target else position.value
-    LaunchedEffect(target, immediate) {
-        if (immediate) position.snapTo(target)
-        else position.animateTo(target, tween(200, easing = LinearEasing))
-    }
+    val fraction = value.coerceIn(0f, 1f)
     val height = remember { Animatable(if (playing) 1f else 0f) }
     var lastPhase by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(playing, scrubbing, enabled) {
@@ -79,7 +72,7 @@ internal fun ChatMediaPreviewVideoProgress(
     } else lastPhase
     val primary = MaterialTheme.colorScheme.primary
     Slider(
-        value = value,
+        value = fraction,
         onValueChange = { if (enabled) onValueChange(it) },
         onValueChangeFinished = { if (enabled) onValueChangeFinished() },
         enabled = enabled,

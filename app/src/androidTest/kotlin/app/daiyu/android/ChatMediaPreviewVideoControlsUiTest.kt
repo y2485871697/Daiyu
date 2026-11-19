@@ -45,9 +45,11 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
     private var scrubChanges = 0
     private var completedSeeks = 0
     private var pager: PagerState? = null
+    private var controlAccent = Color.Unspecified
 
     @Composable
     private fun Controls(ready: Boolean, active: Boolean) {
+        controlAccent = MaterialTheme.colorScheme.primary
         ChatMediaPreviewVideoControls(
             state = controls, active = active, ready = ready,
             onToggleVisibility = { surfaceTaps++; controls = controls.toggleVisibility() },
@@ -314,6 +316,7 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             ui.onNodeWithContentDescription("播放").assertIsDisplayed()
             assertAccentInk(node("chat-media-video-play-pause"), accent)
             assertAccentInk(node("chat-media-video-orientation"), accent)
+            assertAccentInk(node("chat-media-video-time"), accent)
             assertAccentInk(node("chat-media-video-progress"), accent)
             node("chat-media-video-progress").performTouchInput {
                 swipe(Offset(width * 0.2f, centerY), Offset(width * 0.7f, centerY), 200)
@@ -395,7 +398,7 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             ui.mainClock.autoAdvance = false
             assertProgressHandle(0f, accent)
             instrumentation.runOnMainSync { fraction = 0.86f }
-            ui.mainClock.advanceTimeBy(240)
+            ui.mainClock.advanceTimeByFrame()
             assertProgressHandle(0.86f, accent)
             instrumentation.runOnMainSync { fraction = 0.2f }
             ui.mainClock.advanceTimeByFrame()
@@ -407,6 +410,56 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             ui.mainClock.advanceTimeByFrame()
             assertProgressHandle(0f, accent)
         } finally { ui.mainClock.autoAdvance = auto }
+    }
+
+    fun testShortVideoForwardProgressHasNoTailCatchUpAnimation() {
+        val accent = Color(0xFF58C9D4)
+        var progress by mutableStateOf(ChatMediaPreviewVideoControlsState().prepared(2_000))
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = accent)) {
+                    Box(Modifier.widthIn(max = 360.dp).fillMaxWidth()
+                        .statusBarsPadding().height(64.dp).background(Color.Black)) {
+                        app.daiyu.android.ui.media.ChatMediaPreviewVideoProgress(
+                            value = progress.fraction, playing = progress.playRequested, seeking = false, enabled = true,
+                            onValueChange = {}, onValueChangeFinished = {}, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        } }
+        val auto = ui.mainClock.autoAdvance
+        try {
+            ui.mainClock.autoAdvance = false
+            for (position in listOf(0, 400, 800, 1_200, 1_500, 1_600, 1_700, 1_800, 1_900, 1_980)) {
+                instrumentation.runOnMainSync { progress = progress.positionChanged(position) }
+                ui.mainClock.advanceTimeByFrame()
+                assertProgressHandle(position / 2_000f, accent)
+            }
+            instrumentation.runOnMainSync { progress = progress.completed() }
+            ui.mainClock.advanceTimeByFrame()
+            assertProgressHandle(1f, accent)
+        } finally { ui.mainClock.autoAdvance = auto }
+    }
+
+    fun testPlaybackAndOrientationKeepEqualTouchTargetsAndOpticalIconSize() {
+        showControls(visible = true)
+        for (requested in listOf(true, false)) {
+            mainThread { controls = controls.copy(playRequested = requested) }
+            awaitVisualIdle()
+            val play = node("chat-media-video-play-pause").fetchSemanticsNode().boundsInRoot
+            val orientation = node("chat-media-video-orientation").fetchSemanticsNode().boundsInRoot
+            val target = with(ui.density) { 48.dp.toPx() }
+            assertEquals(target, play.width, 1f)
+            assertEquals(target, play.height, 1f)
+            assertEquals(play.width, orientation.width, 1f)
+            assertEquals(play.height, orientation.height, 1f)
+            val accent = ui.runOnIdle { controlAccent }
+            val playInk = accentInkBounds(ui.onNodeWithTag("chat-media-video-play-pause-icon", useUnmergedTree = true), accent)
+            val rotationInk = accentInkBounds(ui.onNodeWithTag("chat-media-video-orientation-icon", useUnmergedTree = true), accent)
+            val tolerance = with(ui.density) { 2.dp.toPx() }
+            assertEquals("rotation ink must match the visible play/pause glyph",
+                maxOf(playInk.width, playInk.height), maxOf(rotationInk.width, rotationInk.height), tolerance)
+        }
     }
 
     fun testVideoPosterRemainsVisibleWhileAuthorizedOriginalIsOpening() {
@@ -512,6 +565,7 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
     }
 
     fun testImageAndVideoDownloadKeepTheirFirstFrameOffsets() {
+        val accent = Color(0xFF58C9D4)
         for (mime in listOf("image/png", "video/mp4")) {
             var opened by mutableStateOf(true)
             val item = app.daiyu.android.ui.media.ChatMediaPreviewItem("download-$mime", mime, "media",
@@ -519,16 +573,20 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             try {
                 mainThread { activity.setContent {
                     AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                        if (opened) app.daiyu.android.ui.media.ChatMediaPreviewDialog(
-                            app.daiyu.android.ui.media.ChatMediaPreviewSelection(listOf(item), 0)) { opened = false }
+                        MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = accent)) {
+                            if (opened) app.daiyu.android.ui.media.ChatMediaPreviewDialog(
+                                app.daiyu.android.ui.media.ChatMediaPreviewSelection(listOf(item), 0)) { opened = false }
+                        }
                     }
                 } }
                 val initial = node("chat-media-download").fetchSemanticsNode().boundsInRoot
                 val viewport = node("chat-media-preview-viewport").fetchSemanticsNode().boundsInRoot
-                val inset = with(ui.density) { (if (mime.startsWith("video")) 24.dp else 8.dp).toPx() }
+                val inset = with(ui.density) { 24.dp.toPx() }
                 assertEquals("$mime initial top", inset, initial.top - viewport.top, 1.5f)
                 assertEquals("$mime initial right", inset, viewport.right - initial.right, 1.5f)
+                assertAccentInk(ui.onNodeWithContentDescription("下载原件", useUnmergedTree = true), accent)
                 awaitVisualIdle()
+                assertAccentInk(ui.onNodeWithContentDescription("下载原件", useUnmergedTree = true), accent)
                 assertEquals("$mime download must not jump after status bars hide", initial,
                     node("chat-media-download").fetchSemanticsNode().boundsInRoot)
             } finally { mainThread { opened = false }; ui.waitForIdle() }
@@ -600,6 +658,28 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             }.onFailure { failure.addSuppressed(it) }
             throw failure
         } finally { image?.asAndroidBitmap()?.recycle() }
+    }
+
+    private fun accentInkBounds(target: SemanticsNodeInteraction, accent: Color): androidx.compose.ui.geometry.Rect {
+        val image = captureScreenNode(target)
+        try {
+            val pixels = image.toPixelMap()
+            var left = pixels.width
+            var top = pixels.height
+            var right = -1
+            var bottom = -1
+            for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+                val pixel = pixels[x, y]
+                if (kotlin.math.abs(pixel.red - accent.red) < 0.06f &&
+                    kotlin.math.abs(pixel.green - accent.green) < 0.06f &&
+                    kotlin.math.abs(pixel.blue - accent.blue) < 0.06f) {
+                    left = minOf(left, x); top = minOf(top, y)
+                    right = maxOf(right, x); bottom = maxOf(bottom, y)
+                }
+            }
+            assertTrue("control must have accent ink", right >= left && bottom >= top)
+            return androidx.compose.ui.geometry.Rect(left.toFloat(), top.toFloat(), (right + 1).toFloat(), (bottom + 1).toFloat())
+        } finally { image.asAndroidBitmap().recycle() }
     }
 
     private fun assertAccentInk(target: SemanticsNodeInteraction, accent: Color) {

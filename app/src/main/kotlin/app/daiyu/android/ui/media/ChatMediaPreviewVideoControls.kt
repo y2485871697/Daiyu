@@ -27,7 +27,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
@@ -146,6 +145,7 @@ internal fun ChatMediaPreviewVideoControls(
                     Icon(
                         imageVector = if (state.playRequested) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         contentDescription = if (state.playRequested) "暂停" else "播放",
+                        modifier = Modifier.size(24.dp).testTag("chat-media-video-play-pause-icon"),
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 }
@@ -161,7 +161,7 @@ internal fun ChatMediaPreviewVideoControls(
                 )
                 Text(
                     text = "${chatMediaPreviewVideoTime(state.displayedPositionMillis)} / ${chatMediaPreviewVideoTime(state.durationMillis)}",
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.primary,
                     fontSize = 12.sp,
                     maxLines = 1,
                     modifier = Modifier.padding(end = 4.dp).testTag("chat-media-video-time"),
@@ -174,6 +174,8 @@ internal fun ChatMediaPreviewVideoControls(
                 ) {
                     Icon(Icons.Rounded.ScreenRotation,
                         contentDescription = if (landscape) "切换竖屏" else "切换横屏",
+                        // This glyph fills its viewport; inset it to match play/pause ink, not their touch targets.
+                        modifier = Modifier.size(24.dp).testTag("chat-media-video-orientation-icon").padding(4.dp),
                         tint = MaterialTheme.colorScheme.primary)
                 }
             }

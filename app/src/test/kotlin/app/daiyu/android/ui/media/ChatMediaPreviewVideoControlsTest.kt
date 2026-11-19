@@ -132,6 +132,18 @@ class ChatMediaPreviewVideoControlsTest {
         assertEquals(dragging, dragging.completed())
     }
 
+    @Test fun shortVideoUsesMillisecondFractionsThroughoutTheFinalSegment() {
+        for (duration in listOf(900, 1_980, 2_000, 2_150)) {
+            var state = ChatMediaPreviewVideoControlsState().prepared(duration)
+            for (position in listOf(0, duration / 2, duration * 3 / 4, duration - 100, duration - 20, duration - 1)) {
+                state = state.positionChanged(position)
+                assertEquals(position.toFloat() / duration, state.fraction, 0f)
+                assertTrue(state.playRequested)
+            }
+            assertEquals(1f, state.completed().fraction, 0f)
+        }
+    }
+
     @Test fun videoTimeUsesMinutesAndHoursWithoutNegativeValues() {
         assertEquals("0:00", chatMediaPreviewVideoTime(-1))
         assertEquals("0:09", chatMediaPreviewVideoTime(9_999))

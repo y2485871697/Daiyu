@@ -69,7 +69,10 @@ class PreviewDialogContract(unittest.TestCase):
     def test_media_download_first_frame_has_no_mutating_status_bar_padding(self):
         host = (MEDIA / 'ChatMediaPreviewHost.kt').read_text()
         self.assertNotIn('statusBarsPadding()', host)
-        self.assertIn('Modifier.align(Alignment.TopEnd).padding(if (video) 24.dp else 8.dp)', host)
+        self.assertIn('Modifier.align(Alignment.TopEnd).padding(24.dp)', host)
+        download = host.split('Icon(Icons.Rounded.Download', 1)[1].split('if (saving)', 1)[0]
+        self.assertIn('tint = MaterialTheme.colorScheme.primary', download)
+        self.assertNotIn('Color.White', download)
 
     def test_video_poster_survives_prepared_until_current_source_texture(self):
         video = (MEDIA / 'ChatMediaPreviewVideo.kt').read_text()
@@ -94,8 +97,9 @@ class PreviewDialogContract(unittest.TestCase):
         self.assertLess(video.index('controls = controls.finishSeeking()'),
                         video.index('view.seekTo(controls.positionMillis)', video.index('onSeekFinished =')))
         progress = (MEDIA / 'ChatMediaPreviewVideoProgress.kt').read_text()
-        self.assertIn('target == 0f || target == 1f', progress)
-        self.assertIn('val fraction = if (immediate) target else position.value', progress)
+        self.assertIn('val fraction = value.coerceIn(0f, 1f)', progress)
+        self.assertNotIn('position.animateTo', progress)
+        self.assertNotIn('Animatable(target)', progress)
         bridge = (SRC / 'ChatMediaPreviewBridge.kt').read_text()
         self.assertIn('displayLoader?.cachedVideo(video.expectedOwner, video.reference, 4096)', bridge)
         self.assertIn('if (!lease.isOpen()) null', bridge)
@@ -109,6 +113,26 @@ class PreviewDialogContract(unittest.TestCase):
     def test_project_identity_guard_accepts_media_port(self):
         import runpy
         runpy.run_path(str(ROOT / 'scripts/verify_project_identity.py'))['verify_tree'](ROOT)
+
+    def test_video_controls_time_and_icons_follow_the_shared_theme(self):
+        controls = (MEDIA / 'ChatMediaPreviewVideoControls.kt').read_text()
+        time = controls.split('text = "${chatMediaPreviewVideoTime(', 1)[1].split('IconButton(', 1)[0]
+        self.assertIn('color = MaterialTheme.colorScheme.primary', time)
+        self.assertNotIn('Color.White', time)
+        self.assertIn('Modifier.size(24.dp).testTag("chat-media-video-play-pause-icon")', controls)
+        self.assertIn('Modifier.size(24.dp).testTag("chat-media-video-orientation-icon").padding(4.dp)', controls)
+
+    def test_visible_native_progress_has_no_poll_and_tween_tail_lag(self):
+        video = (MEDIA / 'ChatMediaPreviewVideo.kt').read_text()
+        self.assertIn('controls.visible) {', video)
+        self.assertIn('if (!controls.visible) return@LaunchedEffect', video)
+        self.assertIn('withFrameNanos { controls = controls.positionChanged(view.currentPosition) }', video)
+        self.assertNotIn('delay(200)', video)
+        progress = (MEDIA / 'ChatMediaPreviewVideoProgress.kt').read_text()
+        self.assertIn('val fraction = value.coerceIn(0f, 1f)', progress)
+        self.assertIn('val playedX = size.width * fraction', progress)
+        self.assertNotIn('position.animateTo', progress)
+        self.assertIn('height.animateTo', progress)
 
 
 if __name__ == "__main__":

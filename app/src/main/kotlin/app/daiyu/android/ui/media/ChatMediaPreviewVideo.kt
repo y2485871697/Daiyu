@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -28,7 +29,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
@@ -140,16 +140,17 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
             failed = true
         }
     }
-    LaunchedEffect(view, prepared, shouldStage, controls.playRequested, controls.seeking, controls.seekPending) {
+    LaunchedEffect(view, prepared, shouldStage, controls.playRequested, controls.seeking, controls.seekPending, controls.visible) {
         if (!prepared || !shouldStage) return@LaunchedEffect
         if (!controls.shouldPlay(active, resumed)) {
             view.pause()
             return@LaunchedEffect
         }
         view.start()
+        if (!controls.visible) return@LaunchedEffect
+        controls = controls.positionChanged(view.currentPosition)
         while (true) {
-            delay(200)
-            controls = controls.positionChanged(view.currentPosition)
+            withFrameNanos { controls = controls.positionChanged(view.currentPosition) }
         }
     }
     BoxWithConstraints(modifier) {

@@ -28,6 +28,9 @@ import kotlin.math.abs
 internal fun workflowDisclosureExpandsUp(headerCenter: Float, viewport: Rect): Boolean =
     headerCenter >= viewport.center.y
 
+internal fun workflowDisclosureTopClearance(turnClearance: Float, disclosureBottom: Float, safeBottom: Float): Float =
+    minOf(turnClearance, disclosureBottom - safeBottom)
+
 internal val WorkflowDisclosureUp = SemanticsPropertyKey<Boolean>("WorkflowDisclosureUp")
 internal val WorkflowDisclosureGeometry = SemanticsPropertyKey<() -> String>("WorkflowDisclosureGeometry")
 
@@ -151,6 +154,16 @@ internal class WorkflowDisclosureMotion(
             else placed.positionInWindow().y + placed.size.height - anchorBottom
     }
 
+    private fun anchorClearance(): Float? {
+        val context = context ?: return null
+        val turnClearance = context.viewport.anchorClearance(context.itemKey) ?: return null
+        if (!anchorAtTop) return turnClearance
+        val placed = container?.takeIf { it.isAttached } ?: return null
+        val safe = context.viewport.bounds() ?: return null
+        return workflowDisclosureTopClearance(turnClearance,
+            placed.positionInWindow().y + placed.size.height, safe.bottom)
+    }
+
     private fun correctAnchor(settling: Boolean = false): Boolean {
         val context = context ?: return true
         val viewport = context.viewport
@@ -160,12 +173,12 @@ internal class WorkflowDisclosureMotion(
             viewport.active = null
             return true
         }
-        if (settling || abs(anchorDelta()) > .5f || (viewport.anchorClearance(context.itemKey) ?: 0f) > .5f) {
+        if (settling || abs(anchorDelta()) > .5f || (anchorClearance() ?: 0f) > .5f) {
             correctingAnchor = true
             try {
                 lastConsumed = viewport.correctAnchor(context.itemKey) {
                     val anchor = anchorDelta()
-                    val delta = maxOf(anchor, viewport.anchorClearance(context.itemKey) ?: anchor)
+                    val delta = maxOf(anchor, anchorClearance() ?: anchor)
                     // Keep the same scroll owner when the editor raises its safe bottom.
                     val shift = delta - anchor
                     anchorTop -= shift
@@ -174,7 +187,7 @@ internal class WorkflowDisclosureMotion(
                 }
             } finally { correctingAnchor = false }
         }
-        return abs(anchorDelta()) <= .5f && (viewport.anchorClearance(context.itemKey) ?: 0f) <= .5f
+        return abs(anchorDelta()) <= .5f && (anchorClearance() ?: 0f) <= .5f
     }
 
     private fun chooseDirection(): Boolean {

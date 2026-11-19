@@ -16,6 +16,17 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertIn('force || boundary.animationIdle', motion)
         self.assertIn('onDispose { motion.dispose() }', motion)
 
+    def test_top_anchor_limits_clearance_to_its_own_disclosure(self):
+        source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
+        clearance = source.split('private fun anchorClearance()', 1)[1].split('private fun correctAnchor(', 1)[0]
+        self.assertIn('if (!anchorAtTop) return turnClearance', clearance)
+        self.assertIn('placed.positionInWindow().y + placed.size.height, safe.bottom', clearance)
+        self.assertIn('minOf(turnClearance, disclosureBottom - safeBottom)', source)
+        correction = source.split('private fun correctAnchor(', 1)[1].split('private fun chooseDirection()', 1)[0]
+        self.assertEqual(3, correction.count('anchorClearance()'))
+        self.assertNotIn('viewport.anchorClearance(context.itemKey)', correction)
+        self.assertIn('val delta = maxOf(anchor, anchorClearance() ?: anchor)', correction)
+
     def test_bottom_reading_anchor_keeps_the_existing_physical_edge(self):
         motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         capture = motion.split('private fun captureAnchor(', 1)[1].split('private fun releaseAnchor(', 1)[0]

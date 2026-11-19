@@ -303,7 +303,8 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             await { advances > 0 }
             mainThread { reported = ReportedReasoning("r", pending, 1100L) }
             ui.mainClock.advanceTimeBy(16)
-            await { visibleText().contains(pending) }
+            ui.onNodeWithText("正在显示…").assertExists()
+            assertFalse("Hide while received text is still draining", visibleText().contains(pending))
             if (stop) instrumentation.runOnMainSync { stopped = true }
             else {
                 captureScreenNode(node("reported-reasoning-header:hidden:reasoning:r"), advanceAnimationClock = false)
@@ -917,6 +918,19 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             checkpoint("resumed-240-drawn")
             waiting("resumed-await-control-removal") { ui.onAllNodesWithTag("chat-control").fetchSemanticsNodes().isEmpty() }
             node("chat-send").assertContentDescriptionEquals("发送")
+            val workflowHeader = node("work-process-header")
+            if (workflowHeader.fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "已折叠")
+                workflowHeader.performClick()
+            waiting("completed-workflow-reopened") {
+                ui.onAllNodesWithTag("reported-reasoning-header:assistant:reasoning:r")
+                    .fetchSemanticsNodes().size == 1
+            }
+            val thoughtHeader = node("reported-reasoning-header:assistant:reasoning:r")
+            if (thoughtHeader.fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "已折叠")
+                thoughtHeader.performClick()
+            ui.mainClock.advanceTimeByFrame()
+            captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
+            assertEquals("Completed thought reopens at its drawn frontier", 240, count())
             repeat(12) {
                 ui.mainClock.advanceTimeByFrame()
                 assertEquals("No new input cannot advance text", 240, count())

@@ -119,7 +119,14 @@ class RunControlActivityTest : WiredActivityTestCase() {
         if (requiresWindowDraw) captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
     }
     private fun send(): Message {
-        setDraft("initial user"); node("chat-send").performClick()
+        setDraft("initial user")
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodes(hasTestTag("chat-send") and hasContentDescription("发送") and isEnabled())
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
+        assertDraft("initial user")
+        node("chat-send").assertContentDescriptionEquals("发送").assertIsEnabled().performClick()
         awaitTextSendResult(activity)
         assertDraft("")
         return checkNotNull(fixture.controller.active)

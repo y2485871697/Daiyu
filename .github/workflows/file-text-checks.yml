@@ -1,0 +1,92 @@
+name: 代鱼文件文本读取检查
+run-name: 代鱼文件文本读取检查 ${{ inputs.check_id }}
+on:
+  workflow_dispatch:
+    inputs:
+      expected_sha:
+        description: 检查目标完整提交SHA
+        type: string
+        required: true
+      check_id:
+        description: 本次定向检查标识
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: daiyu-file-text-checks-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  file-text:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    env:
+      EXPECTED_SHA: ${{ inputs.expected_sha }}
+      SKIP_JDK_VERSION_CHECK: 'true'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.expected_sha }}
+          persist-credentials: false
+      - name: 核对源码与定向契约
+        run: |
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          mkdir -p file-text-checks
+          set -o pipefail
+          PYTHONPATH=tests python3 -B -m unittest test_document_text_read_contract test_opened_file_attachment_contract -v 2>&1 | tee file-text-checks/contracts.log
+          python3 scripts/verify_boundaries.py
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6
+        with:
+          distribution: temurin
+          java-version: |
+            21
+            27
+          check-latest: true
+      - uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: 'platform-tools platforms/android-37.2 build-tools/37.0.0'
+          log-accepted-android-sdk-licenses: false
+      - name: 准备既有离线语音依赖（不打包）
+        run: ./gradlew --no-daemon :app:prepareOfflineSpeechRuntime
+      - name: 定向单测与生产测试源码编译（不打包）
+        run: |
+          set -o pipefail
+          ./gradlew --no-daemon --parallel --build-cache --console=plain \
+            -I scripts/cooperation/checks_only.init.gradle \
+            -PdaiyuCheckGraph=file-text-checks/task-graph.json \
+            :app:compileDebugKotlin :app:testDebugUnitTest \
+            --tests '*DocumentReadPolicyTest' --tests '*DocumentTextWindowTest' \
+            :app:compileDebugAndroidTestKotlin 2>&1 | tee file-text-checks/gradle.log
+      - name: 核对真实结果与零打包
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          reports = list(Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml'))
+          suites = [ET.parse(p).getroot() for p in reports]
+          assert {x.attrib['name'].rsplit('.', 1)[-1] for x in suites} == {'DocumentReadPolicyTest', 'DocumentTextWindowTest'}
+          assert all(int(x.attrib['tests']) > 0 for x in suites)
+          assert all(int(x.attrib.get(k, 0)) == 0 for x in suites for k in ('failures', 'errors', 'skipped'))
+          graph = json.loads(Path('file-text-checks/task-graph.json').read_text())
+          assert ':app:compileDebugKotlin' in graph and ':app:compileDebugAndroidTestKotlin' in graph
+          assert not any(p.is_file() and p.suffix.lower() in ('.apk', '.aab', '.apks') for p in Path('.').rglob('*'))
+          record = dict(source_sha=os.environ['GITHUB_SHA'], check_sha=os.environ['EXPECTED_SHA'], run_id=os.environ['GITHUB_RUN_ID'],
+                        attempt=int(os.environ['GITHUB_RUN_ATTEMPT']), tests=sum(int(x.attrib['tests']) for x in suites),
+                        classes=[x.attrib['name'] for x in suites], failures=0, errors=0, skipped=0, apk_built=False, instrumentation_run=False)
+          Path('file-text-checks/record.json').write_text(json.dumps(record, indent=2) + '\n')
+          print(json.dumps(record))
+          PY
+      - name: 上传准确检查证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 代鱼文件文本读取检查证据
+          path: |
+            file-text-checks/
+            app/build/test-results/testDebugUnitTest/
+          if-no-files-found: error

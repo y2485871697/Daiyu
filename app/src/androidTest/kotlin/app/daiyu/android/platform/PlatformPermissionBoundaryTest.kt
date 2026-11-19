@@ -51,6 +51,19 @@ class PlatformPermissionBoundaryTest : InstrumentationTestCase() {
         }
     }
 
+    fun testMalformedPercentEncodedUtf8RejectsBeforePermissionOrProviderAccess() {
+        val backend = AndroidPlatformReads(DenyingContext(instrumentation.targetContext))
+        for (tool in listOf(PlatformReadTool.FILE_METADATA, PlatformReadTool.FILE_TEXT)) {
+            val malformed = "content://fixture/document/scroll-flicker%EF%BC%881%EF%89.log"
+            val result = JSONObject(backend.read(tool, tool.schema.parse(JSONObject().put("uri", malformed).toString())) { false })
+            assertEquals("invalid_uri", result.getString("error"))
+            assertTrue(result.getString("hint").contains("exactly"))
+            val original = "content://fixture/document/scroll-flicker%EF%BC%881%EF%BC%89.log"
+            val denied = JSONObject(backend.read(tool, tool.schema.parse(JSONObject().put("uri", original).toString())) { false })
+            assertEquals("uri_read_grant_required", denied.getString("error"))
+        }
+    }
+
     fun testCancellationAndInvalidWindowsDoNotReadOrCheckPermissions() {
         val context = DenyingContext(instrumentation.targetContext)
         val backend = AndroidPlatformReads(context)

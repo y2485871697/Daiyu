@@ -14,8 +14,6 @@ import android.provider.OpenableColumns
 import app.daiyu.android.domain.tools.ToolArguments
 import org.json.JSONArray
 import org.json.JSONObject
-import java.nio.ByteBuffer
-import java.nio.charset.CodingErrorAction
 import java.util.Locale
 import java.util.TimeZone
 
@@ -83,7 +81,10 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
         val payload = delivered.toString()
         if (payload.length > MAX_RESULT_CHARS) failure("result_too_large").toString() else payload
     } catch (e: Rejected) {
-        failure(e.code, permissions = listOfNotNull(e.permission)).toString()
+        failure(e.code, permissions = listOfNotNull(e.permission)).apply {
+            if (e.code == "invalid_uri" || e.code == "uri_read_grant_required")
+                put("hint", "Copy the complete URI exactly from the user reference or list_files result, including every percent-encoded byte. Do not decode, rebuild, or guess another URI; this error applies only to the supplied URI.")
+        }.toString()
     } catch (_: SecurityException) {
         failure("permission_denied").toString()
     } catch (_: android.os.OperationCanceledException) {
@@ -167,7 +168,9 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
     }
 
     private fun explicitUri(arguments: ToolArguments): Uri {
-        val uri = Uri.parse(arguments.text("uri"))
+        val raw = arguments.text("uri")
+        if (!DocumentReadPolicy.validUriEncoding(raw)) throw Rejected("invalid_uri")
+        val uri = Uri.parse(raw)
         if (uri.scheme != "content" || uri.authority.isNullOrBlank() || uri.userInfo != null || uri.fragment != null)
             throw Rejected("invalid_uri")
         if (!OpenedFileStore(app).owns(uri) &&
@@ -183,10 +186,17 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
     }.apply { if (optBoolean("ok")) getJSONObject("data").put("scope", "explicit_content_uri_grant") }
 
     private fun fileText(uri: Uri, arguments: JSONObject, cancelled: () -> Boolean): JSONObject {
-        val mime = app.contentResolver.getType(uri) ?: throw Rejected("text_mime_required")
-        val supported = mime.startsWith("text/") || mime in setOf("application/json", "application/xml",
-            "application/javascript", "application/x-yaml", "application/yaml", "application/sql", "application/x-ndjson")
-        if (!supported) throw Rejected("unsupported_document_format")
+        val mime = app.contentResolver.getType(uri)
+        val nameFallback = DocumentReadPolicy.needsName(mime)
+        val name = if (nameFallback) {
+            checkReadCancellation(cancelled)
+            app.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                val column = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (column >= 0 && cursor.moveToFirst() && !cursor.isNull(column)) cursor.getString(column) else null
+            }
+        } else null
+        if (!DocumentReadPolicy.supports(mime, name))
+            throw Rejected(if (mime.isNullOrBlank()) "text_mime_required" else "unsupported_document_format")
         val offset = arguments.optLong("offset_bytes", 0)
         val line = if (arguments.has("start_line")) arguments.getLong("start_line") else null
         val query = if (arguments.has("query")) arguments.getString("query") else null
@@ -223,8 +233,30 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
                         return read
                     }
                 }
-                try { DocumentTextWindow.read(input, offset, line, arguments.optInt("line_count", 200), query, cancelled,
-                    seek = ::position, skipLines = arguments.optLong("skip_lines", 0)) }
+                val prefix = if (nameFallback) {
+                    val header = ByteArray(16)
+                    var count = 0
+                    while (count < header.size) {
+                        checkReadCancellation(cancelled)
+                        val read = input.read(header, count, header.size - count)
+                        if (read < 0) break
+                        if (read == 0) {
+                            val next = input.read()
+                            if (next < 0) break
+                            header[count++] = next.toByte()
+                        } else count += read
+                    }
+                    if (DocumentReadPolicy.binaryHeader(header, count)) throw Rejected("binary_document")
+                    java.io.ByteArrayInputStream(header, 0, count)
+                } else null
+                val textInput = if (prefix != null) java.io.SequenceInputStream(prefix, input) else input
+                try { DocumentTextWindow.read(textInput, offset, line, arguments.optInt("line_count", 200), query, cancelled,
+                    seek = { target ->
+                        if (position(target)) {
+                            prefix?.skip(prefix.available().toLong())
+                            true
+                        } else false
+                    }, skipLines = arguments.optLong("skip_lines", 0)) }
                 catch (_: java.nio.charset.CharacterCodingException) { throw Rejected("invalid_utf8") }
                 catch (error: IllegalArgumentException) {
                     throw Rejected(if (error.message in setOf("binary_document", "non_seekable_offset_limit", "offset_beyond_eof"))
@@ -232,7 +264,7 @@ internal class AndroidPlatformReads(context: Context, private val resultPolicy: 
                 }
             }
         } ?: throw Rejected("unavailable")
-        return JSONObject().put("scope", "explicit_content_uri_grant").put("mime_type", bounded(mime))
+        return JSONObject().put("scope", "explicit_content_uri_grant").put("mime_type", mime?.let(::bounded) ?: JSONObject.NULL)
             .put("text", result.text).put("offset_bytes", result.offset).put("next_offset_bytes", result.nextOffset)
             .put("first_line_in_scan", result.firstLine).put("lines_returned", result.lines)
             .put("remaining_lines_to_skip", result.remainingLines).put("scanned_bytes", result.scannedBytes)

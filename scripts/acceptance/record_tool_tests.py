@@ -15,6 +15,17 @@ import subprocess
 import sys
 
 
+FILE_TEXT_PLATFORM_CLASSES = (
+    "app.daiyu.android.platform.DocumentTextReadTest",
+    "app.daiyu.android.platform.PlatformPermissionBoundaryTest",
+)
+FILE_TEXT_MODULES = (
+    "test_document_text_read_contract", "test_opened_file_attachment_contract",
+    "test_acceptance_tool_receipt",
+    "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
+)
+
+
 HARNESS_PLATFORM_CLASSES = (
     'app.daiyu.android.storage.CloudContextUsageStoreTest',
     'app.daiyu.android.ControllerVideoFilesEntryTest',
@@ -1099,6 +1110,9 @@ def command_for(python, env):
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(SCROLL_POPUP_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *SCROLL_POPUP_MODULES, "-v"], "scroll-popup-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(FILE_TEXT_PLATFORM_CLASSES)):
+        return [python, "-B", "-m", "unittest", *FILE_TEXT_MODULES, "-v"], "file-text-targeted"
     if env.get("SMOKE_MODE") == "smoke" and env.get("SMOKE_TEST_CLASSES") == "app.daiyu.android.PlatformTest":
         return [python, "-B", "-m", "unittest", "test_platform_smoke_scope", "test_test_refresh_contract", "test_acceptance_tool_receipt", "-v"], "platform-targeted"
     if (env.get("SMOKE_MODE") == "smoke"

@@ -35,7 +35,8 @@ class ReasoningStreamCostContract(unittest.TestCase):
             self.assertIn(gate, ack)
         marker = (SRC / 'storage/ConversationCompletionMarkers.kt').read_text()
         self.assertIn('conversation_id=? AND message_id=? AND run_id=? AND token=?', marker)
-        observer = (SRC / 'ui/screens/chat/conversation/ChatMessageList.kt').read_text().split('// Read confirmation observes', 1)[1].split('Box(modifier.fillMaxSize())', 1)[0]
+        observer = (SRC / 'ui/screens/chat/conversation/ChatMessageList.kt').read_text().split('// Read confirmation observes', 1)[1].split('    SideEffect { onViewportReady(', 1)[0]
+        self.assertNotIn('LaunchedEffect(userMessageEntrance, listState)', observer)
         self.assertEqual(2, observer.count('withFrameNanos { }'))
         self.assertIn('completedVisibleTurns(visibleKeys, currentAssistants, readyTurns, revealedTurns)', observer)
         self.assertNotIn('currentTurns.filterIsInstance', observer)

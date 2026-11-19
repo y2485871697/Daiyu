@@ -67,7 +67,8 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertNotIn('workflowToolAppearance', content)
         self.assertIn('val timelineIndices = visibleIndices.filter', content)
         narration = (CHAT / 'WorkflowNarration.kt').read_text()
-        self.assertIn('entry.precedingText.all { currentReveal.ready(it.id, it.text, it.window) }', narration)
+        self.assertIn('if (!paused && playback?.paused != true) admission?.admit(keys)', narration)
+        self.assertNotIn('entry.precedingText.all { currentReveal.ready(it.id, it.text, it.window) }', narration)
         regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNodeMotionTest.kt').read_text()
         for name in ('testNewPendingToolAndFastCompletionShareActualArrival',
                      'testExistingToolReceiptUpdateDoesNotReplayItsBody',

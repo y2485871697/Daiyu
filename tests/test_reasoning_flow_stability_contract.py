@@ -55,8 +55,13 @@ class ReasoningFlowStabilityContractTest(unittest.TestCase):
 
     def test_resume_epoch_does_not_reset_handoff_or_close_a_blocked_prefix(self):
         chat = self.read('ChatMessageList.kt')
-        self.assertIn('remember(turn.listKey) { ReasoningHandoff(turn.reportedReasoning) }', chat)
+        handoff = chat.split('val handoff = remember(turn.listKey, visualScope) {', 1)[1].split('    }', 1)[0]
+        self.assertIn('visualScope?.handoff(turn.listKey, turn.reportedReasoning) ?: ReasoningHandoff(turn.reportedReasoning)', handoff)
+        self.assertNotIn('revealResetEpoch', handoff)
         self.assertNotIn('remember(turn.listKey, revealResetEpoch) { ReasoningHandoff', chat)
+        scope = self.read('WorkflowNarration.kt')
+        self.assertIn('private val handoffs = mutableMapOf<String, ReasoningHandoff>()', scope)
+        self.assertIn('handoffs.getOrPut(owner)', scope)
         self.assertIn('turn.status != RunStatus.RUNNING && prefix.size == turn.content.size', self.read('MarkdownTyping.kt'))
 
     def test_completed_thought_has_a_check_without_tool_success_fabrication(self):

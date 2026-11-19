@@ -153,8 +153,10 @@ class MarkdownAdmissionCompositionTest {
             assertFalse(reveal!!.settled)
             admitted.value = true
             repeat(5) { frame() }
-            assertEquals("Admission follows the complete received body", text.length, reveal!!.limit("answer"))
+            assertTrue("Admission must reveal a typed prefix", reveal!!.limit("answer") in 1 until text.length)
             assertTrue(advances > 0)
+            repeat(25) { frame() }
+            assertEquals(text.length, reveal!!.limit("answer"))
             val receivedFeedback = advances
             repeat(50) { frame() }
             assertEquals("Time cannot fabricate another received chunk", text.length, reveal!!.limit("answer"))
@@ -210,7 +212,7 @@ class MarkdownAdmissionCompositionTest {
             assertEquals(0, advances)
             parsed.value = projection(text)
             repeat(5) { frame() }
-            assertEquals("The accepted projection exposes its received suffix", text.length, reveal!!.limit("answer"))
+            assertTrue("The accepted projection must type its suffix", reveal!!.limit("answer") in prefix.length + 1 until text.length)
             assertTrue(advances > 0)
             repeat(25) { frame() }
             assertEquals(text.length, reveal!!.limit("answer"))

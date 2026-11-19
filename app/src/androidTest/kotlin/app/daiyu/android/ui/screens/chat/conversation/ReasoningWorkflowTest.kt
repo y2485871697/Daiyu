@@ -70,7 +70,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.onAllNodesWithContentDescription("复制回答").assertCountEquals(1)
     }
 
-    fun testNewTerminalReasoningRendersOnceAndNeverReactivatesOnReopen() {
+    fun testNewTerminalReasoningTypesOnceAndNeverReactivatesOnReopen() {
         val text = "新终态摘要" + "甲".repeat(96)
         runBlocking {
             projectMarkdown(listOf(text))
@@ -104,13 +104,20 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             mainThread { source = finalMessage }
+            var partialFrames = 0
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeByFrame()
                 completed()
                 val shown = body()
-                assertTrue("A first terminal snapshot must show no unreceived or replayed prefix", shown.isEmpty() || shown == text)
+                assertTrue("Only received terminal text may be revealed", text.startsWith(shown))
+                if (shown.length in 1 until text.length) {
+                    partialFrames++
+                    assertDisclosure("work-process-header", true)
+                    assertDisclosure(inner, true)
+                }
                 shown == text
             }
+            assertTrue("New terminal output must actually reveal a prefix", partialFrames > 0)
             assertTrue(advances.get() > 0)
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeByFrame()
@@ -285,8 +292,16 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 } else if (!currentText.isNullOrEmpty()) firstVisible = currentText
                 firstVisible != null
             }
-            assertEquals("The first received chunk appears after workflow disposal", firstChunk, firstVisible)
+            assertTrue("The first received chunk must actually type after workflow disposal", firstVisible!!.length in 1 until firstChunk.length)
+            assertTrue(firstChunk.startsWith(firstVisible!!))
             assertTrue(advances.get() > 0)
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                val shown = ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
+                    .firstOrNull()?.config?.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }.orEmpty()
+                assertTrue(firstChunk.startsWith(shown))
+                shown == firstChunk
+            }
             val beforeFeedback = advances.get()
             ui.mainClock.advanceTimeBy(512)
             val unchanged = ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
@@ -294,10 +309,16 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             assertEquals("Elapsed time cannot reveal output that has not arrived", firstChunk, unchanged)
             assertEquals("No fabricated visible feedback between received chunks", beforeFeedback, advances.get())
             mainThread { delivered = answer; done = true }
+            var suffixTyped = false
             ui.waitUntil(5_000) {
-                ui.mainClock.advanceTimeBy(32)
-                ui.onAllNodesWithText(answer, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() && settled.get()
+                ui.mainClock.advanceTimeByFrame()
+                val shown = ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
+                    .firstOrNull()?.config?.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }.orEmpty()
+                assertTrue(answer.startsWith(shown))
+                if (shown.length in firstChunk.length + 1 until answer.length) suffixTyped = true
+                shown == answer && settled.get()
             }
+            assertTrue("Appended received text must also type", suffixTyped)
             ui.onNodeWithText(answer, useUnmergedTree = true).assertIsDisplayed()
             if (workflow) {
                 ui.onNodeWithTag("work-process-header").performClick()
@@ -336,7 +357,15 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 if (!value.isNullOrEmpty()) first = value
                 first != null
             }
-            assertEquals("Confirmed narration follows the complete received chunk", text, first)
+            assertTrue("Confirmed narration must actually type", first!!.length in 1 until text.length)
+            assertTrue(text.startsWith(first!!))
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                val shown = ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes()
+                    .firstOrNull()?.config?.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }.orEmpty()
+                assertTrue(text.startsWith(shown))
+                shown == text
+            }
             assertTrue(advances.get() > 0)
             ui.onNodeWithTag("tool-step:t1").assertExists()
             mainThread { source = source.copy(status = RunStatus.COMPLETED) }

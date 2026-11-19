@@ -4,6 +4,7 @@ import app.daiyu.android.MarkdownBlock
 import app.daiyu.android.MarkdownInline
 import java.text.BreakIterator
 import java.util.Locale
+import kotlin.math.exp
 
 internal fun markdownInlineLength(nodes: List<MarkdownInline>): Int = nodes.sumOf { node ->
     when (node) {
@@ -175,8 +176,12 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         private set
     private var position = 0.0
     private var lastFrame = 0L
-    private var drainStart = 0L
-    private var drainPosition = 0.0
+    private var receivedEnd = 0
+    private var arrivalFrame = 0L
+    private var arrivalSeconds = .12
+    private var rate = 0.0
+    private var desiredRate = 0.0
+    private var resuming = false
     private var seenLive = false
     private var closed = false
 
@@ -190,13 +195,20 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         val appending = markdownTypingAppends(previous?.parts?.map { it.source } ?: baseline, sources)
         val mapped = if (previous != null && appending) mappedMarkdownPosition(previous, parts, position) else position
         val start = when {
-            !seenLive || closed || !appending -> total
+            !seenLive || closed && !paceTerminal || !appending -> total
             previous == null -> baselineLength.coerceAtMost(total)
             else -> mapped.toInt().coerceAtMost(total)
         }
         if (previous == null || position >= previous.total || !appending) lastFrame = 0L
         position = if (previous != null && appending && start < total) mapped.coerceAtMost(total.toDouble()) else start.toDouble()
-        if (!streaming) { drainStart = 0L; drainPosition = position }
+        receivedEnd = if (previous != null && appending) {
+            mappedMarkdownPosition(previous, parts, receivedEnd.toDouble()).toInt().coerceIn(start, total)
+        } else start
+        if (!appending) {
+            rate = 0.0
+            desiredRate = 0.0
+            arrivalFrame = 0L
+        }
         val next = MarkdownTypingTarget(parts, start, streaming, terminal, paceTerminal)
         target = next
         // An empty live body can still be waiting for its first classified answer.
@@ -210,8 +222,9 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
     fun pause(expected: MarkdownTypingTarget) {
         if (target !== expected) return
         lastFrame = 0L
-        drainStart = 0L
-        drainPosition = position
+        arrivalFrame = 0L
+        desiredRate = rate
+        resuming = true
     }
 
     fun finish(expected: MarkdownTypingTarget): Int {
@@ -226,8 +239,33 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         if (target !== expected) return expected.start
         val previous = position.toInt()
         val end = maxOf(previous, limit.coerceIn(0, expected.total))
-        // The frame accepts the received delta; layout and pause still own admission.
-        position = end.toDouble()
+        if (end <= previous) {
+            lastFrame = 0L
+            return previous
+        }
+        val arrived = (end - receivedEnd).coerceAtLeast(0)
+        if (arrived > 0) {
+            if (!resuming && arrivalFrame != 0L && frameNanos > arrivalFrame) {
+                val interval = ((frameNanos - arrivalFrame) / 1_000_000_000.0).coerceIn(.03, .3)
+                arrivalSeconds += (interval - arrivalSeconds) * .25
+            }
+            // Projection admission supplies the local arrival clock, not a fixed character rate.
+            if (!resuming || rate == 0.0) desiredRate = (end - position) / arrivalSeconds
+            if (rate == 0.0 || lastFrame == 0L && !resuming) rate = desiredRate
+            receivedEnd = end
+            arrivalFrame = frameNanos
+        }
+        if (lastFrame == 0L) {
+            // Start from this frontier; idle, pause and layout-blocked time buy no catch-up.
+            position = minOf(end.toDouble(), position + 1.0)
+        } else {
+            val seconds = ((frameNanos - lastFrame).coerceIn(0L, 50_000_000L)) / 1_000_000_000.0
+            rate += (desiredRate - rate) * (1.0 - exp(-seconds / .12))
+            val frameEnd = if (arrived > 1) previous + maxOf(1, (end - previous) / 2) else end
+            position = minOf(frameEnd.toDouble(), position + rate * seconds)
+        }
+        lastFrame = frameNanos
+        resuming = false
         if (position >= expected.total && expected.terminal) closed = true
         val shown = position.toInt().coerceIn(0, expected.total)
         if (shown > previous) onAdvance()

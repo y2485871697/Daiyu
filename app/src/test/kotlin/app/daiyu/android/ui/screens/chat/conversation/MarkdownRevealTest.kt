@@ -6,21 +6,44 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownRevealTest {
-    @Test fun streamingRevealsEachReceivedChunkOnTheNextAdmittedFrame() {
+    private fun drain(state: MarkdownTypingState, target: MarkdownTypingTarget, time: Long = 1_000_000_000L,
+        limit: Int = target.total, onAdvance: () -> Unit = {}): Int {
+        var previous = state.visible(target)
+        repeat(10_000) { frame ->
+            val shown = state.advance(target, time + frame * 16_000_000L, limit, onAdvance)
+            assertTrue("Frontier must stay within received admission", shown in previous..maxOf(previous, limit))
+            if (shown == limit) return shown
+            previous = shown
+        }
+        fail("Received output did not finish: $previous/$limit")
+        return previous
+    }
+
+    @Test fun streamingTypesInsideEveryReceivedChunkWithoutInventingOutput() {
         for (frameMillis in listOf(8L, 16L)) for (length in listOf(500, 5_000)) {
             val state = MarkdownTypingState(emptyList())
             state.update(emptyList(), 0, streaming = true, terminal = false)
             var time = 1_000_000_000L
-            var advances = 0
-            for (received in listOf(1, 7, 83, length)) {
+            var previous = 0
+            for (received in listOf(7, 83, length)) {
                 val target = state.update(listOf(part("字".repeat(received))), 0, true, false)!!
-                time += frameMillis * 1_000_000L
-                assertEquals(received, state.advance(target, time) { advances++ })
-                val before = advances
+                var partial = false
+                var shown = previous
+                repeat(100) {
+                    time += frameMillis * 1_000_000L
+                    val next = state.advance(target, time)
+                    assertTrue(next in shown..received)
+                    if (next in previous + 1 until received) partial = true
+                    shown = next
+                }
+                assertTrue("Each received batch must actually type", partial)
+                assertEquals(received, shown)
+                var advances = 0
                 assertEquals(received, state.advance(target, time + 10_000_000_000L) { advances++ })
-                assertEquals("Time alone cannot fabricate received output", before, advances)
+                assertEquals("Time alone cannot fabricate received output", 0, advances)
+                time += 10_000_000_000L
+                previous = received
             }
-            assertEquals(4, advances)
         }
     }
 
@@ -29,16 +52,17 @@ class MarkdownRevealTest {
         state.update(emptyList(), 0, streaming = true, terminal = false)
         val parts = listOf(part("字".repeat(500)))
         val streaming = state.update(parts, 0, streaming = true, terminal = false)!!
-        assertEquals(67, state.advance(streaming, 1_000_000_000L, 67))
+        assertEquals(67, drain(state, streaming, limit = 67))
         state.pause(streaming)
         assertEquals(67, state.visible(streaming))
         assertEquals(67, state.advance(streaming, 11_000_000_000L, 67))
-        assertEquals(83, state.advance(streaming, 11_016_000_000L, 83))
+        val resumed = state.advance(streaming, 11_016_000_000L, 83)
+        assertTrue("Resume starts at the current frontier, not at the whole admission", resumed in 68 until 83)
         val terminal = state.update(parts, 0, streaming = false, terminal = true, paceTerminal = true)!!
-        assertEquals(83, terminal.start)
-        assertEquals("Completion cannot bypass layout admission", 83,
-            state.advance(terminal, 21_000_000_000L, 83))
-        assertEquals(terminal.total, state.advance(terminal, 21_016_000_000L))
+        assertEquals(resumed, terminal.start)
+        assertEquals("Completion cannot bypass layout admission", resumed,
+            state.advance(terminal, 21_000_000_000L, resumed))
+        assertEquals(terminal.total, drain(state, terminal, 21_016_000_000L))
     }
 
     @Test fun queuedFrameSeesPauseBeforeRecompositionAndResumeDoesNotCatchUp() {
@@ -59,19 +83,35 @@ class MarkdownRevealTest {
                 state.visible(target)
             }
         }
-        assertEquals(7, queuedFrame(1_000_000_000L))
+        assertEquals(7, drain(state, target, limit = 7))
         val before = advances
         control.pause(true)
         assertTrue(currentCanAdvance.value)
         assertSame(playback, currentPlayback.value)
         admitted = 19
-        assertEquals(7, queuedFrame(1_116_000_000L))
         assertEquals(7, queuedFrame(11_116_000_000L))
+        assertEquals(7, queuedFrame(21_116_000_000L))
         assertEquals(before, advances)
         control.pause(false)
-        assertEquals(19, queuedFrame(21_116_000_000L))
-        assertEquals(19, queuedFrame(31_166_000_000L))
-        assertEquals("Resume only admits the current received frontier", before + 1, advances)
+        assertEquals(8, queuedFrame(31_116_000_000L))
+        assertTrue("The next resumed frame must not rush the paused backlog", queuedFrame(31_132_000_000L) < 19)
+    }
+
+    @Test fun pausedAndLayoutBlockedTimeCannotChangeTheResumedPace() {
+        fun resumed(delay: Long): List<Int> {
+            val state = MarkdownTypingState(emptyList())
+            state.update(emptyList(), 0, true, false)
+            val target = state.update(listOf(part("字".repeat(500))), 0, true, false)!!
+            state.advance(target, 1_000_000_000L)
+            state.advance(target, 1_016_000_000L)
+            state.pause(target)
+            val appended = state.update(listOf(part("字".repeat(5_000))), 0, true, false)!!
+            return (0..4).map { state.advance(appended, 1_032_000_000L + delay + it * 16_000_000L) }
+        }
+        val short = resumed(0L)
+        assertEquals(short, resumed(60_000_000_000L))
+        assertTrue(short.zipWithNext().all { (a, b) -> b - a <= 68 })
+        assertTrue(short.last() < 500)
     }
 
     @Test fun frameGatePreservesDisabledRuntimePausedAndExplicitFinishSemantics() {
@@ -127,7 +167,7 @@ class MarkdownRevealTest {
         val state = MarkdownTypingState(listOf(source("")))
         state.update(listOf(part("")), 0, true, false)
         val old = state.update(listOf(MarkdownTypingPart(source("&amp"), 4, "&amp")), 0, true, false)!!
-        assertEquals(3, state.advance(old, 1_000_000_000, 3))
+        assertEquals(3, drain(state, old, limit = 3))
         val next = state.update(listOf(MarkdownTypingPart(source("&amp;XYZ"), 4, "&XYZ")), 0, true, false)!!
         assertEquals(1, next.start)
         assertEquals("&", next.parts.single().displayed.take(next.start))
@@ -152,15 +192,15 @@ class MarkdownRevealTest {
         val state = MarkdownTypingState(emptyList())
         state.update(emptyList(), 0, true, false)
         val target = state.update(listOf(part("note", "note"), part("x".repeat(500), "answer")), 0, false, true)!!
-        assertEquals(4, state.advance(target, 1_000_000_000L, 4))
+        assertEquals(4, drain(state, target, limit = 4))
         assertEquals(4, state.advance(target, 1_250_000_000L, 4))
         assertEquals(4, state.visible(target))
         assertEquals(0, target.limit("answer", state.visible(target)))
         state.pause(target)
         assertEquals(4, state.advance(target, 9_000_000_000L, 4))
-        assertEquals(12, state.advance(target, 9_016_000_000L, 12))
+        assertEquals(12, drain(state, target, 9_016_000_000L, 12))
         assertEquals(8, target.limit("answer", state.visible(target)))
-        assertEquals(target.total, state.advance(target, 9_032_000_000L))
+        assertEquals(target.total, drain(state, target, 10_000_000_000L))
     }
 
     @Test fun existingMessagesAndRemountsAreVisibleImmediately() {
@@ -228,7 +268,8 @@ class MarkdownRevealTest {
             streaming = false, terminal = true, paceTerminal = true)!!
         assertEquals(0, answer.start)
         assertEquals(0, state.visible(answer))
-        assertEquals(text.length, state.advance(answer, 1_000_000_000L))
+        assertTrue(state.advance(answer, 1_000_000_000L) in 1 until text.length)
+        assertEquals(text.length, drain(state, answer, 1_016_000_000L))
     }
 
     @Test fun reconnectWindowCompletionKeepsThePartiallyRevealedBudget() {
@@ -248,7 +289,7 @@ class MarkdownRevealTest {
         assertEquals(visible, terminal.start)
         assertEquals("Completion cannot bypass the admitted frontier", visible,
             state.advance(terminal, 1_100_000_000L, visible))
-        assertEquals(terminal.total, state.advance(terminal, 1_116_000_000L))
+        assertEquals(terminal.total, drain(state, terminal, 1_116_000_000L))
     }
 
     @Test fun changedReconnectRangesOrContentRemainReplacements() {
@@ -280,7 +321,7 @@ class MarkdownRevealTest {
         val admitted = state.update(listOf(part("answer")), 0, streaming = false, terminal = true)!!
         assertEquals(0, admitted.start)
         state.advance(admitted, 1_000_000_000)
-        assertEquals(6, state.advance(admitted, 1_250_000_000))
+        assertEquals(6, drain(state, admitted, 1_016_000_000L))
     }
 
     @Test fun liveBodyNeedNotObserveAStreamingPhaseToRevealItsFirstAnswer() {
@@ -289,10 +330,12 @@ class MarkdownRevealTest {
         val answer = state.update(listOf(part("x".repeat(500))), 0, streaming = false, terminal = true)!!
         assertEquals(0, answer.start)
         var advances = 0
-        assertEquals(answer.total, state.advance(answer, 1_000_000_000L) { advances++ })
-        assertEquals(1, advances)
-        assertEquals(answer.total, state.advance(answer, 1_250_000_000L) { advances++ })
-        assertEquals(1, advances)
+        assertTrue(state.advance(answer, 1_000_000_000L) { advances++ } in 1 until answer.total)
+        assertEquals(answer.total, drain(state, answer, 1_016_000_000L) { advances++ })
+        assertTrue("New terminal output must have multiple visible advances", advances > 1)
+        val completed = advances
+        assertEquals(answer.total, state.advance(answer, 2_000_000_000L) { advances++ })
+        assertEquals(completed, advances)
         val edited = state.update(listOf(part("x".repeat(501))), 0, streaming = false, terminal = true)!!
         assertEquals("Completed edits still use a silent baseline", 501, edited.start)
     }
@@ -322,17 +365,19 @@ class MarkdownRevealTest {
             val answer = state.update(listOf(part("字".repeat(500))), 0, streaming = false, terminal = terminal,
                 paceTerminal = true)!!
             var advances = 0
-            assertEquals(17, state.advance(answer, 1_000_000_000L, 17) { advances++ })
+            assertEquals(17, drain(state, answer, limit = 17) { advances++ })
             state.pause(answer)
             assertEquals(17, state.visible(answer))
             assertEquals(17, state.advance(answer, 11_000_000_000L, 17) { advances++ })
-            assertEquals(83, state.advance(answer, 11_016_000_000L, 83) { advances++ })
-            assertEquals(answer.total, state.advance(answer, 11_032_000_000L) { advances++ })
-            assertEquals(3, advances)
+            assertTrue(state.advance(answer, 11_016_000_000L, 83) { advances++ } in 18 until 83)
+            assertEquals(83, drain(state, answer, 11_032_000_000L, 83) { advances++ })
+            assertEquals(answer.total, drain(state, answer, 12_000_000_000L) { advances++ })
+            assertTrue(advances > 3)
             state.update(answer.parts, 0, streaming = false, terminal = true, paceTerminal = true)
             val edited = state.update(listOf(part("字".repeat(501))), 0, streaming = false, terminal = true,
                 paceTerminal = true)!!
-            assertEquals("Editing a completed answer stays silent", 501, edited.start)
+            assertEquals("A newly received terminal append keeps the current frontier", 500, edited.start)
+            assertEquals(501, drain(state, edited, 20_000_000_000L))
         }
     }
 
@@ -345,7 +390,7 @@ class MarkdownRevealTest {
         val terminal = state.update(listOf(part("x".repeat(300))), 0, false, true)!!
         assertTrue(terminal.start < terminal.total)
         state.advance(terminal, 2_000_000_000)
-        assertEquals(300, state.advance(terminal, 2_250_000_000))
+        assertEquals(300, drain(state, terminal, 2_016_000_000L))
         val edited = state.update(listOf(part("x".repeat(301))), 0, false, true)!!
         assertEquals(301, edited.start)
     }
@@ -367,17 +412,19 @@ class MarkdownRevealTest {
     @Test fun receivedFrontierDoesNotDependOnRefreshRate() {
         fun shown(frame: Long): Int {
             val state = MarkdownTypingState(listOf(source("")))
-            val target = state.update(listOf(part("x".repeat(100))), 0, true, false)!!
+            val target = state.update(listOf(part("x".repeat(10_000))), 0, true, false)!!
             var time = 1_000_000_000L
             var visible = state.advance(target, time)
-            while (time < 1_200_000_000L) {
-                time = minOf(time + frame, 1_200_000_000L)
+            while (time < 1_060_000_000L) {
+                time = minOf(time + frame, 1_060_000_000L)
                 visible = state.advance(target, time)
             }
             return visible
         }
-        assertEquals(100, shown(16_666_667))
-        assertEquals(100, shown(8_333_333))
+        val slow = shown(16_666_667)
+        val fast = shown(8_333_333)
+        assertTrue(slow in 1 until 10_000)
+        assertEquals(slow.toDouble(), fast.toDouble(), 1.0)
     }
 
     @Test fun everyPrefixIsSurrogateAndCombiningBoundarySafe() {

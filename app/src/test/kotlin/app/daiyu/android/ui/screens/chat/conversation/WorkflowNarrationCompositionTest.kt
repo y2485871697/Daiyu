@@ -84,8 +84,10 @@ class WorkflowNarrationCompositionTest {
             assertEquals(0, advances)
             admitted.value = true
             repeat(5) { frame() }
-            assertEquals(text.length, narration!!.reveal.limit("narration"))
+            assertTrue(narration!!.reveal.limit("narration") in 1 until text.length)
             assertTrue(advances > 0)
+            until { narration!!.reveal.settled }
+            assertEquals(text.length, narration!!.reveal.limit("narration"))
 
             expanded.value = false
             repeat(5) { frame() }
@@ -108,7 +110,7 @@ class WorkflowNarrationCompositionTest {
             paused.value = false
             repeat(5) { frame() }
             val resumedLimit = narration!!.reveal.limit("narration")
-            assertEquals("Resume follows the received projection without paying paused time", resumedText.length, resumedLimit)
+            assertTrue("Resume must continue typing without paying paused time", resumedLimit in 601 until resumedText.length)
             assertTrue(advances > closedAdvances)
             running.value = false
             repeat(25) { frame() }
@@ -170,7 +172,7 @@ class WorkflowNarrationCompositionTest {
             release.countDown()
             until { narration!!.projection?.sources == listOf(full) }
             repeat(4) { frame() }
-            assertEquals(full.length, narration!!.reveal.limit("n"))
+            assertTrue(narration!!.reveal.limit("n") in 2 until full.length)
             assertTrue(advances > 0)
             until { narration!!.reveal.settled }
             assertEquals(full.length, narration!!.reveal.limit("n"))
@@ -216,7 +218,7 @@ class WorkflowNarrationCompositionTest {
             text.value = pending
             parsed.value = projection(pending)
             until { advances > 0 }
-            assertEquals(pending.length, reveal!!.limit("r"))
+            assertTrue(reveal!!.limit("r") in first.length + 1 until pending.length)
 
             text.value = replacement
             frame()
@@ -234,7 +236,7 @@ class WorkflowNarrationCompositionTest {
             text.value = next
             parsed.value = projection(next)
             until { advances > paused }
-            assertEquals(next.length, reveal!!.limit("r"))
+            assertTrue(reveal!!.limit("r") in replacement.length + 1 until next.length)
             until { reveal!!.settled }
             assertEquals(next.length, reveal!!.limit("r"))
         } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }

@@ -49,7 +49,11 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
     def test_received_answer_obeys_layout_admission_without_a_synthetic_rate(self):
         motion = (BASE / 'MarkdownReveal.kt').read_text()
         self.assertIn('val end = maxOf(previous, limit.coerceIn(0, expected.total))', motion)
-        self.assertIn('position = end.toDouble()', motion)
+        self.assertIn('position = minOf(frameEnd.toDouble(), position + rate * seconds)', motion)
+        self.assertIn('desiredRate = rate', motion)
+        self.assertIn('lastFrame = 0L', motion)
+        self.assertIn('resuming = true', motion)
+        self.assertNotIn('position = end.toDouble()', motion)
         self.assertIn('if (shown > previous) onAdvance()', motion)
         self.assertIn('if (position >= expected.total && expected.terminal) closed = true', motion)
         self.assertNotIn('val speed = 70.0', motion)

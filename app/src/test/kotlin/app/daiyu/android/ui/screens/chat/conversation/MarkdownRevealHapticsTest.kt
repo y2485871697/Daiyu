@@ -35,9 +35,9 @@ class MarkdownRevealHapticsTest {
         assertEquals(0, f.frame(target, 1000, 0))
         assertTrue(f.requests.isEmpty())
         assertEquals(0, f.advances)
-        f.frame(target, 1016, 1); assertEquals(1, f.requests.size)
-        f.frame(target, 1032, 2); assertEquals(1, f.requests.size)
-        f.frame(target, 1048, 3); assertEquals(2, f.requests.size)
+        f.frame(target, 1016); assertEquals(1, f.requests.size)
+        f.frame(target, 1032); assertEquals(1, f.requests.size)
+        f.frame(target, 1048); assertEquals(2, f.requests.size)
         assertEquals(3, f.advances)
         assertEquals(2, f.requests.size)
         assertTrue(f.requests.all { it.kind == HapticKind.TICK })
@@ -45,17 +45,27 @@ class MarkdownRevealHapticsTest {
         assertEquals(2, f.requests.size)
     }
 
-    @Test fun terminalArrivalEmitsOneVisibleAdvanceWithoutAClockDrivenDrain() {
+    @Test fun terminalArrivalTypesWithOneFeedbackPerVisibleFrame() {
         val f = Fixture()
         val streaming = f.target("x".repeat(200))
-        assertEquals(200, f.frame(streaming, 1000))
+        assertEquals(1, f.frame(streaming, 1000))
         val terminal = f.target("x".repeat(220), streaming = false, terminal = true)
-        val before = f.advances
-        assertEquals(220, f.frame(terminal, 1100))
-        assertEquals(before + 1, f.advances)
+        var shown = f.motion.visible(terminal)
+        var time = 1016L
+        while (shown < terminal.total && time < 5000L) {
+            val before = f.advances
+            val next = f.frame(terminal, time)
+            assertEquals(before + if (next > shown) 1 else 0, f.advances)
+            assertTrue(next in shown..terminal.total)
+            shown = next
+            time += 16
+        }
+        assertEquals(terminal.total, shown)
+        assertTrue(f.advances > 1)
         val done = f.requests.size
-        assertEquals(220, f.frame(terminal, 1350))
-        assertEquals(before + 1, f.advances)
+        val advances = f.advances
+        assertEquals(terminal.total, f.frame(terminal, time + 1000))
+        assertEquals(advances, f.advances)
         f.engine.drain()
         assertEquals(done, f.requests.size)
     }
@@ -69,10 +79,10 @@ class MarkdownRevealHapticsTest {
         var admitted = 0
         for (time in 1016L..1320L step 16L) f.frame(target, time, ++admitted)
         val before = f.requests.size
-        assertEquals(admitted, f.motion.visible(target))
+        assertTrue(f.motion.visible(target) in 1..admitted)
         for (time in 1336L..2000L step 16L) f.frame(target, time, ++admitted)
         assertTrue(f.requests.size > before + 10)
-        assertEquals(admitted, f.motion.visible(target))
+        assertTrue(f.motion.visible(target) in 1..admitted)
         assertTrue(f.requests.all { it.kind == HapticKind.TICK })
         f.engine.updateSettings(HapticSettings(generation = false))
         val muted = f.requests.size
@@ -95,14 +105,14 @@ class MarkdownRevealHapticsTest {
 
     @Test fun liveSettingsGateAndIntensityAreNotDuplicatedInTheRenderer() {
         val f = Fixture(); val target = f.target("x".repeat(500))
-        f.frame(target, 1000, 0); f.frame(target, 1050, 1)
+        f.frame(target, 1000, 0); f.frame(target, 1050)
         val before = f.requests.size
         f.engine.updateSettings(HapticSettings(generation = false))
-        f.frame(target, 1100, 2); assertEquals(before, f.requests.size)
+        f.frame(target, 1100); assertEquals(before, f.requests.size)
         f.engine.updateSettings(HapticSettings(touch = false))
-        f.frame(target, 1150, 3); assertEquals(before, f.requests.size)
+        f.frame(target, 1150); assertEquals(before, f.requests.size)
         f.engine.updateSettings(HapticSettings(intensity = HapticIntensity.HIGH))
-        f.frame(target, 1200, 4)
+        f.frame(target, 1200)
         assertEquals(HapticIntensity.HIGH, f.requests.last().intensity)
         assertEquals(before + 1, f.requests.size)
     }

@@ -304,7 +304,7 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
             var count = 0
             for (y in 0 until image.height) for (x in 0 until image.width) {
                 val c = image[x, y]
-                if (c.red > .95f && c.blue > .95f && c.green < .5f) count++
+                if (c.red > c.green + .15f && c.blue > c.green + .15f) count++
             }
             return count
         }
@@ -318,7 +318,9 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
             node("image_attachments").assertDoesNotExist()
             pixels()
             ui.mainClock.advanceTimeBy(32)
-            assertTrue("a removed real chip must still have exit pixels", pixels() > 0)
+            val remaining = node("composer-attachment-exit").fetchSemanticsNode().boundsInRoot.height
+            assertTrue("real chip pixel sample must occur before height reaches zero: $remaining", remaining > 0f)
+            assertTrue("a removed real chip must still have exit pixels at height=$remaining", pixels() > 0)
             ui.mainClock.advanceTimeBy(240)
             assertEquals(0, pixels())
         } finally { ui.mainClock.autoAdvance = true }

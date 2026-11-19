@@ -29,10 +29,13 @@ class MediaPresentationHandoffContract(unittest.TestCase):
 
     def test_exit_retains_only_drawn_pixels_and_uses_the_height_clock(self):
         source = (SRC / 'ui/screens/chat/conversation/ComposerAttachmentExit.kt').read_text()
-        self.assertIn('rememberGraphicsLayer()', source)
+        self.assertIn('frame.bitmap = ImageBitmap(width, height)', source)
+        self.assertIn('draw(this, layoutDirection, checkNotNull(frame.canvas), size)', source)
+        self.assertIn('this@drawWithContent.drawContent()', source)
+        self.assertIn('drawImage(pixels, topLeft = Offset(0f, size.height - pixels.height)', source)
         self.assertIn('size.height / frame.exitStartHeight', source)
         self.assertIn('.onSizeChanged { frame.targetHeight = it.height }', source)
-        for forbidden in ('delay(', 'finishSubmission', 'delete(', 'clearDraft', 'LaunchedEffect'):
+        for forbidden in ('delay(', 'finishSubmission', 'delete(', 'clearDraft', 'LaunchedEffect', 'rememberGraphicsLayer', 'toImageBitmap', 'launch('):
             self.assertNotIn(forbidden, source)
         composer = (SRC / 'ui/screens/chat/conversation/ChatComposer.kt').read_text()
         self.assertLess(composer.index('ComposerAttachmentExit {'), composer.index('attachmentContent()'))

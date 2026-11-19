@@ -335,9 +335,10 @@ class ChatComposerActionMotionTest private constructor(private val scale: Compos
         repeat(3) {
             ui.mainClock.advanceTimeBy(32)
             val now = node("composer-attachment-exit").fetchSemanticsNode().boundsInRoot
+            assertTrue("attachment height must remain positive during pixel sampling: $now", now.height > 0f)
             assertTrue("attachment height must shrink", now.height < previousHeight)
             val strength = retainedAttachmentStrength()
-            assertTrue("old pixels must survive while their height remains", strength > 0f)
+            assertTrue("old pixels must survive: height=${now.height}/${before.height}, strength=$strength, time=${ui.mainClock.currentTime}", strength > 0f)
             assertEquals("opacity must use the same progress as height", now.height / before.height, strength, .12f)
             assertTrue(abs(now.bottom - before.bottom) <= 1f)
             previousHeight = now.height
@@ -354,10 +355,13 @@ class ChatComposerActionMotionTest private constructor(private val scale: Compos
             if (visible) Box(Modifier.fillMaxWidth().height(56.dp)
                 .background(if (replacement) Color.Green else Color.Magenta).testTag("live-attachment"))
         }
+        assertTrue("the outgoing attachment must first be painted", retainedAttachmentPixels() > 0)
         mainThread { visible = false }
         ui.mainClock.advanceTimeByFrame()
         ui.mainClock.advanceTimeBy(48)
-        assertTrue(retainedAttachmentPixels() > 0)
+        val remaining = node("composer-attachment-exit").fetchSemanticsNode().boundsInRoot.height
+        assertTrue("replacement must interrupt a still-positive exit height: $remaining", remaining > 0f)
+        assertTrue("the outgoing pixels must survive before replacement", retainedAttachmentPixels() > 0)
         mainThread { replacement = true; visible = true }
         ui.mainClock.advanceTimeByFrame()
         node("live-attachment").assertExists()

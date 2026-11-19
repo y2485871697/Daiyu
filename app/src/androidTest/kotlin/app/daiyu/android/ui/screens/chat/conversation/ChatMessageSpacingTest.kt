@@ -24,6 +24,7 @@ import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.ui.app.AgentAppTheme
 
 class ChatMessageSpacingTest : WiredActivityTestCase() {
+    override val requiresWindowDraw: Boolean = true
     private var screen by mutableStateOf(ChatScreenState("间距回归"))
     private var attachmentHeight by mutableStateOf(0.dp)
     private var density = 1f
@@ -228,10 +229,10 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         }
     }
 
-    fun testFirstLiveChunkTypesWithoutSnappingTheSentUserAndHistory() {
+    fun testReceivedChunksRenderWithoutSnappingTheSentUserAndHistory() {
         show(1f, plainText = true)
         val history = screen.turns
-        val pending = ChatTurnUi.User("start-user", "检查首段逐字输出", pending = true)
+        val pending = ChatTurnUi.User("start-user", "检查收到的首段输出", pending = true)
         val first = "一二三四五六七八九十一二三四五六七八九十一二三"
         ui.mainClock.autoAdvance = false
         try {
@@ -247,12 +248,22 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             val histories = mutableListOf(top("tail"))
             val lengths = mutableListOf<Int>()
             val geometryFrames = mutableListOf<String>()
-            var paintedPartial = false
+            var paintedReceivedPrefix = false
+            var received = first.take(5)
+            var batchReached = false
             ui.runOnUiThread {
                 screen = screen.copy(turns = history + pending.copy(pending = false) +
-                    ChatTurnUi.Assistant("start-reply", finalText = first, status = RunStatus.RUNNING, isStreaming = true))
+                    ChatTurnUi.Assistant("start-reply", finalText = received, status = RunStatus.RUNNING, isStreaming = true))
             }
             repeat(90) { frame ->
+                if (frame == 30 || frame == 60) {
+                    received = if (frame == 30) first.take(13) else first
+                    batchReached = false
+                    ui.runOnUiThread {
+                        screen = screen.copy(turns = history + pending.copy(pending = false) +
+                            ChatTurnUi.Assistant("start-reply", finalText = received, status = RunStatus.RUNNING, isStreaming = true))
+                    }
+                }
                 ui.mainClock.advanceTimeByFrame()
                 ui.waitForIdle()
                 users += top("start-user")
@@ -261,19 +272,24 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     hasAnyAncestor(hasTestTag("chat-turn:start-reply")), useUnmergedTree = true).fetchSemanticsNodes()
                 val texts = textNodes.flatMap { it.config[SemanticsProperties.Text] }.map { it.text }
                     .filter { it.isNotEmpty() && first.startsWith(it) }
-                lengths += texts.maxOfOrNull { it.length } ?: 0
+                val shown = texts.maxByOrNull { it.length }.orEmpty()
+                assertTrue("Unreceived text must never be shown: received=$received shown=$shown", received.startsWith(shown))
+                if (batchReached) assertEquals("No new delta may change the displayed frontier", received, shown)
+                if (shown == received) batchReached = true
+                if (frame % 30 == 29) assertEquals("Every received batch must finish within its original frame budget", received, shown)
+                lengths += shown.length
                 if (frame % 10 == 0 || frame == 89) geometryFrames += "frame=$frame ${liveGeometry()}"
-                val partial = textNodes.firstOrNull { node ->
-                    node.config[SemanticsProperties.Text].any { it.text.length in 1 until first.length && first.startsWith(it.text) }
+                val receivedPrefixNode = textNodes.firstOrNull { node ->
+                    node.config[SemanticsProperties.Text].any { it.text == received && received.length < first.length }
                 }
-                if (!paintedPartial && partial != null) {
-                    val origin = partial.layoutInfo.coordinates.positionInRoot()
-                    val size = partial.layoutInfo.coordinates.size
+                if (!paintedReceivedPrefix && receivedPrefixNode != null) {
+                    val origin = receivedPrefixNode.layoutInfo.coordinates.positionInRoot()
+                    val size = receivedPrefixNode.layoutInfo.coordinates.size
                     if (origin.y + size.height <= composer.top - (10f + ChatTailClearance.value) * density + 1f) {
                         val clock = ui.mainClock.currentTime
                         val host = ui.onNodeWithTag("spacing-host")
                         val pixels = captureScreenNode(host, advanceAnimationClock = false).toPixelMap()
-                        assertEquals("A partial-body screenshot must not advance typing", clock, ui.mainClock.currentTime)
+                        assertEquals("A received-prefix capture must not advance the animation clock", clock, ui.mainClock.currentTime)
                         val hostOrigin = host.fetchSemanticsNode().layoutInfo.coordinates.positionInRoot()
                         val left = (origin.x - hostOrigin.x).toInt().coerceIn(0, pixels.width)
                         val top = (origin.y - hostOrigin.y).toInt().coerceIn(0, pixels.height)
@@ -281,7 +297,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                         val bottom = (origin.y - hostOrigin.y + size.height).toInt().coerceIn(top, pixels.height)
                         for (y in top until bottom) for (x in left until right) {
                             val pixel = pixels[x, y]
-                            if (pixel.red < .6f && pixel.green < .6f && pixel.blue < .6f) paintedPartial = true
+                            if (pixel.red < .6f && pixel.green < .6f && pixel.blue < .6f) paintedReceivedPrefix = true
                         }
                     }
                 }
@@ -290,11 +306,9 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             }
             val userSteps = users.zipWithNext { before, after -> before - after }
             val historySteps = histories.zipWithNext { before, after -> before - after }
-            assertTrue("The first chunk must actually type, not become a full baseline: $lengths",
-                lengths.any { it in 1 until first.length })
             assertEquals("First chunk must finish: lengths=$lengths userSteps=$userSteps " +
                 "historySteps=$historySteps geometry=$geometryFrames", first.length, lengths.last())
-            assertTrue("A partial prefix must actually paint inside the body ROI", paintedPartial)
+            assertTrue("A received prefix must actually paint inside the body ROI", paintedReceivedPrefix)
             ui.onNode(hasText(first) and hasAnyAncestor(hasTestTag("chat-turn:start-reply")),
                 useUnmergedTree = true).assertIsDisplayed()
             val reply = ui.onNodeWithTag("chat-turn:start-reply").fetchSemanticsNode().layoutInfo.coordinates

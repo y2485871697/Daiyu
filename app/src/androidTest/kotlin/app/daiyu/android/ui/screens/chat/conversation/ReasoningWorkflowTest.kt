@@ -23,6 +23,7 @@ import top.yukonga.miuix.kmp.basic.Text
 
 /** Production mapper and AssistantTurn; offline component regression, no tool execution. */
 class ReasoningWorkflowTest : WiredActivityTestCase() {
+    override val requiresWindowDraw: Boolean = true
     private fun tool(id: String) = MessageBlock.Tool(ToolInvocation(ToolCallId(id), "lookup", "{}"), "done")
     private fun message(blocks: List<MessageBlock>, summaries: List<ReportedReasoning>) = Message(
         MessageId("a"), ConversationId("c"), RunId("r"), "assistant", blocks, RunStatus.COMPLETED, reportedReasoning = summaries)
@@ -69,7 +70,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.onAllNodesWithContentDescription("复制回答").assertCountEquals(1)
     }
 
-    fun testNewTerminalReasoningTypesOnceAndNeverReactivatesOnReopen() {
+    fun testNewTerminalReasoningRendersOnceAndNeverReactivatesOnReopen() {
         val text = "新终态摘要" + "甲".repeat(96)
         runBlocking {
             projectMarkdown(listOf(text))
@@ -103,20 +104,13 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             mainThread { source = finalMessage }
-            var partialFrames = 0
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeByFrame()
                 completed()
                 val shown = body()
-                if (shown.isNotEmpty() && shown != text) {
-                    partialFrames++
-                    assertTrue(text.startsWith(shown))
-                    assertDisclosure("work-process-header", true)
-                    assertDisclosure(inner, true)
-                }
+                assertTrue("A first terminal snapshot must show no unreceived or replayed prefix", shown.isEmpty() || shown == text)
                 shown == text
             }
-            assertTrue("New terminal output must actually reveal a prefix", partialFrames > 0)
             assertTrue(advances.get() > 0)
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeByFrame()
@@ -131,6 +125,9 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             fun staticFrame() {
                 ui.mainClock.advanceTimeByFrame()
                 completed()
+                ui.onAllNodesWithTag("reasoning-step-state:first-final", useUnmergedTree = true).fetchSemanticsNodes().forEach {
+                    assertEquals("Reopening must not reactivate completed reasoning", "已思考", it.config[SemanticsProperties.StateDescription])
+                }
                 assertEquals("Reopening must not replay typing or feedback", once, advances.get())
                 if (body().isNotEmpty()) assertEquals(text, body())
             }

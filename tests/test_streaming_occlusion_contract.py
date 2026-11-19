@@ -449,7 +449,7 @@ class StreamingOcclusionContract(unittest.TestCase):
                       "if (entering.isEmpty()) return bottom", "it.config.getOrNull(WorkflowEntryEntering)?.invoke() == true",
                       "it.positionInRoot.y + it.size.height"):
             self.assertIn(token, source)
-        observation = source.split("fun paintedBottom(", 1)[1].split("private fun shortWorkflow(", 1)[0]
+        observation = source.split("fun paintedBottom(", 1)[1].split("fun testNewToolHeaderHasNoPartialInkAtTheOriginalSafetyEdge(", 1)[0]
         self.assertNotIn("boundsInRoot", observation)
         self.assertNotIn("ChatTailClearance", observation)
         self.assertIn("testNativeEntryMeasurementStillDetectsDrawOnlyClipping", source)

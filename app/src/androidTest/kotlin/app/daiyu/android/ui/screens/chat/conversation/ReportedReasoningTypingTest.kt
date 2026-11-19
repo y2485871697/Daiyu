@@ -3,6 +3,12 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.InternalComposeApi
+import androidx.compose.runtime.currentComposer
+import androidx.compose.runtime.tooling.CompositionData
+import androidx.compose.runtime.tooling.CompositionGroup
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.runtime.State
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.semantics.getOrNull
@@ -693,7 +699,54 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = true
     }
 
+    @OptIn(InternalComposeApi::class)
     private class PauseProbe {
+        val composition = AtomicReference<CompositionData?>(null)
+        val clearance = AtomicReference<StreamingTextClearance?>(null)
+        private var scanGroups = 0
+        private var scanTruncated = false
+        private fun rememberedValues(): List<Any> {
+            val values = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Any, Boolean>())
+            scanGroups = 0
+            scanTruncated = false
+            fun visit(group: CompositionGroup) {
+                if (scanGroups >= 6_000) { scanTruncated = true; return }
+                scanGroups++
+                group.data.forEach { if (it != null) values.add(it) }
+                group.compositionGroups.forEach(::visit)
+            }
+            composition.get()?.compositionGroups?.forEach(::visit)
+            return values.toList()
+        }
+        private fun revealSummary(reveal: MarkdownReveal): String {
+            val target = field(reveal, "target") as? MarkdownTypingTarget
+            val frame = field(reveal, "frame") as? MarkdownTypingFrame
+            val publication = reveal.publication
+            val published = field(publication, "published") as? Map<*, *>
+            val pending = field(publication, "pending") as? Map<*, *>
+            return "reveal@${System.identityHashCode(reveal)}," +
+                "parts=${target?.parts?.joinToString { it.source.id + ":" + it.length }}," +
+                "start=${target?.start},total=${target?.total}," +
+                "frameVisible=${frame?.visible},frameMatches=${frame?.target === target}," +
+                "completion=${field(reveal, "completion")},settled=${reveal.settled}," +
+                "publication@${System.identityHashCode(publication)},active=${publication.active}," +
+                "paintPending=${pending?.size}," +
+                "publishedExact=${target?.parts?.all { it.length == 0 || published?.get(it.source.id) == it.source }}"
+        }
+        private fun paintSummary(frame: Any): String {
+            val requested = field(frame, "layout") as? TextLayoutResult
+            val drawn = field(frame, "drawn") as? TextLayoutResult
+            val rendered = field(frame, "rendered") as? TextLayoutResult
+            val committed = field(frame, "committed") as? TextLayoutResult
+            val coordinates = field(frame, "coordinates") as? LayoutCoordinates
+            val clearance = clearance.get()
+            return "paint@${System.identityHashCode(frame)},candidate=${requested?.layoutInput?.text?.length}," +
+                "committed=${committed?.layoutInput?.text?.length},rendered=${rendered?.layoutInput?.text?.length}," +
+                "drawn=${drawn?.layoutInput?.text?.length}," +
+                "sameText=${drawn?.layoutInput?.text == requested?.layoutInput?.text}," +
+                "compatible=${drawn != null && requested != null && drawn.canPaintPrefixOf(requested)}," +
+                "height=${drawn?.size?.height},available=${clearance?.availableHeight(coordinates)}"
+        }
         val control = AtomicReference<ReplyPresentationControl?>(null)
         val scope = AtomicReference<WorkflowVisualScope?>(null)
         val composed = AtomicReference<ChatTurnUi.Assistant?>(null)
@@ -722,7 +775,19 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                 val values = field(it, "completed") as? Map<*, *>
                 "size=${values?.size},r=${values?.get("r")}"
             }
-            "stage=$stage,composedIsExpected=${composed.get() == turn}," +
+            val values = rememberedValues()
+            val revealValues = values.filterIsInstance<MarkdownReveal>()
+            val paintValues = values.filter { it.javaClass.simpleName == "MarkdownTextFrame" }
+            val reveals = revealValues.sortedByDescending {
+                (field(it, "target") as? MarkdownTypingTarget)?.total ?: 0
+            }.take(8).joinToString(";") { revealSummary(it) }
+            val paints = paintValues.sortedByDescending {
+                (field(it, "layout") as? TextLayoutResult)?.layoutInput?.text?.length ?: 0
+            }.take(8).joinToString(";") { paintSummary(it) }
+            "scanGroups=$scanGroups,scanTruncated=$scanTruncated,values=${values.size}," +
+                "revealCount=${revealValues.size},paintCount=${paintValues.size}," +
+                "reveals=[$reveals],paints=[$paints]," +
+                "stage=$stage,composedIsExpected=${composed.get() == turn}," +
                 "pending=${c?.pending(turn)},pause=${c?.pauseRequested},finished=${c?.finished}," +
                 "settledIsExpected=${field(c, "settledTurn") == turn}," +
                 "pendingLaneCount=${(field(c, "pendingLanes") as? Map<*, *>)?.size}," +
@@ -749,6 +814,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             "enabled=${!it.config.contains(SemanticsProperties.Disabled)},bounds=${it.boundsInRoot}"
     }
 
+    @OptIn(InternalComposeApi::class)
     private fun assertTerminalThoughtUsesTheComposerPause(path: Path) {
         val baseline = "思考开头"
         val pending = baseline + "甲".repeat(240)
@@ -794,7 +860,11 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                             turnExtras = { extraTurn ->
                                 val playback = LocalReplyPlayback.current
                                 val scope = LocalWorkflowVisualScope.current
+                                val composition = currentComposer.compositionData
+                                val clearance = LocalStreamingTextClearance.current
                                 SideEffect {
+                                    probe.composition.set(composition)
+                                    probe.clearance.set(clearance)
                                     probe.control.set(playback?.control)
                                     probe.scope.set(scope)
                                     probe.composed.set(extraTurn)

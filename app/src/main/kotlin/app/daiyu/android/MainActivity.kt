@@ -966,7 +966,12 @@ class MainActivity : ComponentActivity() {
         videoSending = true
         userEntranceVideoRequest = request
         videoReceiptRequest = request; videoReceiptEditor = original
-        val queued = controller.sendVideos(selected, request, original) { receipt, _ ->
+        val queued = controller.sendVideos(selected, request, original, onPreparedUser = { userId ->
+            if (activityUsable() && userEntranceVideoRequest === request && videoUi.editor() == original) {
+                userMessageEntrance = UserMessageEntrance(userId.value, waitForIme = true)
+                publishChat(rowsChanged = false)
+            }
+        }) { receipt, _ ->
             // Settle the retained host even when the originating Activity has been destroyed.
             settle(receipt)
             if (activityUsable()) { settleRetainedVideoReceipt(); publishChat() }
@@ -5859,11 +5864,18 @@ class MainActivity : ComponentActivity() {
         val generation = editorGeneration
         val revision = draftRevision
         val owner = imageHost.session
+        val attemptBefore = owner.attempt
         val conversation = selected
         imageHost.send(conversation, revision, text, stillCurrent = {
             activityUsable() && imageHost.session === owner && editorGeneration == generation &&
                 draftRevision == revision && selected?.id == conversation?.id && draft == text
         })
+        owner.frozen?.takeIf { owner.attempt != null && owner.attempt !== attemptBefore }?.let { frozen ->
+            if (userMessageEntrance?.messageId != frozen.identity.userId.value) {
+                userMessageEntrance = UserMessageEntrance(frozen.identity.userId.value, waitForIme = true)
+                publishChat(rowsChanged = false)
+            }
+        }
     }
 
     private fun settleImageReceipt(receipt: ImageSendResult.Accepted, text: String) {
@@ -5875,6 +5887,9 @@ class MainActivity : ComponentActivity() {
         selected = receipt.conversation; editorGeneration++; draftRevision++
         draft = ""; selectionStart = 0; selectionEnd = 0
         controller.preferences.edit().putString("selected", receipt.conversation.id.value).apply()
+        if (userMessageEntrance?.messageId != receipt.userId.value && shown.none { it.second.id == receipt.userId }) {
+            userMessageEntrance = UserMessageEntrance(receipt.userId.value)
+        }
         publishChat()
         loadAcceptedHistory(receipt.conversation, animateUserMessage = true)
     }
@@ -6001,8 +6016,10 @@ class MainActivity : ComponentActivity() {
                 loadAcceptedHistory(conversation, animateUserMessage)
                 return@launch
             }
-            if (animateUserMessage) rows?.lastOrNull { it.second.role == Message.USER_ROLE }?.second?.let {
-                userMessageEntrance = UserMessageEntrance(it.id.value)
+            if (animateUserMessage) rows?.lastOrNull { it.second.role == Message.USER_ROLE }?.second?.let { user ->
+                if (userMessageEntrance?.messageId != user.id.value && shown.none { it.second.id == user.id }) {
+                    userMessageEntrance = UserMessageEntrance(user.id.value)
+                }
             }
             applyAcceptedHistory(conversation, generation, request, chatState.contentRevision, rows)
         }

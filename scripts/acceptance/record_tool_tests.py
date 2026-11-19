@@ -403,6 +403,16 @@ MEDIA_MESSAGE_ENTRANCE_PLATFORM_CLASSES = (
     'app.daiyu.android.ui.screens.chat.conversation.UserMessageMediaEntranceTest',
     'app.daiyu.android.ui.screens.chat.conversation.MessageMediaLayoutGeometryTest',
 )
+MEDIA_PRESENTATION_HANDOFF_PLATFORM_CLASSES = (
+    'app.daiyu.android.ui.screens.chat.conversation.UserMessageEntranceTest',
+    'app.daiyu.android.ui.screens.chat.conversation.UserMessageMediaEntranceTest',
+    'app.daiyu.android.ui.screens.chat.conversation.MessageMediaLayoutGeometryTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatComposerActionMotionTest',
+    'app.daiyu.android.ui.screens.chat.attachments.ImageAttachmentsUiTest',
+    'app.daiyu.android.ui.screens.chat.attachments.VideoAttachmentsUiTest',
+    'app.daiyu.android.ChatSubmissionActivityTest',
+    'app.daiyu.android.ControllerVideoProductionEntryTest',
+)
 USER_MESSAGE_ENTRANCE_MODULES = tuple(dict.fromkeys((
     'test_chat_submission_preview_contract', 'test_composer_surface_color_contract',
     'test_compression_send_gate_contract', 'test_delegation_batch_and_send_contract',
@@ -947,6 +957,11 @@ def command_for(python, env):
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(VIDEO_PICKER_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *VIDEO_PICKER_MODULES, "-v"], "video-picker-targeted"
+    if (env.get("SMOKE_MODE") == "smoke"
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(MEDIA_PRESENTATION_HANDOFF_PLATFORM_CLASSES)):
+        modules = tuple(dict.fromkeys(USER_MESSAGE_ENTRANCE_MODULES + MEDIA_SEND_MODULES +
+                                     ("test_media_presentation_handoff_contract",)))
+        return [python, "-B", "-m", "unittest", *modules, "-v"], "user-message-entrance-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (
                 sorted(USER_MESSAGE_ENTRANCE_PLATFORM_CLASSES), sorted(MEDIA_MESSAGE_ENTRANCE_PLATFORM_CLASSES))):

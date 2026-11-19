@@ -224,11 +224,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         }
                 Box(Modifier.fillMaxWidth().padding(horizontal = 13.dp).height(1.dp)
                     .testTag("chat-composer-divider").background(dividerColor))
-                Column(Modifier.fillMaxWidth().animateContentSize(
-                    animationSpec = if (preparingSend || state.text.isEmpty()) tween(180, easing = FastOutSlowInEasing)
-                        else spring(dampingRatio = 1f, stiffness = 500f),
-                    alignment = Alignment.BottomCenter,
-                )) {
+                Column(Modifier.fillMaxWidth()) {
+                    ComposerAttachmentExit {
                     ComposerReferenceChips(references.references, pageActive && state.enabled, visualEnabled) { reference ->
                         if (state.editorGeneration == currentEditorGeneration && references.source == currentDraft) {
                             val next = references.remove(reference)
@@ -238,6 +235,12 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                         }
                     }
                     attachmentContent()
+                    }
+                    Column(Modifier.fillMaxWidth().animateContentSize(
+                        animationSpec = if (preparingSend || state.text.isEmpty()) tween(180, easing = FastOutSlowInEasing)
+                            else spring(dampingRatio = 1f, stiffness = 500f),
+                        alignment = Alignment.BottomCenter,
+                    )) {
                     key(state.editorGeneration, actions.editingMessageKey) {
                         val mountedGeneration = state.editorGeneration
                         var editingValue by remember {
@@ -292,6 +295,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 }
                             },
                         )
+                    }
                     }
                 }
                 Box(Modifier.fillMaxWidth().padding(start = 13.dp, end = 13.dp, bottom = 12.dp).heightIn(min = 36.dp).testTag("chat-composer-bottom"), contentAlignment = Alignment.Center) {

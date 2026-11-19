@@ -3,6 +3,10 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.runtime.key
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.getValue
@@ -273,4 +277,134 @@ class ChatComposerActionMotionTest private constructor(private val scale: Compos
             assertEquals(5, releases)
         }
     }
+    private fun showAttachmentExit(content: @androidx.compose.runtime.Composable () -> Unit) {
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    Box(Modifier.size(240.dp, 180.dp).background(Color.Black)
+                        .testTag("attachment-motion-scene"), contentAlignment = Alignment.BottomCenter) {
+                        Column(Modifier.fillMaxWidth()) {
+                            ComposerAttachmentExit(content)
+                            Box(Modifier.fillMaxWidth().height(40.dp).background(Color.Cyan))
+                        }
+                    }
+                }
+            }
+        }
+        awaitVisualIdle()
+        ui.mainClock.autoAdvance = false
+    }
+
+    private fun retainedAttachmentPixels(): Int {
+        val pixels = frameWithoutClockAdvance("attachment-motion-scene").toPixelMap()
+        var count = 0
+        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+            val c = pixels[x, y]
+            if (c.red > .005f && c.blue > .005f && c.green < .005f) count++
+        }
+        return count
+    }
+
+    private fun retainedAttachmentStrength(): Float {
+        val pixels = frameWithoutClockAdvance("attachment-motion-scene").toPixelMap()
+        var maximum = 0f
+        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+            val c = pixels[x, y]
+            if (c.red > c.green + .005f && c.blue > c.green + .005f) maximum = maxOf(maximum, c.red)
+        }
+        return maximum
+    }
+
+    fun testAttachmentPixelsRetireWithTheMeasuredHeightAcrossEditorReplacement() {
+        var visible by mutableStateOf(true)
+        var editor by mutableStateOf(0)
+        showAttachmentExit {
+            key(editor) {
+                if (visible) Column(Modifier.fillMaxWidth().height(56.dp).testTag("live-attachment")) {
+                    Box(Modifier.fillMaxWidth().weight(1f).background(Color.Yellow))
+                    Box(Modifier.fillMaxWidth().weight(1f).background(Color.Magenta))
+                }
+            }
+        }
+        val before = node("composer-attachment-exit").fetchSemanticsNode().boundsInRoot
+        assertTrue(retainedAttachmentPixels() > 0)
+        mainThread { visible = false; editor++ }
+        ui.mainClock.advanceTimeByFrame()
+        node("live-attachment").assertDoesNotExist()
+        var previousHeight = before.height
+        repeat(3) {
+            ui.mainClock.advanceTimeBy(32)
+            val now = node("composer-attachment-exit").fetchSemanticsNode().boundsInRoot
+            assertTrue("attachment height must shrink", now.height < previousHeight)
+            val strength = retainedAttachmentStrength()
+            assertTrue("old pixels must survive while their height remains", strength > 0f)
+            assertEquals("opacity must use the same progress as height", now.height / before.height, strength, .12f)
+            assertTrue(abs(now.bottom - before.bottom) <= 1f)
+            previousHeight = now.height
+        }
+        ui.mainClock.advanceTimeBy(240)
+        assertEquals(0f, node("composer-attachment-exit").fetchSemanticsNode().boundsInRoot.height, 1f)
+        assertEquals(0, retainedAttachmentPixels())
+    }
+
+    fun testReplacingAnExitingAttachmentCannotRemoveTheNewAttachment() {
+        var visible by mutableStateOf(true)
+        var replacement by mutableStateOf(false)
+        showAttachmentExit {
+            if (visible) Box(Modifier.fillMaxWidth().height(56.dp)
+                .background(if (replacement) Color.Green else Color.Magenta).testTag("live-attachment"))
+        }
+        mainThread { visible = false }
+        ui.mainClock.advanceTimeByFrame()
+        ui.mainClock.advanceTimeBy(48)
+        assertTrue(retainedAttachmentPixels() > 0)
+        mainThread { replacement = true; visible = true }
+        ui.mainClock.advanceTimeByFrame()
+        node("live-attachment").assertExists()
+        assertEquals("replacement must not replay the old pixels", 0, retainedAttachmentPixels())
+        ui.mainClock.advanceTimeBy(300)
+        node("live-attachment").assertExists()
+        assertEquals(0, retainedAttachmentPixels())
+        val pixels = frameWithoutClockAdvance("attachment-motion-scene").toPixelMap()
+        var green = 0
+        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+            val c = pixels[x, y]
+            if (c.green > .8f && c.red < .1f && c.blue < .1f) green++
+        }
+        assertTrue("the new attachment must remain painted", green > 0)
+    }
+
+    fun testZeroDurationAttachmentExitLeavesNoEmptyHeightOrRetainedPixels() {
+        scale.factor = 0f
+        var visible by mutableStateOf(true)
+        showAttachmentExit {
+            if (visible) Box(Modifier.fillMaxWidth().height(56.dp).background(Color.Magenta))
+        }
+        mainThread { visible = false }
+        ui.mainClock.advanceTimeByFrame()
+        ui.mainClock.advanceTimeByFrame()
+        assertEquals(0f, node("composer-attachment-exit").fetchSemanticsNode().boundsInRoot.height, 1f)
+        assertEquals(0, retainedAttachmentPixels())
+    }
+
+    fun testInterruptedAttachmentEntranceBeginsItsExitAtTheCurrentOpacity() {
+        var visible by mutableStateOf(false)
+        showAttachmentExit {
+            if (visible) Box(Modifier.fillMaxWidth().height(56.dp).background(Color.Magenta))
+        }
+        mainThread { visible = true }
+        ui.mainClock.advanceTimeByFrame()
+        frameWithoutClockAdvance("attachment-motion-scene")
+        ui.mainClock.advanceTimeBy(48)
+        val entering = node("composer-attachment-exit").fetchSemanticsNode().boundsInRoot
+        assertTrue(entering.height > 0f)
+        assertEquals(1f, retainedAttachmentStrength(), .02f)
+        mainThread { visible = false }
+        ui.mainClock.advanceTimeByFrame()
+        assertEquals("interruption must not jump opacity to current/target height", 1f,
+            retainedAttachmentStrength(), .12f)
+        ui.mainClock.advanceTimeBy(240)
+        assertEquals(0, retainedAttachmentPixels())
+    }
+
 }

@@ -18,6 +18,8 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -31,6 +33,7 @@ import app.daiyu.android.media.ImageAttachmentFailure
 import app.daiyu.android.media.ImageAttachmentOwner
 import app.daiyu.android.ui.app.AgentAppTheme
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 /** Component-only instrumentation. No SAF launcher, model request or production controller is used. */
 class ImageAttachmentsUiTest : WiredActivityTestCase() {
@@ -64,7 +67,7 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         awaitVisualIdle()
     }
 
-    private fun showComposer(holder: ImageAttachmentsState) {
+    private fun showComposer(holder: ImageAttachmentsState, loader: ImageAttachmentPreviewLoader = { _, _ -> ImageBitmap(8, 8) }) {
         mainThread { activity.setContent {
             val state by holder.state.collectAsState()
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -76,7 +79,7 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
                                 onSelect = { selection = holder.requestSelection(it) },
                                 onPreview = { holder.openPreview(it) }, onRemove = { holder.remove(it) },
                                 onDismissPreview = { holder.closePreview(it) },
-                            ), { _, _ -> ImageBitmap(8, 8) }, compact = true)
+                            ), loader, compact = true)
                         })
                 } }
             }
@@ -264,4 +267,61 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         node("image_attachments_item:${oldSlot.id}").assertDoesNotExist()
         assertTrue(holder.state.value.ready.isEmpty())
     }
+    fun testReadyThumbnailDoesNotReloadWhenSubmissionRekeysTheSameAsset() {
+        val attachment = image("stable-send-thumbnail")
+        val holder = ImageAttachmentsState(draft, listOf(attachment))
+        val loads = AtomicInteger()
+        show(holder) { _, _ -> loads.incrementAndGet(); ImageBitmap(8, 8) }
+        val before = holder.state.value.ready.single().key
+        ui.waitUntil(5_000) { loads.get() == 1 }
+        awaitVisualIdle()
+        node("image_attachments_preview_loading:${before.id}").assertDoesNotExist()
+        assertEquals(1, loads.get())
+        mainThread {
+            holder.activate(ImageAttachmentDraft(owner, draft.revision + 1), listOf(attachment))
+            checkNotNull(holder.beginSubmission())
+        }
+        awaitVisualIdle()
+        val after = holder.state.value.ready.single().key
+        assertFalse("operation capabilities must still change", before == after)
+        node("image_attachments_preview_loading:${after.id}").assertDoesNotExist()
+        assertEquals("unchanged asset must retain its already displayed bitmap", 1, loads.get())
+    }
+
+    fun testAcceptedRealImageChipKeepsItsPixelsUntilItsComposerHeightRetires() {
+        val holder = ImageAttachmentsState(draft, listOf(image("accepted-exit")))
+        val bitmap = android.graphics.Bitmap.createBitmap(16, 16, android.graphics.Bitmap.Config.ARGB_8888)
+            .apply { eraseColor(android.graphics.Color.MAGENTA) }.asImageBitmap()
+        val loaded = AtomicBoolean()
+        showComposer(holder) { _, _ -> loaded.set(true); bitmap }
+        ui.waitUntil(5_000) { loaded.get() }
+        awaitVisualIdle()
+        ui.mainClock.autoAdvance = false
+        fun pixels(): Int {
+            val before = ui.mainClock.currentTime
+            val image = captureScreenNode(node("chat-composer-surface"), advanceAnimationClock = false).toPixelMap()
+            assertEquals(before, ui.mainClock.currentTime)
+            var count = 0
+            for (y in 0 until image.height) for (x in 0 until image.width) {
+                val c = image[x, y]
+                if (c.red > .95f && c.blue > .95f && c.green < .5f) count++
+            }
+            return count
+        }
+        try {
+            assertTrue(pixels() > 0)
+            mainThread {
+                val submission = checkNotNull(holder.beginSubmission())
+                assertTrue(holder.finishSubmission(submission, ImageAttachmentAcceptance.Accepted))
+            }
+            ui.mainClock.advanceTimeByFrame()
+            node("image_attachments").assertDoesNotExist()
+            pixels()
+            ui.mainClock.advanceTimeBy(32)
+            assertTrue("a removed real chip must still have exit pixels", pixels() > 0)
+            ui.mainClock.advanceTimeBy(240)
+            assertEquals(0, pixels())
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
 }

@@ -880,7 +880,12 @@ class ChatController internal constructor(private val application:Application,
         }
     }
     internal fun sendVideos(conversation: Conversation?, request: VideoDraftRequest,
-        editor: ControllerVideoEditor, complete: (VideoDraftReceipt, Conversation?) -> Unit): Boolean {
+        editor: ControllerVideoEditor, complete: (VideoDraftReceipt, Conversation?) -> Unit): Boolean =
+        sendVideos(conversation, request, editor, {}, complete)
+
+    internal fun sendVideos(conversation: Conversation?, request: VideoDraftRequest,
+        editor: ControllerVideoEditor, onPreparedUser: (MessageId) -> Unit,
+        complete: (VideoDraftReceipt, Conversation?) -> Unit): Boolean {
         val ui = videoUi ?: return false
         if (Looper.myLooper() != Looper.getMainLooper() || ui.editor() != editor || !editor.visible ||
             editor.conversation != request.conversation || editor.text != request.text ||
@@ -898,6 +903,15 @@ class ChatController internal constructor(private val application:Application,
                 val original = ControllerVideoAttempt(request, videoJournal).also { attempt = it }
                 val replay = original.reserve(database) // ORIGINAL identity, before any DB write.
                 if (replay != null) replay else {
+                    val userId = original.userId
+                    val bindPresentation = java.util.concurrent.FutureTask<Unit> {
+                        if (pendingVideoState?.request === request) onPreparedUser(userId)
+                    }
+                    // Worker only; reserve() has closed its DB transaction before this boundary.
+                    try {
+                        check(handler.post(bindPresentation)) { "video_presentation_unavailable" }
+                        bindPresentation.get(5, java.util.concurrent.TimeUnit.SECONDS)
+                    } finally { bindPresentation.cancel(false) }
                     sendPrepared(token, conversation, request.text, expectedDraftText = request.text, videoAttempt = original)
                     token.videoReceipt ?: original.reject()
                 }

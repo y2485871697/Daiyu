@@ -256,4 +256,41 @@ class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    private fun exerciseVideoPresentationAdmission(refuse: Boolean) {
+        val conversation = fixture.database.create(fixture.database.selectedAssistantId())
+        mainThread { activity.select(conversation) }
+        setDraft("video presentation admission")
+        val owner = VideoAttachmentOwner(conversation.id.value, "presentation-admission")
+        val video = VideoAttachment(owner, "12345678-1234-1234-1234-123456789abc", "video/mp4",
+            3, "a".repeat(64), 1000, 32, 24)
+        val calls = java.util.concurrent.atomic.AtomicInteger()
+        val receipt = java.util.concurrent.atomic.AtomicReference<VideoDraftReceipt?>()
+        mainThread {
+            val editor = (MainActivity::class.java.getDeclaredField("videoUi").apply { isAccessible = true }
+                .get(activity) as ControllerVideoUi).editor()
+            val request = VideoDraftRequest(conversation.id.value, owner, 1, editor.text, listOf(video))
+            assertTrue(fixture.controller.sendVideos(conversation, request, editor, onPreparedUser = { userId ->
+                assertEquals(android.os.Looper.getMainLooper(), android.os.Looper.myLooper())
+                assertTrue("no user may be published before presentation admission",
+                    fixture.database.messages(conversation.id).none { it.second.id == userId })
+                calls.incrementAndGet()
+                if (refuse) throw IllegalStateException("test presentation refusal")
+            }) { value, _ -> receipt.set(value) })
+        }
+        awaitControl("video presentation admission") { receipt.get() != null }
+        assertEquals(1, calls.get())
+        // The original is intentionally missing: neither the admitted nor refused path may send.
+        assertEquals(VideoDraftOutcome.REJECTED, receipt.get()?.outcome)
+        assertTrue(fixture.database.messages(conversation.id).isEmpty())
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testVideoBindsItsPresentationOnMainBeforeMessagePublication() {
+        exerciseVideoPresentationAdmission(refuse = false)
+    }
+
+    fun testRefusedVideoPresentationCannotCommitOrOpenTheModel() {
+        exerciseVideoPresentationAdmission(refuse = true)
+    }
+
 }

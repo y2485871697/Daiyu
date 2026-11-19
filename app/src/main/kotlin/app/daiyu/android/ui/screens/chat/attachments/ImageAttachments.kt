@@ -109,7 +109,7 @@ fun ImageAttachments(
         } else if (state.items.isNotEmpty()) {
             Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 state.items.forEachIndexed { index, item ->
-                    key(item.key) {
+                    key(if (item is ImageAttachmentItem.Ready) item.attachment else item.key) {
                         AttachmentTile(item, numberOffset + index + 1, enabled && state.canRemove(item.key), actions, loadPreview, compact)
                     }
                 }
@@ -229,8 +229,8 @@ private fun AttachmentImage(
     compact: Boolean = false,
 ) {
     val loader by rememberUpdatedState(loadPreview)
-    var attempt by remember(item.key) { mutableStateOf(0) }
-    val result by produceState<PreviewResult>(PreviewResult.Loading, item.key, maxEdge, attempt) {
+    var attempt by remember(item.attachment) { mutableStateOf(0) }
+    val result by produceState<PreviewResult>(PreviewResult.Loading, item.attachment, maxEdge, attempt) {
         value = PreviewResult.Loading
         value = try {
             PreviewResult.Loaded(withContext(Dispatchers.IO) { loader(item.attachment, maxEdge) })

@@ -55,7 +55,7 @@ jobs:
           import json, unittest
           from pathlib import Path
           records = []
-          for pattern in ('test_terminal_tmp_png_reader.py', 'test_license_bundle.py', 'test_media_send_contract.py', 'test_tool_receipt_snapshot_contract.py', 'test_tool_receipt_pause_contract.py', 'test_record_tool_tests_scope.py', 'test_acceptance_tool_receipt.py', 'test_message_composer_edit_contract.py', 'test_preview_dialog_status_bar_contract.py', 'test_work_timeline_connector_contract.py', 'test_image_sidebar_visibility_contract.py', 'test_message_edit_revalidation_contract.py', 'test_message_action_snapshot_admission_contract.py'):
+          for pattern in ('test_media_presentation_handoff_contract.py', 'test_terminal_tmp_png_reader.py', 'test_license_bundle.py', 'test_media_send_contract.py', 'test_tool_receipt_snapshot_contract.py', 'test_tool_receipt_pause_contract.py', 'test_record_tool_tests_scope.py', 'test_acceptance_tool_receipt.py', 'test_message_composer_edit_contract.py', 'test_preview_dialog_status_bar_contract.py', 'test_work_timeline_connector_contract.py', 'test_image_sidebar_visibility_contract.py', 'test_message_edit_revalidation_contract.py', 'test_message_action_snapshot_admission_contract.py'):
               suite = unittest.TestLoader().discover('tests', pattern=pattern)
               assert suite.countTestCases() > 0, pattern
               result = unittest.TextTestRunner(verbosity=2).run(suite)

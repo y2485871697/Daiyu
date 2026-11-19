@@ -1568,3 +1568,29 @@ class UserMessageEntranceToolTestsScopeTest(unittest.TestCase):
         command = next(line.strip()[len('run: '):] for line in step.splitlines()
                        if line.strip().startswith('run: '))
         self.assertIn('test_record_tool_tests_scope.UserMessageEntranceToolTestsScopeTest', command.split())
+
+
+class MediaPresentationHandoffToolTestsScopeTest(unittest.TestCase):
+    def test_exact_handoff_classes_run_only_registered_targeted_checks(self):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location('handoff_record_tool_tests',
+            Path(__file__).resolve().parents[1] / 'scripts/acceptance/record_tool_tests.py')
+        recorder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(recorder)
+        classes = recorder.MEDIA_PRESENTATION_HANDOFF_PLATFORM_CLASSES
+        for qualified in classes:
+            source = ROOT / 'app/src/androidTest/kotlin' / (qualified.replace('.', '/') + '.kt')
+            self.assertTrue(source.is_file(), qualified)
+            self.assertIn('class ' + qualified.rsplit('.', 1)[1], source.read_text())
+        for selection in (classes, tuple(reversed(classes))):
+            command, scope = recorder.command_for('python3', {'SMOKE_MODE': 'smoke',
+                'SMOKE_TEST_CLASSES': ','.join(selection)})
+            self.assertEqual('user-message-entrance-targeted', scope)
+            expected = tuple(dict.fromkeys(recorder.USER_MESSAGE_ENTRANCE_MODULES + recorder.MEDIA_SEND_MODULES +
+                                           ('test_media_presentation_handoff_contract',)))
+            self.assertEqual(['python3', '-B', '-m', 'unittest', *expected, '-v'], command)
+            self.assertNotIn('discover', command)
+        for selection in (classes[:-1], classes + (classes[0],), classes + ('unknown.Class',)):
+            _, scope = recorder.command_for('python3', {'SMOKE_MODE': 'smoke',
+                'SMOKE_TEST_CLASSES': ','.join(selection)})
+            self.assertEqual('full', scope)

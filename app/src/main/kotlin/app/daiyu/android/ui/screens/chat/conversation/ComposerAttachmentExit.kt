@@ -92,9 +92,9 @@ internal fun ComposerAttachmentExit(content: @Composable () -> Unit) {
                     drawRect(Color.Transparent, blendMode = BlendMode.Clear)
                     this@drawWithContent.drawContent()
                 }
+                // Live and retiring attachments consume the same completed pixels.
+                drawImage(checkNotNull(frame.bitmap))
             }
-            // Live attachments keep their normal hardware drawing, independently of the exit copy.
-            drawContent()
         },
     ) { CompositionLocalProvider(LocalComposerAttachmentVisualChange provides changed) { content() } }
 }

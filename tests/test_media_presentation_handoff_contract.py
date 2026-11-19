@@ -32,6 +32,9 @@ class MediaPresentationHandoffContract(unittest.TestCase):
         self.assertIn('frame.bitmap = ImageBitmap(width, height)', source)
         self.assertIn('draw(this, layoutDirection, checkNotNull(frame.canvas), size)', source)
         self.assertIn('this@drawWithContent.drawContent()', source)
+        raster = source.rsplit('.drawWithContent {', 1)[1]
+        self.assertIn('drawImage(checkNotNull(frame.bitmap))', raster)
+        self.assertEqual(1, raster.count('drawContent()'))
         self.assertIn('drawImage(pixels, topLeft = Offset(0f, size.height - pixels.height)', source)
         self.assertIn('size.height / frame.exitStartHeight', source)
         self.assertIn('frame.targetHeight = child.height', source)

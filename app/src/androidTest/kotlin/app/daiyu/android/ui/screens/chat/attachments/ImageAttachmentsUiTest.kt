@@ -296,11 +296,10 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         showComposer(holder) { _, _ -> loaded.set(true); bitmap }
         ui.waitUntil(5_000) { loaded.get() }
         awaitVisualIdle()
-        ui.mainClock.autoAdvance = false
-        fun pixels(): Int {
+        fun pixels(verifyClock: Boolean = true): Int {
             val before = ui.mainClock.currentTime
             val image = captureScreenNode(node("chat-composer-surface"), advanceAnimationClock = false).toPixelMap()
-            assertEquals(before, ui.mainClock.currentTime)
+            if (verifyClock) assertEquals(before, ui.mainClock.currentTime)
             var count = 0
             for (y in 0 until image.height) for (x in 0 until image.width) {
                 val c = image[x, y]
@@ -308,6 +307,8 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
             }
             return count
         }
+        ui.waitUntil(5_000) { pixels(verifyClock = false) > 0 }
+        ui.mainClock.autoAdvance = false
         try {
             assertTrue(pixels() > 0)
             mainThread {

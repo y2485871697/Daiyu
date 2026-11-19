@@ -403,7 +403,7 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
         return bounds
     }
 
-    private fun assertSendTailContinuity(text: String, acceptAfter: Long, fromEarlierHistory: Boolean = false) {
+    private fun assertSendTailContinuity(text: String, acceptAfter: Long, fromEarlierHistory: Boolean = false, orderedHistory: Boolean = false) {
         val history: List<ChatTurnUi> = List(24) { ChatTurnUi.User("history-$it", "更早的历史消息 $it") }
         var rows by mutableStateOf(history)
         var preview by mutableStateOf<ChatSubmissionPreview?>(null)
@@ -440,11 +440,13 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
             ui.waitForIdle()
         }
         assertTrue("a safely placed send must become visible", progress() > 0f)
-        assertTrue("the first visible frame must contain real bubble paint", bubbleBackgroundContrast() > .001f)
+        val firstContrast = bubbleBackgroundContrast()
+        assertTrue("the first visible frame must contain real bubble paint", firstContrast > .001f)
         val baseline = sendPhysicalBounds("chat-turn:new-send")
         val composerTop = sendPhysicalBounds("tail-composer").top
         val expectedGap = (8f + 26f) * density
         val diagnostic = StringBuilder()
+        var previousProgress = 0f
         fun sample(key: String, stage: String) {
             val row = sendPhysicalBounds("chat-turn:$key")
             val actions = sendPhysicalBounds("message-user-actions:$key")
@@ -454,6 +456,16 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
             assertEquals("$stage: the first painted send already owns the reply gap", expectedGap, gap, 1.5f)
             assertEquals("$stage: the whole user row cannot jump after first paint", baseline.top, row.top, 1.5f)
             assertEquals("$stage: action slot cannot jump after first paint", baseline.bottom, actions.bottom, 1.5f)
+            if (orderedHistory) {
+                assertEquals("$stage: reference row height must not change", baseline.height, row.height, 1.5f)
+                assertTrue("$stage: reference entrance progress must not go backwards", progress() + .001f >= previousProgress)
+                previousProgress = progress()
+                ui.onNodeWithText("scroll-flicker（5）.log").assertIsDisplayed()
+                ui.onNodeWithText("工作目录").assertIsDisplayed()
+                ui.onNodeWithTag("message-reference-icon:0", useUnmergedTree = true).assertIsDisplayed()
+                ui.onNodeWithText("content://", substring = true, useUnmergedTree = true).assertDoesNotExist()
+                ui.onNodeWithText("218953", substring = true, useUnmergedTree = true).assertDoesNotExist()
+            }
             diagnostic.append("{\"stage\":\"").append(stage).append("\",\"clock\":").append(ui.mainClock.currentTime)
                 .append(",\"rowTop\":").append(row.top).append(",\"actionsBottom\":").append(actions.bottom)
                 .append(",\"composerTop\":").append(composer.top).append(",\"gap\":").append(gap).append("}\n")
@@ -466,6 +478,8 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
             sample(ticket.key, "preparing")
             elapsed += 16
         }
+        if (orderedHistory) assertTrue("reference bubble alpha must increase during entrance",
+            bubbleBackgroundContrast() > firstContrast + .001f)
         val sameMotion = checkNotNull(motion)
         // A durable assistant can arrive before history publishes its user. Keep the real projection order.
         val assistant = ChatTurnUi.Assistant("accepted-assistant", status = app.daiyu.android.domain.RunStatus.RUNNING, isStreaming = true)
@@ -480,7 +494,8 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
             sample(ticket.key, "accepted-preview")
         }
         change {
-            rows = history + ChatTurnUi.User("saved-user", text) + assistant
+            rows = history + ChatTurnUi.User("saved-user", text,
+                content = if (orderedHistory) listOf(MessageContentUi.Text("saved-reference-text", text)) else emptyList()) + assistant
             preview = null
             navigation = ChatScrollRequest(3)
         }
@@ -491,7 +506,8 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
         }
         assertEquals(1f, progress(), .001f)
         val directory = java.io.File(activity.getExternalFilesDir(null), "visual-diagnostics/user-message-entrance").apply { mkdirs() }
-        java.io.File(directory, "tail-$acceptAfter-${scale.factor}-$fromEarlierHistory.jsonl").writeText(diagnostic.toString())
+        val referenceCase = if (orderedHistory) "-references-${if (text.startsWith("检查")) "body" else "only"}" else ""
+        java.io.File(directory, "tail-$acceptAfter-${scale.factor}-$fromEarlierHistory$referenceCase.jsonl").writeText(diagnostic.toString())
     }
 
 
@@ -507,6 +523,20 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
         assertTrue(entrance.positioned)
         entrance.updatePlacement(next, false)
         assertFalse(entrance.positioned)
+    }
+
+
+    private val entranceReferences = "文件引用（未读取）：content://reference-never-read.invalid/document/log\n" +
+        "附件信息（按需读取）：scroll-flicker（5）.log（218953 字节）；用 read_text_file 按需读取\n" +
+        "目录引用（未读取）：content://reference-never-read.invalid/tree/primary%3Afiles\n" +
+        "附件信息（按需读取）：工作目录；用 list_files 按需列举"
+
+    fun testTextAndReferencesKeepOneEntranceAcrossPreviewAndSavedOrderedText() {
+        assertSendTailContinuity("检查这些附件\n$entranceReferences", acceptAfter = 80, orderedHistory = true)
+    }
+
+    fun testReferencesOnlyKeepOneEntranceAcrossPreviewAndSavedOrderedText() {
+        assertSendTailContinuity(entranceReferences, acceptAfter = 80, orderedHistory = true)
     }
 
 }

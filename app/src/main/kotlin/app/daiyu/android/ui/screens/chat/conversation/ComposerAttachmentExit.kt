@@ -34,6 +34,9 @@ private class ComposerAttachmentFrame {
     var exitStartHeight = 0f
 }
 
+internal val LocalComposerAttachmentRasterProbe =
+    staticCompositionLocalOf<((ImageBitmap, Int, Int) -> Unit)?> { null }
+
 private val LocalComposerAttachmentVisualChange = staticCompositionLocalOf<() -> Unit> { {} }
 
 /** Child-only image decoding must also invalidate the independently retained raster. */
@@ -53,6 +56,7 @@ internal fun ObserveComposerAttachmentVisual(value: Any?) {
 @Composable
 internal fun ComposerAttachmentExit(content: @Composable () -> Unit) {
     val frame = remember { ComposerAttachmentFrame() }
+    val rasterProbe = LocalComposerAttachmentRasterProbe.current
     val changed = remember(frame) { { frame.visualRevision++; Unit } }
     Column(Modifier.fillMaxWidth().testTag("composer-attachment-exit").clipToBounds()
         .drawWithContent {
@@ -79,7 +83,7 @@ internal fun ComposerAttachmentExit(content: @Composable () -> Unit) {
             layout(child.width, child.height) { child.placeRelative(0, 0) }
         }
         .drawWithContent {
-            frame.visualRevision
+            val revision = frame.visualRevision
             val width = size.width.toInt()
             val height = size.height.toInt()
             if (frame.targetHeight > 0 && width > 0 && height > 0) {
@@ -92,6 +96,7 @@ internal fun ComposerAttachmentExit(content: @Composable () -> Unit) {
                     drawRect(Color.Transparent, blendMode = BlendMode.Clear)
                     this@drawWithContent.drawContent()
                 }
+                rasterProbe?.invoke(checkNotNull(frame.bitmap), revision, frame.targetHeight)
                 // Live and retiring attachments consume the same completed pixels.
                 drawImage(checkNotNull(frame.bitmap))
             }

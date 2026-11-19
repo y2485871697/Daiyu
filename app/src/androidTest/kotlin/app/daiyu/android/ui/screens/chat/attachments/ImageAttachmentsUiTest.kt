@@ -14,11 +14,14 @@ import app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
 import app.daiyu.android.ui.screens.chat.conversation.ComposerUi
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.asAndroidBitmap
+import app.daiyu.android.ui.screens.chat.conversation.LocalComposerAttachmentRasterProbe
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
@@ -34,6 +37,7 @@ import app.daiyu.android.media.ImageAttachmentOwner
 import app.daiyu.android.ui.app.AgentAppTheme
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /** Component-only instrumentation. No SAF launcher, model request or production controller is used. */
 class ImageAttachmentsUiTest : WiredActivityTestCase() {
@@ -68,21 +72,27 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         awaitVisualIdle()
     }
 
-    private fun showComposer(holder: ImageAttachmentsState, loader: ImageAttachmentPreviewLoader = { _, _ -> ImageBitmap(8, 8) }) {
+    private fun showComposer(
+        holder: ImageAttachmentsState,
+        rasterProbe: ((ImageBitmap, Int, Int) -> Unit)? = null,
+        loader: ImageAttachmentPreviewLoader = { _, _ -> ImageBitmap(8, 8) },
+    ) {
         mainThread { activity.setContent {
             val state by holder.state.collectAsState()
-            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                ChatMenuLayer { Box(Modifier.fillMaxSize()) {
-                    ChatComposer(ComposerUi(imageSendAvailable = state.canSubmit,
-                        imageSendBlocked = state.items.isNotEmpty() && !state.canSubmit), ChatScreenActions(),
-                        Modifier.requiredWidth(320.dp).align(Alignment.BottomCenter), attachmentContent = {
-                            ImageAttachments(state, ImageAttachmentsActions(
-                                onSelect = { selection = holder.requestSelection(it) },
-                                onPreview = { holder.openPreview(it) }, onRemove = { holder.remove(it) },
-                                onDismissPreview = { holder.closePreview(it) },
-                            ), loader, compact = true)
-                        })
-                } }
+            CompositionLocalProvider(LocalComposerAttachmentRasterProbe provides rasterProbe) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    ChatMenuLayer { Box(Modifier.fillMaxSize()) {
+                        ChatComposer(ComposerUi(imageSendAvailable = state.canSubmit,
+                            imageSendBlocked = state.items.isNotEmpty() && !state.canSubmit), ChatScreenActions(),
+                            Modifier.requiredWidth(320.dp).align(Alignment.BottomCenter), attachmentContent = {
+                                ImageAttachments(state, ImageAttachmentsActions(
+                                    onSelect = { selection = holder.requestSelection(it) },
+                                    onPreview = { holder.openPreview(it) }, onRemove = { holder.remove(it) },
+                                    onDismissPreview = { holder.closePreview(it) },
+                                ), loader, compact = true)
+                            })
+                    } }
+                }
             }
         } }
         awaitVisualIdle()
@@ -294,7 +304,23 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         val bitmap = android.graphics.Bitmap.createBitmap(16, 16, android.graphics.Bitmap.Config.ARGB_8888)
             .apply { eraseColor(android.graphics.Color.MAGENTA) }.asImageBitmap()
         val loaded = AtomicBoolean()
-        showComposer(holder) { _, _ -> loaded.set(true); bitmap }
+        val raster = AtomicReference<String?>(null)
+        val rasterSequence = AtomicInteger()
+        val probeActive = AtomicBoolean(true)
+        showComposer(holder, rasterProbe = { image, revision, targetHeight ->
+            if (probeActive.get()) {
+                val map = image.toPixelMap()
+                var magenta = 0
+                for (y in 0 until map.height) for (x in 0 until map.width) {
+                    val c = map[x, y]
+                    if (c.red > c.green + .15f && c.blue > c.green + .15f) magenta++
+                }
+                val native = image.asAndroidBitmap()
+                raster.set("sequence=${rasterSequence.incrementAndGet()} revision=$revision target=$targetHeight " +
+                    "size=${image.width}x${image.height} identity=${System.identityHashCode(native)} " +
+                    "generation=${native.generationId} magenta=$magenta")
+            }
+        }) { _, _ -> loaded.set(true); bitmap }
         ui.waitUntil(5_000) { loaded.get() }
         awaitVisualIdle()
         fun pixels(verifyClock: Boolean = true): Int {
@@ -308,7 +334,31 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
             }
             return count
         }
-        ui.waitUntil(5_000) { pixels(verifyClock = false) > 0 }
+        var lastPixels = -1
+        try {
+            ui.waitUntil(5_000) { pixels(verifyClock = false).also { lastPixels = it } > 0 }
+        } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+            val id = holder.state.value.ready.single().key.id
+            fun count(tag: String) = ui.onAllNodes(hasTestTag(tag), useUnmergedTree = true)
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).size
+            val directory = java.io.File(activity.getExternalFilesDir(null),
+                "visual-diagnostics/real-image-initial").apply { mkdirs() }
+            val details = "screenMagenta=$lastPixels raster=${raster.get()} " +
+                "loaded=${count("image_attachments_preview_loaded:$id")} " +
+                "loading=${count("image_attachments_preview_loading:$id")} " +
+                "failed=${count("image_attachments_preview_failed:$id")} " +
+                "clock=${ui.mainClock.currentTime} autoAdvance=${ui.mainClock.autoAdvance} " +
+                "thumbnail=${node("image_attachments_thumbnail:$id").fetchSemanticsNode().boundsInRoot} " +
+                "composer=${node("chat-composer-surface").fetchSemanticsNode().boundsInRoot}"
+            java.io.File(directory, "state.txt").writeText(details)
+            val screen = captureScreenNode(node("chat-composer-surface"), advanceAnimationClock = false)
+            try {
+                java.io.File(directory, "screen.png").outputStream().use {
+                    screen.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                }
+            } finally { screen.asAndroidBitmap().recycle() }
+            throw AssertionError("Initial real thumbnail missing: $details", timeout)
+        } finally { probeActive.set(false) }
         ui.mainClock.autoAdvance = false
         try {
             assertTrue(pixels() > 0)

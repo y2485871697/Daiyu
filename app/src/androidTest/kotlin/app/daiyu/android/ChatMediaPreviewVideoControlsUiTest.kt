@@ -311,9 +311,16 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
     fun testShortRealVideoCompletesAtEndAndReplayReturnsToStart() {
         val file = java.io.File(activity.cacheDir, "preview-completion-${java.util.UUID.randomUUID()}.mp4")
         encodeOfflineBackupMp4(file, frameCount = 20)
+        val poster = android.graphics.Bitmap.createBitmap(12, 12, android.graphics.Bitmap.Config.ARGB_8888)
+            .apply { eraseColor(android.graphics.Color.MAGENTA) }
+        val image = poster.asImageBitmap()
+        val releaseOriginal = kotlinx.coroutines.CompletableDeferred<Unit>()
         var opened by mutableStateOf(true)
         val item = app.daiyu.android.ui.media.ChatMediaPreviewItem("completion-video", "video/mp4", file.name,
-            { null }, { app.daiyu.android.ui.media.ChatMediaPreviewOriginal(file.inputStream(), "video/mp4", file.name) })
+            { image }, openOriginal = {
+                releaseOriginal.await()
+                app.daiyu.android.ui.media.ChatMediaPreviewOriginal(file.inputStream(), "video/mp4", file.name)
+            }, cachedImage = { image })
         try {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -321,6 +328,14 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
                         app.daiyu.android.ui.media.ChatMediaPreviewSelection(listOf(item), 0)) { opened = false }
                 }
             } }
+            val cover = captureScreenNode(node("chat-media-video-cover"))
+            try {
+                val map = cover.toPixelMap()
+                val center = map[map.width / 2, map.height / 2]
+                assertTrue("real video poster must be visible before original opens",
+                    center.red > .9f && center.blue > .9f && center.green < .1f)
+            } finally { cover.asAndroidBitmap().recycle() }
+            releaseOriginal.complete(Unit)
             node("chat-media-video-surface").performClick()
             ui.waitUntil(20_000) {
                 ui.onAllNodes(hasTestTag("chat-media-video-progress") and isEnabled())
@@ -331,6 +346,16 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             val end = node("chat-media-video-progress").fetchSemanticsNode().config[
                 androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo].current
             assertEquals(1f, end, 0f)
+            node("chat-media-video-cover").assertDoesNotExist()
+            val rendered = captureScreenNode(node("chat-media-video-renderer"))
+            try {
+                val map = rendered.toPixelMap()
+                val center = map[map.width / 2, map.height / 2]
+                assertTrue("decoded frame must replace poster without black",
+                    center.red > .15f && center.red < .7f &&
+                        kotlin.math.abs(center.red - center.green) < .08f &&
+                        kotlin.math.abs(center.green - center.blue) < .08f)
+            } finally { rendered.asAndroidBitmap().recycle() }
             node("chat-media-video-play-pause").performClick()
             ui.waitUntil(5_000) {
                 ui.onAllNodes(hasTestTag("chat-media-video-progress"))
@@ -343,7 +368,8 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
                     ?.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo)?.current == 1f
             }
             ui.onNodeWithContentDescription("播放").assertIsDisplayed()
-        } finally { mainThread { opened = false }; ui.waitForIdle(); file.delete() }
+            node("chat-media-video-cover").assertDoesNotExist()
+        } finally { mainThread { opened = false }; ui.waitForIdle(); poster.recycle(); file.delete() }
     }
 
     fun testImageAndVideoDownloadKeepTheirFirstFrameOffsets() {
@@ -371,7 +397,26 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
     }
 
     private fun assertProgressHandle(fraction: Float, accent: Color) {
-        val image = captureScreenNode(node("chat-media-video-progress-track"), advanceAnimationClock = false)
+        val track = ui.onNodeWithTag("chat-media-video-progress-track", useUnmergedTree = true).assertExists()
+        val bounds = track.fetchSemanticsNode().boundsInRoot
+        val image = try {
+            assertTrue("progress track must have positive bounds: $bounds", bounds.width > 0f && bounds.height > 0f)
+            captureScreenNode(track, advanceAnimationClock = false)
+        } catch (failure: AssertionError) {
+            val directory = java.io.File(activity.getExternalFilesDir(null),
+                "visual-diagnostics/video-progress-track").apply { mkdirs() }
+            java.io.File(directory, "state.txt").writeText("fraction=$fraction bounds=$bounds " +
+                "clock=${ui.mainClock.currentTime} autoAdvance=${ui.mainClock.autoAdvance}\n" +
+                ui.onRoot(useUnmergedTree = true).printToString())
+            instrumentation.uiAutomation.takeScreenshot()?.let { screen ->
+                try {
+                    java.io.File(directory, "screen.png").outputStream().use {
+                        screen.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                } finally { screen.recycle() }
+            }
+            throw failure
+        }
         try {
             val pixels = image.toPixelMap()
             val expected = (fraction * (pixels.width - 1)).toInt()

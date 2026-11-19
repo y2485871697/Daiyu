@@ -256,7 +256,7 @@ private fun AttachmentImage(
                 onClick = { attempt++ }, modifier = Modifier.heightIn(min = 48.dp))
         }
         is PreviewResult.Loaded -> Image(current.bitmap, contentDescription = description,
-            modifier = modifier.fillMaxSize(), contentScale = contentScale)
+            modifier = modifier.fillMaxSize().testTag("image_attachments_preview_loaded:${item.key.id}"), contentScale = contentScale)
     }
 }
 

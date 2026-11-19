@@ -214,6 +214,14 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         drainPosition = position
     }
 
+    fun finish(expected: MarkdownTypingTarget): Int {
+        if (target !== expected) return expected.start
+        position = expected.total.toDouble()
+        pause(expected)
+        if (expected.terminal) closed = true
+        return expected.total
+    }
+
     fun advance(expected: MarkdownTypingTarget, frameNanos: Long, limit: Int = expected.total, onAdvance: () -> Unit = {}): Int {
         if (target !== expected) return expected.start
         val previous = position.toInt()

@@ -323,4 +323,22 @@ class MarkdownRevealTest {
         assertTrue(66 <= after[2][0])
     }
 
+
+    @Test fun explicitPresentationFinishRevealsOnlyTheCurrentTarget() {
+        val state = MarkdownTypingState(emptyList())
+        state.update(emptyList(), 0, streaming = false, terminal = false, live = true)
+        val old = state.update(listOf(part("字".repeat(100))), 0, streaming = false,
+            terminal = true, paceTerminal = true)!!
+        state.advance(old, 1_000_000_000L)
+        state.advance(old, 1_050_000_000L)
+        val current = state.update(listOf(part("字".repeat(200))), 0, streaming = false,
+            terminal = true, paceTerminal = true)!!
+        val before = state.visible(current)
+        state.finish(old)
+        assertEquals(before, state.visible(current))
+        assertEquals(current.total, state.finish(current))
+        assertEquals(current.total, state.visible(current))
+        assertEquals(current.total, state.advance(current, 20_000_000_000L))
+    }
+
 }

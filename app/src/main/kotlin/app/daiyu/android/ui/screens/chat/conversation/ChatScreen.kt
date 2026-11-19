@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.statusBarsIgnoringVisibility
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -165,6 +166,45 @@ internal fun DaiyuChatScreen(
     val callCoordinates = remember(state.conversationKey) { ChatCallAnchorCoordinates() }
     val latestCallAnchorChanged by rememberUpdatedState(onCallAnchorChanged)
     val displayedTurns = submissionTurns(state.turns, state.submissionPreview)
+    val reply = displayedTurns.lastOrNull() as? ChatTurnUi.Assistant
+    val runtimePhase = state.composer.phase
+    val presentation = remember(state.conversationKey, reply?.listKey) {
+        ReplyPresentationControl(reply?.listKey,
+            runtimePhase != ComposerPhase.IDLE || reply?.status == app.daiyu.android.domain.RunStatus.RUNNING)
+    }
+    SideEffect {
+        if (runtimePhase != ComposerPhase.IDLE || reply?.status == app.daiyu.android.domain.RunStatus.RUNNING)
+            presentation.observeLive()
+        when (runtimePhase) {
+            ComposerPhase.PAUSED -> presentation.pause(true)
+            ComposerPhase.RUNNING -> presentation.pause(false)
+            ComposerPhase.IDLE -> Unit
+        }
+    }
+    val playback = remember(presentation, runtimePhase) { ReplyPlayback(presentation, runtimePhase == ComposerPhase.PAUSED) }
+    val presentationOnly = runtimePhase == ComposerPhase.IDLE && reply?.let(presentation::pending) == true
+    val composer = state.composer.copy(
+        phase = when {
+            presentationOnly -> if (playback.paused) ComposerPhase.PAUSED else ComposerPhase.RUNNING
+            runtimePhase == ComposerPhase.RUNNING && presentation.pauseRequested -> ComposerPhase.PAUSED
+            else -> runtimePhase
+        },
+        presentationOnly = presentationOnly,
+        controlOwnerKey = if (presentationOnly) "presentation:${state.conversationKey}:${reply?.actionKey}" else state.composer.controlOwnerKey,
+    )
+    val composerActions = actions.copy(
+        onPrimaryTap = {
+            if (runtimePhase == ComposerPhase.IDLE) presentation.pause(!playback.paused)
+            else actions.onPrimaryTap()
+        },
+        onPrimaryLongPress = {
+            presentation.finish()
+            if (runtimePhase != ComposerPhase.IDLE) actions.onPrimaryLongPress()
+        },
+        onControlPress = { if (!presentationOnly) actions.onControlPress() },
+        onControlRelease = { if (!presentationOnly) actions.onControlRelease() },
+        onSend = { text -> presentation.finish(); actions.onSend(text) },
+    )
     val userMessageEntrance = suppliedUserMessageEntrance ?:
         rememberUserMessageEntrance(state.userMessageEntrance, presentationActive, awaitPlacement = true)
     val focus = LocalFocusManager.current
@@ -242,10 +282,10 @@ internal fun DaiyuChatScreen(
                     speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId, compressionActivities = state.compressionActivities,
                     onPresentationReady = onPresentationReady, historyReady = state.historyReady,
                     retainUnconfirmedRows = !state.historyReady, userMessageEntrance = userMessageEntrance,
-                    hasTurnExtras = hasTurnExtras)
+                    hasTurnExtras = hasTurnExtras, replyPlayback = playback)
             }
         }, composer = { backdrop ->
-            ChatComposer(state.composer, actions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop,
+            ChatComposer(composer, composerActions, assistant = assistant, balanceState = state.balanceState, backdrop = backdrop,
                 modifier = Modifier.onGloballyPositioned {
                     composerBounds = it.boundsInRoot()
                     callCoordinates.composer = it

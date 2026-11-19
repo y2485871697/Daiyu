@@ -98,6 +98,9 @@ internal fun ReportedReasoningCard(
             val sourceWindow = LocalReasoningSourceWindows.current[summary.itemId]
             val projection = rememberMarkdownProjection(listOf(text), streaming = streamingProjection, windows = listOf(sourceWindow))
             val revealGate = parentExpanded && !manuallyCollapsed && (!stopped || currentOverride == true)
+            val presentationLane = listOf("reasoning", ownerKey, summary.itemId)
+            val playback = LocalReplyPlayback.current
+            SideEffect { if (!revealGate) playback?.control?.skipLane(presentationLane) }
             val revealEnabled = arrived && revealGate && hasReportedReasoningText(text) &&
                 (isThinking || observedLive || currentOverride == true)
             var observedDisplayLive by remember(revealGate, revealResetEpoch) { mutableStateOf(isThinking) }
@@ -116,6 +119,7 @@ internal fun ReportedReasoningCard(
                         live = isThinking || queuedForArrival,
                         paceTerminal = queuedForArrival,
                         initialBaseline = if (queuedForArrival) emptyList() else null,
+                        presentationLane = presentationLane.takeIf { revealGate },
                     )
                 }
             }
@@ -125,6 +129,7 @@ internal fun ReportedReasoningCard(
     }
     val settled = summaryDisplays.all { it.reveal.settled }
     val displayThinking = isThinking || !stopped && summaryDisplays.any { it.waitingForReveal }
+    val displayPaused = LocalReplyPlayback.current?.paused == true
     val disclosureExpanded = currentOverride ?: (!stopped && (isThinking || observedLive && !settled))
     val expanded = hasSummary && disclosureExpanded && summaryDisplays.any { display ->
         display.projection?.sources?.any(::hasReportedReasoningText) == true
@@ -154,7 +159,7 @@ internal fun ReportedReasoningCard(
             .padding(horizontal = if (embedded) 0.dp else 11.dp, vertical = if (embedded) 5.dp else 9.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (embedded) 6.dp else 7.dp)) {
             Icon(ChatPreviewIcons.Thought, null, Modifier.size(if (embedded) 18.dp else 14.dp), tint = colors.accent)
-            Text(if (displayThinking) "正在思考…" else "已思考", Modifier.weight(1f), color = if (embedded) colors.text else colors.accent,
+            Text(reasoningDisplayLabel(isThinking, displayThinking, displayPaused), Modifier.weight(1f), color = if (embedded) colors.text else colors.accent,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium))
             ReasoningElapsedTime(ownerKey, rememberReasoningTiming(reported), isThinking && allowLiveTiming, nanoTime, embedded)
             if (hasSummary) {
@@ -275,6 +280,7 @@ internal fun ReasoningStepRow(
 ) {
     val colors = conversationColors()
     val lineMotion = LocalWorkflowLineMotion.current
+    val displayPaused = LocalReplyPlayback.current?.paused == true
     val appearance = rememberWorkflowToolAppearance("reasoning:${reported.itemId}")
     ReportedReasoningCard("$ownerKey:reasoning:${reported.itemId}", listOf(reported),
         allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, stopped = stopped, embedded = true,
@@ -288,9 +294,9 @@ internal fun ReasoningStepRow(
         leadingIndicator = { displayThinking ->
             Box(Modifier.padding(top = 17.dp).width(12.dp)) {
                 val complete = (generationComplete || reported.activeSinceNanos == null) && !displayThinking
-                val spinning = displayThinking && !stopped && LocalWorkflowNodeMotionEnabled.current
+                val spinning = displayThinking && !stopped && !displayPaused && LocalWorkflowNodeMotionEnabled.current
                 Box(Modifier.size(10.dp).testTag("reasoning-step-state:${reported.itemId}")
-                    .semantics { stateDescription = if (complete) "已思考" else "正在思考" }
+                    .semantics { stateDescription = reasoningDisplayLabel(!generationComplete && reported.activeSinceNanos != null, !complete, displayPaused).removeSuffix("…") }
                     .workflowCompletion("reasoning:${reported.itemId}", complete, appearance = appearance)
                     .clip(CircleShape).then(when {
                         complete -> Modifier.background(colors.success)

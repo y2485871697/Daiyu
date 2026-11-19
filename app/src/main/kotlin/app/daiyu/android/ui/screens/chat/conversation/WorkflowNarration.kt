@@ -98,26 +98,29 @@ internal fun WorkflowNarrationContent(
     content: @Composable (WorkflowNarration) -> Unit,
 ) {
     run {
+        val playback = LocalReplyPlayback.current
+        val displayPaused = paused || playback?.paused == true
         val texts = remember(sources) { sources.map { it.text } }
         val projection = rememberMarkdownProjection(texts, streaming = running, windows = sources.map { it.window })
-        val baselineOnly = !expanded || stopped
+        val baselineOnly = !expanded || stopped || playback?.control?.finished == true
+        SideEffect { if (baselineOnly && admission != null) playback?.control?.skipLane(admission) }
         val blocked = workflowBlockedTextSources(steps, reasoningReady) +
             if (baselineOnly) emptySet() else admission?.blockedText(steps).orEmpty()
         // Reopening is a silent baseline; reasoning handoff never resets this owner.
         val reveal = key(expanded, stopped) {
             val baseline = remember(admission, revealResetEpoch) { admission?.initialBaseline(sources, baselineOnly) }
-            rememberMarkdownReveal(sources, projection, streaming = running && !paused,
+            rememberMarkdownReveal(sources, projection, streaming = running && !displayPaused,
                 terminal = !running && projection?.sources == texts, resetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance,
                 enabled = expanded && !stopped && !paused, allowBaselinePrefix = false, blockedSources = blocked, live = running,
-                initialBaseline = baseline)
+                initialBaseline = baseline, presentationLane = admission.takeUnless { baselineOnly })
         }
         val plan = remember(steps) { workflowAdmissionPlan(steps) }
         SideEffect { if (baselineOnly) admission?.admit(plan.map { it.key }) }
         val currentPlan by rememberUpdatedState(plan)
         val currentReveal by rememberUpdatedState(reveal)
-        LaunchedEffect(admission, baselineOnly, paused, revealResetEpoch) {
+        LaunchedEffect(admission, baselineOnly, displayPaused, revealResetEpoch) {
             val gate = admission ?: return@LaunchedEffect
-            if (baselineOnly || paused) return@LaunchedEffect
+            if (baselineOnly || displayPaused) return@LaunchedEffect
             var presentedText: List<MarkdownTypingSource>? = null
             snapshotFlow {
                 currentPlan.firstOrNull { !gate.contains(it.key) }?.takeIf { entry ->

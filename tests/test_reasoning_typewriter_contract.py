@@ -79,7 +79,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
                       'live = isThinking || queuedForArrival',
                       '(isThinking || observedLive || currentOverride == true)',
                       'leadingIndicator?.invoke(displayThinking)',
-                      'Text(if (displayThinking) "正在思考…" else "已思考"',
+                      'Text(reasoningDisplayLabel(isThinking, displayThinking, displayPaused)',
                       'leadingIndicator = { displayThinking ->',
                       'val complete = (generationComplete || reported.activeSinceNanos == null) && !displayThinking'):
             self.assertIn(token, card)

@@ -316,6 +316,7 @@ internal fun ChatMessageList(
     onTurnComposed: ((String) -> Unit)? = null,
     userMessageEntrance: UserMessageEntranceMotion? = null,
     hasTurnExtras: (ChatTurnUi.Assistant) -> Boolean = { true },
+    replyPlayback: ReplyPlayback? = null,
 ) {
     val incomingTurns = turns
     var retainedTurns by remember { mutableStateOf(turns, androidx.compose.runtime.referentialEqualityPolicy()) }
@@ -1070,7 +1071,10 @@ internal fun ChatMessageList(
                     if (onTurnComposed != null) SideEffect { onTurnComposed(turn.listKey) }
                     when (turn) {
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader, userMessageEntrance)
-                        is ChatTurnUi.Assistant -> androidx.compose.runtime.CompositionLocalProvider(
+                        is ChatTurnUi.Assistant -> {
+                            val playback = replyPlayback?.takeIf { it.control.matches(turn) }
+                            androidx.compose.runtime.CompositionLocalProvider(
+                            LocalReplyPlayback provides playback,
                             LocalWorkflowVisualScope provides workflowAdmissions.scope(turn.listKey, initialPositionPending),
                             LocalWorkflowDisclosureContext provides remember(turn.listKey, disclosureViewport) {
                                 WorkflowDisclosureContext(disclosureViewport, turn.listKey) {
@@ -1096,12 +1100,14 @@ internal fun ChatMessageList(
                                 },
                                 onRevealSettled = { settled ->
                                     if (settled) revealedTurns[turn.listKey] = turn else revealedTurns.remove(turn.listKey)
+                                    playback?.control?.setSettled(turn, settled)
                                 },
                                 onContentReady = { ready ->
                                     if (ready) readyTurns[turn.listKey] = turn else readyTurns.remove(turn.listKey)
                                 })
                             turnExtras(turn)
                         } }
+                        }
                     }
                     fallbackAfter[turn.listKey].orEmpty().forEach { entry ->
                         key(entry.id) { ChatTimelineDivider(entry) }
@@ -1268,7 +1274,7 @@ internal fun AssistantTurn(
         terminal = generationComplete, resetEpoch = revealResetEpoch,
         onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources,
         live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true,
-        initialBaseline = initialBaseline)
+        initialBaseline = initialBaseline, presentationLane = "body:${turn.listKey}")
     SideEffect { if (canReleaseWithoutWorkflow && ordered.body.isNotEmpty()) answerReleased = true }
     val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true
     SideEffect { onContentReady(contentReady) }

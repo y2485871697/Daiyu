@@ -100,11 +100,16 @@ internal fun rememberMarkdownReveal(
     live: Boolean = streaming,
     paceTerminal: Boolean = false,
     initialBaseline: List<MarkdownTypingSource>? = null,
+    presentationLane: Any? = null,
 ): MarkdownReveal {
     val currentAdvance by rememberUpdatedState(onVisibleAdvance)
     val parser = LocalMarkdownParser.current
     val identity = MarkdownParserIdentity(parser)
-    val baseline = remember(identity, resetEpoch) { (initialBaseline ?: sources).toList() }
+    val playback = LocalReplyPlayback.current
+    val retainedLane = remember(playback?.control, presentationLane, identity, resetEpoch) {
+        presentationLane?.let { slot -> playback?.control?.lane(slot, identity, resetEpoch) { initialBaseline ?: sources } }
+    }
+    val baseline = remember(identity, resetEpoch, retainedLane) { retainedLane?.baseline ?: (initialBaseline ?: sources).toList() }
     val baselineProjection = if (sources == baseline) projection else rememberMarkdownProjection(baseline.map { it.text },
         streaming = !terminal, windows = baseline.map { it.window })
     val baselineLength = remember(baselineProjection, baseline, sources == baseline, allowBaselinePrefix) {
@@ -121,7 +126,7 @@ internal fun rememberMarkdownReveal(
             MarkdownTypingPart(displayed, displayText.length, displayText)
         } }
     }
-    val motion = remember(identity, resetEpoch) { MarkdownTypingState(baseline) }
+    val motion = remember(identity, resetEpoch, retainedLane) { retainedLane?.motion ?: MarkdownTypingState(baseline) }
     val exactProjection = projection?.sources == sources.map { it.text } &&
         projection?.windows.orEmpty() == sources.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty()
     val targetTerminal = terminal && exactProjection
@@ -135,14 +140,19 @@ internal fun rememberMarkdownReveal(
     val sourcesCompatible = remember(target, sources) {
         target?.let { markdownTypingAppends(it.parts.map { part -> part.source }, sources) } == true
     }
-    val canAdvance = enabled && sourcesCompatible
+    val finishImmediately = playback?.control?.finished == true
+    val canAdvance = enabled && sourcesCompatible && playback?.paused != true
     val currentCanAdvance by rememberUpdatedState(canAdvance)
     val clearance = LocalStreamingTextClearance.current
     val textClearance by rememberUpdatedState(clearance)
-    val frame = produceState(MarkdownTypingFrame(target, target?.start ?: 0), target, canAdvance, advanceLimit) {
+    val frame = produceState(MarkdownTypingFrame(target, target?.start ?: 0), target, canAdvance, advanceLimit, finishImmediately) {
         val current = target ?: return@produceState
         var shown = motion.visible(current)
         value = MarkdownTypingFrame(current, shown)
+        if (finishImmediately) {
+            value = MarkdownTypingFrame(current, motion.finish(current))
+            return@produceState
+        }
         if (!canAdvance) { motion.pause(current); return@produceState }
         val end = maxOf(shown, minOf(current.total, advanceLimit))
         while (shown < end) {
@@ -159,6 +169,18 @@ internal fun rememberMarkdownReveal(
             (if (progress.target === target) progress.visible else target.start) < minOf(target.total, advanceLimit)
         }
     } }
+    val presentationPending by remember(frame, target, enabled, sourcesCompatible) { derivedStateOf {
+        enabled && sourcesCompatible && target != null && frame.value.let { progress ->
+            (if (progress.target === target) progress.visible else target.start) < target.total
+        }
+    } }
+    SideEffect { playback?.control?.reportPending(motion, presentationPending) }
+    DisposableEffect(playback?.control, motion, retainedLane) {
+        onDispose {
+            motion.target?.let(motion::pause)
+            if (retainedLane == null) playback?.control?.reportPending(motion, false)
+        }
+    }
     SideEffect { clearance?.typingPending = typingPending }
     DisposableEffect(clearance) {
         onDispose { clearance?.typingPending = false }

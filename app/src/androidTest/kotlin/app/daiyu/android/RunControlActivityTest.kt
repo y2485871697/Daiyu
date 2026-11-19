@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.ExecutionPhase
@@ -128,4 +129,77 @@ class RunControlActivityTest : WiredActivityTestCase() {
         assertEquals(RunStatus.COMPLETED, fixture.database.messages(old.conversationId).last().second.status)
         assertEquals(2, fixture.opens.get())
     }
+
+    private fun visibleTailCharacters(): Int = ui.onAllNodes(
+        SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true)
+        .fetchSemanticsNodes().flatMap { it.config[SemanticsProperties.Text] }
+        .sumOf { text -> text.text.count { it == '甲' } }
+
+    private fun completedTail(): Message {
+        val session = fixture.session("终态输出" + "甲".repeat(400))
+        val owner = send()
+        assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+        ui.mainClock.autoAdvance = false
+        session.release.countDown()
+        awaitControl("backend is completed before the presentation") { fixture.controller.active == null }
+        ui.waitUntil(10_000) {
+            ui.mainClock.advanceTimeBy(32)
+            visibleTailCharacters() in 1 until 400
+        }
+        node("chat-control").assertIsEnabled().assertContentDescriptionEquals("暂停")
+        assertEquals(RunStatus.COMPLETED, fixture.database.messages(owner.conversationId).last().second.status)
+        return owner
+    }
+
+    fun testCompletedRunKeepsRealPresentationPauseAndResumeUntilTheLastCharacter() {
+        try {
+            val owner = completedTail()
+            node("chat-control").performClick()
+            ui.mainClock.advanceTimeBy(32)
+            node("chat-control").assertContentDescriptionEquals("继续")
+            val paused = visibleTailCharacters()
+            assertTrue(paused in 1 until 400)
+            ui.mainClock.advanceTimeBy(1200)
+            assertEquals("Pause must freeze the visible prefix", paused, visibleTailCharacters())
+            assertNull(fixture.controller.active)
+            assertEquals(1, fixture.opens.get())
+            node("chat-control").performClick()
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeBy(16)
+                visibleTailCharacters() > paused
+            }
+            assertTrue("Resume must not jump to the end", visibleTailCharacters() < 400)
+            node("chat-control").assertContentDescriptionEquals("暂停")
+            ui.waitUntil(15_000) {
+                ui.mainClock.advanceTimeBy(64)
+                visibleTailCharacters() == 400
+            }
+            ui.mainClock.advanceTimeBy(64)
+            node("chat-control").assertDoesNotExist()
+            node("chat-send").assertContentDescriptionEquals("发送").assertIsNotEnabled()
+            assertEquals(1, fixture.opens.get())
+            assertEquals(RunStatus.COMPLETED, fixture.database.messages(owner.conversationId).last().second.status)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
+    fun testCompletedPresentationCanSendANewDraftWithoutAppendingToTheFinishedRun() {
+        try {
+            val old = completedTail()
+            node("chat-control").performClick()
+            ui.mainClock.advanceTimeBy(32)
+            val next = fixture.session("next reply")
+            setDraft("next user")
+            node("chat-send").assertContentDescriptionEquals("发送").assertIsEnabled().performClick()
+            awaitTextSendResult(activity)
+            assertTrue(next.entered.await(5, TimeUnit.SECONDS))
+            assertEquals(2, fixture.opens.get())
+            val active = checkNotNull(fixture.controller.active)
+            assertFalse(old.runId == active.runId)
+            assertEquals(RunStatus.COMPLETED,
+                fixture.database.messages(old.conversationId).first { it.second.id == old.id }.second.status)
+            next.release.countDown()
+            awaitControl("new run completes independently") { fixture.controller.active == null }
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
 }

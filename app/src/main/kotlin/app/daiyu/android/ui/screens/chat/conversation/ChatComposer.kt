@@ -147,7 +147,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     var attachments by remember(state.editorGeneration, actions.editingMessageKey, state.enabled, pageActive) { mutableStateOf(false) }
     var voiceModes by remember(state.editorGeneration, state.enabled, state.voiceModes, callUi?.sessionKey, pageActive) { mutableStateOf(false) }
     val voiceMenuEnabled = toolbarEnabled && state.voiceModes.isNotEmpty()
-    val hasText = state.text.isNotBlank() || state.editingMessageCanSubmit || (state.phase == ComposerPhase.IDLE && (state.imageSendAvailable || state.videoSendAvailable))
+    val hasText = state.text.isNotBlank() || state.editingMessageCanSubmit || ((state.phase == ComposerPhase.IDLE || state.presentationOnly) && (state.imageSendAvailable || state.videoSendAvailable))
     val preparingSend = state.preparingSendKey != null
     val textAction = hasText && !preparingSend
     val compressionBlocked = !preparingSend && state.mainContextCompressing && (textAction || state.phase == ComposerPhase.IDLE)
@@ -157,7 +157,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val primaryIcon = when {
         preparingSend -> ChatPreviewIcons.Pause
         state.phase == ComposerPhase.PAUSED && !hasText -> ChatPreviewIcons.Play
-        textAction && state.phase != ComposerPhase.IDLE -> ChatPreviewIcons.Append
+        textAction && state.phase != ComposerPhase.IDLE && !state.presentationOnly -> ChatPreviewIcons.Append
         textAction -> ChatPreviewIcons.Send
         state.phase == ComposerPhase.RUNNING -> ChatPreviewIcons.Pause
         else -> ChatPreviewIcons.Send
@@ -165,8 +165,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val primaryLabel = when {
         preparingSend -> "取消发送"
         state.phase == ComposerPhase.PAUSED && !hasText -> "继续"
-        textAction && state.supplementPending -> "正在追加"
-        textAction && state.phase != ComposerPhase.IDLE -> "追加消息"
+        textAction && state.supplementPending && !state.presentationOnly -> "正在追加"
+        textAction && state.phase != ComposerPhase.IDLE && !state.presentationOnly -> "追加消息"
         editing -> "保存并重新生成"
         textAction -> "发送"
         state.phase == ComposerPhase.RUNNING -> "暂停"
@@ -338,7 +338,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     lifecycleDismissInProgress = true
                                     try { hideChatInputIme(focus, keyboard, view) }
                                     finally { lifecycleDismissInProgress = false }
-                                    if (state.phase == ComposerPhase.IDLE) actions.onSend(state.text)
+                                    if (state.phase == ComposerPhase.IDLE || state.presentationOnly) actions.onSend(state.text)
                                     else actions.onSupplement(state.text)
                                 }
                             }, Modifier.size(32.dp).testTag(when {

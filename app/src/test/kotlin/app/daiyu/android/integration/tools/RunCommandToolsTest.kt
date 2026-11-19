@@ -11,11 +11,21 @@ import org.junit.Test
 import java.io.File
 
 class RunCommandToolsTest {
-    private class Fixture(private val automaticConsent: Boolean = false, linuxState: app.daiyu.android.terminal.TerminalLinuxState? = null,
+    // Isolated adapter tests need a fresh owner, not the owner of a completed Runner.
+    private fun isolatedCommandOwner(): RunExecutionOwner {
+        val factory = RunExecutionOwner.Companion::class.java.declaredMethods.single {
+            it.name.substringBefore('$') == "issue" && it.returnType == RunExecutionOwner::class.java &&
+                it.parameterTypes.contentEquals(arrayOf(Message::class.java, kotlin.jvm.functions.Function1::class.java))
+        }
+        val changed: (RunExecutionOwner) -> Unit = {}
+        return factory.invoke(RunExecutionOwner.Companion, Message(MessageId("m"), ConversationId("c"), RunId("r"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING), changed) as RunExecutionOwner
+    }
+
+    private inner class Fixture(private val automaticConsent: Boolean = false, linuxState: app.daiyu.android.terminal.TerminalLinuxState? = null,
         androidConfiguration: TerminalConfiguration = TerminalConfiguration(workingDirectory = File("/fixed")),
-        linuxLaunch: TerminalPtyLaunch.Linux? = null, fileImages: Boolean = false) {
-        val owner = runnerOwner(Message(MessageId("m"), ConversationId("c"), RunId("r"),
-            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
+        linuxLaunch: TerminalPtyLaunch.Linux? = null, fileImages: Boolean = false,
+        val owner: RunExecutionOwner = isolatedCommandOwner()) {
         val task = TaskAuthorization("s", "r")
         var approved = true
         var prompts = 0
@@ -119,6 +129,37 @@ class RunCommandToolsTest {
             listOf(ToolInvocation(ToolCallId(id), "terminal_exec", JSONObject().put("command", command)
                 .put("environment", environment).put("timeout_ms", timeout).toString())), dispatchOwner) { cancelled }.single().outcome
     }
+    @Test fun isolatedOwnersHaveFreshIdentityAndForeignOwnerCannotOpenTransport() {
+        val fixture = Fixture()
+        val foreign = isolatedCommandOwner()
+        assertNotSame(fixture.owner, foreign)
+        assertNotEquals(fixture.owner.ownerId, foreign.ownerId)
+        assertEquals(fixture.owner.conversationId, foreign.conversationId)
+        assertEquals(fixture.owner.runId, foreign.runId)
+        assertEquals(fixture.owner.assistantMessageId, foreign.assistantMessageId)
+        try {
+            assertEquals(DispatchOutcome.NotExecuted("tool_run_owner_mismatch"),
+                fixture.dispatch("foreign", dispatchOwner = foreign))
+            assertEquals(0, fixture.created)
+            assertEquals(0, fixture.prompts)
+            assertEquals(0, fixture.executions)
+            assertTrue(fixture.dispatch("owned") is DispatchOutcome.Confirmed)
+            assertEquals(1, fixture.executions)
+        } finally { fixture.leaf.close() }
+    }
+
+    @Test fun completedRunnerOwnerStillRejectsNewCommandBeforeConsentOrTransport() {
+        val completed = runnerOwner(Message(MessageId("m"), ConversationId("c"), RunId("r"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
+        val fixture = Fixture(owner = completed)
+        try {
+            assertEquals(DispatchOutcome.NotExecuted("cancelled_before_execution"), fixture.dispatch())
+            assertEquals(0, fixture.created)
+            assertEquals(0, fixture.prompts)
+            assertEquals(0, fixture.executions)
+        } finally { fixture.leaf.close() }
+    }
+
     @Test fun syncWaitReadsTheOriginalJobUntilCompletionWithoutExecutingAgain() {
         val fixture = Fixture().apply { pendingReads = 2 }
         try {

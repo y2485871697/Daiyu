@@ -717,8 +717,33 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
         ui.waitForIdle()
     }
     protected fun SemanticsNodeInteraction.assertEditableText(text: String): SemanticsNodeInteraction {
-        ui.waitUntil(timeoutMillis = 5_000) {
-            fetchSemanticsNode().config.getOrNull(SemanticsProperties.EditableText)?.text == text
+        var draftObservation: String? = null
+        try {
+            ui.waitUntil(timeoutMillis = 5_000) {
+                val config = fetchSemanticsNode().config
+                val actual = config.getOrNull(SemanticsProperties.EditableText)?.text
+                if (config.getOrNull(SemanticsProperties.TestTag) == "chat-draft") {
+                    draftObservation = "actual=${actual?.let { "<$it>" } ?: "<missing EditableText>"}, " +
+                        "selection=${config.getOrNull(SemanticsProperties.TextSelectionRange)}, " +
+                        "focused=${config.getOrNull(SemanticsProperties.Focused)}"
+                }
+                actual == text
+            }
+        } catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
+            if (draftObservation != null) {
+                val sendState = runCatching {
+                    var state = ""
+                    instrumentation.runOnMainSync {
+                        val controller = (instrumentation.targetContext.applicationContext as ChatApplication).controller
+                        state = "active=${controller.active != null}, textSendPending=${controller.textSendState() != null}"
+                    }
+                    state
+                }.getOrElse { "send state unavailable: ${it.javaClass.simpleName}" }
+                failure.addSuppressed(AssertionError(
+                    "Draft expected=<$text>, last observed $draftObservation, $sendState, " +
+                        "autoAdvance=${ui.mainClock.autoAdvance}, clock=${ui.mainClock.currentTime}"))
+            }
+            throw failure
         }
         return assert(SemanticsMatcher("EditableText.text exactly equals <$text>") {
             it.config.getOrNull(SemanticsProperties.EditableText)?.text == text

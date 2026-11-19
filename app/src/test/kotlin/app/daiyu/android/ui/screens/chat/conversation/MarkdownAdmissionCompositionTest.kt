@@ -34,7 +34,7 @@ class MarkdownAdmissionCompositionTest {
         override fun onClear() = Unit
     }
 
-    @Test fun protectedBodyDoesNotConsumeItsFirstChunkBeforeContainerDraw() = runBlocking {
+    @Test fun protectedBodyDoesNotConsumeItsFirstChunkBeforeContainerPlacement() = runBlocking {
         val clock = BroadcastFrameClock()
         val recomposer = Recomposer(coroutineContext + clock)
         val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
@@ -64,10 +64,10 @@ class MarkdownAdmissionCompositionTest {
             sources.value = listOf(MarkdownTypingSource("answer", first))
             parsed.value = projectMarkdown(listOf(first))
             repeat(30) { frame() }
-            assertEquals("A protected container without a draw must not spend the first chunk", 0, reveal!!.limit("answer"))
+            assertEquals("A protected container without placement must not spend the first chunk", 0, reveal!!.limit("answer"))
             assertEquals(0, advances)
-            // Model a completed container draw with protection relinquished, as during manual reading.
-            clearance.update(null, 0, Float.MAX_VALUE, 0, protect = false)
+            // Model completed container placement with protection relinquished, as during manual reading.
+            clearance.update(null, null, 0, 0, 0, protect = false, clampToViewport = false)
             val lengths = mutableListOf<Int>()
             repeat(40) { frame(); lengths += reveal!!.limit("answer") }
             assertTrue("The first admitted chunk must contain intermediate prefixes: $lengths",

@@ -79,10 +79,10 @@ class AssistantWorkflowCompositionTest {
         val viewport = StreamingTailViewport(true)
         viewport.scrollOffset = 44.25f
         viewport.viewportOffset = 12
-        viewport.textClearance.update(null, 44, 20f, 100, protect = true)
+        viewport.textClearance.update(null, null, 44, 20, 100, protect = true, clampToViewport = true)
         assertTrue(viewport.textClearance.held)
         assertFalse(viewport.textClearance.fits(null, 1))
-        viewport.textClearance.update(null, 44, 20f, 100, protect = false)
+        viewport.textClearance.update(null, null, 44, 20, 100, protect = false, clampToViewport = false)
         assertFalse(viewport.textClearance.held)
         assertTrue(viewport.textClearance.fits(null, 100))
         assertEquals(44.25f, viewport.scrollOffset, 0f)

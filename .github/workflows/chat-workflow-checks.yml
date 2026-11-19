@@ -68,8 +68,8 @@ jobs:
           from pathlib import Path
           scope = os.environ['WORKFLOW_CHECK_SCOPE']
           names = {
-              'task-scroll': ('tests/test_streaming_occlusion_contract.py',),
-              'workflow': ('tests/test_streaming_occlusion_contract.py',),
+              'task-scroll': ('tests/test_streaming_occlusion_contract.py', 'tests/test_chat_resume_scroll_contract.py'),
+              'workflow': ('tests/test_streaming_occlusion_contract.py', 'tests/test_chat_resume_scroll_contract.py'),
               'message-actions': ('tests/test_pane_question_smoke_scope.py', 'tests/test_message_confirmation_contract.py'),
           }[scope]
           files = []
@@ -83,8 +83,7 @@ jobs:
           receipt = dict(source_sha=os.environ['EXPECTED_SHA'], tools_sha=os.environ['CONTRACT_TOOLS_SHA'])
           if scope in ('task-scroll', 'workflow'):
               receipt.update(files[0])
-          else:
-              receipt['files'] = files
+          receipt['files'] = files
           Path('workflow-checks').mkdir(exist_ok=True)
           Path('workflow-checks/contract-tools.json').write_text(json.dumps(receipt, indent=2) + '\n')
           PY

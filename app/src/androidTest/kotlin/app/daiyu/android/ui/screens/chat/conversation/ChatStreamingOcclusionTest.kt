@@ -846,7 +846,10 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     }
 
     fun testNewToolHeaderHasNoPartialInkAtTheOriginalSafetyEdge() {
-        data class Sample(val pixels: IntArray, val width: Int, val height: Int, val top: Float, val safe: Float, val y0: Int)
+        data class Sample(val pixels: IntArray, val width: Int, val height: Int, val top: Float, val safe: Float,
+            val x0: Int, val y0: Int, val shot: androidx.compose.ui.graphics.ImageBitmap,
+            val frame: Int, val clock: Long, val before: String, val after: String,
+            val surface: androidx.compose.ui.geometry.Rect)
         var count by mutableStateOf(1)
         val tail = shortWorkflow(1)
         val hostTag = "atomic-tool-header"
@@ -873,7 +876,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             for (next in 2..5) {
                 val samples = mutableListOf<Sample>()
                 mainThread { count = next }
-                repeat(48) {
+                repeat(48) { tick ->
                     frame()
                     val clock = ui.mainClock.currentTime
                     assertEquals(editor, inkRect(hostTag, "ink-editor"))
@@ -883,7 +886,15 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     moved = moved || movement > 1f
                     previousTop = top
                     val safe = editor.top - kotlin.math.round(ChatTailClearance.value * density)
-                    val shot = captureScreenNode(host, advanceAnimationClock = false).toPixelMap()
+                    val headerTag = "tool-step-header:short-step-${next - 1}"
+                    fun headerGeometry(): String {
+                        val header = ui.onAllNodesWithTag(headerTag).fetchSemanticsNodes().singleOrNull()
+                        val origin = host.fetchSemanticsNode().positionInRoot
+                        return "id=${header?.id} at=${header?.positionInRoot?.minus(origin)} size=${header?.size} host=$origin"
+                    }
+                    val before = headerGeometry()
+                    val image = captureScreenNode(host, advanceAnimationClock = false)
+                    val shot = image.toPixelMap()
                     assertEquals(clock, ui.mainClock.currentTime)
                     val surface = inkRect(hostTag, "ink-surface")
                     for (y in ceil(safe).toInt().coerceAtLeast(0) until floor(surface.top).toInt()) {
@@ -902,7 +913,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                         val y = y0 + index / w
                         if (x in 0 until shot.width && y in 0 until shot.height) shot[x, y].toArgb() else Color.White.toArgb()
                     }
-                    samples += Sample(pixels, w, h, at.y, safe, y0)
+                    samples += Sample(pixels, w, h, at.y, safe, x0, y0, image, tick, clock,
+                        before, headerGeometry(), surface)
                 }
                 assertTrue(samples.isNotEmpty())
                 val reference = samples.last()
@@ -919,15 +931,54 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 for (sample in samples) {
                     assertEquals(reference.width, sample.width); assertEquals(reference.height, sample.height)
                     if (sample.top + firstY < sample.safe && sample.top + lastY >= sample.safe) crossedInk = true
-                    val alpha = ink.maxOf { (contrast(sample.pixels, it) / contrast(reference.pixels, it)).coerceIn(0f, 1f) }
+                    val hit = ink.maxBy { (contrast(sample.pixels, it) / contrast(reference.pixels, it)).coerceIn(0f, 1f) }
+                    val alpha = (contrast(sample.pixels, hit) / contrast(reference.pixels, hit)).coerceIn(0f, 1f)
                     if (alpha <= .06f) continue
                     painted = true
-                    assertTrue("Any painted header must fit its complete reference ink, not just its first glyph row: " +
-                    "top=${sample.top} height=${sample.height} y0=${sample.y0} lastY=$lastY safe=${sample.safe}",
-                    sample.y0 + lastY + 1f <= sample.safe + 1f)
+                    val hitX = sample.x0 + hit % sample.width
+                    val hitY = sample.y0 + hit / sample.width
+                    val detail = "next=$next frame=${sample.frame} clock=${sample.clock} " +
+                        "top=${sample.top} height=${sample.height} y0=${sample.y0} lastY=$lastY safe=${sample.safe} " +
+                        "alpha=$alpha hit=$hitX,$hitY background=${Integer.toHexString(sample.pixels[0])} " +
+                        "sampleArgb=${Integer.toHexString(sample.pixels[hit])} referenceArgb=${Integer.toHexString(reference.pixels[hit])} " +
+                        "surface=${sample.surface} hitInsideSurface=${sample.surface.contains(androidx.compose.ui.geometry.Offset(hitX.toFloat(), hitY.toFloat()))} " +
+                        "before=${sample.before} after=${sample.after} " +
+                        "referenceFrame=${reference.frame} referenceClock=${reference.clock} referenceOrigin=${reference.x0},${reference.y0} " +
+                        "referenceBefore=${reference.before} referenceAfter=${reference.after}"
+                    fun saveFailure() = runCatching {
+                        val directory = java.io.File(activity.getExternalFilesDir(null),
+                            "visual-diagnostics/atomic-header/next-$next").apply { mkdirs() }
+                        fun save(image: androidx.compose.ui.graphics.ImageBitmap, name: String) {
+                            java.io.File(directory, "$name.png").outputStream().use {
+                                check(image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                            }
+                        }
+                        fun crop(value: Sample, name: String) {
+                            val bitmap = android.graphics.Bitmap.createBitmap(value.pixels, value.width, value.height,
+                                android.graphics.Bitmap.Config.ARGB_8888)
+                            try { java.io.File(directory, "$name.png").outputStream().use {
+                                check(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it))
+                            } } finally { bitmap.recycle() }
+                        }
+                        save(sample.shot, "sample-full")
+                        save(reference.shot, "reference-full")
+                        crop(sample, "sample-header")
+                        crop(reference, "reference-header")
+                        java.io.File(directory, "sample.txt").writeText(detail)
+                    }.exceptionOrNull()?.let { "captureFailure=${it.javaClass.simpleName}" }.orEmpty()
+                    if (sample.before != sample.after) {
+                        val capture = saveFailure()
+                        fail("Header geometry changed across the sampled draw: $detail $capture")
+                    }
+                    if (sample.y0 + lastY + 1f > sample.safe + 1f) {
+                        val capture = saveFailure()
+                        fail("Any painted header must fit its complete reference ink, not just its first glyph row: $detail $capture")
+                    }
                     // Normalize the existing uniform fade; missing lower glyphs cannot hide behind it.
-                    for (i in ink) assertTrue("Header ink must be complete at the same fade opacity",
-                        contrast(sample.pixels, i) >= contrast(reference.pixels, i) * alpha - .05f)
+                    for (i in ink) if (contrast(sample.pixels, i) < contrast(reference.pixels, i) * alpha - .05f) {
+                        val capture = saveFailure()
+                        fail("Header ink must be complete at the same fade opacity: index=$i $detail $capture")
+                    }
                 }
                 assertTrue("A new tool must not remain invisible", painted)
             }

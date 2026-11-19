@@ -315,7 +315,7 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             } finally { ui.mainClock.autoAdvance = autoAdvance }
             ui.onNodeWithContentDescription("播放").assertIsDisplayed()
             assertAccentInk(node("chat-media-video-play-pause"), accent)
-            assertAccentInk(node("chat-media-video-orientation"), accent)
+            assertAccentInk(node("chat-media-video-orientation"), accent, antialiasedOnBlack = true)
             assertAccentInk(node("chat-media-video-time"), accent)
             assertAccentInk(node("chat-media-video-progress"), accent)
             node("chat-media-video-progress").performTouchInput {
@@ -439,6 +439,25 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             ui.mainClock.advanceTimeByFrame()
             assertProgressHandle(1f, accent)
         } finally { ui.mainClock.autoAdvance = auto }
+    }
+
+    fun testAntialiasedAccentRejectsWhiteWrongColorDimAndSparseInk() {
+        val accent = Color(0xFF58C9D4)
+        fun scaled(color: Color, coverage: Float) = Color(
+            color.red * coverage, color.green * coverage, color.blue * coverage)
+        val coverage = listOf(0.96f, 0.95f, 0.94f, 0.94f) + List(20) { 0.5f }
+        fun samples(color: Color) = coverage.map { scaled(color, it) }
+        assertTrue(blackBackgroundAccentCoverage(samples(accent).asSequence(), accent).valid)
+        assertFalse(blackBackgroundAccentCoverage(samples(Color.White).asSequence(), accent).valid)
+        assertFalse(blackBackgroundAccentCoverage(samples(Color.Green).asSequence(), accent).valid)
+        val dim = blackBackgroundAccentCoverage(List(64) { scaled(accent, 0.5f) }.asSequence(), accent)
+        assertTrue("dim fixture must independently meet the area gate", dim.area >= 8f)
+        assertFalse("uniform dimming must fail the peak gate", dim.valid)
+        assertFalse(blackBackgroundAccentCoverage(List(4) { accent }.asSequence(), accent).valid)
+        for (wrong in listOf(Color.White, Color.Red, Color.Green, Color.Blue)) {
+            assertFalse(blackBackgroundAccentCoverage(
+                (samples(accent) + wrong).asSequence(), accent).valid)
+        }
     }
 
     fun testPlaybackAndOrientationKeepEqualTouchTargetsAndOpticalIconSize() {
@@ -682,7 +701,33 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
         } finally { image.asAndroidBitmap().recycle() }
     }
 
-    private fun assertAccentInk(target: SemanticsNodeInteraction, accent: Color) {
+    private data class AccentCoverage(val area: Float, val peak: Float, val wrongColorPixels: Int) {
+        val valid: Boolean get() = area >= 8f && peak >= 0.94f && wrongColorPixels == 0
+    }
+
+    // A 16px diagonal glyph can have fewer than eight fully covered pixels at mdpi.
+    // Recover edge coverage only on this fixture's known black background; retain hue and opacity guards.
+    private fun blackBackgroundAccentCoverage(samples: Sequence<Color>, accent: Color): AccentCoverage {
+        val magnitude = accent.red * accent.red + accent.green * accent.green + accent.blue * accent.blue
+        var area = 0f
+        var peak = 0f
+        var wrongColorPixels = 0
+        for (pixel in samples) {
+            if (maxOf(pixel.red, pixel.green, pixel.blue) < 0.1f) continue
+            val coverage = (pixel.red * accent.red + pixel.green * accent.green + pixel.blue * accent.blue) / magnitude
+            if (coverage > 1.06f || kotlin.math.abs(pixel.red / coverage - accent.red) >= 0.06f ||
+                kotlin.math.abs(pixel.green / coverage - accent.green) >= 0.06f ||
+                kotlin.math.abs(pixel.blue / coverage - accent.blue) >= 0.06f) {
+                wrongColorPixels++
+            } else {
+                area += coverage.coerceAtMost(1f)
+                peak = maxOf(peak, coverage)
+            }
+        }
+        return AccentCoverage(area, peak, wrongColorPixels)
+    }
+
+    private fun assertAccentInk(target: SemanticsNodeInteraction, accent: Color, antialiasedOnBlack: Boolean = false) {
         val image = captureScreenNode(target)
         try {
             val pixels = image.toPixelMap()
@@ -693,14 +738,23 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
                     kotlin.math.abs(pixel.green - accent.green) < 0.06f &&
                     kotlin.math.abs(pixel.blue - accent.blue) < 0.06f) matches++
             }
-            val failure = if (matches < 8) junit.framework.AssertionFailedError(
-                "Expected progress accent in control, matching pixels=$matches") else null
+            val blackBackground = !antialiasedOnBlack || listOf(0 to 0, pixels.width - 1 to 0,
+                0 to pixels.height - 1, pixels.width - 1 to pixels.height - 1).all { (x, y) ->
+                val background = pixels[x, y]
+                maxOf(background.red, background.green, background.blue) < 0.01f
+            }
+            val coverage = if (antialiasedOnBlack) blackBackgroundAccentCoverage(sequence {
+                for (y in 0 until pixels.height) for (x in 0 until pixels.width) yield(pixels[x, y])
+            }, accent) else null
+            val valid = blackBackground && (coverage?.valid ?: (matches >= 8))
+            val message = "Expected progress accent in control, matching pixels=$matches coverage=$coverage blackBackground=$blackBackground"
+            val failure = if (!valid) junit.framework.AssertionFailedError(message) else null
             if (failure != null) {
                 runCatching {
                     val directory = java.io.File(activity.getExternalFilesDir(null),
                         "visual-diagnostics/video-control-accent").apply { mkdirs() }
                     java.io.File(directory, "state.txt").writeText(
-                        "matches=$matches pixels=${pixels.width}x${pixels.height} " +
+                        "matches=$matches coverage=$coverage blackBackground=$blackBackground pixels=${pixels.width}x${pixels.height} " +
                             "accent=$accent density=${ui.density.density} " +
                             "clock=${ui.mainClock.currentTime} autoAdvance=${ui.mainClock.autoAdvance}\n" +
                             target.printToString())
@@ -717,7 +771,7 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
                 }.onFailure { failure.addSuppressed(it) }
                 throw failure
             }
-            assertTrue("Expected progress accent in control, matching pixels=$matches", matches >= 8)
+            assertTrue(message, valid)
         } finally {
             image.asAndroidBitmap().recycle()
         }

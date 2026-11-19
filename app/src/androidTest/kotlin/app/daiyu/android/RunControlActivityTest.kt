@@ -399,7 +399,17 @@ class RunControlActivityTest : WiredActivityTestCase() {
             assertDraft("next user")
             SnapshotWriteTraceProbe.around {
                 node("chat-send").assertContentDescriptionEquals("发送").assertIsEnabled().performClick()
-                ui.mainClock.autoAdvance = true
+                // The next session is intentionally held: settle its receipt with the
+                // manual clock, not by running the loading animation until global idle.
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    var acknowledged = false
+                    controlMain {
+                        acknowledged = invokeHost(activity, "getPendingTextSend") == null &&
+                            fixture.controller.textSendState() == null
+                    }
+                    acknowledged
+                }
                 awaitTextSendResult(activity)
                 assertTrue(next.entered.await(5, TimeUnit.SECONDS))
                 assertEquals(2, fixture.opens.get())

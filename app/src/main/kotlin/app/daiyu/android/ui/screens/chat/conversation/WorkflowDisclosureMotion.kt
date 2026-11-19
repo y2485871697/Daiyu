@@ -216,12 +216,10 @@ internal class WorkflowDisclosureMotion(
         if (viewport != null) {
             viewport.followingOnPress = false
             if (following) viewport.resumeFollow()
-            anchorAtTop = collapseUp && !opening
-            if (upwards || anchorAtTop) {
-                val boundary = if (anchorAtTop) this else enclosingBoundary()
-                boundary.captureAnchor(this, anchorAtTop)
-                borrowedBoundary = boundary.takeIf { it !== this && viewport.active === it }
-            } else viewport.active = null
+            anchorAtTop = !upwards || collapseUp && !opening
+            val boundary = if (anchorAtTop) this else enclosingBoundary()
+            boundary.captureAnchor(this, anchorAtTop)
+            borrowedBoundary = boundary.takeIf { it !== this && viewport.active === it }
         }
     }
 

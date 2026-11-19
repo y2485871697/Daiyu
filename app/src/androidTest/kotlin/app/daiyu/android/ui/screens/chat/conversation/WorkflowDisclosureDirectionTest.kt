@@ -115,8 +115,8 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    private fun assertHalf(lower: Boolean) {
-        val center = ui.onNodeWithTag("work-process-header").fetchSemanticsNode().boundsInRoot.center.y
+    private fun assertHalf(lower: Boolean, tag: String = "work-process-header") {
+        val center = ui.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot.center.y
         val listTop = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot.top
         val safeBottom = ui.onNodeWithTag("direction-composer").fetchSemanticsNode().boundsInRoot.top - ChatTailClearance.value * density
         assertEquals("Fixture header must be in the requested safe half", lower, center >= (listTop + safeBottom) / 2f)
@@ -188,68 +188,67 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         assertTrue("Workflow remains visible after its fixed upward collapse", bottom() > top())
     }
 
-    fun testDirectionStaysFrozenUntilFullyClosedAndNextCycleUsesTheNewState() {
+    private fun assertCycleFreezesAcrossHalfChange(completesOutput: Boolean) {
         var following by mutableStateOf(true)
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-            val viewport = remember { WorkflowDisclosureViewport({ following }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { true }, { _, _ -> 0f }) }
-            CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember { WorkflowDisclosureContext(viewport, "stable") { true } }) {
-                Column { WorkProcessCard(work, "stable", content = { Box(Modifier.height(80.dp)) }) }
-            }
-        } } }
-        ui.waitForIdle()
-        ui.mainClock.autoAdvance = false
-        try {
-            ui.onNodeWithTag("work-process-header").performClick()
-            ui.mainClock.advanceTimeBy(64); ui.waitForIdle()
-            assertDirection(true)
-            mainThread { following = false }
-            ui.onNodeWithTag("work-process-header").performClick()
-            ui.mainClock.advanceTimeBy(48); ui.waitForIdle()
-            assertDirection(true)
-            ui.onNodeWithTag("work-process-header").performClick()
-            ui.mainClock.advanceTimeBy(400); ui.waitForIdle()
-            assertDirection(true)
-            ui.onNodeWithTag("work-process-header").performClick()
-            ui.mainClock.advanceTimeBy(400); ui.waitForIdle()
-            assertDirection(true)
-        } finally { ui.mainClock.autoAdvance = true }
-        ui.onNodeWithTag("work-process-header").performClick(); ui.waitForIdle()
-        assertDirection(false)
-    }
-
-    fun testOutputCompletionKeepsTheCurrentEdgeUntilFullyClosed() {
         var outputActive by mutableStateOf(true)
+        var lower by mutableStateOf(false)
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-            val viewport = remember { WorkflowDisclosureViewport({ true }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { true }, { _, _ -> 0f }) }
-            CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember {
-                WorkflowDisclosureContext(viewport, "completing") { outputActive }
-            }) {
-                WorkProcessCard(work, "completing", content = { Box(Modifier.height(80.dp).testTag("completion-body")) })
+            var safe by remember { mutableStateOf<Rect?>(null) }
+            val viewport = remember { WorkflowDisclosureViewport({ following }, { safe }, {}, { false }, { _, _ -> 0f }) }
+            Box(Modifier.size(320.dp, 420.dp).testTag("cycle-viewport").onGloballyPositioned { safe = it.boundsInWindow() }) {
+                CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember {
+                    WorkflowDisclosureContext(viewport, "stable-cycle") { outputActive }
+                }) {
+                    Column {
+                        if (lower) Box(Modifier.height(260.dp))
+                        WorkProcessCard(work, "stable-cycle", content = { Box(Modifier.height(80.dp).testTag("cycle-body")) })
+                    }
+                }
             }
         } } }
         ui.waitForIdle()
+        fun assertCycleHalf(expectedLower: Boolean) {
+            val header = ui.onNodeWithTag("work-process-header").fetchSemanticsNode().boundsInRoot
+            val viewport = ui.onNodeWithTag("cycle-viewport").fetchSemanticsNode().boundsInRoot
+            assertEquals("The same disclosure owner must cross the viewport midpoint", expectedLower, header.center.y >= viewport.center.y)
+        }
+        assertCycleHalf(false)
         ui.mainClock.autoAdvance = false
         try {
             touchHeader()
             ui.mainClock.advanceTimeBy(64); ui.waitForIdle()
-            assertDirection(true)
-            mainThread { outputActive = false }
+            assertDirection(false)
+            mainThread {
+                lower = true
+                if (completesOutput) outputActive = false else following = false
+            }
+            ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            assertCycleHalf(true)
+            assertDirection(false)
             touchHeader()
             ui.mainClock.advanceTimeBy(48); ui.waitForIdle()
-            assertDirection(true)
+            assertDirection(false)
             touchHeader()
             ui.mainClock.advanceTimeBy(400); ui.waitForIdle()
-            assertDirection(true)
+            assertDirection(false)
             touchHeader()
             ui.mainClock.advanceTimeBy(400); ui.waitForIdle()
-            assertDirection(true)
+            assertDirection(false)
+            ui.onNodeWithTag("cycle-body").assertDoesNotExist()
         } finally { ui.mainClock.autoAdvance = true }
-        ui.onNodeWithTag("completion-body").assertDoesNotExist()
+        assertCycleHalf(true)
         touchHeader(); ui.waitForIdle()
-        assertDirection(false)
+        assertDirection(true)
+        ui.onNodeWithTag("cycle-body").assertExists()
     }
 
-    fun testToolDetailsUseTheSameFollowingPriority() {
+    fun testDirectionStaysFrozenUntilFullyClosedAndNextCycleUsesTheNewState() =
+        assertCycleFreezesAcrossHalfChange(completesOutput = false)
+
+    fun testOutputCompletionKeepsTheCurrentEdgeUntilFullyClosed() =
+        assertCycleFreezesAcrossHalfChange(completesOutput = true)
+
+    fun testFollowingToolDetailsUseTheUpperHalf() {
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             val viewport = remember { WorkflowDisclosureViewport({ true }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { true }, { _, _ -> 0f }) }
             CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember { WorkflowDisclosureContext(viewport, "tool") { true } }) {
@@ -258,17 +257,18 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         } } }
         ui.waitForIdle()
         ui.onNodeWithTag("tool-step-header:tool").performClick(); ui.waitForIdle()
-        assertDirection(true, "tool-step-header:tool")
+        assertDirection(false, "tool-step-header:tool")
     }
-    fun testRealToolHeaderTouchRetainsTheFollowingPriority() {
+    fun testRealFollowingToolHeaderTouchUsesTheUpperHalf() {
         mountList(following = true, tool = true)
+        assertHalf(lower = false, tag = "tool-step-header:tool")
         ui.onNodeWithTag("tool-step-header:tool").performTouchInput { click() }
         ui.waitForIdle()
-        assertDirection(true, "tool-step-header:tool")
+        assertDirection(false, "tool-step-header:tool")
         ui.onNodeWithTag("direction-body").assertExists()
     }
 
-    fun testReasoningSummaryUsesTheSameFollowingPriority() {
+    fun testFollowingReasoningSummaryUsesTheUpperHalf() {
         kotlinx.coroutines.runBlocking { projectMarkdown(listOf("direction summary")) }
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             val viewport = remember { WorkflowDisclosureViewport({ true }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { true }, { _, _ -> 0f }) }
@@ -278,10 +278,10 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         } } }
         ui.waitForIdle()
         ui.onNodeWithTag("reported-reasoning-header:reasoning").performTouchInput { click() }; ui.waitForIdle()
-        assertDirection(true, "reported-reasoning-header:reasoning")
+        assertDirection(false, "reported-reasoning-header:reasoning")
         ui.onNodeWithTag("reported-reasoning-content:reasoning").assertExists()
         ui.onNodeWithTag("reported-reasoning-content:reasoning").performTouchInput { click() }; ui.waitForIdle()
-        assertDirection(true, "reported-reasoning-header:reasoning")
+        assertDirection(false, "reported-reasoning-header:reasoning")
         ui.onNodeWithTag("reported-reasoning-content:reasoning").assertDoesNotExist()
     }
 
@@ -343,6 +343,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         assertEquals(androidx.compose.ui.Alignment.Bottom, tool.collapseAlignment)
     }
 
+    private var supplementalLower by mutableStateOf(false)
     private var supplementalFollowing by mutableStateOf(false)
     private var supplementalOutputActive by mutableStateOf(false)
     private val supplementalKinds = listOf("question", "category", "child-live", "child-receipt")
@@ -355,18 +356,19 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
     }
 
     private fun mountSupplemental(kind: String, following: Boolean, outputActive: Boolean, lower: Boolean) {
+        supplementalLower = lower
         supplementalFollowing = following
         supplementalOutputActive = outputActive
         mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             androidx.compose.runtime.key(kind) {
             var safe by remember { mutableStateOf<Rect?>(null) }
             val viewport = remember { WorkflowDisclosureViewport({ supplementalFollowing }, { safe }, {}, { false }, { _, _ -> 0f }) }
-            Box(Modifier.size(320.dp, 420.dp).onGloballyPositioned { safe = it.boundsInWindow() }) {
+            Box(Modifier.size(320.dp, 420.dp).testTag("supplemental-viewport").onGloballyPositioned { safe = it.boundsInWindow() }) {
                 CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember {
                     WorkflowDisclosureContext(viewport, "supplemental") { supplementalOutputActive }
                 }) {
                     Column {
-                        if (lower) Box(Modifier.height(260.dp))
+                        if (supplementalLower) Box(Modifier.height(260.dp))
                         when (kind) {
                             "question" -> {
                                 val owner = app.daiyu.android.domain.question.QuestionIdentity("direction", "run", "owner", "call")
@@ -395,10 +397,17 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         ui.waitForIdle()
     }
 
+    private fun assertSupplementalHalf(header: String, lower: Boolean) {
+        val bounds = ui.onNodeWithTag(header).fetchSemanticsNode().boundsInRoot
+        val viewport = ui.onNodeWithTag("supplemental-viewport").fetchSemanticsNode().boundsInRoot
+        assertEquals("Supplemental header must be in the requested viewport half", lower, bounds.center.y >= viewport.center.y)
+    }
+
     private fun assertSupplementalDirection(following: Boolean, outputActive: Boolean, lower: Boolean, expected: Boolean) {
         for (kind in supplementalKinds) {
             mountSupplemental(kind, following, outputActive, lower)
             val header = supplementalHeader(kind)
+            assertSupplementalHalf(header, lower)
             ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
             assertDirection(expected, header)
             ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
@@ -406,14 +415,17 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         }
     }
 
-    fun testAllSupplementalDisclosuresUseActiveStreamingFollowPriority() =
-        assertSupplementalDirection(following = true, outputActive = true, lower = false, expected = true)
+    fun testAllSupplementalDisclosuresFollowTheUpperHalfWhileStreaming() =
+        assertSupplementalDirection(following = true, outputActive = true, lower = false, expected = false)
 
     fun testAllSupplementalDisclosuresAtIdleBottomUseTheUpperHalf() =
         assertSupplementalDirection(following = true, outputActive = false, lower = false, expected = false)
 
     fun testAllSupplementalDisclosuresDetachedInUpperHalfExpandDown() =
         assertSupplementalDirection(following = false, outputActive = true, lower = false, expected = false)
+
+    fun testAllSupplementalDisclosuresFollowingInLowerHalfExpandUp() =
+        assertSupplementalDirection(following = true, outputActive = true, lower = true, expected = true)
 
     fun testAllSupplementalDisclosuresDetachedInLowerHalfExpandUp() =
         assertSupplementalDirection(following = false, outputActive = true, lower = true, expected = true)
@@ -427,12 +439,16 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                     androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已折叠"))
             }
             ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
-            assertDirection(true, header)
-            mainThread { supplementalFollowing = false; supplementalOutputActive = false }
-            ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
-            assertDirection(true, header)
+            assertSupplementalHalf(header, false)
+            assertDirection(false, header)
+            mainThread { supplementalFollowing = false; supplementalOutputActive = false; supplementalLower = true }
+            ui.waitForIdle()
+            assertSupplementalHalf(header, true)
+            assertDirection(false, header)
             ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
             assertDirection(false, header)
+            ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
+            assertDirection(true, header)
         }
     }
 

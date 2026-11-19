@@ -56,7 +56,7 @@ class DocumentTextReadTest : InstrumentationTestCase() {
                 queries++
                 val columns = projection ?: arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
                 return MatrixCursor(columns).apply {
-                    addRow(columns.map { if (it == OpenableColumns.DISPLAY_NAME) name else source.length() }.toTypedArray())
+                    addRow(columns.map<String, Any> { if (it == OpenableColumns.DISPLAY_NAME) name else source.length() }.toTypedArray())
                 }
             }
             override fun openAssetFile(uri: Uri, mode: String): AssetFileDescriptor {

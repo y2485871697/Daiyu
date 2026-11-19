@@ -1,5 +1,8 @@
 package app.daiyu.android
 
+import android.os.SystemClock
+import androidx.compose.runtime.snapshots.Snapshot
+import java.util.concurrent.atomic.AtomicLong
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
@@ -25,6 +28,48 @@ class RunControlActivityTest : WiredActivityTestCase() {
             "testPresentationGestureCannotRetargetNextRunBeforeRelease",
             "testPresentationLongPressCannotFinishTheNextReply",
         )
+    private object SnapshotWriteTraceProbe {
+        fun <T> around(action: () -> T): T {
+            val lastSample = AtomicLong(Long.MIN_VALUE)
+            val samples = java.util.ArrayDeque<String>()
+            val probeClass = javaClass.name
+            val observer = Snapshot.registerGlobalWriteObserver { state ->
+                try {
+                    val now = SystemClock.elapsedRealtime()
+                    val previous = lastSample.get()
+                    if ((previous == Long.MIN_VALUE || now - previous >= 750L) &&
+                        lastSample.compareAndSet(previous, now)) {
+                        val stack = Thread.currentThread().stackTrace.asSequence()
+                            .filter { it.className.startsWith("app.daiyu.android.") && !it.className.startsWith(probeClass) }
+                            .take(6).joinToString("\n") { "    at $it" }
+                        val sample = "t=${now}ms ${state.javaClass.name}@" +
+                            Integer.toHexString(System.identityHashCode(state)) + "\n" + stack
+                        synchronized(samples) {
+                            if (samples.size == 16) samples.removeFirst()
+                            samples.addLast(sample)
+                        }
+                    }
+                } catch (_: Throwable) { /* A diagnostic must not fail the state writer. */ }
+            }
+            var original: Throwable? = null
+            try {
+                return action()
+            } catch (failure: Throwable) {
+                original = failure
+                runCatching {
+                    failure.addSuppressed(AssertionError("Global snapshot write samples (750ms, last 16; not exhaustive):\n" +
+                        synchronized(samples) { samples.joinToString("\n\n") }))
+                }
+                throw failure
+            } finally {
+                val failure = original
+                if (failure == null) observer.dispose()
+                else try { observer.dispose() } catch (cleanup: Throwable) {
+                    if (cleanup !== failure) failure.addSuppressed(cleanup)
+                }
+            }
+        }
+    }
     private class ParserGate : AutoCloseable {
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
@@ -305,7 +350,11 @@ class RunControlActivityTest : WiredActivityTestCase() {
             val paused = visibleTailCharacters()
             assertEquals("Pause must retain the received drawn baseline", beforePause, paused)
             parserGates.last().release.countDown()
-            ui.waitUntil(5_000) { markdownProjectionCache.getBlocks(pending, defaultMarkdownParser) != null }
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                assertEquals("Late parsing must not cross the paused paint frontier", paused, visibleTailCharacters())
+                markdownProjectionCache.getBlocks(pending, defaultMarkdownParser) != null
+            }
             controlMain { }
             ui.waitForIdle()
             repeat(12) {
@@ -348,17 +397,19 @@ class RunControlActivityTest : WiredActivityTestCase() {
                     .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
             }
             assertDraft("next user")
-            node("chat-send").assertContentDescriptionEquals("发送").assertIsEnabled().performClick()
-            ui.mainClock.autoAdvance = true
-            awaitTextSendResult(activity)
-            assertTrue(next.entered.await(5, TimeUnit.SECONDS))
-            assertEquals(2, fixture.opens.get())
-            val active = checkNotNull(fixture.controller.active)
-            assertFalse(old.runId == active.runId)
-            assertEquals(RunStatus.COMPLETED,
-                fixture.database.messages(old.conversationId).first { it.second.id == old.id }.second.status)
-            next.release.countDown()
-            awaitControl("new run completes independently") { fixture.controller.active == null }
+            SnapshotWriteTraceProbe.around {
+                node("chat-send").assertContentDescriptionEquals("发送").assertIsEnabled().performClick()
+                ui.mainClock.autoAdvance = true
+                awaitTextSendResult(activity)
+                assertTrue(next.entered.await(5, TimeUnit.SECONDS))
+                assertEquals(2, fixture.opens.get())
+                val active = checkNotNull(fixture.controller.active)
+                assertFalse(old.runId == active.runId)
+                assertEquals(RunStatus.COMPLETED,
+                    fixture.database.messages(old.conversationId).first { it.second.id == old.id }.second.status)
+                next.release.countDown()
+                awaitControl("new run completes independently") { fixture.controller.active == null }
+            }
         } finally { ui.mainClock.autoAdvance = true }
     }
 

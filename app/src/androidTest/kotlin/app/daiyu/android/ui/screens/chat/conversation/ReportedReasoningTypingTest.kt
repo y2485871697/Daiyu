@@ -2,6 +2,11 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.ui.semantics.getOrNull
+import java.util.concurrent.atomic.AtomicReference
 import app.daiyu.android.MarkdownParser
 import java.util.concurrent.CountDownLatch
 import androidx.compose.runtime.getValue
@@ -688,6 +693,62 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = true
     }
 
+    private class PauseProbe {
+        val control = AtomicReference<ReplyPresentationControl?>(null)
+        val scope = AtomicReference<WorkflowVisualScope?>(null)
+        val composed = AtomicReference<ChatTurnUi.Assistant?>(null)
+        var stage = "install"
+        private val checkpoints = java.util.ArrayDeque<String>()
+        private fun field(owner: Any?, name: String): Any? {
+            if (owner == null) return null
+            val declared = owner.javaClass.declaredFields.firstOrNull {
+                it.name == name || it.name == name + "\$delegate"
+            } ?: error("Missing ${owner.javaClass.simpleName}.$name")
+            declared.isAccessible = true
+            val value = declared.get(owner)
+            return if (value is State<*>) value.value else value
+        }
+        fun sample(turn: ChatTurnUi.Assistant): String = Snapshot.withoutReadObservation {
+            val c = control.get()
+            val lanes = field(c, "lanes") as? Map<*, *>
+            val targets = lanes?.values?.take(8)?.joinToString {
+                val motion = field(it, "motion") as MarkdownTypingState
+                val target = motion.target
+                "target=${target?.total},visible=${target?.let(motion::visible)}," +
+                    "terminal=${target?.terminal},streaming=${target?.streaming}"
+            }
+            val handoffs = field(scope.get(), "handoffs") as? Map<*, *>
+            val completed = handoffs?.values?.take(8)?.joinToString {
+                val values = field(it, "completed") as? Map<*, *>
+                "size=${values?.size},r=${values?.get("r")}"
+            }
+            "stage=$stage,composedIsExpected=${composed.get() == turn}," +
+                "pending=${c?.pending(turn)},pause=${c?.pauseRequested},finished=${c?.finished}," +
+                "settledIsExpected=${field(c, "settledTurn") == turn}," +
+                "pendingLaneCount=${(field(c, "pendingLanes") as? Map<*, *>)?.size}," +
+                "targets=[$targets],handoffs=[$completed]"
+        }
+        fun record(value: String) {
+            if (checkpoints.size == 8) checkpoints.removeFirst()
+            checkpoints.addLast(value)
+        }
+        fun report() = checkpoints.joinToString("\n")
+    }
+
+    private fun pauseControlSummary(): String = ui.onAllNodes(
+        SemanticsMatcher("pause diagnostics") { true }, useUnmergedTree = true
+    ).fetchSemanticsNodes(atLeastOneRootRequired = false).filter {
+        val tag = it.config.getOrNull(SemanticsProperties.TestTag)
+        tag == "chat-control" || tag == "chat-send" || tag == "work-process-header" ||
+            tag?.startsWith("reported-reasoning-header:") == true ||
+            tag?.startsWith("reported-reasoning-content:") == true
+    }.take(16).joinToString("\n") {
+        "tag=${it.config.getOrNull(SemanticsProperties.TestTag)}," +
+            "desc=${it.config.getOrNull(SemanticsProperties.ContentDescription)}," +
+            "state=${it.config.getOrNull(SemanticsProperties.StateDescription)}," +
+            "enabled=${!it.config.contains(SemanticsProperties.Disabled)},bounds=${it.boundsInRoot}"
+    }
+
     private fun assertTerminalThoughtUsesTheComposerPause(path: Path) {
         val baseline = "思考开头"
         val pending = baseline + "甲".repeat(240)
@@ -703,6 +764,24 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         var current by mutableStateOf(turn(path, baseline))
         var phase by mutableStateOf(ComposerPhase.RUNNING)
         var backendControls = 0
+        val probe = PauseProbe()
+        fun checkpoint(label: String) {
+            probe.stage = label
+            val sample = runCatching {
+                var value = "<not-sampled>"
+                var failure: Throwable? = null
+                instrumentation.runOnMainSync {
+                    try { value = probe.sample(current) } catch (problem: Throwable) { failure = problem }
+                }
+                failure?.let { throw it }
+                value
+            }.getOrElse { "stage=$label,unavailable=${it.javaClass.simpleName}" }
+            probe.record(sample)
+        }
+        fun waiting(label: String, predicate: () -> Boolean) {
+            probe.stage = label
+            await(predicate)
+        }
         ui.mainClock.autoAdvance = false
         fun count() = visibleText().count { it == '甲' }
         try {
@@ -711,19 +790,30 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                     CompositionLocalProvider(LocalMarkdownParser provides parser) {
                         DaiyuChatScreen(ChatScreenState("presentation", turns = listOf(current), conversationKey = "presentation",
                             composer = ComposerUi(phase = phase, controlOwnerKey = "reply")),
-                            ChatScreenActions(onPrimaryTap = { backendControls++ }), hasTurnExtras = { false })
+                            ChatScreenActions(onPrimaryTap = { backendControls++ }), hasTurnExtras = { false },
+                            turnExtras = { extraTurn ->
+                                val playback = LocalReplyPlayback.current
+                                val scope = LocalWorkflowVisualScope.current
+                                SideEffect {
+                                    probe.control.set(playback?.control)
+                                    probe.scope.set(scope)
+                                    probe.composed.set(extraTurn)
+                                }
+                            })
                     }
                 }
             } }
-            await { visibleText().contains(baseline) }
+            waiting("baseline") { visibleText().contains(baseline) }
             captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
+            checkpoint("baseline-drawn")
             mainThread {
                 current = turn(path, pending, live = false)
                 phase = ComposerPhase.IDLE
             }
-            await { parsing.count == 0L }
+            waiting("terminal-parser-blocked") { parsing.count == 0L }
             assertNull(markdownProjectionCache.getBlocks(pending, parser))
-            await {
+            checkpoint("terminal-parser-blocked")
+            waiting("blocked-await-pause-control") {
                 ui.onAllNodes(hasTestTag("chat-control") and hasContentDescription("暂停") and isEnabled())
                     .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
             }
@@ -733,7 +823,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeBy(32)
             node("chat-control").assertContentDescriptionEquals("继续")
             release.countDown()
-            await { markdownProjectionCache.getBlocks(pending, parser) != null }
+            waiting("paused-await-parser-publication") { markdownProjectionCache.getBlocks(pending, parser) != null }
             mainThread { }
             ui.waitForIdle()
             ui.mainClock.advanceTimeBy(32)
@@ -751,16 +841,23 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             assertEquals(paused, count())
             assertTrue(visibleText().contains(baseline))
             node("chat-control").assertContentDescriptionEquals("继续").performClick()
-            await { visibleText().contains(pending) }
+            waiting("resumed-await-240") { visibleText().contains(pending) }
             captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
             assertEquals(240, count())
-            await { ui.onAllNodesWithTag("chat-control").fetchSemanticsNodes().isEmpty() }
+            checkpoint("resumed-240-drawn")
+            waiting("resumed-await-control-removal") { ui.onAllNodesWithTag("chat-control").fetchSemanticsNodes().isEmpty() }
             node("chat-send").assertContentDescriptionEquals("发送")
             repeat(12) {
                 ui.mainClock.advanceTimeByFrame()
                 assertEquals("No new input cannot advance text", 240, count())
             }
             assertEquals("Presentation controls must not reopen the model", 0, backendControls)
+        } catch (failure: Throwable) {
+            val failedStage = probe.stage
+            runCatching { checkpoint("failure:$failedStage") }
+            runCatching { failure.addSuppressed(AssertionError(probe.report())) }
+            runCatching { failure.addSuppressed(AssertionError("Fresh pause controls:\n" + pauseControlSummary())) }
+            throw failure
         } finally { release.countDown(); ui.mainClock.autoAdvance = true }
     }
 

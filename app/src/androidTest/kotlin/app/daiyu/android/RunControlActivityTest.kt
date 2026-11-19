@@ -213,7 +213,7 @@ class RunControlActivityTest : WiredActivityTestCase() {
     fun testCompletedRunKeepsRealPresentationPauseAndResumeUntilTheLastCharacter() {
         try {
             val owner = completedTail()
-            captureScreenNode(ui.onRoot(), advanceAnimationClock = false)
+            captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
             val beforePause = visibleTailCharacters()
             assertTrue("Painted body must be partial before pause: $beforePause", beforePause in 1 until 400)
             node("chat-control").performClick()
@@ -222,7 +222,7 @@ class RunControlActivityTest : WiredActivityTestCase() {
             val paused = visibleTailCharacters()
             assertTrue("Paused body prefix must remain partial: before=$beforePause paused=$paused", paused in 1 until 400)
             ui.mainClock.advanceTimeBy(1200)
-            captureScreenNode(ui.onRoot(), advanceAnimationClock = false)
+            captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
             assertEquals("Pause must freeze the visible prefix", paused, visibleTailCharacters())
             assertNull(fixture.controller.active)
             assertEquals(1, fixture.opens.get())

@@ -686,7 +686,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                 phase = ComposerPhase.IDLE
             }
             ui.mainClock.advanceTimeBy(32)
-            captureScreenNode(ui.onRoot(), advanceAnimationClock = false)
+            captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
             val beforePause = count()
             assertTrue("Painted thought must be partial before pause: path=$path count=$beforePause", beforePause in 1 until 240)
             node("chat-control").assertContentDescriptionEquals("暂停").performClick()
@@ -700,7 +700,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                 assertEquals("Paused paint frontier must not admit a late prefix", paused, count())
             }
             ui.mainClock.advanceTimeBy(1200)
-            captureScreenNode(ui.onRoot(), advanceAnimationClock = false)
+            captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
             assertEquals(paused, count())
             node("chat-control").performClick()
             await { count() > paused }

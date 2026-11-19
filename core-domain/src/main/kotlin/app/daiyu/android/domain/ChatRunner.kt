@@ -661,8 +661,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var contextHeaderPrepared = false
         fun prepareContextRequest() {
             model.prepareRequest()
+            requestDefinitions = (tool as? CatalogTool)?.definitions.orEmpty().toList()
             val runtime = contextRuntime ?: return
-            val header = runtime.headerIdentity((tool as? CatalogTool)?.definitions.orEmpty())
+            val header = runtime.headerIdentity(requestDefinitions)
             if (contextHeaderPrepared && preparedContextHeader != header) {
                 pressureChecked = false
                 contextState = contextState?.copy(input = null, calibration = null, pressure = null,
@@ -679,7 +680,6 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             if (controls && boundary()) { reopenAfterCompaction = true; pressureChecked = false }
             val runtime = contextRuntime?.compressionSnapshot() ?: return
             if (synchronized(terminalLock) { pendingCompact != null }) compactAtBoundary(boundaryRuntime = runtime)
-            requestDefinitions = (tool as? CatalogTool)?.definitions.orEmpty().toList()
             if (pressureChecked || !runtime.automatic || !runtime.canCompact) return
             pressureChecked = true
             val threshold = runtime.pressureThresholdTokens ?: return

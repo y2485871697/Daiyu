@@ -54,8 +54,13 @@ class RunnerCompactionPlacementTest {
             override fun commitCheckpoint(checkpoint: RunCheckpoint) { checkpoints += checkpoint }
             override fun reconcileCheckpoint(checkpoint: RunCheckpoint) = error("no recovery")
         }
-        val result = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
-            BatteryTool { tools++; "done" }, RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}.run(initial, listOf(user))
+        lateinit var runner: ChatRunner
+        runner = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+            BatteryTool { tools++; "done" }, RunnerOptions(runtimeStore = store, contextRuntime = runtime,
+                onRequestCompletedBoundary = {
+                    if (nexts == 1) assertTrue(runner.requestCompaction())
+                })) {}
+        val result = runner.run(initial, listOf(user))
         assertEquals(RunStatus.COMPLETED, result.status)
         assertTrue(finished); assertEquals(1, tools); assertEquals(2, nexts)
         assertEquals(MessageHistory.expand(listOf(capturedBoundary!!)), MessageHistory.expand(listOf(result)).take(1).map { it.copy(status = RunStatus.RUNNING) })
@@ -103,8 +108,13 @@ class RunnerCompactionPlacementTest {
             override fun commitCheckpoint(checkpoint: RunCheckpoint) { checkpoints += checkpoint }
             override fun reconcileCheckpoint(checkpoint: RunCheckpoint) = error("no recovery")
         }
-        val result = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
-            BatteryTool { tools++; "done" }, RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}.run(initial, listOf(user))
+        lateinit var runner: ChatRunner
+        runner = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+            BatteryTool { tools++; "done" }, RunnerOptions(runtimeStore = store, contextRuntime = runtime,
+                onRequestCompletedBoundary = {
+                    if (nexts == 1) assertTrue(runner.requestCompaction())
+                })) {}
+        val result = runner.run(initial, listOf(user))
         assertEquals(RunStatus.COMPLETED, result.status)
         assertEquals(2, opens); assertEquals(2, nexts); assertEquals(1, tools)
         assertEquals(1, failures); assertEquals(1, finished)
@@ -139,8 +149,11 @@ class RunnerCompactionPlacementTest {
             }
             override fun cancel() {}
         } }
-        val result = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
-            BatteryTool { error("no tools") }, RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}.run(initial, listOf(user))
+        lateinit var runner: ChatRunner
+        runner = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+            BatteryTool { error("no tools") }, RunnerOptions(runtimeStore = store, contextRuntime = runtime,
+                onRequestCompletedBoundary = { assertTrue(runner.requestCompaction()) })) {}
+        val result = runner.run(initial, listOf(user))
         assertEquals(RunStatus.COMPLETED, result.status); assertTrue(finished)
         assertTrue(checkpoints.all { it.context?.compactions == 0 })
         assertEquals("retained", result.blocks.filterIsInstance<MessageBlock.Text>().single().text)

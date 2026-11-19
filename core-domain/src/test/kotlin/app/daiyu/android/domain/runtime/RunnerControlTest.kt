@@ -775,7 +775,7 @@ class RunnerControlTest {
             RunnerOptions(reconnect = ReconnectPolicy(maxAttempts = 2), onUsage = usage::add), {})
         val result = runner.run(initial(), emptyList())
         assertEquals(RunStatus.FAILED, result.status)
-        assertEquals(ModelFailure.NETWORK.userMessage, result.error)
+        assertEquals(ModelRequestException(ModelFailure.NETWORK).detailedMessage, result.error)
         assertEquals("prefix" + (1..expectedResumes).joinToString("") { "-retry-$it" },
             result.blocks.filterIsInstance<MessageBlock.Text>().single().text)
         assertEquals(1, opens); assertEquals(1, nexts); assertEquals(expectedResumes, resumes)

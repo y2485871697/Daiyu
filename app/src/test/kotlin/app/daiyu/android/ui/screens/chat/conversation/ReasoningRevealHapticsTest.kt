@@ -7,15 +7,14 @@ import org.junit.Test
 class ReasoningRevealHapticsTest {
     private fun part(id: String, text: String) = MarkdownTypingPart(MarkdownTypingSource(id, text), text.length)
 
-    @Test fun anObservedEmptyThoughtTypesItsFirstChunk() {
+    @Test fun anObservedEmptyThoughtRevealsItsReceivedChunkOnAdmission() {
         val motion = MarkdownTypingState(listOf(MarkdownTypingSource("reasoning-r", "")))
         motion.update(listOf(part("reasoning-r", "")), 0, streaming = true, terminal = false)
         val text = "思考".repeat(100)
         val target = checkNotNull(motion.update(listOf(part("reasoning-r", text)), 0, true, false))
         var ticks = 0
-        assertEquals(0, motion.advance(target, 1_000_000_000L) { ticks++ })
-        val visible = motion.advance(target, 1_016_000_000L) { ticks++ }
-        assertTrue(visible in 1 until text.length)
+        assertEquals(text.length, motion.advance(target, 1_000_000_000L) { ticks++ })
+        assertEquals(text.length, motion.advance(target, 4_000_000_000L) { ticks++ })
         assertEquals(1, ticks)
     }
 
@@ -30,21 +29,34 @@ class ReasoningRevealHapticsTest {
             }
             override fun cancel() = Unit
         }, resumed = true)
-        val streams = listOf("body", "reasoning-a", "reasoning-b").map { id ->
-            val motion = MarkdownTypingState(listOf(MarkdownTypingSource(id, "")))
-            motion to checkNotNull(motion.update(listOf(part(id, "文".repeat(200))), 0, true, false))
+        val ids = listOf("body", "reasoning-a", "reasoning-b")
+        val streams = ids.map { id -> MarkdownTypingState(listOf(MarkdownTypingSource(id, ""))) }
+        fun receive(length: Int) {
+            streams.forEachIndexed { index, motion ->
+                val target = checkNotNull(motion.update(listOf(part(ids[index], "文".repeat(length))), 0, true, false))
+                assertEquals(length, motion.advance(target, now * 1_000_000L) { engine.visibleAdvance(owner) })
+            }
         }
-        streams.forEach { (motion, target) -> motion.advance(target, now * 1_000_000L) { engine.visibleAdvance(owner) } }
-        listOf(1_016L, 1_047L, 1_048L).forEach { frame ->
-            now = frame
-            engine.backgroundOutput(owner, 36, reasoning = true)
-            streams.forEach { (motion, target) -> motion.advance(target, now * 1_000_000L) { engine.visibleAdvance(owner) } }
+        receive(20)
+        assertEquals(1, requests.size)
+        now = 1_016L
+        receive(40)
+        assertEquals(1, requests.size)
+        now = 1_032L
+        engine.backgroundOutput(owner, 36, reasoning = true)
+        assertEquals(1, requests.size)
+        receive(60)
+        assertEquals(2, requests.size)
+        now = 4_000L
+        streams.forEach { motion ->
+            val target = checkNotNull(motion.target)
+            motion.advance(target, now * 1_000_000L) { engine.visibleAdvance(owner) }
         }
         assertEquals(2, requests.size)
         assertTrue(requests.all { it.kind == HapticKind.TICK })
     }
 
-    @Test fun disclosureRebaselineSkipsHiddenHistoryAndTypesOnlyLaterAppend() {
+    @Test fun disclosureRebaselineSkipsHiddenHistoryAndRevealsOnlyLaterAppend() {
         val accumulated = "隐藏思考".repeat(40)
         var ticks = 0
         val sources = listOf(MarkdownTypingSource("r", accumulated))
@@ -53,8 +65,8 @@ class ReasoningRevealHapticsTest {
         assertEquals(accumulated.length, reopened.advance(baseline, 1_000_000_000L) { ticks++ })
         assertEquals(0, ticks)
         val next = checkNotNull(reopened.update(listOf(part("r", accumulated + "新".repeat(100))), accumulated.length, true, false))
-        reopened.advance(next, 1_016_000_000L) { ticks++ }
-        reopened.advance(next, 1_048_000_000L) { ticks++ }
-        assertTrue(ticks > 0)
+        assertEquals(accumulated.length + 100, reopened.advance(next, 1_016_000_000L) { ticks++ })
+        assertEquals(accumulated.length + 100, reopened.advance(next, 4_000_000_000L) { ticks++ })
+        assertEquals(1, ticks)
     }
 }

@@ -214,7 +214,7 @@ jobs:
           set -o pipefail
           classes=(AssistantWorkflowContentTest ToolHeaderTextTest ReportedReasoningTextTest)
           if [[ "$WORKFLOW_CHECK_SCOPE" == workflow ]]; then
-            classes+=(ReconnectPartsTest WorkflowDisclosureMotionTest ReasoningStreamCompositionTest)
+            classes+=(ReconnectPartsTest WorkflowDisclosureMotionTest ReasoningStreamCompositionTest ReasoningRevealHapticsTest)
           fi
           if [[ "$WORKFLOW_CHECK_SCOPE" != environment-dots ]]; then
             classes+=(ChatTurnMapperTest ReasoningWorkflowMapperTest AssistantWorkflowCompositionTest
@@ -352,7 +352,7 @@ jobs:
           root = Path.cwd()
           expected = {'AssistantWorkflowContentTest', 'ToolHeaderTextTest', 'ReportedReasoningTextTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] == 'workflow':
-              expected |= {'ReconnectPartsTest', 'WorkflowDisclosureMotionTest', 'ReasoningStreamCompositionTest'}
+              expected |= {'ReconnectPartsTest', 'WorkflowDisclosureMotionTest', 'ReasoningStreamCompositionTest', 'ReasoningRevealHapticsTest'}
           if os.environ['WORKFLOW_CHECK_SCOPE'] != 'environment-dots':
               expected |= {'ChatTurnMapperTest', 'ReasoningWorkflowMapperTest', 'AssistantWorkflowCompositionTest',
                            'WorkflowConnectorsTest', 'ReasoningHandoffTest', 'MarkdownAdmissionCompositionTest',

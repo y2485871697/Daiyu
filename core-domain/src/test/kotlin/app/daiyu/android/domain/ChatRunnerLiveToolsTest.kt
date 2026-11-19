@@ -65,9 +65,12 @@ class ChatRunnerLiveToolsTest {
         val original = catalog.tools
         val oversized = listOf(definition("oversized"))
         val checked = mutableListOf<List<ToolDefinition>>()
+        var updates = 0
         val runtime = object : app.daiyu.android.domain.runtime.RunContextRuntime {
-            override val automatic = false
+            override val automatic = true
             override val windowTokens = 100L
+            override val pressureThresholdTokens: Long? = 90L
+            override fun fixedSurfaceTokens(history: List<Message>): Long = 0L
             override fun localTokens(history: List<Message>, tools: List<ToolDefinition>): Long {
                 checked.add(tools)
                 catalog.tools = oversized // Settings change after the budget sees its snapshot.
@@ -82,9 +85,9 @@ class ChatRunnerLiveToolsTest {
             override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
                 assertSame(checked.last(), definitions)
                 assertEquals(original, definitions)
-                catalog.tools = original
                 return object : ModelSession {
                     override fun updateToolDefinitions(definitions: List<ToolDefinition>) {
+                        updates++
                         assertSame(checked.last(), definitions)
                         assertEquals(original, definitions)
                     }
@@ -99,6 +102,7 @@ class ChatRunnerLiveToolsTest {
             RunnerOptions(contextRuntime = runtime)) {}.run(message, emptyList())
         assertEquals(RunStatus.COMPLETED, result.status)
         assertEquals(2, checked.size)
+        assertEquals(1, updates)
         assertEquals(oversized, catalog.tools)
     }
 

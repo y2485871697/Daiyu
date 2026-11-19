@@ -38,6 +38,8 @@ class MediaPresentationHandoffContract(unittest.TestCase):
         self.assertIn('drawImage(pixels, topLeft = Offset(0f, size.height - pixels.height)', source)
         self.assertIn('size.height / frame.exitStartHeight', source)
         self.assertIn('frame.targetHeight = child.height', source)
+        self.assertIn('var targetHeight by mutableIntStateOf(0)', source)
+        self.assertIn('if (frame.targetHeight > 0 && width > 0 && height > 0)', raster)
         self.assertIn('frame.visualRevision', source)
         for forbidden in ('delay(', 'finishSubmission', 'delete(', 'clearDraft', 'LaunchedEffect', 'rememberGraphicsLayer', 'toImageBitmap', 'launch('):
             self.assertNotIn(forbidden, source)

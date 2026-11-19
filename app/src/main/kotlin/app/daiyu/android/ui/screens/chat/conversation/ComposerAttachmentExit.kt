@@ -28,7 +28,7 @@ import androidx.compose.ui.platform.testTag
 
 private class ComposerAttachmentFrame {
     var visualRevision by mutableIntStateOf(0)
-    var targetHeight = 0
+    var targetHeight by mutableIntStateOf(0)
     var bitmap: ImageBitmap? = null
     var canvas: Canvas? = null
     var exitStartHeight = 0f
@@ -82,7 +82,7 @@ internal fun ComposerAttachmentExit(content: @Composable () -> Unit) {
             frame.visualRevision
             val width = size.width.toInt()
             val height = size.height.toInt()
-            if (width > 0 && height > 0) {
+            if (frame.targetHeight > 0 && width > 0 && height > 0) {
                 if (frame.bitmap?.width != width || frame.bitmap?.height != height) {
                     frame.bitmap = ImageBitmap(width, height)
                     frame.canvas = Canvas(checkNotNull(frame.bitmap))

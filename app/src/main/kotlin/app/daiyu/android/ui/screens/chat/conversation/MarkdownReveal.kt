@@ -184,6 +184,7 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
     private var receiptRate = baseline.sumOf { it.text.length.toLong() } / .12
     private var observesReceipts = false
     private var receiptPaused = false
+    private var receiptReanchoring = false
     private var rate = 0.0
     private var desiredRate = 0.0
     private var resuming = false
@@ -198,6 +199,7 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
             receiptNanos = 0L
             receiptRate = sources.sumOf { it.text.length.toLong() } / .12
             receiptPaused = paused
+            receiptReanchoring = false
             return
         }
         val added = sources.sumOf { it.text.length.toLong() } - previous.sumOf { it.text.length.toLong() }
@@ -208,11 +210,12 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
             else if (receiptRate == 0.0 && added > 0) receiptRate = added / .12
             return
         }
-        if (receiptPaused) { receiptPaused = false; receiptNanos = 0L }
+        if (receiptPaused) { receiptPaused = false; receiptNanos = 0L; receiptReanchoring = true }
         if (added <= 0) return
         val seconds = if (receiptNanos != 0L && nowNanos > receiptNanos)
             ((nowNanos - receiptNanos) / 1_000_000_000.0).coerceAtLeast(.001) else .12
-        if (receiptNanos != 0L || receiptRate == 0.0) receiptRate = added / seconds
+        if (!receiptReanchoring || receiptRate == 0.0) receiptRate = added / seconds
+        receiptReanchoring = false
         receiptNanos = nowNanos
     }
 

@@ -592,4 +592,18 @@ class MarkdownRevealTest {
         assertTrue(state.advance(paused, 62_016_000_000L) in 2 until 500)
         assertEquals(500, drain(state, paused, 62_032_000_000L))
     }
+
+    @Test fun firstLiveAppendBootstrapsFromItsOwnBatchRatherThanHistoryPrefix() {
+        val prefix = "prefix "
+        val state = MarkdownTypingState(listOf(source(prefix)))
+        state.receive(listOf(source(prefix)), 1_000_000_000L)
+        state.update(listOf(part(prefix)), prefix.length, true, false)
+        val text = prefix + "字".repeat(500)
+        state.receive(listOf(source(text)), 2_000_000_000L)
+        val next = state.update(listOf(part(text)), prefix.length, false, true, paceTerminal = true)!!
+        assertEquals(prefix.length, next.start)
+        assertEquals(prefix.length + 1, state.advance(next, 3_000_000_000L))
+        assertTrue(state.advance(next, 3_016_000_000L) in prefix.length + 20 until text.length)
+        assertEquals(text.length, drain(state, next, 3_032_000_000L))
+    }
 }

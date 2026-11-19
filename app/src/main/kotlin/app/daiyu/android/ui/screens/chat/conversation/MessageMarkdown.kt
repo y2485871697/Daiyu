@@ -25,6 +25,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.neverEqualPolicy
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.constrainWidth
+import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -114,9 +123,14 @@ internal fun RevealedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?,
     deferBlockReveal: Boolean = false,
     sourceWindow: app.daiyu.android.MarkdownSourceWindow? = null,
 ) {
-    if (deferBlockReveal) ProjectedMessageMarkdown(text, blocks, modifier,
-        generationComplete = generationComplete, visibility = reveal.visibility(partId), sourceWindow = sourceWindow)
-    else ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)
+    val publication = reveal.publication
+    SideEffect { publication.active = true }
+    CompositionLocalProvider(LocalMarkdownPaintPublication provides publication) {
+        val presented = modifier.onPlaced { reveal.presented(partId) }
+        if (deferBlockReveal) ProjectedMessageMarkdown(text, blocks, presented,
+            generationComplete = generationComplete, visibility = reveal.visibility(partId), sourceWindow = sourceWindow)
+        else ProjectedMessageMarkdown(text, blocks, presented, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)
+    }
 }
 
 @Composable
@@ -175,9 +189,10 @@ internal fun ParsedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, m
 
 private val LocalMarkdownPaintedText = staticCompositionLocalOf<MutableMap<Int, TextLayoutResult>?> { null }
 private class MarkdownTextFrame {
-    var coordinates: LayoutCoordinates? = null
+    var coordinates by mutableStateOf<LayoutCoordinates?>(null, neverEqualPolicy())
     var layout: TextLayoutResult? = null
-    var painted: TextLayoutResult? = null
+    var rendered: TextLayoutResult? = null
+    var committed by mutableStateOf<TextLayoutResult?>(null)
 }
 
 @Composable
@@ -189,17 +204,42 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
         BasicText(text, modifier, style, softWrap = softWrap)
         return
     }
-    val frame = remember { MarkdownTextFrame() }
-    BasicText(text, modifier.onPlaced { frame.coordinates = it }.drawWithContent {
-        if (clearance.fits(frame.coordinates, size.height.toInt())) {
-            drawContent()
-            frame.painted = frame.layout
-            if (paintOffset != null) frame.layout?.let { painted[paintOffset] = it }
-        } else (paintOffset?.let { painted[it] } ?: frame.painted)?.takeIf { previous ->
-            frame.layout?.let { previous.canPaintPrefixOf(it) } == true &&
-                clearance.fits(frame.coordinates, previous.size.height)
-        }?.let { drawText(it) }
-    }, style, softWrap = softWrap, onTextLayout = { frame.layout = it })
+    val frame = remember(clearance, paintOffset) { MarkdownTextFrame() }
+    val measurer = rememberTextMeasurer(cacheSize = 1)
+    val publication = LocalMarkdownPaintPublication.current
+    val displayed = frame.committed
+    val owner = remember(frame) { Any() }
+    fun published(): Boolean = text.isEmpty() || frame.rendered?.let { actual ->
+        actual.layoutInput.text == text && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
+            clearance.fits(frame.coordinates, actual.size.height)
+    } == true
+    SideEffect { publication?.setPending(owner, !published()) }
+    DisposableEffect(publication, owner) { onDispose { publication?.setPending(owner, false) } }
+    BasicText(displayed?.layoutInput?.text ?: AnnotatedString(""), modifier.layout { measurable, constraints ->
+        val candidate = measurer.measure(text, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
+        frame.layout = candidate
+        val committed = measurable.measure(constraints.copy(minHeight = 0))
+        layout(constraints.constrainWidth(maxOf(candidate.size.width, committed.width)),
+            constraints.constrainHeight(maxOf(candidate.size.height, committed.height))) {
+            committed.placeRelative(0, 0)
+        }
+    }.onPlaced { coordinates ->
+        frame.coordinates = coordinates
+        frame.layout?.let { candidate ->
+            val previous = frame.committed ?: paintOffset?.let { painted[it] }
+            frame.committed = when {
+                clearance.fits(coordinates, candidate.size.height) -> candidate
+                previous?.canPaintPrefixOf(candidate) == true &&
+                    clearance.fits(coordinates, previous.size.height) -> previous
+                else -> null
+            }
+            frame.committed?.let { accepted -> if (paintOffset != null) painted[paintOffset] = accepted }
+        }
+        publication?.setPending(owner, !published())
+    }.graphicsLayer {
+        alpha = if (displayed != null && frame.layout?.let { displayed.canPaintPrefixOf(it) } == true &&
+            clearance.fits(frame.coordinates, displayed.size.height)) 1f else 0f
+    }, displayed?.layoutInput?.style ?: style, softWrap = softWrap, onTextLayout = { frame.rendered = it })
 }
 
 internal fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boolean {
@@ -209,7 +249,7 @@ internal fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boo
         previous.constraints.maxWidth != current.constraints.maxWidth || previous.style != current.style ||
         previous.density != current.density || previous.layoutDirection != current.layoutDirection) return false
     val prefix = current.text.subSequence(0, previous.text.length)
-    return previous.text.spanStyles == prefix.spanStyles && previous.text.paragraphStyles == prefix.paragraphStyles
+    return previous.text == prefix
 }
 
 @Composable

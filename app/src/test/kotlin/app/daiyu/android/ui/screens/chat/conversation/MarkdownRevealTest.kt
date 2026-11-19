@@ -5,6 +5,27 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownRevealTest {
+    @Test fun finalBudgetWaitsForItsOwnPlacedSourceAndPendingLeaves() {
+        val motion = MarkdownTypingState(emptyList())
+        val target = motion.update(listOf(part("final")), 0, false, true)!!
+        val own = MarkdownPaintPublication().apply { active = true }
+        val unrelated = MarkdownPaintPublication().apply { active = true }
+        val leaf = Any()
+        assertFalse(own.settled(target))
+        own.presented("final", source("old"))
+        assertFalse(own.settled(target))
+        own.setPending(leaf, true)
+        own.presented("final", source("final"))
+        assertFalse(own.settled(target))
+        unrelated.setPending(Any(), true)
+        own.setPending(leaf, false)
+        assertTrue(own.settled(target))
+        val appended = motion.update(listOf(part("final next")), 0, false, true)!!
+        assertFalse(own.settled(appended))
+        own.presented("final", source("final next"))
+        assertTrue(own.settled(appended))
+    }
+
     private fun source(text: String, id: String = "final") = MarkdownTypingSource(id, text)
     private fun part(text: String, id: String = "final") = MarkdownTypingPart(source(text, id), text.length)
 

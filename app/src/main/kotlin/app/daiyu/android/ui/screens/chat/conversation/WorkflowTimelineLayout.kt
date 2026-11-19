@@ -5,6 +5,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.neverEqualPolicy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
@@ -185,7 +188,7 @@ internal fun WorkflowTimelineColumn(timeline: Boolean, content: @Composable () -
 }
 
 private class WorkflowPaintFrame {
-    var coordinates: LayoutCoordinates? = null
+    var coordinates by mutableStateOf<LayoutCoordinates?>(null, neverEqualPolicy())
 }
 
 /** The candidate keeps its measured extent; the visible surface ends at the same safe edge as its ink. */
@@ -219,12 +222,13 @@ internal fun Modifier.workflowInkClearance(): Modifier {
     val clearance = LocalStreamingTextClearance.current
     val item = LocalWorkflowItemLayout.current
     val frame = remember(clearance, item) { WorkflowPaintFrame() }
-    return onPlaced { frame.coordinates = it }.drawWithContent {
+    return onPlaced { frame.coordinates = it }.graphicsLayer {
         val coordinates = frame.coordinates
         val parent = item?.coordinates
+        val height = coordinates?.takeIf { it.isAttached }?.size?.height ?: 0
         val allocated = if (item != null && coordinates?.isAttached == true && parent?.isAttached == true)
-            parent.localPositionOf(coordinates, androidx.compose.ui.geometry.Offset.Zero).y + size.height <= item.allocatedHeight + .01f
+            parent.localPositionOf(coordinates, Offset.Zero).y + height <= item.allocatedHeight + .01f
         else item == null
-        if (allocated && clearance?.fits(coordinates, size.height.toInt()) != false) drawContent()
+        alpha = if (height > 0 && allocated && clearance?.fits(coordinates, height) != false) 1f else 0f
     }
 }

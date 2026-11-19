@@ -117,9 +117,10 @@ internal val LocalQuestionCardArrival = staticCompositionLocalOf<(String) -> Uni
 internal val LocalStreamingTextClearance = staticCompositionLocalOf<StreamingTextClearance?> { null }
 
 internal class StreamingTextClearance {
-    private data class Geometry(val viewport: LayoutCoordinates?, val offset: Int, val bottom: Float, val height: Int)
-    private var geometry by mutableStateOf<Geometry?>(null)
-    private var drawn by mutableStateOf(false)
+    private data class Geometry(val list: LayoutCoordinates?, val viewport: LayoutCoordinates?, val offset: Int,
+        val clearance: Int, val height: Int, val clampToViewport: Boolean)
+    private var geometry by mutableStateOf<Geometry?>(null, neverEqualPolicy())
+    private var positioned by mutableStateOf(false)
     private val typingOwners = mutableStateMapOf<Any, Unit>()
     val typingPending: Boolean get() = typingOwners.isNotEmpty()
     var pacedFollowing by mutableStateOf(false)
@@ -134,19 +135,26 @@ internal class StreamingTextClearance {
     fun finishPacedFollow() {
         if (!typingPending) pacedFollowing = false
     }
-    val held: Boolean get() = !drawn || geometry?.let { it.height > it.bottom + .01f } == true
+    val held: Boolean get() = !positioned || geometry?.let {
+        it.height > availableHeight(it.viewport) + it.offset + .01f
+    } == true
 
-    fun update(viewport: LayoutCoordinates?, offset: Int, bottom: Float, height: Int, protect: Boolean) {
-        geometry = if (protect) Geometry(viewport, offset, bottom + offset, height) else null
-        drawn = true
+    fun update(list: LayoutCoordinates?, viewport: LayoutCoordinates?, offset: Int, clearance: Int,
+        height: Int, protect: Boolean, clampToViewport: Boolean) {
+        geometry = if (protect) Geometry(list, viewport, offset, clearance, height, clampToViewport) else null
+        positioned = true
     }
 
     fun availableHeight(coordinates: LayoutCoordinates?): Float {
+        if (!positioned) return 0f
         val current = geometry ?: return Float.POSITIVE_INFINITY
+        val list = current.list?.takeIf { it.isAttached } ?: return 0f
         val viewport = current.viewport?.takeIf { it.isAttached } ?: return 0f
         val leaf = coordinates?.takeIf { it.isAttached } ?: return 0f
-        val top = viewport.localPositionOf(leaf, Offset.Zero).y + current.offset
-        return (current.bottom - top).coerceAtLeast(0f)
+        val viewportTop = list.localPositionOf(viewport, Offset.Zero).y
+        val safeBottom = list.size.height - current.clearance.toFloat()
+        val bottom = if (current.clampToViewport) minOf(safeBottom, viewportTop + viewport.size.height) else safeBottom
+        return (bottom - list.localPositionOf(leaf, Offset.Zero).y).coerceAtLeast(0f)
     }
 
     fun fits(coordinates: LayoutCoordinates?, height: Int): Boolean =
@@ -232,7 +240,12 @@ internal fun StreamingTailContainer(
             }
         }, modifier = Modifier
             .testTag("chat-stream-viewport:$itemKey")
-            .onPlaced { state.viewportCoordinates = it }
+            .onPlaced { viewport ->
+                state.viewportCoordinates = viewport
+                val followingCatchup = state.bounded && state.followCatchup && followIntent()
+                state.textClearance.update(listCoordinates(), viewport, state.scrollOffset.roundToInt(), drawClearance(),
+                    state.contentHeight, preserveTextClearance && protectClearance() && followIntent(), !followingCatchup)
+            }
             .drawWithContent {
                 // Following content stops at the safe edge; detached reading retains the editor backdrop.
                 val protect = protectClearance()
@@ -245,9 +258,6 @@ internal fun StreamingTailContainer(
                 // A temporary follow gate must not shrink the physical safe edge during catchup.
                 val followingCatchup = state.bounded && state.followCatchup && followIntent()
                 val clipBottom = if (protect && !followingCatchup) minOf(size.height, bottom) else bottom
-                // Reserve the candidate height first; text commits only once its complete line fits.
-                state.textClearance.update(viewport, state.scrollOffset.roundToInt(), clipBottom,
-                    state.contentHeight, preserveTextClearance && protect && followIntent())
                 clipRect(bottom = clipBottom) { this@drawWithContent.drawContent() }
             }
             .scrollable(innerScroll, Orientation.Vertical, enabled = userScrollEnabled && state.bounded)
@@ -1285,12 +1295,13 @@ internal fun AssistantTurn(
     val blockedSources = remember(ordered.body, bodyVisible) {
         if (bodyVisible) emptySet() else ordered.body.filterIsInstance<MessageContentUi.Text>().map { it.itemId }.toSet()
     }
-    val initialBaseline = remember(turn.listKey, visualScope, revealResetEpoch) {
+    val bodyRevealEpoch = remember(turn.listKey) { revealResetEpoch }
+    val initialBaseline = remember(turn.listKey) {
         visualScope?.bodyBaseline(turn.listKey, bodySources,
             turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty())
     }
     val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,
-        terminal = generationComplete, resetEpoch = revealResetEpoch,
+        terminal = generationComplete, resetEpoch = bodyRevealEpoch,
         onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources,
         live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true,
         initialBaseline = initialBaseline, presentationLane = "body:${turn.listKey}")
@@ -1406,7 +1417,7 @@ internal fun rememberAssistantTextBody(plainNarration: Set<String>, sources: Lis
             val visibility = currentReveal.value.visibility(text.itemId)
             val boundaries = remember(displayed) { MarkdownTextBoundaries(displayed) }
             val end by remember(visibility, boundaries) { androidx.compose.runtime.derivedStateOf { boundaries.end(visibility.value) } }
-            Text(displayed.take(end), modifier.fillMaxWidth(), color = conversationColors().muted,
+            Text(displayed.take(end), modifier.fillMaxWidth().onPlaced { currentReveal.value.presented(text.itemId) }, color = conversationColors().muted,
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
         } else RevealedMessageMarkdown(displayed, accepted?.blocksAt(index),
             currentReveal.value, text.itemId, modifier,

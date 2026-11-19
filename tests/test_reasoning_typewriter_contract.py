@@ -73,14 +73,21 @@ class ReasoningTypewriterContract(unittest.TestCase):
 
     def test_terminal_state_is_independent_of_first_display_backlog(self):
         card = (CHAT / 'ReportedReasoningCard.kt').read_text()
-        for token in ('val displayThinking = isThinking || !stopped && waitingForReveal',
+        for token in ('val displayThinking = isThinking',
                       'reasoningDisplayLabel(isThinking, displayThinking, displayPaused)', 'visualScope?.claimReasoning(ownerKey, summary.itemId)',
                       'ticket.take() && revealGate && !stopped', 'paceTerminal = firstPresentation',
-                      'initialBaseline = if (firstPresentation) emptyList() else null',
+                      'initialBaseline = if (firstPresentation || queuedEmptyBaseline) emptyList() else null',
                       'enabled = revealEnabled && !paused', 'leadingIndicator?.invoke(displayThinking)',
                       'val complete = (generationComplete || reported.activeSinceNanos == null) && !displayThinking'):
             self.assertIn(token, card)
         self.assertNotIn('queuedForArrival', card)
+        self.assertNotIn('val displayThinking = isThinking ||', card)
+        self.assertIn('queuedEmptyBaseline', card)
+        typing = (CHAT / 'MarkdownTyping.kt').read_text()
+        self.assertIn('completion.value && publication.settled(target)', typing)
+        self.assertIn('published[it.source.id] == it.source', typing)
+        self.assertNotIn('clearance?.paintPending', typing)
+        self.assertIn('firstPresentation || hasDisplayText || queuedEmptyBaseline && arrived', card)
         scope = (CHAT / 'WorkflowNarration.kt').read_text()
         self.assertIn('reasoningClaims.add(owner to itemId) && !baseline', scope)
         self.assertIn('ReasoningHandoff(if (baseline) initial else emptyList())', scope)

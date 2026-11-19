@@ -8,6 +8,10 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.withFrameNanos
@@ -19,9 +23,15 @@ internal class MarkdownReveal(
     private val frame: State<MarkdownTypingFrame>,
     exact: Boolean,
     budgets: MarkdownRevealBudgets = MarkdownRevealBudgets(derivedStateOf { target }, frame),
+    internal val publication: MarkdownPaintPublication = MarkdownPaintPublication(),
 ) {
     private val completion = derivedStateOf { exact && target != null && visible() >= target.total }
-    val settled: Boolean get() = completion.value
+    val settled: Boolean get() = completion.value && publication.settled(target)
+    fun presented(id: String) {
+        target?.parts?.firstOrNull { it.source.id == id }?.takeIf { limit(id) >= it.length }?.let {
+            publication.presented(id, it.source)
+        }
+    }
     private fun visible(): Int = frame.value.let { if (it.target === target) it.visible else target?.start ?: 0 }
     private val limits = target?.let { current -> current.parts.associate { part ->
         part.source.id to budgets.visibility(part.source.id)
@@ -41,6 +51,7 @@ internal class MarkdownRevealBudgets(
     private val target: State<MarkdownTypingTarget?>,
     private val frame: State<MarkdownTypingFrame>,
 ) {
+    val publication = MarkdownPaintPublication()
     private val parts = mutableMapOf<String, State<Int>>()
     fun visibility(id: String): State<Int> = parts.getOrPut(id) {
         derivedStateOf {
@@ -50,6 +61,20 @@ internal class MarkdownRevealBudgets(
         }
     }
 }
+
+internal class MarkdownPaintPublication {
+    var active by mutableStateOf(false)
+    private val pending = mutableStateMapOf<Any, Unit>()
+    private val published = mutableStateMapOf<String, MarkdownTypingSource>()
+    fun setPending(owner: Any, value: Boolean) {
+        if (value) pending[owner] = Unit else pending.remove(owner)
+    }
+    fun presented(id: String, source: MarkdownTypingSource) { published[id] = source }
+    fun settled(target: MarkdownTypingTarget?): Boolean = !active || target != null &&
+        pending.isEmpty() && target.parts.all { it.length == 0 || published[it.source.id] == it.source }
+}
+
+internal val LocalMarkdownPaintPublication = staticCompositionLocalOf<MarkdownPaintPublication?> { null }
 
 private val hiddenMarkdownVisibility: State<Int> = derivedStateOf { 0 }
 
@@ -190,7 +215,7 @@ internal fun rememberMarkdownReveal(
         target.parts == parts && target.parts.map { it.source } == sources
     val currentTarget = rememberUpdatedState(target)
     val budgets = remember(identity, resetEpoch, frame) { MarkdownRevealBudgets(currentTarget, frame) }
-    return remember(target, frame, exact, budgets) { MarkdownReveal(target, frame, exact, budgets) }
+    return remember(target, frame, exact, budgets) { MarkdownReveal(target, frame, exact, budgets, budgets.publication) }
 }
 
 internal fun markdownTypingBaselineLength(

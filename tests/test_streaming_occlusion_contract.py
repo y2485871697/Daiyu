@@ -24,21 +24,27 @@ class StreamingOcclusionContract(unittest.TestCase):
                       "val typingPending: Boolean get() = typingOwners.isNotEmpty()",
                       "typingOwners[owner] = Unit", "pacedFollowing = true", "} else typingOwners.remove(owner)"):
             self.assertIn(token, source)
-        self.assertIn("state.textClearance.update(viewport, state.scrollOffset.roundToInt(), clipBottom", drawing)
-        self.assertIn("preserveTextClearance && protect && followIntent()", drawing)
+        admission = viewport.split(".onPlaced { viewport ->", 1)[1].split(".drawWithContent {", 1)[0]
+        self.assertIn("state.textClearance.update(listCoordinates(), viewport, state.scrollOffset.roundToInt(), drawClearance()", admission)
+        self.assertIn("preserveTextClearance && protectClearance() && followIntent()", admission)
+        self.assertNotIn("state.textClearance.update(", drawing)
         self.assertIn("body.placeRelative(0, -state.scrollOffset.roundToInt())", placement)
-        self.assertIn("viewport.localPositionOf(leaf, Offset.Zero).y + current.offset", source)
+        self.assertIn("val safeBottom = list.size.height - current.clearance.toFloat()", source)
+        self.assertIn("bottom - list.localPositionOf(leaf, Offset.Zero).y", source)
         typing = (CHAT.parent / "MarkdownTyping.kt").read_text()
         self.assertIn("currentCanAdvance && textClearance?.held != true", typing)
         self.assertIn("else { motion.pause(current); motion.visible(current) }", typing)
         markdown = (CHAT.parent / "MessageMarkdown.kt").read_text()
         for token in ("remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }",
-                      "clearance.fits(frame.coordinates, size.height.toInt())", "painted[paintOffset] = it",
-                      "clearance.fits(frame.coordinates, previous.size.height)", "drawText(it)",
+                      "clearance.fits(coordinates, candidate.size.height)", "painted[paintOffset] = accepted",
+                      "clearance.fits(frame.coordinates, displayed.size.height)", "frame.committed",
+                      'BasicText(displayed?.layoutInput?.text ?: AnnotatedString("")',
                       "paintOffset + offset", "paintOffset + offsets[column]",
-                      "previous.canPaintPrefixOf(it)", "current.text.text.startsWith(previous.text.text)",
+                      "previous?.canPaintPrefixOf(candidate) == true", "current.text.text.startsWith(previous.text.text)",
                       "previous.constraints.maxWidth != current.constraints.maxWidth",
-                      "previous.text.spanStyles == prefix.spanStyles", "textClearance?.held != true"):
+                      "previous.text == prefix", "textClearance?.held != true",
+                      "frame.rendered", "publication?.setPending(owner, !published())",
+                      "actual.layoutInput.text == text", "modifier.layout { measurable, constraints ->"):
             self.assertIn(token, markdown)
         workflow = (CHAT.parent / "AssistantWorkflowContent.kt").read_text()
         classifier = workflow.split("internal fun ChatTurnUi.Assistant.hasPlainTextBody", 1)[1].split("internal fun MessageContentUi.workflowKey", 1)[0]

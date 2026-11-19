@@ -112,8 +112,13 @@ internal fun ReportedReasoningCard(
                 (isThinking || observedLive || firstPresentation || currentOverride == true)
             var observedDisplayLive by remember(revealGate, revealResetEpoch) { mutableStateOf(isThinking) }
             SideEffect { if (isThinking) observedDisplayLive = true }
+            val hasDisplayText = hasReportedReasoningText(text)
+            var queuedEmptyBaseline by remember(revealGate, revealResetEpoch) {
+                mutableStateOf(revealGate && isThinking && !arrived && !hasDisplayText)
+            }
+            SideEffect { if (hasDisplayText || !isThinking) queuedEmptyBaseline = false }
             val reveal = key(revealGate) {
-                key(firstPresentation || hasReportedReasoningText(text)) {
+                key(firstPresentation || hasDisplayText || queuedEmptyBaseline && arrived) {
                     rememberMarkdownReveal(
                         listOf(MarkdownTypingSource(summary.itemId, text, sourceWindow)), projection,
                         streaming = isThinking && revealEnabled && !paused, terminal = !isThinking,
@@ -123,7 +128,7 @@ internal fun ReportedReasoningCard(
                         allowBaselinePrefix = false,
                         live = isThinking || firstPresentation,
                         paceTerminal = firstPresentation,
-                        initialBaseline = if (firstPresentation) emptyList() else null,
+                        initialBaseline = if (firstPresentation || queuedEmptyBaseline) emptyList() else null,
                         presentationLane = presentationLane.takeIf { revealGate },
                     )
                 }
@@ -136,7 +141,7 @@ internal fun ReportedReasoningCard(
     val settled = summaryDisplays.all { it.reveal.settled }
     val presenting = observedLive || summaryDisplays.any { it.firstPresentation }
     val waitingForReveal = summaryDisplays.any { it.waitingForReveal }
-    val displayThinking = isThinking || !stopped && waitingForReveal
+    val displayThinking = isThinking
     val displayPaused = LocalReplyPlayback.current?.paused == true
     val disclosureExpanded = currentOverride ?: (!stopped && (isThinking || presenting && (!settled || waitingForReveal)))
     val expanded = hasSummary && disclosureExpanded && summaryDisplays.any { display ->

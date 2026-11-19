@@ -35,7 +35,7 @@ internal fun MarkdownCodeText(block: MarkdownBlock.Code, visibleCharacters: Int,
     val end = boundaries.end(visibleCharacters)
     val visible = remember(block.text, end) { block.text.substring(0, end) }
     val simpleShaping = remember(block.text) { block.text.all { it.code < 128 } }
-    if (end >= block.text.length || !simpleShaping) {
+    if (end >= block.text.length || !simpleShaping || LocalStreamingTextClearance.current != null) {
         ClearanceText(AnnotatedString(markdownCodeDisplayText(block, visible)), null, modifier, style, softWrap = false)
         return
     }

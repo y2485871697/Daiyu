@@ -383,7 +383,11 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         }
     }
 
-    fun testQueuedEmptyBaselineTypesAfterArrivalButReopenIsSilent() {
+    fun testQueuedEmptyBaselineTypesAfterArrivalButReopenIsSilent() = verifyQueuedEmptyBaseline(0)
+    fun testQueuedTextBeforeArrivalTypesButReopenIsSilent() = verifyQueuedEmptyBaseline(1)
+    fun testQueuedTextAtArrivalTypesButReopenIsSilent() = verifyQueuedEmptyBaseline(2)
+
+    private fun verifyQueuedEmptyBaseline(order: Int) {
         val first = "queued first " + "甲".repeat(120)
         val hidden = first + " hidden " + "乙".repeat(180)
         val next = hidden + " visible " + "丙".repeat(180)
@@ -404,10 +408,21 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             } }
             ui.mainClock.advanceTimeBy(32)
             assertEquals(0, advances)
-            mainThread { appearance.arrived = true; appearance.settled = true }
-            ui.mainClock.advanceTimeBy(32)
-            assertEquals(0, advances)
-            mainThread { text = first }
+            when (order) {
+                0 -> {
+                    mainThread { appearance.arrived = true; appearance.settled = true }
+                    ui.mainClock.advanceTimeBy(32)
+                    assertEquals(0, advances)
+                    mainThread { text = first }
+                }
+                1 -> {
+                    mainThread { text = first }
+                    ui.mainClock.advanceTimeBy(160)
+                    assertEquals(0, advances)
+                    mainThread { appearance.arrived = true; appearance.settled = true }
+                }
+                else -> mainThread { text = first; appearance.arrived = true; appearance.settled = true }
+            }
             await { advances > 0 }
             assertFalse(visibleText().contains(first))
             await { visibleText().contains(first) }

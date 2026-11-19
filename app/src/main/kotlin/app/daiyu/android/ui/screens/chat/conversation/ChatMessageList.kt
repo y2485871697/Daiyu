@@ -49,6 +49,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -77,7 +78,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.Remeasurement
 import androidx.compose.ui.layout.RemeasurementModifier
-import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
@@ -91,6 +91,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.domain.BottomFollowMotion
+import app.daiyu.android.domain.BottomFollowViewport
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
 import top.yukonga.miuix.kmp.basic.Text
@@ -105,6 +106,7 @@ private class FollowClearanceLayout : RemeasurementModifier {
     var active = false
     var coordinates: LayoutCoordinates? = null
     var followViewport: Triple<androidx.compose.ui.unit.IntSize, Int, Int>? = null
+    val viewportLoss = BottomFollowViewport()
 
     override fun onRemeasurementAvailable(remeasurement: Remeasurement) {
         this.remeasurement = remeasurement
@@ -569,15 +571,35 @@ internal fun ChatMessageList(
                 " motion=${state.followDiagnostic} sync=${state.clearanceDiagnostic} correction=${state.anchorCorrection}"
         }
     }
+    fun observeFollowViewport(layout: LazyListLayoutInfo) {
+        val viewport = Triple(layout.viewportSize, layout.beforeContentPadding,
+            currentOcclusionPx + currentFollowClearancePx)
+        clearanceLayout.viewportLoss.observe(currentTailKey,
+            viewport.first.height - viewport.second - viewport.third, following = canFollowBottom())
+        clearanceLayout.followViewport = viewport
+    }
     fun correctFollowClearance() {
         synchronousTrace("daiyu.chat.restore-clearance") {
+            val nestedTail = currentNestedTail
             val activeTail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
             if (nestedTail.migrating || !clearanceLayout.active || clearanceLayout.correcting ||
-                !canFollowBottom() || currentOcclusionPx <= 0) return
-            if (nestedTail.textClearance.pacedFollowing) return
+                !canFollowBottom()) {
+                if (!canFollowBottom()) {
+                    clearanceLayout.viewportLoss.reset()
+                    clearanceLayout.followViewport = null
+                }
+                return
+            }
             val remeasurement = clearanceLayout.remeasurement ?: return
             var layout = listState.layoutInfo
             if (layout.viewportSize.height <= 0) return
+            observeFollowViewport(layout)
+            if (currentOcclusionPx <= 0) {
+                clearanceLayout.viewportLoss.correction(0f)
+                return
+            }
+            val viewportCorrection = clearanceLayout.viewportLoss.pendingPx > 0f
+            if (nestedTail.textClearance.pacedFollowing && !viewportCorrection) return
             val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey &&
                 nestedTail.contentHeight > 0 && nestedTail.contentHeight <= layout.viewportSize.height -
                 currentOcclusionPx - with(density) { 11.dp.roundToPx() + ChatTailClearance.roundToPx() }
@@ -585,7 +607,7 @@ internal fun ChatMessageList(
                 activeTail != null && activeTail.status != RunStatus.RUNNING && !activeTail.isStreaming &&
                 readyTurns[activeTail.listKey] == activeTail &&
                 revealedTurns[activeTail.listKey] != activeTail
-            val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal
+            val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal || viewportCorrection
             if (nestedTail.followCatchup && !protectMeasuredTail) return
             if (!protectMeasuredTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return
             var last = layout.visibleItemsInfo.lastOrNull {
@@ -613,16 +635,24 @@ internal fun ChatMessageList(
                                 fallbackAfter[it.listKey].isNullOrEmpty() && compressionAfter[it.listKey].isNullOrEmpty())
                 } == true
                 if (shortBoundedTail && liveTextTail && !resumeFollowPending && !nestedTail.followCatchup &&
+                    !viewportCorrection &&
                     clearanceLayout.followViewport == Triple(layout.viewportSize,
                         layout.beforeContentPadding, currentOcclusionPx + currentFollowClearancePx)) return
-                if (!listState.canScrollForward) return
+                if (!listState.canScrollForward) {
+                    clearanceLayout.viewportLoss.correction(0f)
+                    return
+                }
                 // Keep measured text above the editor while terminal reveal is still advancing.
                 // Move the outer list, not a header-clipping inner offset.
                 val tailClearance = currentFollowClearancePx
                 val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - tailClearance
-                val correction = (last.offset + last.size - visibleBottom).coerceAtLeast(0)
-                if (correction == 0) return
-                val consumed = listState.dispatchRawDelta(correction.toFloat())
+                val obscured = (last.offset + last.size - visibleBottom).coerceAtLeast(0)
+                // A viewport change pays only its lost safe height, never queued text growth.
+                val correction = if (viewportCorrection) clearanceLayout.viewportLoss.correction(obscured.toFloat())
+                    else obscured.toFloat()
+                if (correction == 0f) return
+                val consumed = listState.dispatchRawDelta(correction)
+                clearanceLayout.viewportLoss.consume(consumed)
                 nestedTail.clearanceDiagnostic = "delta=$correction,consumed=$consumed"
                 if (consumed > 0f && clearanceLayout.active) {
                     // Raw delta may defer placement; finish it after the previous layout pass.
@@ -838,7 +868,7 @@ internal fun ChatMessageList(
     // Keep a single motion across target-height updates instead of snapping each new line.
     LaunchedEffect(listState, revealResetEpoch) {
         clearanceLayout.followViewport = null
-        var alignViewport = false
+        clearanceLayout.viewportLoss.reset()
         val motion = BottomFollowMotion()
         var motionOwner: String? = null
         // Process each measured target update through a frame; collectLatest would cancel a
@@ -857,9 +887,13 @@ internal fun ChatMessageList(
                     currentOcclusionPx + currentFollowClearancePx),
                     Triple(resumeReady, currentNestedTail.contentHeight, currentNestedTail.textClearance.typingPending)))
         }.collect { target ->
-            if (target == null) { motion.reset(); return@collect }
+            if (target == null) {
+                motion.reset()
+                clearanceLayout.viewportLoss.reset()
+                clearanceLayout.followViewport = null
+                return@collect
+            }
             currentNestedTail.followDiagnostic = "target"
-            var observedViewport = clearanceLayout.followViewport
             while (canFollowBottom()) {
                 if (motionOwner != currentTailKey) {
                     motion.reset()
@@ -893,10 +927,14 @@ internal fun ChatMessageList(
                         it.index == index && it.key == currentTailKey
                     } ?: return@collect
                 }
-                val viewport = Triple(layout.viewportSize, layout.beforeContentPadding,
-                    currentOcclusionPx + currentFollowClearancePx)
-                if (observedViewport != null && observedViewport != viewport) alignViewport = true
-                observedViewport = viewport
+                observeFollowViewport(layout)
+                if (clearanceLayout.viewportLoss.pendingPx > 0f) {
+                    correctFollowClearance()
+                    layout = listState.layoutInfo
+                    last = layout.visibleItemsInfo.lastOrNull {
+                        it.index == index && it.key == currentTailKey
+                    } ?: return@collect
+                }
                 val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
                 if (resumeFollowPending && tail != null && !tail.isStreaming &&
                     layout.visibleItemsInfo.any { it.key == tail.listKey } &&
@@ -929,8 +967,6 @@ internal fun ChatMessageList(
                         }
                     }
                     resumeFollowPending = false
-                    alignViewport = false
-                    clearanceLayout.followViewport = observedViewport
                     if (currentNestedTail.textClearance.typingPending) {
                         withFrameNanos { frameTimeNanos ->
                             if (motionOwner != currentTailKey) {
@@ -947,7 +983,7 @@ internal fun ChatMessageList(
                     return@collect
                 }
                 // Reveal may be waiting for this very movement to clear its next line.
-                val alignment = (alignViewport || resumeFollowPending) && !currentNestedTail.textClearance.pacedFollowing
+                val alignment = resumeFollowPending && !currentNestedTail.textClearance.pacedFollowing
                 var delta = if (alignment) followDistance else 0f
                 if (!alignment) {
                     // Keep one cancellable frame loop alive while measured overflow remains.
@@ -981,7 +1017,9 @@ internal fun ChatMessageList(
                     }
                 }
                 if (delta > 0f && canFollowBottom()) {
+                    val scrollOwner = currentTailKey
                     val consumed = listState.scrollBy(delta)
+                    if (clearanceLayout.viewportLoss.owner == scrollOwner) clearanceLayout.viewportLoss.consume(consumed)
                     currentNestedTail.followDiagnostic = "distance=$followDistance,delta=$delta,consumed=$consumed"
                     if (consumed <= 0f) {
                         // A fractional step or pending item measure is not a settled boundary.
@@ -990,7 +1028,6 @@ internal fun ChatMessageList(
                     }
                     if (alignment) {
                         resumeFollowPending = false
-                        alignViewport = false
                         motion.reset()
                     }
                 } else if (!canFollowBottom()) {
@@ -998,7 +1035,8 @@ internal fun ChatMessageList(
                     return@collect
                 }
             }
-            clearanceLayout.followViewport = observedViewport
+            clearanceLayout.viewportLoss.reset()
+            clearanceLayout.followViewport = null
             motion.reset()
         }
     }
@@ -1129,6 +1167,10 @@ internal fun ChatMessageList(
             modifier = Modifier.testTag("chat-messages").fillMaxSize()
                 .then(clearanceLayout)
                 .onPlaced { clearanceLayout.coordinates = it }
+                .onGloballyPositioned { coordinates ->
+                    clearanceLayout.coordinates = coordinates
+                    if (coordinates.isAttached) correctFollowClearance()
+                }
                 .drawWithContent { if (!initialPositionPending) drawContent() }
                 .then(if (initialPositionPending) Modifier.clearAndSetSemantics {} else Modifier)
                 .pointerInput(Unit) {

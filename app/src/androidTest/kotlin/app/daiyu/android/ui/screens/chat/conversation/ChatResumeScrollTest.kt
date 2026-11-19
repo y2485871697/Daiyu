@@ -1,6 +1,5 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -47,7 +46,7 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             contentActive = active
             if (formatted) body = formattedBody
             owner = Owner().apply { registry.currentState = Lifecycle.State.RESUMED }
-            activity.setContent {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     CompositionLocalProvider(LocalMarkdownParser provides parser, LocalLifecycleOwner provides owner,
                         app.daiyu.android.ui.navigation.LocalPageContentActive provides contentActive) {
@@ -76,7 +75,7 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
         var observe = false
         mainThread {
             owner = Owner().apply { registry.currentState = Lifecycle.State.RESUMED }
-            activity.setContent {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     CompositionLocalProvider(LocalLifecycleOwner provides owner) {
                         Box(Modifier.size(320.dp, 240.dp)) {
@@ -217,7 +216,7 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
         try {
             mainThread {
                 owner = Owner().apply { registry.currentState = Lifecycle.State.RESUMED }
-                activity.setContent {
+                activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                     AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                         CompositionLocalProvider(LocalLifecycleOwner provides owner, LocalMarkdownParser provides parser) {
                             Box(Modifier.size(320.dp, 240.dp)) {

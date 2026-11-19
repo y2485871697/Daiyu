@@ -214,7 +214,7 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
                       'nestedTail.contentHeight > 0 && nestedTail.contentHeight <= layout.viewportSize.height -',
                       'val boundedTerminalReveal = nestedTail.bounded && currentTailKey == assistantOwnerKey &&',
                       'if (!protectMeasuredTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return',
-                      'val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal',
+                      'val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal || viewportCorrection',
                       'if (nestedTail.followCatchup && !protectMeasuredTail) return',
                       'if (!protectMeasuredTail && resumeFollowPending',
                       'activeTail.status != RunStatus.RUNNING && !activeTail.isStreaming',

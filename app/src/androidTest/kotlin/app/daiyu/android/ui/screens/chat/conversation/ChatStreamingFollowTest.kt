@@ -1,7 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import android.view.ViewTreeObserver
-import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
@@ -30,7 +29,7 @@ class ChatStreamingFollowTest : WiredActivityTestCase() {
         mainThread {
             height = initialHeight
             windowHeight = viewportHeight
-            activity.setContent {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     Box(Modifier.size(320.dp, windowHeight)) {
                         ChatMessageList(

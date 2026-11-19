@@ -1,6 +1,5 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import androidx.activity.compose.setContent
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -52,7 +51,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
 
     private fun mountList(following: Boolean, lower: Boolean = false, tool: Boolean = false,
         status: RunStatus = RunStatus.RUNNING, streaming: Boolean = true) {
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             BoxWithConstraints(Modifier.size(320.dp, 420.dp)) {
                 ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { inset ->
@@ -192,7 +191,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         var following by mutableStateOf(true)
         var outputActive by mutableStateOf(true)
         var lower by mutableStateOf(false)
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             var safe by remember { mutableStateOf<Rect?>(null) }
             val viewport = remember { WorkflowDisclosureViewport({ following }, { safe }, {}, { false }, { _, _ -> 0f }) }
             Box(Modifier.size(320.dp, 420.dp).testTag("cycle-viewport").onGloballyPositioned { safe = it.boundsInWindow() }) {
@@ -249,7 +248,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         assertCycleFreezesAcrossHalfChange(completesOutput = true)
 
     fun testFollowingToolDetailsUseTheUpperHalf() {
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             val viewport = remember { WorkflowDisclosureViewport({ true }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { true }, { _, _ -> 0f }) }
             CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember { WorkflowDisclosureContext(viewport, "tool") { true } }) {
                 WorkStepRow(WorkStepUi("tool", "fixture", "detail", WorkStepState.OK))
@@ -270,7 +269,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
 
     fun testFollowingReasoningSummaryUsesTheUpperHalf() {
         kotlinx.coroutines.runBlocking { projectMarkdown(listOf("direction summary")) }
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             val viewport = remember { WorkflowDisclosureViewport({ true }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { true }, { _, _ -> 0f }) }
             CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember { WorkflowDisclosureContext(viewport, "reasoning") { true } }) {
                 ReportedReasoningCard("reasoning", listOf(app.daiyu.android.domain.ReportedReasoning("summary", "direction summary")))
@@ -291,7 +290,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         for (closing in listOf("manual", "complete", "stop")) {
             var running by mutableStateOf(true)
             var stopped by mutableStateOf(false)
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 androidx.compose.runtime.key(closing) {
                     val viewport = remember { WorkflowDisclosureViewport({ true }, { Rect(0f, 0f, 10000f, 10000f) }, {}, { false }, { _, _ -> 0f }) }
                     CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember {
@@ -359,7 +358,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         supplementalLower = lower
         supplementalFollowing = following
         supplementalOutputActive = outputActive
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             androidx.compose.runtime.key(kind) {
             var safe by remember { mutableStateOf<Rect?>(null) }
             val viewport = remember { WorkflowDisclosureViewport({ supplementalFollowing }, { safe }, {}, { false }, { _, _ -> 0f }) }
@@ -454,7 +453,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
 
     private fun assertLowerReadingBoundaryIsStationary(status: RunStatus, streaming: Boolean) {
         val step = WorkStepUi("reading-tool", "fixture", "", WorkStepState.OK)
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             BoxWithConstraints(Modifier.size(320.dp, 420.dp)) {
                 ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { inset ->
@@ -584,7 +583,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         val nextHeader = if (growInterToolText) "tool-step-header:surrounding-0" else "tool-step-header:surrounding-4"
         val category = "tool-category:child_control"
         val trace = mutableListOf<String>()
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             Box(Modifier.safeDrawingPadding()) {
                 BoxWithConstraints(Modifier.size(320.dp, if (growInterToolText) 520.dp else 420.dp).testTag("clip-summary-host")) {
@@ -789,7 +788,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
 
     fun testNestedWorkflowAndToolMoveTheirReadingWindowInsteadOfClippingTheIdentity() {
         val step = WorkStepUi("nested-tool", "fixture", "", WorkStepState.OK)
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             BoxWithConstraints(Modifier.size(320.dp, 420.dp).testTag("nested-host")) {
                 ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { inset ->
@@ -863,7 +862,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             var running by mutableStateOf(true)
             var stopped by mutableStateOf(false)
             var safeBottom = 0f
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 density = LocalDensity.current.density
                 Box(Modifier.size(320.dp, 420.dp).clipToBounds().onGloballyPositioned {
                     safeBottom = it.boundsInWindow().top + 280f * density
@@ -969,7 +968,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         val frames = java.util.Collections.synchronizedList(mutableListOf<ArrivalFrame>())
         val marker = Color.Magenta
         var safeTop = 0
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             safeTop = WindowInsets.safeDrawing.getTop(LocalDensity.current)
             Box(Modifier.safeDrawingPadding()) {

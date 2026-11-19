@@ -1,6 +1,5 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
@@ -43,7 +42,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running)),
                 composer = ComposerUi(modelLabel = "gpt-6.1-sol",
                     phase = if (running) ComposerPhase.RUNNING else ComposerPhase.IDLE), scrollRequest = ChatScrollRequest(1))
-            activity.setContent {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                 AgentAppTheme(AppearanceSettings(interfaceScale = scale,
                     themeMode = if (dark) AppearanceThemeMode.DARK else AppearanceThemeMode.LIGHT), true) {
                     val currentDensity = LocalDensity.current.density
@@ -86,9 +85,15 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     val composerOuterTop = surface.top - 10f * density
                     val gap = (composerOuterTop - fullTailBottom) / density
                     val displayed = ui.onNodeWithText(marker, substring = true).isDisplayed()
-                    lastGeometry = "tailTop=${tail.positionInRoot().y} tailHeight=${tail.size.height} " +
+                    val complete = (screen.turns.lastOrNull() as? ChatTurnUi.Assistant)?.status == RunStatus.COMPLETED
+                    val copy = ui.onNode(hasContentDescription("复制回答") and hasAnyAncestor(hasTestTag("chat-turn:tail")))
+                    val actionExists = ui.onAllNodes(hasContentDescription("复制回答") and hasAnyAncestor(hasTestTag("chat-turn:tail")))
+                        .fetchSemanticsNodes().isNotEmpty()
+                    val actionsDisplayed = !complete || actionExists && copy.isDisplayed()
+                    lastGeometry = "complete=$complete actionExists=$actionExists actionsDisplayed=$actionsDisplayed " +
+                        "tailTop=${tail.positionInRoot().y} tailHeight=${tail.size.height} " +
                         "surface=$surface viewport=$viewport density=$density outerGapDp=$gap surfaceGapDp=${(surface.top - fullTailBottom) / density} markerDisplayed=$displayed"
-                    displayed && gap in (ChatTailClearance.value - 2f)..(ChatTailClearance.value + 2f)
+                    displayed && actionsDisplayed && gap in (ChatTailClearance.value - 2f)..(ChatTailClearance.value + 2f)
                 }
             }
         } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {

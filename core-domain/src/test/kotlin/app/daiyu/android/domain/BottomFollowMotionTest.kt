@@ -190,4 +190,113 @@ class BottomFollowMotionTest {
         assertEquals(0f, motion.step(Float.NaN, 50_000_001L, 1f), 0f)
         assertEquals(0f, motion.step(10f, 60_000_000L, 0f), 0f)
     }
+
+    @Test fun viewportFirstObservationAndSameHeightCreateNoDebt() {
+        val viewport = BottomFollowViewport()
+        viewport.observe("a", 600, true)
+        assertEquals("a", viewport.owner)
+        assertEquals(600, viewport.observedSafeHeight!!.toInt())
+        assertEquals(0f, viewport.pendingPx, 0f)
+        viewport.observe("a", 600, true)
+        assertEquals(0f, viewport.pendingPx, 0f)
+    }
+
+    @Test fun viewportPartialConsumptionNeverRechargesTheObservedLoss() {
+        val viewport = BottomFollowViewport()
+        viewport.observe("a", 600, true)
+        viewport.observe("a", 500, true)
+        assertEquals(500, viewport.observedSafeHeight!!.toInt())
+        assertEquals(100f, viewport.correction(400f), 0f)
+        viewport.consume(40f)
+        viewport.observe("a", 500, true)
+        assertEquals(60f, viewport.correction(400f), 0f)
+        viewport.consume(0f)
+        viewport.observe("a", 500, true)
+        assertEquals(60f, viewport.correction(400f), 0f)
+        viewport.consume(60f)
+        viewport.observe("a", 500, true)
+        assertEquals(0f, viewport.correction(400f), 0f)
+    }
+
+    @Test fun viewportExpansionOffsetsOnlyUnpaidLossWithoutBankingCredit() {
+        val viewport = BottomFollowViewport()
+        viewport.observe("a", 600, true)
+        viewport.observe("a", 520, true)
+        viewport.consume(30f)
+        viewport.observe("a", 500, true)
+        assertEquals(70f, viewport.pendingPx, 0f)
+        viewport.observe("a", 540, true)
+        assertEquals(30f, viewport.pendingPx, 0f)
+        viewport.observe("a", 580, true)
+        assertEquals(0f, viewport.pendingPx, 0f)
+        viewport.observe("a", 560, true)
+        assertEquals(20f, viewport.pendingPx, 0f)
+    }
+
+    @Test fun viewportOwnerChangeAndLostFollowDiscardLossAndBaseline() {
+        val viewport = BottomFollowViewport()
+        viewport.observe("a", 600, true)
+        viewport.observe("a", 500, true)
+        viewport.observe("b", 400, true)
+        assertEquals(0f, viewport.pendingPx, 0f)
+        viewport.observe("b", 350, true)
+        assertEquals(50f, viewport.pendingPx, 0f)
+        viewport.observe("b", 300, false)
+        assertNull(viewport.owner)
+        assertNull(viewport.observedSafeHeight)
+        assertEquals(0f, viewport.pendingPx, 0f)
+        viewport.observe("b", 250, true)
+        assertEquals(0f, viewport.pendingPx, 0f)
+        viewport.observe("b", 200, true)
+        assertEquals(50f, viewport.pendingPx, 0f)
+        viewport.observe(null, 200, true)
+        assertNull(viewport.owner)
+        assertNull(viewport.observedSafeHeight)
+        assertEquals(0f, viewport.pendingPx, 0f)
+    }
+
+    @Test fun viewportConsumesOnlyFinitePositiveActualPixels() {
+        val viewport = BottomFollowViewport()
+        viewport.observe("a", 600, true)
+        viewport.observe("a", 500, true)
+        for (invalid in listOf(0f, -5f, Float.NaN, Float.POSITIVE_INFINITY)) {
+            viewport.consume(invalid)
+            assertEquals(100f, viewport.pendingPx, 0f)
+        }
+        viewport.consume(12.5f)
+        assertEquals(87.5f, viewport.pendingPx, 0f)
+        viewport.consume(200f)
+        assertEquals(0f, viewport.pendingPx, 0f)
+        viewport.observe("a", 500, true)
+        assertEquals(0f, viewport.pendingPx, 0f)
+    }
+
+    @Test fun viewportAlreadyClearedGeometryCannotPayForLaterTextGrowth() {
+        val viewport = BottomFollowViewport()
+        viewport.observe("a", 600, true)
+        viewport.observe("a", 500, true)
+        assertEquals(25f, viewport.correction(25f), 0f)
+        viewport.consume(25f)
+        viewport.observe("a", 500, true)
+        assertEquals(0f, viewport.correction(400f), 0f)
+        viewport.observe("a", 460, true)
+        assertEquals(0f, viewport.correction(0f), 0f)
+        assertEquals(0f, viewport.correction(400f), 0f)
+    }
+
+    @Test fun viewportLossDoesNotSnapQueuedGrowthOrResetTypingMotion() {
+        val viewport = BottomFollowViewport()
+        val motion = BottomFollowMotion()
+        motion.step(1000f, 0L, 1f, continuous = true)
+        repeat(30) { motion.step(1000f, (it + 1) * 16_666_667L, 1f, continuous = true) }
+        val velocity = motion.velocityPxPerSecond
+        viewport.observe("a", 600, true)
+        viewport.observe("a", 560, true)
+        assertEquals(40f, viewport.correction(240f), 0f)
+        viewport.consume(40f)
+        assertEquals(velocity, motion.velocityPxPerSecond, 0f)
+        val step = motion.step(200f, 31 * 16_666_667L, 1f, continuous = true)
+        assertTrue(step > 0f && step <= 14f)
+        assertEquals(0f, viewport.correction(200f - step), 0f)
+    }
 }

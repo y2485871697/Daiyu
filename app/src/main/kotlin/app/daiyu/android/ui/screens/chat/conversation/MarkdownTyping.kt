@@ -76,6 +76,7 @@ internal class MarkdownPaintPublication {
 }
 
 internal val LocalMarkdownPaintPublication = staticCompositionLocalOf<MarkdownPaintPublication?> { null }
+internal val LocalMarkdownReceiptClock = staticCompositionLocalOf<() -> Long> { System::nanoTime }
 
 private val hiddenMarkdownVisibility: State<Int> = derivedStateOf { 0 }
 
@@ -156,8 +157,9 @@ internal fun rememberMarkdownReveal(
         } }
     }
     val motion = remember(identity, resetEpoch, retainedLane) { retainedLane?.motion ?: MarkdownTypingState(baseline) }
+    val receiptClock = LocalMarkdownReceiptClock.current
     remember(motion, sources, playback?.paused) {
-        motion.receive(sources, System.nanoTime(), paused = playback?.paused == true)
+        motion.receive(sources, receiptClock(), paused = playback?.paused == true)
     }
     val exactProjection = projection?.sources == sources.map { it.text } &&
         projection?.windows.orEmpty() == sources.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty()

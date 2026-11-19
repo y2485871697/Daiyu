@@ -1,6 +1,5 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -232,7 +231,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var origin by mutableStateOf(240.dp)
         var hostPx = 0
         var clearancePx = 0
-        mainThread { activity.setContent {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val d = LocalDensity.current
                 hostPx = with(d) { 360.dp.roundToPx() }
@@ -278,7 +277,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var hostCoordinates: LayoutCoordinates? = null
         var hostPx = 0
         var clearancePx = 0
-        mainThread { activity.setContent {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
             AgentAppTheme(AppearanceSettings(themeMode =
                 app.daiyu.android.data.model.AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
                 val d = LocalDensity.current
@@ -342,7 +341,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var topInsetPx = 0
         var layoutInsetPx = 0
         mainThread {
-            activity.setContent {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     val d = LocalDensity.current
                     hostPx = with(d) { 360.dp.roundToPx() }
@@ -436,7 +435,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         }
         var body by mutableStateOf("")
         mainThread {
-            activity.setContent {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                 AgentAppTheme(AppearanceSettings(themeMode =
                     app.daiyu.android.data.model.AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
                     density = LocalDensity.current.density
@@ -561,7 +560,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var body by mutableStateOf(texts.first())
         var live by mutableStateOf(true)
         mainThread {
-            activity.setContent {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                 AgentAppTheme(AppearanceSettings(themeMode =
                     app.daiyu.android.data.model.AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
                     density = LocalDensity.current.density
@@ -721,7 +720,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var bodyCoordinates: LayoutCoordinates? = null
         var anchorCoordinates: LayoutCoordinates? = null
         mainThread {
-            activity.setContent {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     density = LocalDensity.current.density
                     BoxWithConstraints(Modifier.size(320.dp, viewportHeight).testTag("occlusion-host")) {
@@ -803,7 +802,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var count by mutableStateOf(1)
         val tail = shortWorkflow(1)
         val hostTag = "atomic-tool-header"
-        mainThread { activity.setContent {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
             AgentAppTheme(AppearanceSettings(themeMode = app.daiyu.android.data.model.AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
                 density = LocalDensity.current.density
                 Box(Modifier.size(320.dp, 420.dp).background(Color.White).testTag(hostTag)) {
@@ -906,7 +905,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     fun testSemanticVisibilityProbeDistinguishesPaddingFromTopClipping() {
         var shift by mutableStateOf(0.dp)
         mainThread {
-            activity.setContent {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                 Box(Modifier.size(64.dp).clipToBounds()) {
                     Box(Modifier.offset(y = shift).testTag("semantic-visibility-probe").padding(bottom = 2.dp)) {
                         Box(Modifier.size(32.dp, 26.dp))
@@ -938,7 +937,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var count by mutableStateOf(1)
         val tail = shortWorkflow(1)
         mainThread {
-            activity.setContent {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     density = LocalDensity.current.density
                     Box(Modifier.size(320.dp, 640.dp)) {
@@ -1004,7 +1003,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
 
     fun testNativeEntryMeasurementStillDetectsDrawOnlyClipping() {
         ui.mainClock.autoAdvance = false
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             Box(Modifier.size(240.dp, 160.dp).background(Color.White).testTag("native-entry-host")) {
                 WorkflowEntry("probe", WorkflowEntrances(), animate = true) {
                     Text("first line\nlast line", Modifier.testTag("native-entry-text").drawWithContent {
@@ -1070,7 +1069,11 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         verifyTerminalPacedToolAnswer(resumeAtFrame = 180)
     }
 
-    private fun verifyTerminalPacedToolAnswer(resumeAtFrame: Int? = null) {
+    fun testFirstTerminalToolAnswerUsesSeveralDrawnFramesAtBootstrapRate() {
+        verifyTerminalPacedToolAnswer(slowReceipts = false)
+    }
+
+    private fun verifyTerminalPacedToolAnswer(resumeAtFrame: Int? = null, slowReceipts: Boolean = true) {
         val full = """
             搜到的内容主要集中在几起最知名的“外星人事件”：
 
@@ -1087,10 +1090,11 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
 
             需要我展开讲某一个，或者换成英文/其他语言的资料吗？
         """.trimIndent()
-        verifyTerminalPacedText("", full, withTools = true, resumeAtFrame = resumeAtFrame)
+        verifyTerminalPacedText("", full, withTools = true, resumeAtFrame = resumeAtFrame, slowReceipts = slowReceipts)
     }
 
-    private fun verifyTerminalPacedText(seed: String, full: String, withTools: Boolean = false, resumeAtFrame: Int? = null) {
+    private fun verifyTerminalPacedText(seed: String, full: String, withTools: Boolean = false,
+        resumeAtFrame: Int? = null, slowReceipts: Boolean = true) {
         val preface = "我用浏览器帮你搜一下。"
         val expectedSeed = if (withTools) "" else markdownBlocksDisplayText(defaultMarkdownParser(seed))
         val expectedFull = markdownBlocksDisplayText(defaultMarkdownParser(full))
@@ -1121,7 +1125,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 override val lifecycle = androidx.lifecycle.LifecycleRegistry(this).also { registry = it }
             }
             registry.currentState = androidx.lifecycle.Lifecycle.State.RESUMED
-            activity.setContent {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                 androidx.compose.runtime.CompositionLocalProvider(
                     androidx.lifecycle.compose.LocalLifecycleOwner provides owner,
                     app.daiyu.android.ui.navigation.LocalPageContentActive provides contentActive) {
@@ -1227,12 +1231,31 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var firstGapFrame: Int? = null
         ui.mainClock.autoAdvance = false
         try {
+            if (slowReceipts) {
+                val primer = full.take(seed.length + 1)
+                val expectedPrimer = markdownBlocksDisplayText(defaultMarkdownParser(primer))
+                ui.runOnUiThread { turn = turnFor(primer, complete = false) }
+                var primerSettled = false
+                for (index in 0 until 90) {
+                    frame()
+                    if (ready.get() && displayed(textLayouts()) == expectedPrimer) {
+                        primerSettled = true
+                        break
+                    }
+                }
+                assertTrue("Prime the real raw receipt rate before the slow terminal batch", primerSettled)
+                ui.mainClock.advanceTimeBy(4_000)
+                ui.waitForIdle()
+                assertEquals("An idle interval cannot fabricate new input", expectedPrimer, displayed(textLayouts()))
+            }
             ui.runOnUiThread {
                 reports.clear()
                 turn = turnFor(full, complete = true)
             }
             for (index in 0 until 640) {
                 if (index == resumeAtFrame) {
+                    assertFalse("Resume must interrupt active terminal typing", ready)
+                    assertTrue("Resume must preserve a partial answer", expectedFull != displayed(textLayouts()))
                     ui.runOnUiThread {
                         registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED
                         contentActive = false
@@ -1286,7 +1309,11 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 if (settled) { finished = true; break }
             }
             assertTrue("Exercise terminal formatting before reveal is settled", reports.contains(false))
-            assertTrue("Keep several seconds of terminal-paced output", unreadyFrames > 120 && growthFrames > 120)
+            if (slowReceipts) {
+                assertTrue("Keep several seconds of terminal-paced output", unreadyFrames > 120 && growthFrames > 120)
+            } else {
+                assertTrue("A bootstrap terminal batch must still draw real intermediate frames", unreadyFrames > 1 && growthFrames > 1)
+            }
             assertTrue("Wrap across several real text lines", heightGrowth >= 5)
             assertTrue("Check actual painted growth repeatedly", paintedGrowth >= 5)
             assertTrue("Exercise the requested foreground recovery", resumeAtFrame == null || resumed)
@@ -1465,7 +1492,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var hostCoordinates: LayoutCoordinates? = null
         val state = StreamingTailViewport(true)
         mainThread {
-            activity.setContent {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     density = LocalDensity.current.density
                     Box(Modifier.size(320.dp, 300.dp).background(Color.White).clipToBounds()
@@ -1755,7 +1782,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     fun testBoundedViewportPublishesFullExtentWhenOnlyTheContentHeightChanges() {
         var growth by mutableStateOf(0.dp)
         val state = StreamingTailViewport(true)
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             val boundedHeight = with(LocalDensity.current) { 80.dp.roundToPx() }
             Box(Modifier.size(320.dp, 420.dp)) {
@@ -1785,7 +1812,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var appended by mutableStateOf(0.dp)
         var streaming by mutableStateOf(true)
         val work = WorkProcessUi(emptyList(), "已完成")
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             Box(Modifier.size(320.dp, 420.dp).testTag("gap-host")) {
                 ChatConversationLayers(Modifier.size(320.dp, 420.dp), messages = { inset ->

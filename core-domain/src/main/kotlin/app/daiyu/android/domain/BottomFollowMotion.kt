@@ -55,3 +55,42 @@ class BottomFollowMotion {
         return movement.coerceIn(0f, frameLimit)
     }
 }
+
+/** Consumable safe-viewport loss for one following owner. Units are px. */
+class BottomFollowViewport {
+    var owner: String? = null
+        private set
+    var observedSafeHeight: Int? = null
+        private set
+    var pendingPx = 0f
+        private set
+
+    fun reset() {
+        owner = null
+        observedSafeHeight = null
+        pendingPx = 0f
+    }
+
+    fun observe(owner: String?, height: Int, following: Boolean) {
+        if (!following || owner == null) {
+            reset()
+            return
+        }
+        val next = height.coerceAtLeast(0)
+        val previous = observedSafeHeight
+        pendingPx = if (this.owner != owner || previous == null) 0f
+            else (pendingPx + previous.toFloat() - next.toFloat()).coerceAtLeast(0f)
+        this.owner = owner
+        observedSafeHeight = next
+    }
+
+    fun correction(obscuredPx: Float): Float {
+        // Layout may already have absorbed some loss; never carry it into later text growth.
+        pendingPx = min(pendingPx, obscuredPx.coerceAtLeast(0f))
+        return pendingPx
+    }
+
+    fun consume(actualPx: Float) {
+        if (actualPx.isFinite() && actualPx > 0f) pendingPx = (pendingPx - actualPx).coerceAtLeast(0f)
+    }
+}

@@ -322,7 +322,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         correction = source.split("fun correctFollowClearance() {", 1)[1].split("val requestedIndex", 1)[0]
         for token in ("val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey",
                       "nestedTail.contentHeight <= layout.viewportSize.height", "11.dp.roundToPx() + ChatTailClearance.roundToPx()",
-                      "val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal",
+                      "val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal || viewportCorrection",
                       "if (!protectMeasuredTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return",
                       "val tailClearance = currentFollowClearancePx",
                       "dispatchRawDelta", "remeasurement.forceRemeasure()", "!canFollowBottom()",
@@ -334,7 +334,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("readyTurns[activeTail.listKey] == activeTail", correction)
         self.assertIn("revealedTurns[activeTail.listKey] != activeTail", correction)
         self.assertIn("activeTail.status != RunStatus.RUNNING", correction)
-        self.assertLess(correction.index("if (protectMeasuredTail && last.size"), correction.index("if (!listState.canScrollForward) return"))
+        self.assertLess(correction.index("if (protectMeasuredTail && last.size"), correction.index("if (!listState.canScrollForward) {"))
         device = DEVICE.read_text()
         case = device.split("fun testShortReplyGrowingPastViewportKeepsTailPinnedDuringOuterCatchup()", 1)[1].split("fun testManualReadingDrawsThrough", 1)[0]
         for token in ("for (shortHeight in listOf(160, 200))", "height = shortHeight.dp",

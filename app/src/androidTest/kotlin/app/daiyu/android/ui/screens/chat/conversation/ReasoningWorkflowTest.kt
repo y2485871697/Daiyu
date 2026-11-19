@@ -1,6 +1,5 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import androidx.activity.compose.setContent
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.CompositionLocalProvider
@@ -46,7 +45,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
 
     fun testLeadingBodyStaysOutsideTheWorkflowWhenToolsArriveAndTheCardToggles() {
         var source by mutableStateOf(message(listOf(MessageBlock.Text("intro", "开头正文")), emptyList()))
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             AssistantTurn(mapped(source), ChatScreenActions())
         } } }
         ui.waitUntil(5_000) { ui.onAllNodesWithText("开头正文", useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
@@ -91,7 +90,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 assertTrue(it.config[SemanticsProperties.StateDescription] in listOf("已思考", "正在显示"))
             }
         }
-        mainThread { activity.setContent {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 Box(Modifier.size(320.dp, 480.dp)) {
                     ChatMessageList(listOf<ChatTurnUi>(ChatTurnUi.User("history", "历史")) +
@@ -167,7 +166,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         val advances = java.util.concurrent.atomic.AtomicInteger()
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val blocks = listOf(tool("start"), MessageBlock.Text("narration", narration), tool("admission")) +
                     if (complete) listOf(MessageBlock.Text("answer", answer)) else emptyList()
                 val turn = mapped(message(blocks, emptyList()).copy(
@@ -245,7 +244,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         val settled = java.util.concurrent.atomic.AtomicBoolean()
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val source = message((if (workflow) listOf(tool("t1")) else emptyList()) + if (ready) listOf(MessageBlock.Text("body", delivered)) else emptyList(), emptyList())
                     .copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
                 val reconnects = if (reconnect) listOf(app.daiyu.android.timeline.ChatTimelineEntry.Reconnect(
@@ -337,7 +336,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         val advances = java.util.concurrent.atomic.AtomicInteger()
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val turn = ChatTurnMapper.map(listOf(source), dedicatedTool = { _, _ -> if (mixed) "probe" else null })
                     .single() as ChatTurnUi.Assistant
                 AssistantTurn(turn, ChatScreenActions(), onVisibleAdvance = { advances.incrementAndGet() })
@@ -392,7 +391,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             Text("stable dedicated probe")
             true
         }
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             AssistantTurn(turn, actions, dedicatedTool = dedicated)
         } } }
         awaitHeader()
@@ -420,7 +419,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         prepare()
         val turn = mapped(message(listOf(tool("t1"), tool("t2"), MessageBlock.Text("a", "answer")),
             listOf(ReportedReasoning("r1", "first summary", 100, blockOffset = 0), ReportedReasoning("r2", "second summary", 200, blockOffset = 1))))
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) { AssistantTurn(turn, ChatScreenActions()) } } }
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) { AssistantTurn(turn, ChatScreenActions()) } } }
         awaitHeader()
         ui.onNodeWithTag("reported-reasoning:${turn.listKey}").assertDoesNotExist()
         ui.onNodeWithTag("work-process-header").performClick()
@@ -456,7 +455,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         prepare()
         val first = message(listOf(tool("t1")), listOf(ReportedReasoning("r1", "first summary", blockOffset = 0)))
         var turn by mutableStateOf(mapped(first))
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) { AssistantTurn(turn, ChatScreenActions()) } } }
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) { AssistantTurn(turn, ChatScreenActions()) } } }
         awaitHeader()
         ui.onNodeWithTag("work-process-header").performClick()
         ui.onNodeWithTag("reported-reasoning-header:${turn.listKey}:reasoning:r1").performClick()
@@ -473,7 +472,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         val source = message(listOf(tool("question"), MessageBlock.Text("a", "answer")),
             listOf(ReportedReasoning("r1", "first summary", blockOffset = 0), ReportedReasoning("r2", "second summary", blockOffset = 1)))
         val turn = ChatTurnMapper.map(listOf(source), dedicatedTool = { _, _ -> "verified" }).single() as ChatTurnUi.Assistant
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             AssistantTurn(turn, ChatScreenActions(), dedicatedTool = { Text("direct question"); true })
         } } }
         awaitHeader()
@@ -490,7 +489,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     fun testPureAnswerKeepsItsSingleThoughtInsideTheWorkflow() {
         prepare()
         val turn = mapped(message(listOf(MessageBlock.Text("a", "answer")), listOf(ReportedReasoning("r1", "first summary"))))
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) { AssistantTurn(turn, ChatScreenActions()) } } }
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) { AssistantTurn(turn, ChatScreenActions()) } } }
         awaitHeader()
         ui.onNodeWithTag("reported-reasoning:${turn.listKey}").assertDoesNotExist()
         assertDisclosure("work-process-header", expanded = false)
@@ -506,7 +505,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         var running by mutableStateOf(true)
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val turn = mapped(message(listOf(tool("t1")), listOf(reported)).copy(status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED))
                     .copy(isStreaming = running)
                 AssistantTurn(turn, ChatScreenActions())
@@ -554,7 +553,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         }
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val turn = ChatTurnMapper.withStreamingOwner(ChatTurnMapper.map(listOf(source)), source).single() as ChatTurnUi.Assistant
                 AssistantTurn(turn, ChatScreenActions())
             } } }
@@ -602,7 +601,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
 
     fun testRunningFlowStartsExpandedAndTerminalResetsOnlyTheOuterDisclosure() {
         var source by mutableStateOf(message(listOf(tool("t1")), emptyList()).copy(status = RunStatus.RUNNING))
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             AssistantTurn(mapped(source), ChatScreenActions(), toolContent = { Text("unique tool detail") })
         } } }
         awaitHeader()
@@ -636,7 +635,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         val initial = listOf(first, MessageContentUi.Tool(step), second)
         var content by mutableStateOf(initial)
         var running by mutableStateOf(true)
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             MessageContent(content, ChatScreenActions(), null, markdown = true, flowRunning = running,
                 toolContent = { Text("mixed tool detail") },
                 reasoningBody = { reasoning, connector -> ReasoningStepRow("mixed", reasoning, connector,
@@ -681,7 +680,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             MessageHistorySegment(MessageId("a"), "assistant", listOf(MessageBlock.Text("answer", "answer")))))
         val turn = mapped(source)
         val received = mutableListOf<String>()
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             AssistantTurn(turn, ChatScreenActions(onBranch = { received += it }))
         } } }
         ui.waitUntil(5_000) { ui.onAllNodesWithContentDescription("分支").fetchSemanticsNodes().size == 1 }
@@ -698,7 +697,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         fun project(message: Message, receipt: ToolReceiptUi) =
             ChatTurnMapper.map(listOf(message), toolReceipt = { _, _ -> receipt }).single() as ChatTurnUi.Assistant
         var turn by mutableStateOf(project(source, ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING)))
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             AssistantTurn(turn, ChatScreenActions())
         } } }
         awaitHeader()
@@ -729,7 +728,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             Triple(RunStatus.INTERRUPTED, WorkStepState.UNKNOWN, "已完成2步 · 已中断"))) {
             val source = message(listOf(tool("t1")), listOf(ReportedReasoning("r1", "first summary"))).copy(status = status)
             val turn = ChatTurnMapper.map(listOf(source), toolState = { _, _ -> state }).single() as ChatTurnUi.Assistant
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 AssistantTurn(turn, ChatScreenActions())
             } } }
             awaitHeader()
@@ -747,7 +746,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             .single() as ChatTurnUi.Assistant
         assertEquals(1, turn.workProcess!!.completedStepCount)
         assertEquals(WorkStepState.PENDING, turn.workProcess.segments.flatMap { it.steps }.single().state)
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             AssistantTurn(turn, ChatScreenActions())
         } } }
         awaitHeader()
@@ -770,7 +769,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             }
         }).single() as ChatTurnUi.Assistant
         var turn by mutableStateOf(project(WorkStepState.UNKNOWN, WorkStepState.NOT_EXECUTED))
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             AssistantTurn(turn, ChatScreenActions())
         } } }
         awaitHeader()
@@ -790,7 +789,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     }
     fun testToolOnlyRunningWorkflowStartsExpanded() {
         val turn = mapped(message(listOf(tool("t1")), emptyList()).copy(status = RunStatus.RUNNING)).copy(isStreaming = true)
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             AssistantTurn(turn, ChatScreenActions())
         } } }
         awaitHeader()
@@ -807,7 +806,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         var source by mutableStateOf(message(emptyList(), listOf(
             ReportedReasoning("r1", "first summary", 0L, System.nanoTime(), blockOffset = 0))).copy(status = RunStatus.RUNNING))
         var requested by mutableStateOf(false)
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             val turn = ChatTurnMapper.withStreamingOwner(ChatTurnMapper.map(listOf(source)), source,
                 stopRequested = requested).single() as ChatTurnUi.Assistant
             AssistantTurn(turn, ChatScreenActions())
@@ -832,7 +831,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         prepare()
         var mounted by mutableStateOf(true)
         var stopped by mutableStateOf(false)
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             val holder = rememberSaveableStateHolder()
             if (mounted) holder.SaveableStateProvider("reasoning-state") {
                 ReportedReasoningCard("restored-stop", listOf(ReportedReasoning("r1", "first summary", 0L, 1L)),
@@ -859,7 +858,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         var mounted by mutableStateOf(true)
         var running by mutableStateOf(true)
         val step = mapped(message(listOf(tool("t1")), emptyList())).workProcess!!.segments.single().steps.single()
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             val holder = rememberSaveableStateHolder()
             if (mounted) holder.SaveableStateProvider("workflow-state") {
                 WorkProcessCard(WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), "已完成", running), "restored-flow")
@@ -886,7 +885,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             ReportedReasoning("r1", "first summary", 0L, System.nanoTime(), blockOffset = 0))).copy(status = RunStatus.RUNNING))
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 AssistantTurn(mapped(source).copy(isStreaming = true), ChatScreenActions())
             } } }
             ui.mainClock.advanceTimeBy(300)
@@ -932,7 +931,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 var answer by mutableStateOf(false)
                 var done by mutableStateOf(false)
                 val id = if (mixed) "mixed" else "legacy"
-                mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     val base = mapped(message(listOf(tool(id)), emptyList()).copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING))
                     val step = base.workProcess!!.segments.flatMap { it.steps }.single()
                     val body = if (answer) "answer" else ""
@@ -983,7 +982,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         var ready = false
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 ReportedReasoningCard("stop-reveal", listOf(ReportedReasoning("r1", text, 0L, 1L)),
                     allowLiveTiming = true, stopped = stopped, onVisibleAdvance = { advances++ },
                     onHandoffReady = { ready = it })
@@ -1013,7 +1012,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         var done by mutableStateOf(false)
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val source = message(if (done) listOf(MessageBlock.Text("a", "answer")) else emptyList(), listOf(reported))
                     .copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
                 AssistantTurn(mapped(source).copy(isStreaming = !done), ChatScreenActions())
@@ -1042,7 +1041,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         var epoch by mutableStateOf(0L)
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val source = message(if (done) listOf(MessageBlock.Text("a", "answer")) else emptyList(), listOf(reported))
                     .copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
                 AssistantTurn(mapped(source).copy(isStreaming = !done), ChatScreenActions(), revealResetEpoch = epoch)
@@ -1069,7 +1068,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         var done by mutableStateOf(false)
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val source = message(listOf(tool("t1")) + if (done) listOf(MessageBlock.Text("a", "answer")) else emptyList(),
                     listOf(reported)).copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
                 AssistantTurn(mapped(source).copy(content = emptyList(), isStreaming = !done), ChatScreenActions())
@@ -1097,7 +1096,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         var done by mutableStateOf(false)
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val source = message(listOf(tool("t1")) + if (done) listOf(MessageBlock.Text("a", "answer")) else emptyList(),
                     listOf(reported)).copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
                 AssistantTurn(mapped(source).copy(content = emptyList(), isStreaming = !done), ChatScreenActions())
@@ -1132,7 +1131,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         prepare()
         var summaries by mutableStateOf<List<ReportedReasoning>>(emptyList())
         var done by mutableStateOf(false)
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             val source = message(listOf(tool("t1")) + if (done) listOf(MessageBlock.Text("a", "answer")) else emptyList(), summaries)
                 .copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
             AssistantTurn(mapped(source).copy(isStreaming = !done), ChatScreenActions())
@@ -1154,7 +1153,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         var source by mutableStateOf(message(emptyList(), listOf(
             ReportedReasoning("r1", "first summary", 0L, System.nanoTime(), blockOffset = 0))).copy(status = RunStatus.RUNNING))
         var dedicated by mutableStateOf(false)
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             val turn = ChatTurnMapper.map(listOf(source), dedicatedTool = { _, _ -> if (dedicated) "verified" else null })
                 .single() as ChatTurnUi.Assistant
             AssistantTurn(turn.copy(isStreaming = true), ChatScreenActions())
@@ -1182,7 +1181,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         val entryTag = toolEntryTag("t1")
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val source = message(listOf(tool("t1")), listOf(reported)).copy(status = RunStatus.RUNNING)
                 AssistantTurn(mapped(source).copy(isStreaming = true), ChatScreenActions())
             } } }
@@ -1213,7 +1212,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         var mounted by mutableStateOf(true)
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val entrances = remember { WorkflowEntrances() }
                 if (mounted) WorkflowEntry("fixture", entrances, animate = true) { Box(Modifier.size(100.dp)) }
             } } }
@@ -1238,7 +1237,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         var reported by mutableStateOf(ReportedReasoning("phase", "first summary", 0L, System.nanoTime()))
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 ReasoningStepRow("phase-owner", reported, allowLiveTiming = timing, onHandoffReady = { handoffReady = it })
             } } }
             for (sample in listOf(true, false, true, false)) {
@@ -1264,7 +1263,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
 
     fun testTerminalThoughtDoesNotUseAStaleTimingAnchor() {
         prepare()
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             ReasoningStepRow("terminal-owner", ReportedReasoning("terminal", "first summary", 100L, System.nanoTime()),
                 allowLiveTiming = true, generationComplete = true)
         } } }
@@ -1285,7 +1284,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         var timing by mutableStateOf(true)
         ui.mainClock.autoAdvance = false
         try {
-            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 val source = message(listOf(tool("exit-tool")) +
                     if (running) emptyList() else listOf(MessageBlock.Text("answer", "answer")), listOf(reported))
                     .copy(status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED)
@@ -1331,7 +1330,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     fun testANewThoughtCanRunAfterThePreviousThoughtCompleted() {
         prepare()
         var appended by mutableStateOf(false)
-        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             androidx.compose.foundation.layout.Column {
                 ReasoningStepRow("successive", ReportedReasoning("old", "first summary", 100L),
                     allowLiveTiming = true, generationComplete = false)

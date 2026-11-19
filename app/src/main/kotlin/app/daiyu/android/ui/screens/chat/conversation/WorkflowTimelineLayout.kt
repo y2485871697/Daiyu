@@ -232,11 +232,11 @@ internal fun Modifier.workflowInkClearance(): Modifier {
         frame.availableHeight = clearance?.availableHeight(coordinates) ?: Float.POSITIVE_INFINITY
     }
     return onPlaced(::positioned).onGloballyPositioned(::positioned).drawWithContent {
-        val coordinates = frame.coordinates
+        val coordinates = frame.coordinates?.takeIf { it.isAttached } ?: return@drawWithContent
         val parent = item?.coordinates
-        val height = kotlin.math.ceil(size.height).toInt()
-        val allocated = if (item != null && coordinates?.isAttached == true && parent?.isAttached == true)
-            parent.localPositionOf(coordinates, Offset.Zero).y + size.height <= item.allocatedHeight + .01f
+        val height = coordinates.size.height
+        val allocated = if (item != null && parent?.isAttached == true)
+            parent.localPositionOf(coordinates, Offset.Zero).y + height <= item.allocatedHeight + .01f
         else item == null
         if (allocated && height <= frame.availableHeight + .01f && clearance?.fits(coordinates, height) != false) drawContent()
     }

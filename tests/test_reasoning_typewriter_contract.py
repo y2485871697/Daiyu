@@ -97,7 +97,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
         resume = chat.split('val resumeReady =', 1)[1].split('Triple(canFollowBottom()', 1)[0]
         self.assertNotIn('revealedTurns', resume)
         self.assertIn('readyTurns[tail.listKey] == tail', resume)
-        self.assertIn('(alignViewport || resumeFollowPending) && !currentNestedTail.textClearance.pacedFollowing', chat)
+        self.assertIn('resumeFollowPending && !currentNestedTail.textClearance.pacedFollowing', chat)
 
     def test_body_adapter_and_reasoning_share_one_clock(self):
         typing = (CHAT / 'MarkdownTyping.kt').read_text()

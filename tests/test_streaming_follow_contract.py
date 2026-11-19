@@ -22,7 +22,8 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("val motion = BottomFollowMotion()", self.follow)
         self.assertNotIn("while (true)", self.follow)
         self.assertIn("withFrameNanos", self.follow)
-        self.assertIn("if (observedViewport != null && observedViewport != viewport) alignViewport = true", self.follow)
+        self.assertNotIn("alignViewport", self.follow)
+        self.assertIn("observeFollowViewport(layout)", self.follow)
         alignment = self.follow.split("if (alignment) {", 1)[1].split("}", 1)[0]
         self.assertIn("motion.reset()", alignment)
         self.assertNotIn("LaunchedEffect(turns", self.follow)
@@ -32,7 +33,10 @@ class StreamingFollowContract(unittest.TestCase):
         observation = self.follow.split("snapshotFlow {", 1)[1].split("}.collect { target ->", 1)[0]
         self.assertLess(observation.index(guard), observation.index("val layout = listState.layoutInfo"))
         self.assertLess(observation.index(guard), observation.index("val tail = currentTurns.lastOrNull()"))
-        self.assertIn("if (target == null) { motion.reset(); return@collect }", self.follow)
+        self.assertIn("if (target == null) {", self.follow)
+        disabled = self.follow.split("if (target == null) {", 1)[1].split("return@collect", 1)[0]
+        self.assertIn("motion.reset()", disabled)
+        self.assertIn("clearanceLayout.viewportLoss.reset()", disabled)
         self.assertIn("LaunchedEffect(listState, revealResetEpoch)", self.follow)
         self.assertIn("while (canFollowBottom())", self.follow)
         for dependency in ("!initialPositionPending", "pageActive", "scrollResumed", "followBottom",
@@ -43,7 +47,7 @@ class StreamingFollowContract(unittest.TestCase):
     def test_measured_overflow_is_integrated_not_paid_as_a_single_scroll(self):
         self.assertIn("val followDistance = maxOf(overflow.toFloat(), obscuredTail.toFloat())", self.follow)
         self.assertIn("if (followDistance <= 0f)", self.follow)
-        self.assertIn("val alignment = (alignViewport || resumeFollowPending) && !currentNestedTail.textClearance.pacedFollowing", self.follow)
+        self.assertIn("val alignment = resumeFollowPending && !currentNestedTail.textClearance.pacedFollowing", self.follow)
         self.assertIn("var delta = if (alignment) followDistance else 0f", self.follow)
         self.assertIn("val frameFollowDistance = maxOf(frameOverflow.toFloat(), frameObscuredTail.toFloat())", self.follow)
         self.assertIn("delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity,", self.follow)
@@ -60,7 +64,7 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("Triple(resumeReady, currentNestedTail.contentHeight, currentNestedTail.textClearance.typingPending)", self.follow)
         self.assertIn("currentNestedTail.bounded && currentTailKey == assistantOwnerKey", self.follow)
         self.assertIn("currentNestedTail.contentHeight > 0 && last.size != currentNestedTail.contentHeight", self.follow)
-        stale = self.follow.split("last.size != currentNestedTail.contentHeight", 1)[1].split("val viewport =", 1)[0]
+        stale = self.follow.split("last.size != currentNestedTail.contentHeight", 1)[1].split("observeFollowViewport(layout)", 1)[0]
         self.assertIn("clearanceLayout.remeasurement?.forceRemeasure()", stale)
         self.assertIn("layout = listState.layoutInfo", stale)
         self.assertIn("it.index == index && it.key == currentTailKey", stale)
@@ -83,7 +87,10 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("textClearance?.held != true", typing)
 
     def test_explicit_scroll_and_touch_keep_ownership(self):
-        self.assertIn("if (target == null) { motion.reset(); return@collect }", self.follow)
+        self.assertIn("if (target == null) {", self.follow)
+        disabled = self.follow.split("if (target == null) {", 1)[1].split("return@collect", 1)[0]
+        self.assertIn("motion.reset()", disabled)
+        self.assertIn("clearanceLayout.viewportLoss.reset()", disabled)
         self.assertIn("scrollResumed && followBottom && !currentDragging", self.guard)
         self.assertIn("followBottom = false; wasDragged = false", self.source)
         self.assertIn("consumedScrollSerial = currentScrollSerial", self.source)
@@ -173,6 +180,29 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertEqual(1, frame.count("advanceTimeByFrame()"))
         self.assertIn("movement <= 14f * density", device)
 
+
+
+    def test_viewport_geometry_restores_only_lost_safe_height_without_paying_text_backlog(self):
+        correction = self.source.split("fun correctFollowClearance()", 1)[1].split("// A non-following viewport", 1)[0]
+        for token in ("observeFollowViewport(layout)",
+                      "val viewportCorrection = clearanceLayout.viewportLoss.pendingPx > 0f",
+                      "nestedTail.textClearance.pacedFollowing && !viewportCorrection",
+                      "shortBoundedTail || boundedTerminalReveal || viewportCorrection",
+                      "clearanceLayout.viewportLoss.correction(obscured.toFloat())",
+                      "clearanceLayout.viewportLoss.consume(consumed)"):
+            self.assertIn(token, correction)
+        observation = self.source.split("fun observeFollowViewport(", 1)[1].split("fun correctFollowClearance", 1)[0]
+        self.assertIn("clearanceLayout.viewportLoss.observe(currentTailKey,", observation)
+        self.assertIn("viewport.first.height - viewport.second - viewport.third", observation)
+        self.assertIn("following = canFollowBottom()", observation)
+        self.assertIn("clearanceLayout.followViewport = viewport", observation)
+        self.assertNotIn("alignViewport", self.follow)
+        self.assertIn("clearanceLayout.viewportLoss.consume(consumed)", self.follow)
+        zero_inset = correction.split("if (currentOcclusionPx <= 0) {", 1)[1].split("return", 1)[0]
+        self.assertIn("clearanceLayout.viewportLoss.correction(0f)", zero_inset)
+        positioned = self.source.split('.onPlaced { clearanceLayout.coordinates = it }', 1)[1].split('.drawWithContent', 1)[0]
+        self.assertIn('.onGloballyPositioned', positioned)
+        self.assertIn('if (coordinates.isAttached) correctFollowClearance()', positioned)
 
 if __name__ == "__main__":
     unittest.main()

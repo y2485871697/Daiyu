@@ -1233,6 +1233,11 @@ def command_for(python, env):
             and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) in (
                 sorted(TASK_SCROLL_PLATFORM_CLASSES), sorted(TASK_SCROLL_NATIVE_LAYOUT_CLASSES),
                 sorted(TASK_SCROLL_COMPLEMENT_CLASSES),
+                sorted(('app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',
+                        'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest')),
+                sorted(('app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',
+                        'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest',
+                        'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest')),
                 ['app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest'])):
         return [python, '-B', '-m', 'unittest', *TASK_SCROLL_MODULES, '-v'], 'task-scroll-targeted'
     if (env.get("SMOKE_MODE") == "smoke"

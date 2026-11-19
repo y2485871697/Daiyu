@@ -1,5 +1,6 @@
 """Task-scroll-only tooling and inventory selection; no emulator or compilation."""
 import io
+from itertools import permutations
 import json
 import os
 from pathlib import Path
@@ -54,6 +55,23 @@ class TaskScrollSmokeScopeTests(unittest.TestCase):
         self.assertEqual(required, set(recorder.TASK_SCROLL_MODULES))
         self.assertEqual(len(required), len(recorder.TASK_SCROLL_MODULES))
         self.assertNotIn('discover', command)
+
+    def test_exact_paint_diagnostics_keep_task_scroll_checks(self):
+        pair = (CLASSES[3], CLASSES[4])
+        for classes in (pair, (*pair, CLASSES[2])):
+            for ordering in permutations(classes):
+                command, scope = recorder.command_for('python3', dict(
+                    SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=','.join(ordering)))
+                self.assertEqual('task-scroll-targeted', scope)
+                self.assertEqual(['python3', '-B', '-m', 'unittest', *recorder.TASK_SCROLL_MODULES, '-v'], command)
+            raw = ','.join(classes)
+            for invalid in (raw + ',app.daiyu.android.UnknownTest', raw + ',' + classes[0],
+                            ' ' + raw, raw + ' ', raw + ',', ',' + raw):
+                self.assertEqual('full', recorder.command_for('python3', dict(
+                    SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=invalid))[1])
+            for mode in ('', 'compile', 'candidate', 'daily', 'release'):
+                self.assertEqual('full', recorder.command_for('python3', dict(
+                    SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
 
     def test_workflow_task_scroll_check_runs_streaming_follow_contract(self):
         root = Path(__file__).resolve().parents[1]

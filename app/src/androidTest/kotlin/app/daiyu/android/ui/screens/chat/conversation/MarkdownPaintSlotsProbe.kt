@@ -56,8 +56,17 @@ internal class MarkdownPaintSlotsProbe {
                 null
             }
         }
-        fun visit(group: CompositionGroup, path: String, depth: Int) {
-            if (groups >= 6_000 || slots >= 24_000 || depth > 96) { truncated = true; return }
+        data class Cursor(val iterator: Iterator<CompositionGroup>, val path: String, var index: Int = 0)
+        val stack = java.util.ArrayDeque<Cursor>()
+        compositions[key]?.let { stack.addLast(Cursor(it.compositionGroups.iterator(), "")) }
+        while (stack.isNotEmpty() && groups < 6_000 && slots < 24_000) {
+            val cursor = stack.peekLast()
+            if (!cursor.iterator.hasNext()) {
+                stack.removeLast()
+                continue
+            }
+            val group = cursor.iterator.next()
+            val path = "${cursor.path}/${cursor.index++}"
             groups++
             val data = group.data.iterator()
             var slot = 0
@@ -68,14 +77,9 @@ internal class MarkdownPaintSlotsProbe {
                 slot++
             }
             if (data.hasNext()) truncated = true
-            val children = group.compositionGroups.iterator()
-            var index = 0
-            while (children.hasNext() && groups < 6_000 && slots < 24_000) {
-                visit(children.next(), "$path/${index++}", depth + 1)
-            }
-            if (children.hasNext()) truncated = true
+            stack.addLast(Cursor(group.compositionGroups.iterator(), path))
         }
-        compositions[key]?.compositionGroups?.forEachIndexed { index, group -> visit(group, "$index", 0) }
+        if (stack.any { it.iterator.hasNext() }) truncated = true
         val values = paths.keys.toList()
         fun location(value: Any?) = "${id(value)}@${paths[value] ?: "not-in-slots"}"
         fun layout(frame: Any, name: String) = field(frame, name) as? TextLayoutResult

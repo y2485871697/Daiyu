@@ -719,6 +719,15 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             composition.get()?.compositionGroups?.forEach(::visit)
             return values.toList()
         }
+        fun reasoningFrontier(source: String): Pair<Int, Int> {
+            val lanes = field(checkNotNull(control.get()), "lanes") as? Map<*, *>
+                ?: error("Missing active presentation lanes")
+            val lane = lanes.values.filterIsInstance<ReplyTypingLane>().single {
+                it.motion.target?.parts?.any { part -> part.source.id == "r" && part.source.text == source } == true
+            }
+            val target = checkNotNull(lane.motion.target)
+            return target.total to lane.motion.visible(target)
+        }
         private fun revealSummary(reveal: MarkdownReveal): String {
             val target = field(reveal, "target") as? MarkdownTypingTarget
             val frame = field(reveal, "frame") as? MarkdownTypingFrame
@@ -849,6 +858,17 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             probe.stage = label
             await(predicate)
         }
+        fun assertCompletedReasoningFrontier() {
+            var frontier: Pair<Int, Int>? = null
+            var failure: Throwable? = null
+            instrumentation.runOnMainSync {
+                try { frontier = Snapshot.withoutReadObservation { probe.reasoningFrontier(pending) } }
+                catch (problem: Throwable) { failure = problem }
+            }
+            failure?.let { throw it }
+            assertEquals("Reopened thought must retain its complete motor target", pending.length, frontier?.first)
+            assertEquals("Paint initialization must not replay the typing motor", pending.length, frontier?.second)
+        }
         ui.mainClock.autoAdvance = false
         fun count() = visibleText().count { it == '甲' }
         try {
@@ -928,7 +948,13 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             val thoughtHeader = node("reported-reasoning-header:assistant:reasoning:r")
             if (thoughtHeader.fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "已折叠")
                 thoughtHeader.performClick()
-            ui.mainClock.advanceTimeByFrame()
+            assertCompletedReasoningFrontier()
+            waiting("completed-thought-painted") {
+                assertCompletedReasoningFrontier()
+                ui.onAllNodesWithTag("chat-control").assertCountEquals(0)
+                node("chat-send").assertContentDescriptionEquals("发送")
+                visibleText().contains(pending)
+            }
             captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
             assertEquals("Completed thought reopens at its drawn frontier", 240, count())
             repeat(12) {

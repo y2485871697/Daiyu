@@ -160,7 +160,8 @@ class WorkTimelineConnectorContractTest(unittest.TestCase):
     def test_connector_handoff_requires_prompt_complete_tool_pixels(self):
         motion = (CHAT / 'WorkflowNodeMotion.kt').read_text()
         layout = (CHAT / 'WorkflowTimelineLayout.kt').read_text()
-        self.assertIn('line?.incoming != null && entrance?.arrived == true', layout)
+        self.assertIn('if (!fullyVisible && entrance?.arrived == true) fullyVisible = true', layout)
+        self.assertIn('fullyVisible -> body.toFloat()', layout)
         appearance = motion[motion.index('internal fun rememberWorkflowToolAppearance'):motion.index('internal fun Modifier.workflowToolAppearance')]
         self.assertLess(appearance.index('first { it >= 1f }'), appearance.index('appearance.progress.snapTo(.12f)'))
         source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNodeMotionTest.kt').read_text()

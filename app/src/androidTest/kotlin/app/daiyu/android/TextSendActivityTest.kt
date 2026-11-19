@@ -184,6 +184,7 @@ class TextSendActivityTest private constructor(
         val before = mainThreadValue { host.state }
         try {
             repeat(2) { index ->
+                dismissIme()
                 ui.onNodeWithContentDescription("附件").performClick()
                 node("chat-attachment:ATTACH_VIDEO").performClick()
                 ui.waitUntil(5_000) { launches.get() == index + 1 }
@@ -198,7 +199,9 @@ class TextSendActivityTest private constructor(
                     activity.activityResultRegistry.onSaveInstanceState(saved)
                     val keys = checkNotNull(saved.getStringArrayList("KEY_COMPONENT_ACTIVITY_REGISTERED_KEYS"))
                     val codes = checkNotNull(saved.getIntegerArrayList("KEY_COMPONENT_ACTIVITY_REGISTERED_RCS"))
-                    codes[keys.indexOfFirst { it.startsWith("video-picker-") }.also { check(it >= 0) }]
+                    val launchedKey = saved.getStringArrayList("KEY_COMPONENT_ACTIVITY_LAUNCHED_KEYS")
+                        .orEmpty().single { it.startsWith("video-picker-") }
+                    codes[keys.indexOf(launchedKey).also { check(it >= 0) }]
                 }
                 mainThread {
                     assertFalse(activity.lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED))
@@ -302,6 +305,7 @@ class TextSendActivityTest private constructor(
                         assertEquals(before.visit, fixture.controller.videoHost.state.visit)
                     }
                 }
+                dismissIme()
                 ui.onNodeWithContentDescription("附件").performClick()
                 node("chat-attachment:ATTACH_VIDEO").assertIsDisplayed().assertIsEnabled().performClick()
                 ui.waitUntil(5_000) { launches.get() == index + 1 }

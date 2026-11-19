@@ -12,7 +12,8 @@ class StreamingFollowContract(unittest.TestCase):
     def setUpClass(cls):
         cls.source = CHAT.read_text()
         cls.guard = cls.source.split("fun canFollowBottom(): Boolean =", 1)[1].split("\n\n", 1)[0]
-        cls.follow = cls.source.split("// Keep a single motion", 1)[1].split("// Read confirmation", 1)[0]
+        cls.follow = cls.source.split("// Keep a single motion", 1)[1].split(
+            "    app.daiyu.android.diagnostics.ObserveChatRecovery(", 1)[0]
 
     def test_height_updates_do_not_restart_the_motion_collector(self):
         self.assertIn("LaunchedEffect(listState, revealResetEpoch)", self.follow)

@@ -12,9 +12,11 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [28])
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class ChatMediaPreviewVideoThumbnailCacheTest {
     private fun reference() = MessageVideoReference(MessageVideoOwner("chat", "message"), UUID.randomUUID().toString(),
         "video/mp4", 4, "a".repeat(64), 1_000, 32, 24)

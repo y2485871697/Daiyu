@@ -318,6 +318,7 @@ private fun VideoCover(host: VideoChatHost, state: VideoChatHost.Snapshot, item:
         value = if (sameVideoVisit(state, host.state) && host.state.items.contains(item) && image != null)
             VideoCoverResult.Loaded(image) else VideoCoverResult.Failed
     }
+    app.daiyu.android.ui.screens.chat.conversation.ObserveComposerAttachmentVisual(result)
     when (val current = result) {
         VideoCoverResult.Loading -> if (compact) androidx.compose.material3.Icon(DaiyuIcons.Video, "正在读取封面…",
             Modifier.size(18.dp).testTag("video_attachments_cover_loading:${item.key}"), tint = chatChromeColors().muted)

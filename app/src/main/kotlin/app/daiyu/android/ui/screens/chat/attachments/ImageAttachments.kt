@@ -240,6 +240,7 @@ private fun AttachmentImage(
             PreviewResult.Failed
         }
     }
+    app.daiyu.android.ui.screens.chat.conversation.ObserveComposerAttachmentVisual(result)
     when (val current = result) {
         PreviewResult.Loading -> if (compact) androidx.compose.material3.Icon(DaiyuIcons.Image,
             stringResource(R.string.image_attachments_preview_loading),

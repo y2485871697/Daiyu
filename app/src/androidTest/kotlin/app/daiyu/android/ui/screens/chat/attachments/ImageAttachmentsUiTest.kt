@@ -316,13 +316,20 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
             }
             ui.mainClock.advanceTimeByFrame()
             node("image_attachments").assertDoesNotExist()
-            pixels()
-            ui.mainClock.advanceTimeBy(32)
-            val remaining = node("composer-attachment-exit").fetchSemanticsNode().boundsInRoot.height
-            assertTrue("real chip pixel sample must occur before height reaches zero: $remaining", remaining > 0f)
-            assertTrue("a removed real chip must still have exit pixels at height=$remaining", pixels() > 0)
-            ui.mainClock.advanceTimeBy(240)
+            val minimumVisible = 12f * activity.resources.displayMetrics.density
+            var previous = node("composer-attachment-exit").fetchSemanticsNode().boundsInRoot.height
+            repeat(12) {
+                val remaining = node("composer-attachment-exit").fetchSemanticsNode().boundsInRoot.height
+                assertTrue("one exit cannot regrow: $remaining > $previous", remaining <= previous + 1f)
+                if (remaining > minimumVisible) assertTrue("no blank frame at height=$remaining", pixels() > 0)
+                previous = remaining
+                ui.mainClock.advanceTimeByFrame()
+            }
+            ui.mainClock.advanceTimeBy(120)
+            assertEquals(0f, node("composer-attachment-exit").fetchSemanticsNode().boundsInRoot.height, 1f)
             assertEquals(0, pixels())
+            ui.mainClock.advanceTimeBy(240)
+            assertEquals("retired attachment must not return", 0, pixels())
         } finally { ui.mainClock.autoAdvance = true }
     }
 

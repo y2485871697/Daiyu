@@ -154,4 +154,41 @@ class UserMessageMediaEntranceTest : WiredActivityTestCase() {
     fun testMappedVideoStartsEntranceAndPaintsItsPlayOverlay() = verify(video = true, portrait = false, pending = false)
     fun testImageOnlyPendingSettlesToTheRealMappedMediaRow() = verify(video = false, portrait = false, pending = true)
     fun testPortraitVideoOnlyPendingSettlesWithoutAFullVisibilityDeadlock() = verify(video = true, portrait = true, pending = true)
+    fun testMediaPresentationCannotBeginBeforeItsFirstFrameIsAdmitted() {
+        val durable = mapped(video = true, portrait = false)
+        show()
+        val ticket = UserMessageEntrance(durable.id, waitForMedia = true)
+        change {
+            request = ticket
+            rows = rows + durable
+            navigation = ChatScrollRequest(2)
+        }
+        repeat(6) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+        val sameMotion = checkNotNull(motion)
+        assertEquals("placement alone cannot start a cold media entrance", 0f, sameMotion.progress.value, .001f)
+        change { ticket.mediaReady = true }
+        repeat(22) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+            if (sameMotion.progress.value >= .5f) assertMediaPaint(video = true, playVisible = true)
+        }
+        assertSame(sameMotion, motion)
+        assertEquals(1f, sameMotion.progress.value, .001f)
+    }
+
+    fun testFailedMediaProjectionShowsAnExplicitUnavailableMessage() {
+        val durable = mapped(video = true, portrait = false)
+        show()
+        val ticket = UserMessageEntrance(durable.id, waitForMedia = true)
+        change {
+            request = ticket
+            rows = rows + durable.copy(content = emptyList())
+            navigation = ChatScrollRequest(2)
+        }
+        change { ticket.mediaUnavailable = true; ticket.mediaReady = true }
+        finishEntrance()
+        ui.onNodeWithText("附件暂不可用").assertIsDisplayed()
+        ui.onNodeWithTag("message-video-play:1").assertDoesNotExist()
+    }
+
 }

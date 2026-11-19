@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.key
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
@@ -14,6 +15,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -407,6 +409,29 @@ class ChatComposerActionMotionTest private constructor(private val scale: Compos
         ui.mainClock.advanceTimeByFrame()
         assertEquals("interruption must not jump opacity to current/target height", 1f,
             retainedAttachmentStrength(), .12f)
+        ui.mainClock.advanceTimeBy(240)
+        assertEquals(0, retainedAttachmentPixels())
+    }
+
+    fun testAsynchronousChildPixelsRefreshTheRasterWithoutChangingItsHeight() {
+        var visible by mutableStateOf(true)
+        var loaded by mutableStateOf(false)
+        showAttachmentExit {
+            if (visible) Box(Modifier.fillMaxWidth().height(56.dp)
+                .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))) {
+                ObserveComposerAttachmentVisual(loaded)
+                Box(Modifier.fillMaxSize().background(if (loaded) Color.Magenta else Color.Yellow))
+            }
+        }
+        mainThread { loaded = true }
+        ui.mainClock.advanceTimeByFrame()
+        assertTrue("the asynchronous child must first be visible", retainedAttachmentPixels() > 0)
+        mainThread { visible = false }
+        repeat(10) {
+            ui.mainClock.advanceTimeByFrame()
+            val height = node("composer-attachment-exit").fetchSemanticsNode().boundsInRoot.height
+            if (height > 12f) assertTrue("no blank exit frame at $height", retainedAttachmentPixels() > 0)
+        }
         ui.mainClock.advanceTimeBy(240)
         assertEquals(0, retainedAttachmentPixels())
     }

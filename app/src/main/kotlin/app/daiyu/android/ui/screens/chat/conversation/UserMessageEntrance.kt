@@ -23,7 +23,10 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** One UI-owned send, shared by its preparation preview and durable user row. */
-class UserMessageEntrance(val key: String, internal val waitForIme: Boolean = false) {
+class UserMessageEntrance(val key: String, internal val waitForIme: Boolean = false,
+    internal val waitForMedia: Boolean = false) {
+    internal var mediaReady by mutableStateOf(!waitForMedia)
+    internal var mediaUnavailable by mutableStateOf(false)
     var messageId by mutableStateOf(key)
         internal set
     internal var claimed = false
@@ -81,7 +84,7 @@ internal fun rememberUserMessageEntrance(
         }
         wasActive = true
         if (request.claimed) return@LaunchedEffect
-        snapshotFlow { !awaitPlacement || motion.positioned }.first { it }
+        snapshotFlow { request.mediaReady && (!awaitPlacement || motion.positioned) }.first { it }
         if (request.waitForIme) {
             // Let the system finish most of its travel; a refused hide must not hide the message.
             withTimeoutOrNull(240) {
@@ -92,7 +95,7 @@ internal fun rememberUserMessageEntrance(
             }
         }
         // IME travel may invalidate the placement that originally admitted this send.
-        snapshotFlow { !awaitPlacement || motion.positioned }.first { it }
+        snapshotFlow { request.mediaReady && (!awaitPlacement || motion.positioned) }.first { it }
         if (request.claim()) progress.animateTo(1f, tween(300, easing = LinearEasing))
     }
     return motion

@@ -25,6 +25,10 @@ internal class ControllerMessageMediaSnapshot internal constructor(
 ) {
     private val bindings = bindings.toList()
     private val images = images.toSet()
+    fun displayImages(): List<app.daiyu.android.ui.screens.chat.conversation.MessageImageUi> = images.toList()
+    fun displayVideos(): List<MessageVideoUi> = bindings.map { it.video }
+    fun containsOwner(messageId: String): Boolean = images.any { it.expectedOwner.messageId == messageId } ||
+        bindings.any { it.video.expectedOwner.messageId == messageId }
     fun containsImage(image: app.daiyu.android.ui.screens.chat.conversation.MessageImageUi): Boolean = image in images
     fun videos(message: Message): List<MessageVideoUi> = bindings.filter {
         it.runId == message.runId.value && it.video.expectedOwner ==

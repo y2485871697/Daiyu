@@ -1206,7 +1206,10 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
                     clickFeedback = false, onClick = {}, onLongClick = { if (!turn.pending) showMenu = true })
                 .padding(horizontal = 12.dp, vertical = 9.dp)) {
-                if (turn.content.isNotEmpty()) {
+                if (entering?.request?.mediaUnavailable == true) {
+                    UserMessageText("附件暂不可用")
+                    if (turn.text.isNotBlank()) UserMessageText(turn.text)
+                } else if (turn.content.isNotEmpty()) {
                     MessageContent(turn.content, actions, imageLoader, markdown = false, fillWidth = false,
                         textBody = { text, modifier -> UserMessageText(text.text, modifier) })
                 } else {

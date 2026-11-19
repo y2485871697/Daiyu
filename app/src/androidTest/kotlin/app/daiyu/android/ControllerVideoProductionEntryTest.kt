@@ -86,13 +86,18 @@ class ControllerVideoProductionEntryTest : WiredActivityTestCase() {
         mainThread { activity.select(conversation) }
         val text = "  ordinary continuation, original whitespace  "
         setDraft(text)
-        node("chat-send").performClick()
+        node("chat-send").assertIsDisplayed().assertIsEnabled()
+            .performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { click ->
+                assertTrue("send semantics action must be accepted", click())
+                assertNotNull("this send must be queued; problem=${fixture.controller.problem}", fixture.controller.textSendState())
+            }
         awaitTextSendResult(activity)
         // The sidecar has no matching original. A generic model must not silently omit it.
         assertEquals(0, fixture.opens.get())
         assertDraft(text)
         assertEquals(2, ControllerVideoHistory(db).capture(conversation.id).rows.size)
-        assertTrue(fixture.controller.problem?.contains("视频原件") == true)
+        assertTrue("historical original must be the rejection reason; actual=${fixture.controller.problem}",
+            fixture.controller.problem?.contains("视频原件") == true)
     }
 
     fun testProductionReceiptConsumerNeverOverwritesANewerEditor() {

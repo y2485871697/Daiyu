@@ -264,10 +264,11 @@ internal fun MessageVideo(video: MessageVideoUi, number: Int, modifier: Modifier
         }, contentAlignment = Alignment.Center) {
         if (ready) Image((result as MessageImageLoadResult.Ready).bitmap, contentDescription = "消息视频缩略图 $number",
             modifier = Modifier.fillMaxSize().testTag("message-video-thumbnail:$number"), contentScale = ContentScale.Fit)
-        if (ownerMatches) Icon(Icons.Filled.PlayArrow, contentDescription = "消息视频 $number，播放视频",
+        if (ready) Icon(Icons.Filled.PlayArrow, contentDescription = "消息视频 $number，播放视频",
             modifier = Modifier.size(44.dp).background(Color.Black.copy(alpha = 0.45f), RoundedCornerShape(50))
                 .padding(7.dp).testTag("message-video-play:$number"), tint = Color.White)
-        else MessageImageStatus("视频不可用", "视频不可用", false)
+        else MessageImageStatus(if (ownerMatches && result is MessageImageLoadResult.Loading) "视频加载中…" else "视频封面不可用",
+            if (ownerMatches && result is MessageImageLoadResult.Loading) "视频加载中" else "视频封面不可用", false)
     }
 }
 

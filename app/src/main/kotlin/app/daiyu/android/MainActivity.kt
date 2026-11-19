@@ -968,7 +968,7 @@ class MainActivity : ComponentActivity() {
         videoReceiptRequest = request; videoReceiptEditor = original
         val queued = controller.sendVideos(selected, request, original, onPreparedUser = { userId ->
             if (activityUsable() && userEntranceVideoRequest === request && videoUi.editor() == original) {
-                userMessageEntrance = UserMessageEntrance(userId.value, waitForIme = true)
+                userMessageEntrance = UserMessageEntrance(userId.value, waitForIme = true, waitForMedia = true)
                 publishChat(rowsChanged = false)
             }
         }) { receipt, _ ->
@@ -5872,7 +5872,7 @@ class MainActivity : ComponentActivity() {
         })
         owner.frozen?.takeIf { owner.attempt != null && owner.attempt !== attemptBefore }?.let { frozen ->
             if (userMessageEntrance?.messageId != frozen.identity.userId.value) {
-                userMessageEntrance = UserMessageEntrance(frozen.identity.userId.value, waitForIme = true)
+                userMessageEntrance = UserMessageEntrance(frozen.identity.userId.value, waitForIme = true, waitForMedia = true)
                 publishChat(rowsChanged = false)
             }
         }
@@ -7620,22 +7620,26 @@ class MainActivity : ComponentActivity() {
     private var messageMediaSnapshot by mutableStateOf<ControllerMessageMediaSnapshot?>(null)
     private var messageMediaRead: kotlinx.coroutines.Job? = null
     private var messageMediaRequested: MessageMediaKey? = null
+    private var messageMediaPreparedLoader: app.daiyu.android.ui.screens.chat.conversation.MessageImageLoader? = null
+    private var messageMediaRequestedLoader: app.daiyu.android.ui.screens.chat.conversation.MessageImageLoader? = null
     private fun currentMessageMediaKey() = MessageMediaKey(selected?.id, controller.dataRevision, editorGeneration, messageMediaCommitRevision)
 
     /** SQLite/asset reads occur in this host IO projection, never during composition. */
     private fun prepareMessageMedia() {
         if (!controller.ready || displayWindow != null) return
         val key = currentMessageMediaKey()
-        if (messageMediaKey == key || messageMediaRead?.isActive == true && messageMediaRequested == key) return
+        val loader = imageHost.historyLoader
+        if (messageMediaKey == key && messageMediaPreparedLoader === loader ||
+            messageMediaRead?.isActive == true && messageMediaRequested == key && messageMediaRequestedLoader === loader) return
         messageMediaRead?.cancel()
         messageMediaRequested = key
+        messageMediaRequestedLoader = loader
         // An editor-only change does not revoke this conversation's already verified display.
-        // Dataset changes and other conversations still discard the old grants immediately.
-        if (messageMediaSnapshot?.conversation != key.conversation || messageMediaKey?.data != key.data ||
-            messageMediaKey?.mediaCommit != key.mediaCommit)
+        // Dataset changes and other conversations still discard old grants; an accepted append does not.
+        if (messageMediaSnapshot?.conversation != key.conversation || messageMediaKey?.data != key.data)
             messageMediaSnapshot = null
         val id = key.conversation
-        if (id == null) { messageMediaKey = key; return }
+        if (id == null) { messageMediaKey = key; messageMediaPreparedLoader = loader; return }
         messageMediaRead = lifecycleScope.launch {
             val context = kotlinx.coroutines.currentCoroutineContext()
             try {
@@ -7644,11 +7648,25 @@ class MainActivity : ComponentActivity() {
                 } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
                   catch (_: Exception) { null } // Damaged/missing witnesses never become grants.
                 if (!activityUsable() || currentMessageMediaKey() != key || messageMediaRequested != key) return@launch
+                val preparedLoader = snapshot?.let { imageHost.prepareMessageThumbnails(it, userMessageEntrance?.takeIf { entry -> entry.waitForMedia }?.messageId) }
+                if (!activityUsable() || currentMessageMediaKey() != key || messageMediaRequested != key ||
+                    imageHost.historyLoader !== loader || snapshot != null && preparedLoader !== loader) return@launch
                 messageMediaKey = key
-                messageMediaSnapshot = snapshot
+                messageMediaPreparedLoader = loader
+                // Preserve only the already authorized same-dataset presentation on read failure.
+                if (snapshot != null) messageMediaSnapshot = snapshot
+                userMessageEntrance?.takeIf { it.waitForMedia && !it.mediaReady &&
+                    (snapshot?.containsOwner(it.messageId) == true || shown.any { row -> row.second.id.value == it.messageId })
+                }?.let { entry ->
+                    entry.mediaUnavailable = snapshot?.containsOwner(entry.messageId) != true
+                    entry.mediaReady = true
+                }
                 publishChat()
             } finally {
-                if (messageMediaRequested == key) { messageMediaRead = null; messageMediaRequested = null }
+                if (messageMediaRequested == key && messageMediaRequestedLoader === loader) {
+                    messageMediaRead = null; messageMediaRequested = null; messageMediaRequestedLoader = null
+                    if (activityUsable() && (currentMessageMediaKey() != key || imageHost.historyLoader !== loader)) publishChat()
+                }
             }
         }
     }

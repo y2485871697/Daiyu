@@ -11,7 +11,7 @@ class MediaPresentationHandoffContract(unittest.TestCase):
         send = source.split('    private fun sendImageDraft(', 1)[1].split('    private fun settleImageReceipt', 1)[0]
         self.assertIn('owner.attempt !== attemptBefore', send)
         self.assertIn('userMessageEntrance?.messageId != frozen.identity.userId.value', send)
-        self.assertIn('UserMessageEntrance(frozen.identity.userId.value, waitForIme = true)', send)
+        self.assertIn('UserMessageEntrance(frozen.identity.userId.value, waitForIme = true, waitForMedia = true)', send)
         history = source.split('    private fun loadAcceptedHistory(', 1)[1].split('    private fun readAcceptedWindow', 1)[0]
         self.assertIn('userMessageEntrance?.messageId != user.id.value', history)
         self.assertIn('shown.none { it.second.id == user.id }', history)
@@ -34,7 +34,8 @@ class MediaPresentationHandoffContract(unittest.TestCase):
         self.assertIn('this@drawWithContent.drawContent()', source)
         self.assertIn('drawImage(pixels, topLeft = Offset(0f, size.height - pixels.height)', source)
         self.assertIn('size.height / frame.exitStartHeight', source)
-        self.assertIn('.onSizeChanged { frame.targetHeight = it.height }', source)
+        self.assertIn('frame.targetHeight = child.height', source)
+        self.assertIn('frame.visualRevision', source)
         for forbidden in ('delay(', 'finishSubmission', 'delete(', 'clearDraft', 'LaunchedEffect', 'rememberGraphicsLayer', 'toImageBitmap', 'launch('):
             self.assertNotIn(forbidden, source)
         composer = (SRC / 'ui/screens/chat/conversation/ChatComposer.kt').read_text()
@@ -46,6 +47,20 @@ class MediaPresentationHandoffContract(unittest.TestCase):
         self.assertIn('key(if (item is ImageAttachmentItem.Ready) item.attachment else item.key)', source)
         self.assertIn('PreviewResult.Loading, item.attachment, maxEdge, attempt', source)
         self.assertIn('actions.onRemove(item.key)', source)
+
+    def test_media_decode_refreshes_exit_raster_and_admits_the_final_page_lease(self):
+        for name in ('ImageAttachments.kt', 'VideoAttachments.kt'):
+            source = (SRC / 'ui/screens/chat/attachments' / name).read_text()
+            self.assertIn('ObserveComposerAttachmentVisual(result)', source)
+        activity = (SRC / 'MainActivity.kt').read_text()
+        self.assertLess(activity.index('imageHost.prepareMessageThumbnails(it,'),
+                        activity.index('if (snapshot != null) messageMediaSnapshot = snapshot'))
+        self.assertIn('imageHost.historyLoader !== loader', activity)
+        entrance = (SRC / 'ui/screens/chat/conversation/UserMessageEntrance.kt').read_text()
+        self.assertIn('request.mediaReady && (!awaitPlacement || motion.positioned)', entrance)
+        host = (SRC / 'ImageChatHost.kt').read_text()
+        self.assertIn('snapshot.displayVideos().filter', host)
+        self.assertIn('lease === target && target.isOpen()', host)
 
 
 if __name__ == '__main__':

@@ -148,6 +148,28 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         mediaPreviews = if (visible && !closed && conversation != null) PreviewLease(controller, conversation) else null
     }
 
+    /** Prepare the final page lease before a newly accepted media row becomes visible. */
+    internal suspend fun prepareMessageThumbnails(snapshot: ControllerMessageMediaSnapshot, messageId: String?): MessageImageLoader? {
+        val target = lease
+        if (!target.isOpen() || target.conversation != snapshot.conversation.value) return null
+        val loader = target.historyLoader
+        snapshot.displayImages().filter { it.expectedOwner.messageId == messageId }.forEach { image ->
+            if (loader.cached(image.expectedOwner, image.reference, 1024) == null) {
+                try { withContext(Dispatchers.IO) { loader.load(image.expectedOwner, image.reference, 256) } }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* The row displays the explicit unavailable state. */ }
+            }
+        }
+        snapshot.displayVideos().filter { it.expectedOwner.messageId == messageId }.forEach { video ->
+            if (loader.cachedVideo(video.expectedOwner, video.reference, 1024) == null) {
+                try { withContext(Dispatchers.IO) { loader.loadVideo(video.expectedOwner, video.reference, 256) } }
+                catch (cancelled: CancellationException) { throw cancelled }
+                catch (_: Exception) { /* A failed cover must not look like a ready empty video. */ }
+            }
+        }
+        return loader.takeIf { lease === target && target.isOpen() }
+    }
+
     fun syncConversation(conversation: String?) {
         // Accepted can move the provisional session out of the null slot without navigating
         // the editor. Reconcile by slot identity, including null, not just the owner's ID.

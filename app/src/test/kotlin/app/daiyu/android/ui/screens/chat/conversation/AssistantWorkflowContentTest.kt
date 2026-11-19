@@ -229,4 +229,25 @@ class AssistantWorkflowContentTest {
         }
     }
 
+    @Test fun everyReasoningSourceMustFinishTheSameOrderedHandoff() {
+        val reasoning = ReportedReasoning("received", "received thought", 0L)
+        val variants = listOf(
+            ChatTurnUi.Assistant("a", status = RunStatus.COMPLETED, reportedReasoning = listOf(reasoning)),
+            ChatTurnUi.Assistant("a", status = RunStatus.COMPLETED,
+                content = listOf(MessageContentUi.Reasoning(reasoning))),
+            ChatTurnUi.Assistant("a", status = RunStatus.COMPLETED,
+                workProcess = WorkProcessUi(listOf(WorkSegmentUi(reasoning = reasoning)), "done", false)),
+        )
+        for (turn in variants) {
+            val ordered = turn.workflowContent().withResolvedTerminalCards()
+            val current = ordered.steps.filterIsInstance<MessageContentUi.Reasoning>().map { it.reported }
+            assertEquals(listOf(reasoning), current)
+            val handoff = ReasoningHandoff(emptyList())
+            assertFalse(handoff.ready(current))
+            handoff.complete(reasoning)
+            assertTrue(handoff.ready(current))
+            assertTrue(ReasoningHandoff(current).ready(current))
+        }
+    }
+
 }

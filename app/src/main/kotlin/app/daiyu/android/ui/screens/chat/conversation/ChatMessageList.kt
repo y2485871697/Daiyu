@@ -1326,14 +1326,17 @@ internal fun AssistantTurn(
     }
     val sources = remember(bodySources) { bodySources.map { it.text } }
     val visualScope = LocalWorkflowVisualScope.current
+    val reportedReasoning = remember(ordered.steps) {
+        ordered.steps.filterIsInstance<MessageContentUi.Reasoning>().map { it.reported }
+    }
     val handoff = remember(turn.listKey, visualScope) {
-        visualScope?.handoff(turn.listKey, turn.reportedReasoning) ?: ReasoningHandoff(turn.reportedReasoning)
+        visualScope?.handoff(turn.listKey, reportedReasoning) ?: ReasoningHandoff(reportedReasoning)
     }
     SideEffect {
-        turn.reportedReasoning.filter { turn.reasoningStopped || it.activeSinceNanos == null && !hasReportedReasoningText(it.text) }
+        reportedReasoning.filter { turn.reasoningStopped || it.activeSinceNanos == null && !hasReportedReasoningText(it.text) }
             .forEach(handoff::complete)
     }
-    val reasoningReady = turn.reasoningStopped || handoff.ready(turn.reportedReasoning)
+    val reasoningReady = turn.reasoningStopped || handoff.ready(reportedReasoning)
     val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING, windows = bodySources.map { it.window })
     val contentReady = projection?.sources == sources && projection?.windows.orEmpty() == bodySources.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty()
     val generationComplete = turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady

@@ -29,6 +29,14 @@ class MarkdownTypingContract(unittest.TestCase):
         for token in ["displayed.indexOfLast", "ownerMessageId == live.id.value", "live.conversationId.value, live.runId.value, turn.id", "listKey(turn.segmentIndex)", "val streaming = if (!stopRequested && (phase == null || phase == ExecutionPhase.STREAMING)) last else -1", "turn.copy(isStreaming = index == streaming, workProcess = work, stopRequested = stopped)"]:
             self.assertIn(token, mapper)
 
+    def test_turn_settlement_uses_all_ordered_reasoning_paths(self):
+        assistant = self.chat.split('internal fun AssistantTurn(', 1)[1].split(
+            'private fun AssistantTextContent(', 1)[0]
+        self.assertIn('ordered.steps.filterIsInstance<MessageContentUi.Reasoning>().map { it.reported }', assistant)
+        self.assertIn('handoff.ready(reportedReasoning)', assistant)
+        self.assertIn('visualScope?.handoff(turn.listKey, reportedReasoning)', assistant)
+        self.assertNotIn('handoff.ready(turn.reportedReasoning)', assistant)
+
     def test_full_sources_still_project_once_not_per_frame(self):
         self.assertIn("val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING, windows = bodySources.map { it.window })", self.chat)
         self.assertIn("val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,", self.chat)

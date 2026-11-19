@@ -154,7 +154,10 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         finish = source.split('private fun finishIfSettled()', 1)[1].split('fun dispose()', 1)[0]
         self.assertIn('if (!finishPending || !animationIdle) return', finish)
-        self.assertLess(finish.index('boundary.correctAnchor(settling = true)'), finish.index('releaseAnchor(force = false)'))
+        output_handoff, settled = finish.split('val boundary = borrowedBoundary ?: this', 1)
+        self.assertIn('expanded && anchorAtTop && borrowedBoundary == null && outputChanged()', output_handoff)
+        self.assertIn('releaseAnchor(force = false)', output_handoff)
+        self.assertLess(settled.index('boundary.correctAnchor(settling = true)'), settled.index('releaseAnchor(force = false)'))
         self.assertIn('(anchorRequester ?: this).finishIfSettled()', source)
         self.assertIn('return abs(anchorDelta()) <= .5f', source)
         self.assertIn('if (anchorRequester != null) return', source)

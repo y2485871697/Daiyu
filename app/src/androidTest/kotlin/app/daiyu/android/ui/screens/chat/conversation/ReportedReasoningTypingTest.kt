@@ -20,6 +20,7 @@ import kotlinx.coroutines.runBlocking
 class ReportedReasoningTypingTest : WiredActivityTestCase() {
     override val requiresWindowDraw: Boolean
         get() = when (name) {
+            "testCollapsedThoughtDoesNotWaitForHiddenReveal",
             "testStandaloneTerminalThoughtPausesWithTheComposer",
             "testMixedTerminalThoughtPausesWithTheComposer",
             "testWorkflowTerminalThoughtPausesWithTheComposer" -> true
@@ -293,7 +294,14 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeBy(16)
             await { visibleText().contains(pending) }
             if (stop) instrumentation.runOnMainSync { stopped = true }
-            else ui.onNodeWithTag("reported-reasoning-header:hidden:reasoning:r").performClick()
+            else {
+                captureScreenNode(node("reported-reasoning-header:hidden:reasoning:r"), advanceAnimationClock = false)
+                val header = ui.onNodeWithTag("reported-reasoning-header:hidden:reasoning:r")
+                if (header.fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "已展开")
+                    header.performClick()
+                ui.mainClock.advanceTimeByFrame()
+                header.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠"))
+            }
             ui.mainClock.advanceTimeByFrame()
             ui.onNodeWithText("已思考").assertExists()
             ui.onNodeWithText("正在思考…").assertDoesNotExist()
@@ -714,6 +722,12 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                 phase = ComposerPhase.IDLE
             }
             await { parsing.count == 0L }
+            assertNull(markdownProjectionCache.getBlocks(pending, parser))
+            await {
+                ui.onAllNodes(hasTestTag("chat-control") and hasContentDescription("暂停") and isEnabled())
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+            }
+            assertEquals(1L, release.count)
             assertNull(markdownProjectionCache.getBlocks(pending, parser))
             node("chat-control").assertContentDescriptionEquals("暂停").performClick()
             ui.mainClock.advanceTimeBy(32)

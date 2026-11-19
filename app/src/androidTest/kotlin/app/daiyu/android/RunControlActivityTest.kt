@@ -8,6 +8,9 @@ import app.daiyu.android.domain.runtime.ExecutionPhase
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicReference
+import app.daiyu.android.ui.screens.chat.conversation.ChatScreenState
+import app.daiyu.android.ui.screens.chat.conversation.ChatTurnUi
+import app.daiyu.android.ui.screens.chat.conversation.ComposerPhase
 import app.daiyu.android.ui.screens.chat.conversation.projectMarkdown
 import app.daiyu.android.ui.screens.chat.conversation.defaultMarkdownParser
 import app.daiyu.android.ui.screens.chat.conversation.markdownProjectionCache
@@ -15,7 +18,13 @@ import kotlinx.coroutines.runBlocking
 
 class RunControlActivityTest : WiredActivityTestCase() {
     override val requiresWindowDraw: Boolean
-        get() = name == "testCompletedRunKeepsRealPresentationPauseAndResumeUntilTheLastCharacter"
+        get() = name in setOf(
+            "testCompletedPresentationCanSendANewDraftWithoutAppendingToTheFinishedRun",
+            "testCompletedRunKeepsRealPresentationPauseAndResumeUntilTheLastCharacter",
+            "testGestureOwnerCannotRetargetNextRunBeforeRelease",
+            "testPresentationGestureCannotRetargetNextRunBeforeRelease",
+            "testPresentationLongPressCannotFinishTheNextReply",
+        )
     private class ParserGate : AutoCloseable {
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
@@ -195,10 +204,7 @@ class RunControlActivityTest : WiredActivityTestCase() {
                 assertEquals(1L, second.cancelled.count)
             }
             second.release.countDown(); awaitControl("next run unaffected") { fixture.controller.active == null }
-            ui.waitUntil(10_000) {
-                ui.mainClock.advanceTimeBy(32)
-                visibleTailCharacters('乙') == 80
-            }
+            awaitCompletedPresentation(next, '乙')
             node("chat-control").assertContentDescriptionEquals("暂停")
             assertEquals(RunStatus.COMPLETED, fixture.database.messages(old.conversationId).last().second.status)
             assertEquals(2, fixture.opens.get())
@@ -210,6 +216,23 @@ class RunControlActivityTest : WiredActivityTestCase() {
         .fetchSemanticsNodes().flatMap { it.config[SemanticsProperties.Text] }
         .sumOf { text -> text.text.count { it == character } }
 
+    private fun awaitCompletedPresentation(owner: Message, character: Char = '甲') {
+        ui.waitUntil(10_000) {
+            ui.mainClock.advanceTimeBy(32)
+            var terminalPublished = false
+            controlMain {
+                val state = invokeHost(activity, "getChatState") as ChatScreenState
+                terminalPublished = state.composer.phase == ComposerPhase.IDLE &&
+                    state.turns.filterIsInstance<ChatTurnUi.Assistant>().any {
+                        it.ownerMessageId == owner.id.value && it.status == RunStatus.COMPLETED
+                    }
+            }
+            terminalPublished && visibleTailCharacters(character) == 80 &&
+                ui.onAllNodes(hasTestTag("chat-control") and hasContentDescription("暂停") and isEnabled())
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+        }
+    }
+
     private fun completedTail(): Message {
         val session = fixture.session("甲".repeat(320), holdSeconds = 120)
         val owner = send()
@@ -219,10 +242,7 @@ class RunControlActivityTest : WiredActivityTestCase() {
         holdParser()
         session.release.countDown()
         awaitControl("backend is completed before the presentation") { fixture.controller.active == null }
-        ui.waitUntil(10_000) {
-            ui.mainClock.advanceTimeBy(32)
-            visibleTailCharacters() == 80
-        }
+        awaitCompletedPresentation(owner)
         node("chat-control").assertIsEnabled().assertContentDescriptionEquals("暂停")
         assertEquals(RunStatus.COMPLETED, fixture.database.messages(owner.conversationId).last().second.status)
         return owner
@@ -261,10 +281,7 @@ class RunControlActivityTest : WiredActivityTestCase() {
             }
             nextSession.release.countDown()
             awaitControl("next run survives the presentation gesture") { fixture.controller.active == null }
-            ui.waitUntil(10_000) {
-                ui.mainClock.advanceTimeBy(32)
-                visibleTailCharacters('乙') == 80
-            }
+            awaitCompletedPresentation(next, '乙')
             node("chat-control").assertContentDescriptionEquals("暂停")
             assertEquals(2, fixture.opens.get())
             assertEquals(RunStatus.COMPLETED,

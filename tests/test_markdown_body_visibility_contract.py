@@ -53,7 +53,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true,', chat)
         self.assertIn('initialBaseline = initialBaseline, presentationLane = "body:${turn.listKey}")', chat)
         self.assertNotIn('paceTerminal = true', narration)
-        self.assertIn('expected.streaming || expected.terminal && expected.paceTerminal', motion)
+        self.assertIn('expected.streaming || expected.paceTerminal', motion)
         self.assertIn('else 70.0', motion)
         self.assertIn('250_000_000.0', motion)
         device = (Path(__file__).resolve().parents[1] /
@@ -83,10 +83,10 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         inline = ui.split('private fun MarkdownInlineText(', 1)[1].split('private fun MarkdownBlocks(', 1)[0]
         self.assertIn('ClearanceText(visible, paintOffset, modifier, style)', inline)
         clearance = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun TextLayoutResult.canPaintPrefixOf', 1)[0]
-        self.assertIn('val displayed = frame.committed', clearance)
+        self.assertIn('val displayed = if (playback?.paused == true) frame.drawn else frame.committed', clearance)
         self.assertIn('BasicText(displayed?.layoutInput?.text ?: AnnotatedString("")', clearance)
         self.assertIn('clearance.fits(coordinates, candidate.size.height)', clearance)
-        self.assertIn('clearance.fits(frame.coordinates, displayed.size.height)', clearance)
+        self.assertIn('clearance.fits(frame.coordinates, actual.size.height)', clearance)
         self.assertIn('publication?.setPending(owner, false)', clearance)
         self.assertNotIn('drawText(', clearance)
         self.assertIn('SelectionContainer {', ui)

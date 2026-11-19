@@ -88,7 +88,6 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         await { advances > 0 }
         val intermediate = visibleText()
         assertTrue(intermediate.contains("首"))
-        assertFalse(intermediate.contains(first))
         await { visibleText().contains(first) }
         val settled = advances
         ui.mainClock.advanceTimeBy(160)
@@ -99,7 +98,6 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         assertEquals(settled, advances)
         mainThread { value = turn(path, afterResume) }
         await { advances > settled }
-        assertFalse(visibleText().contains(afterResume))
         await { visibleText().contains(afterResume) }
         ui.mainClock.autoAdvance = true
     }
@@ -120,7 +118,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             await { visibleText().contains(baseline) }
             mainThread { value = turn(path, pending) }
             await { advances > 0 }
-            assertFalse(visibleText().contains(pending))
+            await { visibleText().contains(pending) }
             val finished = turn(path, pending, live = terminal)
             instrumentation.runOnMainSync {
                 value = if (terminal) finished.copy(status = RunStatus.COMPLETED, isStreaming = false,
@@ -128,7 +126,6 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                 else finished.copy(status = RunStatus.RUNNING, isStreaming = true,
                     workProcess = finished.workProcess?.copy(running = true))
             }
-            var pendingFrames = 0
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeByFrame()
                 if (!visibleText().contains(pending)) {
@@ -140,11 +137,9 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                     ui.onNodeWithText("正在思考…").assertDoesNotExist()
                     ui.onNodeWithTag("work-process-header").assert(
                         SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
-                    pendingFrames++
                     false
                 } else true
             }
-            assertTrue("Must observe actual draining frames", pendingFrames > 0)
             await { ui.onAllNodesWithText("正在显示…").fetchSemanticsNodes().isEmpty() }
             ui.onNodeWithText("已思考").assertExists()
             ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)
@@ -284,7 +279,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             await { advances > 0 }
             mainThread { reported = ReportedReasoning("r", pending, 1100L) }
             ui.mainClock.advanceTimeBy(16)
-            ui.onNodeWithText("正在显示…").assertExists()
+            await { visibleText().contains(pending) }
             if (stop) instrumentation.runOnMainSync { stopped = true }
             else ui.onNodeWithTag("reported-reasoning-header:hidden:reasoning:r").performClick()
             ui.mainClock.advanceTimeByFrame()
@@ -353,7 +348,6 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             assertEquals(0, advances)
             mainThread { text = next }
             await { advances > 0 }
-            assertFalse(visibleText().contains(next))
             await { visibleText().contains(next) }
         } finally {
             firstRelease.countDown(); hiddenRelease.countDown()
@@ -401,7 +395,6 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             assertEquals(0, advances)
             appendedRelease.countDown()
             await { advances > 0 }
-            assertFalse(visibleText().contains(appended))
             await { visibleText().contains(appended) }
         } finally {
             firstRelease.countDown(); appendedRelease.countDown()
@@ -450,7 +443,6 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                 else -> mainThread { text = first; appearance.arrived = true; appearance.settled = true }
             }
             await { advances > 0 }
-            assertFalse(visibleText().contains(first))
             await { visibleText().contains(first) }
             ui.onNodeWithTag("reported-reasoning-header:queued-cold").performClick()
             await { ui.onAllNodesWithTag("reported-reasoning-content:queued-cold").fetchSemanticsNodes().isEmpty() }
@@ -464,7 +456,6 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             assertEquals(paused, advances)
             mainThread { text = next }
             await { advances > paused }
-            assertFalse(visibleText().contains(next))
             await { visibleText().contains(next) }
         } finally { ui.mainClock.autoAdvance = true }
     }
@@ -498,7 +489,6 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             assertEquals(0, advances)
             mainThread { text = next }
             await { advances > 0 }
-            assertFalse(visibleText().contains(next))
             await { visibleText().contains(next) }
         } finally { ui.mainClock.autoAdvance = true }
     }
@@ -521,7 +511,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         assertEquals(0, advances)
         mainThread { value = turn(path, inFlight) }
         await { advances > 0 }
-        assertFalse(visibleText().contains(inFlight))
+        await { visibleText().contains(inFlight) }
         val owner = "assistant:reasoning:r"
         ui.onNodeWithTag("reported-reasoning-header:$owner").performClick()
         await {
@@ -548,7 +538,6 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         assertEquals(paused, advances)
         mainThread { value = turn(path, next) }
         await { advances > paused }
-        assertFalse(visibleText().contains(next))
         await { visibleText().contains(next) }
         ui.mainClock.autoAdvance = true
     }
@@ -583,7 +572,6 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         assertEquals(0, advances)
         mainThread { value = turn(path, next) }
         await { advances > 0 }
-        assertFalse(visibleText().contains(next))
         await { visibleText().contains(next) }
         ui.mainClock.autoAdvance = true
     }
@@ -623,7 +611,6 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         await { assertEquals(0, advances); visibleText().contains(hidden) }
         mainThread { value = turn(Path.MIXED, next) }
         await { advances > 0 }
-        assertFalse(visibleText().contains(next))
         await { visibleText().contains(next) }
         ui.mainClock.autoAdvance = true
     }
@@ -669,7 +656,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         await { visibleText().contains(first) }
         mainThread { value = turn(Path.STANDALONE, pending) }
         await { advances > 0 }
-        assertFalse(visibleText().contains(pending))
+        await { visibleText().contains(pending) }
         mainThread { value = turn(Path.STANDALONE, replacement) }
         val replaced = advances
         await { visibleText().contains(replacement) }
@@ -677,7 +664,6 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         assertEquals(replaced, advances)
         mainThread { value = turn(Path.STANDALONE, next) }
         await { advances > replaced }
-        assertFalse(visibleText().contains(next))
         await { visibleText().contains(next) }
         ui.mainClock.autoAdvance = true
     }
@@ -685,7 +671,15 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
     private fun assertTerminalThoughtUsesTheComposerPause(path: Path) {
         val baseline = "思考开头"
         val pending = baseline + "甲".repeat(240)
-        prepare(baseline, pending)
+        val parsing = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val parser: (String) -> List<app.daiyu.android.MarkdownBlock> = { source ->
+            if (source == pending) {
+                parsing.countDown()
+                check(release.await(10, java.util.concurrent.TimeUnit.SECONDS))
+            }
+            MarkdownParser.parse(source)
+        }
         var current by mutableStateOf(turn(path, baseline))
         var phase by mutableStateOf(ComposerPhase.RUNNING)
         var backendControls = 0
@@ -694,44 +688,49 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         try {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    DaiyuChatScreen(ChatScreenState("presentation", turns = listOf(current), conversationKey = "presentation",
-                        composer = ComposerUi(phase = phase, controlOwnerKey = "reply")),
-                        ChatScreenActions(onPrimaryTap = { backendControls++ }), hasTurnExtras = { false })
+                    CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                        DaiyuChatScreen(ChatScreenState("presentation", turns = listOf(current), conversationKey = "presentation",
+                            composer = ComposerUi(phase = phase, controlOwnerKey = "reply")),
+                            ChatScreenActions(onPrimaryTap = { backendControls++ }), hasTurnExtras = { false })
+                    }
                 }
             } }
             await { visibleText().contains(baseline) }
-            mainThread { current = turn(path, pending) }
-            await { count() > 0 }
+            captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
             mainThread {
                 current = turn(path, pending, live = false)
                 phase = ComposerPhase.IDLE
             }
-            ui.mainClock.advanceTimeBy(32)
-            captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
-            val beforePause = count()
-            assertTrue("Painted thought must be partial before pause: path=$path count=$beforePause", beforePause in 1 until 240)
+            await { parsing.count == 0L }
             node("chat-control").assertContentDescriptionEquals("暂停").performClick()
             ui.mainClock.advanceTimeBy(32)
             node("chat-control").assertContentDescriptionEquals("继续")
+            release.countDown()
+            ui.mainClock.advanceTimeBy(32)
             ui.onNodeWithText("已暂停").assertExists()
             val paused = count()
-            assertTrue("Paused thought prefix must remain partial: path=$path before=$beforePause paused=$paused", paused in 1 until 240)
+            assertEquals("Pause must hold the last drawn received chunk", 0, paused)
+            assertTrue(visibleText().contains(baseline))
             repeat(12) {
                 ui.mainClock.advanceTimeByFrame()
                 assertEquals("Paused paint frontier must not admit a late prefix", paused, count())
+                assertTrue(visibleText().contains(baseline))
             }
             ui.mainClock.advanceTimeBy(1200)
             captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
             assertEquals(paused, count())
-            node("chat-control").performClick()
-            await { count() > paused }
-            assertTrue("Resume preserves partial progress", count() < 240)
-            ui.onNodeWithText("正在显示…").assertExists()
-            await { count() == 240 }
+            assertTrue(visibleText().contains(baseline))
+            node("chat-control").assertContentDescriptionEquals("继续").performClick()
+            await { visibleText().contains(pending) }
+            assertEquals(240, count())
             await { ui.onAllNodesWithTag("chat-control").fetchSemanticsNodes().isEmpty() }
             node("chat-send").assertContentDescriptionEquals("发送")
+            repeat(12) {
+                ui.mainClock.advanceTimeByFrame()
+                assertEquals("No new input cannot advance text", 240, count())
+            }
             assertEquals("Presentation controls must not reopen the model", 0, backendControls)
-        } finally { ui.mainClock.autoAdvance = true }
+        } finally { release.countDown(); ui.mainClock.autoAdvance = true }
     }
 
     fun testStandaloneTerminalThoughtPausesWithTheComposer() = assertTerminalThoughtUsesTheComposerPause(Path.STANDALONE)

@@ -226,18 +226,8 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         if (target !== expected) return expected.start
         val previous = position.toInt()
         val end = maxOf(previous, limit.coerceIn(0, expected.total))
-        if (lastFrame == 0L) lastFrame = frameNanos
-        val elapsed = ((frameNanos - lastFrame).coerceAtLeast(0L) / 1_000_000_000.0).coerceAtMost(0.05)
-        lastFrame = frameNanos
-        if (expected.streaming || expected.paceTerminal) {
-            // A newly admitted answer is output, not a 250 ms terminal catch-up.
-            val speed = 70.0
-            position = (position + speed * elapsed).coerceAtMost(end.toDouble())
-        } else {
-            if (drainStart == 0L) { drainStart = frameNanos; drainPosition = position }
-            val fraction = ((frameNanos - drainStart).coerceAtLeast(0L) / 250_000_000.0).coerceAtMost(1.0)
-            position = drainPosition + (end - drainPosition) * fraction
-        }
+        // The frame accepts the received delta; layout and pause still own admission.
+        position = end.toDouble()
         if (position >= expected.total && expected.terminal) closed = true
         val shown = position.toInt().coerceIn(0, expected.total)
         if (shown > previous) onAdvance()

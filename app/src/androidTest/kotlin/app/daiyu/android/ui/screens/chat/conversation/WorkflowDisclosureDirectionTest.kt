@@ -92,21 +92,21 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
 
     private fun touchHeader() { ui.onNodeWithTag("work-process-header").performTouchInput { click() } }
 
-    fun testFollowingUpperHeaderStillExpandsUpAndNeverGrowsBehindComposer() {
+    fun testFollowingUpperHeaderExpandsDownAndNeverGrowsBehindComposer() {
         mountList(following = true)
         val header = ui.onNodeWithTag("work-process-header").fetchSemanticsNode().boundsInRoot
         val listTop = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot.top
         val safeBottom = ui.onNodeWithTag("direction-composer").fetchSemanticsNode().boundsInRoot.top - ChatTailClearance.value * density
-        assertTrue("Fixture must distinguish follow priority from the upper-half fallback", header.center.y < (listTop + safeBottom) / 2f)
-        val anchor = bottom()
+        assertTrue("Fixture header must lie in the safe upper half", header.center.y < (listTop + safeBottom) / 2f)
+        val anchor = top()
         ui.mainClock.autoAdvance = false
         try {
             touchHeader()
             repeat(60) {
                 ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
-                assertDirection(true)
+                assertDirection(false)
                 assertTrue("No disclosure frame may reach behind the composer", bottom() <= safeBottom + 1f)
-                assertEquals("Upward disclosure holds its lower edge: ${geometry()}", anchor, bottom(), 2f)
+                assertEquals("Downward disclosure holds its upper edge: ${geometry()}", anchor, top(), 2f)
             }
         } finally { ui.mainClock.autoAdvance = true }
         ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(

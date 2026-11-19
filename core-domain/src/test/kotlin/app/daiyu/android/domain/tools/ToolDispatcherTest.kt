@@ -2,6 +2,10 @@ package app.daiyu.android.domain.tools
 
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.RunExecutionOwner
+import app.daiyu.android.domain.runtime.ReceiptBatchToolExecutor
+import app.daiyu.android.domain.runtime.RunnerOptions
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.locks.LockSupport
 import org.junit.Assert.*
 import org.junit.Test
 import java.util.concurrent.CountDownLatch
@@ -471,4 +475,116 @@ class ToolDispatcherTest {
         assertTrue(store.transaction { it.toList() }.isEmpty())
     }
 
+
+    @Test fun realOwnerGateCommitsFirstReceiptWhileNextToolWaitsWithoutReplay() {
+        val initial = Message(MessageId("paused"), ConversationId("c"), RunId("task"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+        val store = InMemoryToolLedgerStore()
+        val effects = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val firstReturned = CountDownLatch(1)
+        val calls = listOf(call(), call("second", "read_note", "{}"))
+        var rounds = 0
+        lateinit var runner: ChatRunner
+        val actual = dispatcher(store,
+            write { effects.add("first"); assertTrue(runner.pause()); firstReturned.countDown(); ExecutionReceipt.Confirmed("first") },
+            read { effects.add("second"); ExecutionReceipt.Confirmed("second") })
+        val receipts = object : ReceiptBatchToolExecutor {
+            private lateinit var owner: RunExecutionOwner
+            override fun bindOwner(owner: RunExecutionOwner) { assertTrue(owner.owns(initial)); this.owner = owner }
+            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) =
+                actual.dispatchOwned(task(), invocations, owner, cancelled)
+        }
+        runner = ChatRunner(ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                if (rounds++ == 0) calls.forEach { sink(ModelEvent.ToolReady(it)) }
+                else {
+                    assertEquals(listOf(ToolOutput(calls[0].id, "first"), ToolOutput(calls[1].id, "second")), outputs)
+                    sink(ModelEvent.TextFinal("answer", "done"))
+                }
+            }
+            override fun cancel() {}
+        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("receipt only") },
+            RunnerOptions(receiptBatchExecutor = receipts)) {}
+        val task = FutureTask { runner.run(initial, emptyList()) }
+        val worker = Thread(task).apply { isDaemon = true; start() }
+        try {
+            assertTrue(firstReturned.await(5, TimeUnit.SECONDS))
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (LockSupport.getBlocker(worker) !== runner && !task.isDone && System.nanoTime() < deadline) Thread.sleep(1)
+            assertSame(runner, LockSupport.getBlocker(worker))
+            assertEquals(listOf("first"), effects.toList())
+            val pausedRows = store.transaction { rows -> rows.associateBy { it.callId } }
+            assertEquals(LedgerState.CONFIRMED, pausedRows.getValue("call").state)
+            assertEquals("first", pausedRows.getValue("call").payload)
+            assertEquals(LedgerState.UNKNOWN, pausedRows.getValue("second").state)
+            assertTrue(runner.resume())
+            val result = task.get(5, TimeUnit.SECONDS)
+            assertEquals(RunStatus.COMPLETED, result.status)
+            assertEquals(listOf("first", "second"), effects.toList())
+            assertEquals(listOf("first", "second"), result.blocks.filterIsInstance<MessageBlock.Tool>().map { it.result })
+            assertTrue(store.transaction { rows -> rows.size == 2 && rows.all { it.state == LedgerState.CONFIRMED } })
+            assertEquals(2, rounds)
+        } finally { runner.stop(); worker.join(5000); assertFalse(worker.isAlive) }
+    }
+
+    @Test fun realOwnerGateRechecksAfterApprovalAndStopNeverStartsTheAdapter() {
+        for (stopInstead in listOf(false, true)) {
+            val initial = Message(MessageId("approval"), ConversationId("c"), RunId("task"),
+                Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+            val authorization = task(emptySet())
+            val approval = task(setOf(effect()))
+            val store = InMemoryToolLedgerStore()
+            val approvalReturned = CountDownLatch(1)
+            val approvals = AtomicInteger()
+            val executions = AtomicInteger()
+            var rounds = 0
+            lateinit var runner: ChatRunner
+            val tool = object : RegisteredTool {
+                override val definition = write { error("definition only") }.definition
+                override fun prepare(arguments: ToolArguments) = PreparedTool.approvedWrite(effect(),
+                    approve = { context ->
+                        assertSame(authorization, context.authorization)
+                        approvals.incrementAndGet(); assertTrue(runner.pause()); approvalReturned.countDown(); approval
+                    }, admit = { null }, execute = { context ->
+                        assertSame(approval, context.authorization)
+                        executions.incrementAndGet(); ExecutionReceipt.Confirmed("written")
+                    })
+            }
+            val actual = dispatcher(store, tool)
+            val receipts = object : ReceiptBatchToolExecutor {
+                private lateinit var owner: RunExecutionOwner
+                override fun bindOwner(owner: RunExecutionOwner) { assertTrue(owner.owns(initial)); this.owner = owner }
+                override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) =
+                    actual.dispatchOwned(authorization, invocations, owner, cancelled)
+            }
+            runner = ChatRunner(ModelPort { object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    if (rounds++ == 0) sink(ModelEvent.ToolReady(call()))
+                    else {
+                        assertFalse(stopInstead)
+                        assertEquals(listOf(ToolOutput(ToolCallId("call"), "written")), outputs)
+                        sink(ModelEvent.TextFinal("answer", "done"))
+                    }
+                }
+                override fun cancel() {}
+            } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("receipt only") },
+                RunnerOptions(receiptBatchExecutor = receipts)) {}
+            val task = FutureTask { runner.run(initial, emptyList()) }
+            val worker = Thread(task).apply { isDaemon = true; start() }
+            try {
+                assertTrue(approvalReturned.await(5, TimeUnit.SECONDS))
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                while (LockSupport.getBlocker(worker) !== runner && !task.isDone && System.nanoTime() < deadline) Thread.sleep(1)
+                assertSame(runner, LockSupport.getBlocker(worker))
+                assertEquals(1, approvals.get()); assertEquals(0, executions.get())
+                assertEquals(LedgerState.UNKNOWN, store.transaction { it.single().state })
+                if (stopInstead) runner.stop() else assertTrue(runner.resume())
+                assertEquals(if (stopInstead) RunStatus.STOPPED else RunStatus.COMPLETED, task.get(5, TimeUnit.SECONDS).status)
+                assertEquals(1, approvals.get()); assertEquals(if (stopInstead) 0 else 1, executions.get())
+                val entry = store.transaction { it.single() }
+                assertEquals(if (stopInstead) LedgerState.NOT_EXECUTED else LedgerState.CONFIRMED, entry.state)
+                if (stopInstead) assertEquals("cancelled_before_execution", entry.code) else assertEquals("written", entry.payload)
+            } finally { runner.stop(); worker.join(5000); assertFalse(worker.isAlive) }
+        }
+    }
 }

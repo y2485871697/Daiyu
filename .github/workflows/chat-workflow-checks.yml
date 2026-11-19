@@ -331,6 +331,12 @@ jobs:
           fi
           if [[ "$WORKFLOW_CHECK_SCOPE" == task-scroll ]]; then
             domain_tasks=(:core-domain:test --tests app.daiyu.android.domain.BottomFollowMotionTest)
+          elif [[ "$WORKFLOW_CHECK_SCOPE" == workflow ]]; then
+            domain_tasks=(:core-domain:test
+              --tests 'app.daiyu.android.domain.runtime.Runner*'
+              --tests 'app.daiyu.android.domain.ChatRunner*'
+              --tests app.daiyu.android.domain.runtime.TerminalExecutionTargetTest
+              --tests app.daiyu.android.domain.tools.ToolDispatcherTest)
           fi
           ./gradlew --no-daemon --parallel --build-cache --console=plain \
             -I scripts/cooperation/checks_only.init.gradle "${robolectric_init[@]}" \
@@ -426,6 +432,23 @@ jobs:
               record['domain_checks'] = dict(tests=sum(int(s.attrib['tests']) for s in domain_suites),
                                            classes=sorted(s.attrib['name'] for s in domain_suites),
                                            task_outcome=domain_task.group(1) or 'EXECUTED')
+          if record['check_scope'] == 'workflow':
+              domain_suites = [ET.parse(p).getroot() for p in Path('core-domain/build/test-results/test').glob('TEST-*.xml')]
+              domain_names = {s.attrib['name'] for s in domain_suites}
+              required = {'app.daiyu.android.domain.runtime.RunnerControlTest',
+                          'app.daiyu.android.domain.runtime.RunnerReceiptBatchTest',
+                          'app.daiyu.android.domain.runtime.RunnerToolBoundaryTest',
+                          'app.daiyu.android.domain.runtime.TerminalExecutionTargetTest',
+                          'app.daiyu.android.domain.tools.ToolDispatcherTest'}
+              assert required <= domain_names, required - domain_names
+              assert all(name.startswith(('app.daiyu.android.domain.runtime.Runner', 'app.daiyu.android.domain.ChatRunner')) or name in required for name in domain_names)
+              assert all(int(s.attrib['tests']) > 0 for s in domain_suites)
+              assert all(int(s.attrib.get(k, 0)) == 0 for s in domain_suites for k in ('failures', 'errors', 'skipped'))
+              assert ':core-domain:test' in graph
+              domain_task = re.search(r'^> Task :core-domain:test(?: (UP-TO-DATE|FROM-CACHE|NO-SOURCE|SKIPPED))?\s*$', log, re.M)
+              assert domain_task and domain_task.group(1) not in ('NO-SOURCE', 'SKIPPED')
+              record['domain_checks'] = dict(tests=sum(int(s.attrib['tests']) for s in domain_suites),
+                                           classes=sorted(domain_names), task_outcome=domain_task.group(1) or 'EXECUTED')
           tools = Path('workflow-checks/contract-tools.json')
           if tools.exists():
               record['contract_tools'] = json.loads(tools.read_text())

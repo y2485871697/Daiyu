@@ -89,11 +89,17 @@ interface AtomicSupplementRuntimeStore : AtomicRuntimeStore {
     fun commitSupplement(checkpoint: RunCheckpoint, supplement: Message)
 }
 
+/** Each worker obtains a fresh start after admission, immediately before its adapter call. */
+fun interface ToolStartControl {
+    fun awaitStart(admit: () -> Boolean): Boolean
+    fun awaitStart(): Boolean = awaitStart { true }
+}
+
 /** Batch boundary integration for ToolDispatcher. Implementations validate the ENTIRE batch before
  * any execution and own durable dedup/equivalent unknown protection and question barriers.
  * Return one output per call in input order; throw on uncertain outcomes, never fallback/replay. */
 fun interface BatchToolExecutor {
-    fun execute(message: Message, invocations: List<ToolInvocation>): List<ToolOutput>
+    fun execute(message: Message, invocations: List<ToolInvocation>, starts: ToolStartControl): List<ToolOutput>
 }
 
 /** Central dispatcher receipts retain confirmed errors, rejection and uncertainty per call. */

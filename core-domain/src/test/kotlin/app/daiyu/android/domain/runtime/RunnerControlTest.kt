@@ -187,7 +187,7 @@ class RunnerControlTest {
         var opens = 0; var batches = 0
         lateinit var runner: ChatRunner
         val second = call.copy(id = ToolCallId("second"))
-        val batch = BatchToolExecutor { _, calls ->
+        val batch = BatchToolExecutor { _, calls, _ ->
             batches++; assertEquals(listOf(call, second), calls)
             assertTrue(runner.supplement(user("extra")))
             assertEquals(1, opens)
@@ -211,7 +211,7 @@ class RunnerControlTest {
         var batches = 0
         val runner = ChatRunner(ModelPort { session { _, sink ->
             sink(ModelEvent.ToolReady(call)); sink(ModelEvent.ToolReady(call.copy(id = ToolCallId("ask"), name = "ask_user")))
-        } }, store(), BatteryTool { error("unused") }, RunnerOptions(batchExecutor = BatchToolExecutor { _, _ -> batches++; emptyList() })) {}
+        } }, store(), BatteryTool { error("unused") }, RunnerOptions(batchExecutor = BatchToolExecutor { _, _, _ -> batches++; emptyList() })) {}
         assertEquals(RunStatus.FAILED, runner.run(initial(), emptyList()).status); assertEquals(0, batches)
     }
 
@@ -994,6 +994,177 @@ class RunnerControlTest {
         val beforeStop = requireNotNull(stopped.pauseForBrowser())
         stopped.stop()
         assertFalse(stopped.resumeBrowserPause(beforeStop))
+    }
+
+
+    @Test fun pauseAfterRequestCompletionPreventsFirstToolUntilResume() {
+        val paused = CountDownLatch(1)
+        val executed = CountDownLatch(1)
+        val effects = AtomicInteger()
+        var rounds = 0
+        lateinit var runner: ChatRunner
+        runner = ChatRunner(ModelPort { session { _, sink ->
+            if (rounds++ == 0) sink(ModelEvent.ToolReady(call))
+        } }, store(), BatteryTool { effects.incrementAndGet(); executed.countDown(); "done" },
+            RunnerOptions(onRequestCompletedBoundary = {
+                if (rounds == 1) { assertTrue(runner.pause()); paused.countDown() }
+            })) {}
+        val task = FutureTask { runner.run(initial(), emptyList()) }
+        val worker = Thread(task).apply { isDaemon = true; start() }
+        try {
+            assertTrue(paused.await(5, TimeUnit.SECONDS))
+            assertFalse(executed.await(100, TimeUnit.MILLISECONDS))
+            assertEquals(0, effects.get())
+            assertTrue(runner.resume())
+            assertEquals(RunStatus.COMPLETED, task.get(5, TimeUnit.SECONDS).status)
+            assertEquals(1, effects.get())
+        } finally { runner.stop(); worker.join(5000); assertFalse(worker.isAlive) }
+    }
+
+    @Test fun pauseInsideFirstToolDoesNotReplayItOrStartTheNextTool() {
+        val firstFinished = CountDownLatch(1)
+        val secondEntered = CountDownLatch(1)
+        val effects = java.util.concurrent.CopyOnWriteArrayList<String>()
+        val second = call.copy(id = ToolCallId("second"))
+        var rounds = 0
+        lateinit var runner: ChatRunner
+        runner = ChatRunner(ModelPort { session { outputs, sink ->
+            if (rounds++ == 0) {
+                sink(ModelEvent.ToolReady(call)); sink(ModelEvent.ToolReady(second))
+            } else assertEquals(listOf(call.id, second.id), outputs.map { it.callId })
+        } }, store(), BatteryTool { invocation ->
+            effects.add(invocation.id.value)
+            if (invocation.id == call.id) { assertTrue(runner.pause()); firstFinished.countDown() }
+            else secondEntered.countDown()
+            invocation.id.value
+        }, {})
+        val task = FutureTask { runner.run(initial(), emptyList()) }
+        val worker = Thread(task).apply { isDaemon = true; start() }
+        try {
+            assertTrue(firstFinished.await(5, TimeUnit.SECONDS))
+            assertFalse(secondEntered.await(100, TimeUnit.MILLISECONDS))
+            assertEquals(listOf("call"), effects.toList())
+            assertTrue(runner.resume())
+            assertEquals(RunStatus.COMPLETED, task.get(5, TimeUnit.SECONDS).status)
+            assertEquals(listOf("call", "second"), effects.toList())
+        } finally { runner.stop(); worker.join(5000); assertFalse(worker.isAlive) }
+    }
+
+    @Test fun batchStartAdmissionRechecksAQuickPauseResumeEpoch() {
+        val admissions = AtomicInteger()
+        val effects = AtomicInteger()
+        var rounds = 0
+        lateinit var runner: ChatRunner
+        val batch = BatchToolExecutor { _, calls, starts ->
+            calls.map { invocation ->
+                check(starts.awaitStart {
+                    if (admissions.incrementAndGet() == 1) {
+                        assertTrue(runner.pause()); assertTrue(runner.resume())
+                    }
+                    true
+                })
+                effects.incrementAndGet()
+                ToolOutput(invocation.id, "done")
+            }
+        }
+        runner = ChatRunner(ModelPort { session { _, sink ->
+            if (rounds++ == 0) sink(ModelEvent.ToolReady(call))
+        } }, store(), BatteryTool { error("batch only") }, RunnerOptions(batchExecutor = batch)) {}
+        assertEquals(RunStatus.COMPLETED, runner.run(initial(), emptyList()).status)
+        assertEquals(2, admissions.get())
+        assertEquals(1, effects.get())
+    }
+
+    @Test fun parallelBatchWaitersResumeIndividuallyAndStopWakesThemAll() {
+        for (stopInstead in listOf(false, true)) {
+            val firstEntered = CountDownLatch(1)
+            val releaseWaiting = CountDownLatch(1)
+            val waiting = CountDownLatch(2)
+            val laterEntered = CountDownLatch(1)
+            val effects = java.util.concurrent.CopyOnWriteArrayList<String>()
+            val toolThreads = java.util.concurrent.CopyOnWriteArrayList<Thread>()
+            val calls = (0..2).map { call.copy(id = ToolCallId("call-$it")) }
+            var rounds = 0
+            lateinit var runner: ChatRunner
+            val batch = BatchToolExecutor { _, invocations, starts ->
+                val jobs = invocations.mapIndexed { index, invocation ->
+                    FutureTask {
+                        if (index != 0) { waiting.countDown(); check(releaseWaiting.await(5, TimeUnit.SECONDS)) }
+                        if (!starts.awaitStart()) throw InterruptedException()
+                        effects.add(invocation.id.value)
+                        if (index == 0) firstEntered.countDown() else laterEntered.countDown()
+                        ToolOutput(invocation.id, "done")
+                    }.also { job ->
+                        Thread(job).apply { isDaemon = true; toolThreads.add(this); start() }
+                    }
+                }
+                val completed = jobs.map { runCatching { it.get(5, TimeUnit.SECONDS) } }
+                completed.map { it.getOrThrow() }
+            }
+            runner = ChatRunner(ModelPort { session { _, sink ->
+                if (rounds++ == 0) calls.forEach { sink(ModelEvent.ToolReady(it)) }
+            } }, store(), BatteryTool { error("batch only") }, RunnerOptions(batchExecutor = batch)) {}
+            val task = FutureTask { runner.run(initial(), emptyList()) }
+            val worker = Thread(task).apply { isDaemon = true; start() }
+            try {
+                assertTrue(firstEntered.await(5, TimeUnit.SECONDS))
+                assertTrue(waiting.await(5, TimeUnit.SECONDS))
+                assertTrue(runner.pause())
+                releaseWaiting.countDown()
+                val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                while (toolThreads.drop(1).count { java.util.concurrent.locks.LockSupport.getBlocker(it) === runner } != 2 &&
+                    System.nanoTime() < deadline) Thread.sleep(1)
+                assertEquals("Both workers must be parked in the real pause gate", 2,
+                    toolThreads.drop(1).count { java.util.concurrent.locks.LockSupport.getBlocker(it) === runner })
+                assertFalse(laterEntered.await(100, TimeUnit.MILLISECONDS))
+                assertEquals(listOf("call-0"), effects.toList())
+                if (stopInstead) runner.stop() else assertTrue(runner.resume())
+                val result = task.get(5, TimeUnit.SECONDS)
+                assertEquals(if (stopInstead) RunStatus.STOPPED else RunStatus.COMPLETED, result.status)
+                assertEquals(if (stopInstead) setOf("call-0") else calls.map { it.id.value }.toSet(), effects.toSet())
+                assertEquals(effects.size, effects.distinct().size)
+            } finally {
+                releaseWaiting.countDown(); runner.stop(); worker.join(5000)
+                toolThreads.forEach { it.join(5000) }
+                assertFalse(worker.isAlive)
+                assertTrue("Stop must release every registered worker", toolThreads.none { it.isAlive })
+            }
+        }
+    }
+
+    @Test fun diagnosticCallbackPauseOrStopCannotStartALegacyTool() {
+        for (stopInstead in listOf(false, true)) {
+            val boundary = CountDownLatch(1)
+            val effects = AtomicInteger()
+            var rounds = 0
+            lateinit var runner: ChatRunner
+            val diagnostics = RunDiagnostics { stage ->
+                if (stage == RunDiagnosticStage.TOOL_EXECUTION) {
+                    if (stopInstead) runner.stop() else assertTrue(runner.pause())
+                    boundary.countDown()
+                }
+                RunDiagnosticSpan { }
+            }
+            runner = ChatRunner(ModelPort { session { _, sink ->
+                if (rounds++ == 0) sink(ModelEvent.ToolReady(call))
+            } }, store(), BatteryTool { effects.incrementAndGet(); "done" }, RunnerOptions(diagnostics = diagnostics)) {}
+            val task = FutureTask { runner.run(initial(), emptyList()) }
+            val worker = Thread(task).apply { isDaemon = true; start() }
+            try {
+                assertTrue(boundary.await(5, TimeUnit.SECONDS))
+                assertEquals(0, effects.get())
+                if (!stopInstead) {
+                    val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+                    while (java.util.concurrent.locks.LockSupport.getBlocker(worker) !== runner && System.nanoTime() < deadline) Thread.sleep(1)
+                    assertSame(runner, java.util.concurrent.locks.LockSupport.getBlocker(worker))
+                    assertEquals(0, effects.get())
+                    assertTrue(runner.resume())
+                }
+                assertEquals(if (stopInstead) RunStatus.STOPPED else RunStatus.COMPLETED,
+                    task.get(5, TimeUnit.SECONDS).status)
+                assertEquals(if (stopInstead) 0 else 1, effects.get())
+            } finally { runner.stop(); worker.join(5000); assertFalse(worker.isAlive) }
+        }
     }
 
 }

@@ -108,6 +108,15 @@ class ToolDispatcher(
                 else DispatchOutcome.NotExecuted(reservation.code))
         })
         reservation as Reservation.Accepted
+        fun admitStart(index: Int): ExecutionReceipt.NotExecuted? {
+            var denial: ExecutionReceipt.NotExecuted? = null
+            val admit = {
+                if (cancelled()) false
+                else { denial = plans[index].admit(contexts[index]); denial == null }
+            }
+            val started = owner?.toolStarts?.awaitStart(admit) ?: admit()
+            return if (started) null else denial ?: ExecutionReceipt.NotExecuted("cancelled_before_execution")
+        }
         var stop = false
         return ReceiptBatchStart.Completed(invocations.mapIndexed { index, call ->
             val entry = reservation.entries[index]
@@ -124,6 +133,11 @@ class ToolDispatcher(
             if (entry.state == LedgerState.NOT_EXECUTED) return@mapIndexed ToolDispatchResult(call.id,
                 DispatchOutcome.NotExecuted(entry.code))
             val receipt = if (stop || cancelled()) ExecutionReceipt.NotExecuted("batch_stopped_before_execution") else if (plans[index].isUserBarrier) {
+                val denial = admitStart(index)
+                if (denial != null) {
+                    ledger.finish(entry, denial)
+                    return@mapIndexed ToolDispatchResult(call.id, DispatchOutcome.NotExecuted(denial.code))
+                }
                 val context = checkNotNull(contexts[index])
                 return ReceiptBatchStart.Suspended(BarrierOffer(context, PendingToolCheckpoint(call.id)) { receipt ->
                     val outcome = try {
@@ -140,6 +154,8 @@ class ToolDispatcher(
                 var enteredExecution = false
                 var stage = ToolFailureStage.ADMISSION
                 fun executePrepared(context: ToolExecutionContext?): ExecutionReceipt {
+                    stage = ToolFailureStage.ADMISSION
+                    admitStart(index)?.let { return it }
                     stage = ToolFailureStage.ADAPTER
                     enteredExecution = true
                     return plans[index].execute(context)
@@ -151,8 +167,10 @@ class ToolDispatcher(
                     else {
                         val original = checkNotNull(context)
                         stage = ToolFailureStage.APPROVAL
-                        val approval = plan.approveWrite.invoke(original)
+                        val startDenial = admitStart(index)
+                        val approval = if (startDenial == null) plan.approveWrite.invoke(original) else null
                         when {
+                            startDenial != null -> startDenial
                             approval == null -> ExecutionReceipt.NotExecuted("write_approval_denied")
                             approval.sessionId != task.sessionId || approval.taskId != task.taskId ||
                                 approval.allowedWrites != setOf(plan.writeEffect) -> ExecutionReceipt.NotExecuted("write_approval_mismatch")

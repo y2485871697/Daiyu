@@ -305,8 +305,13 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 val image = captureScreenNode(ui.onNodeWithTag("protected-code-host"), advanceAnimationClock = false).toPixelMap()
                 val rect = inkRect("protected-code-host", "markdown-code-viewport")
                 var ink = 0
-                for (y in ceil(rect.top + 6f).toInt() until minOf(image.height, floor(rect.bottom - 6f).toInt()))
-                    for (x in ceil(rect.left + 16f).toInt() until minOf(image.width, floor(rect.right - 16f).toInt()))
+                val left = ceil(rect.left + 16f).toInt().coerceIn(0, image.width)
+                val top = ceil(rect.top + 6f).toInt().coerceIn(0, image.height)
+                val right = floor(rect.right - 16f).toInt().coerceIn(0, image.width)
+                val bottom = floor(rect.bottom - 6f).toInt().coerceIn(0, image.height)
+                assertTrue("The protected code viewport must intersect the captured host: $rect", left < right && top < bottom)
+                for (y in top until bottom)
+                    for (x in left until right)
                         if (inkDark(image[x, y])) ink++
                 assertTrue("The protected code viewport must contain actual text pixels", ink > 20)
             }

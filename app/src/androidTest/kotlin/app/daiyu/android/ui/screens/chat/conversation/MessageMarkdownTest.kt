@@ -737,11 +737,16 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         ui.waitForIdle()
     }
 
-    private fun advanceTerminalReveal(displaySlots: Int) {
-        // Completed answers keep the production 70-slot/s pace; only the test clock advances.
-        val maxDuration = kotlin.math.ceil(displaySlots * 1000.0 / 70.0).toLong() + 64L
-        ui.mainClock.advanceTimeBy(maxDuration)
-        repeat(4) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+    private fun advanceUntilObserved(description: String, maxFrames: Int = 60, observed: () -> Boolean) {
+        check(!ui.mainClock.autoAdvance)
+        ui.waitForIdle()
+        if (observed()) return
+        repeat(maxFrames) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+            if (observed()) return
+        }
+        assertTrue("$description was not observed within $maxFrames frames", observed())
     }
 
     private fun awaitNodes(matcher: SemanticsMatcher, count: Int = 1) {
@@ -1675,23 +1680,24 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             ui.runOnUiThread { turn = turn.copy(finalText = source) }
-            ui.mainClock.advanceTimeBy(80); ui.waitForIdle()
-            val matcher = hasAnyAncestor(hasTestTag("leaf-only")) and hasText("LEAF", substring = true)
-            val start = annotation(ui.onNode(matcher, useUnmergedTree = true)).length
+            val matcher = hasAnyAncestor(hasTestTag("leaf-only")) and hasText(plain)
+            advanceUntilObserved("complete received leaf", maxFrames = 12) {
+                ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().size == 1 && completed.get()
+            }
             val count = ownerCompositions.get()
-            repeat(6) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
-            val end = annotation(ui.onNode(matcher, useUnmergedTree = true)).length
-            assertTrue(end > start)
-            assertFalse(completed.get())
-            assertEquals("only text leaves subscribe to each frame", count, ownerCompositions.get())
+            repeat(6) {
+                ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                assertEquals(plain, annotation(ui.onNode(matcher, useUnmergedTree = true)).text)
+            }
+            assertEquals("idle frames must not recompose the reveal owner", count, ownerCompositions.get())
             ui.runOnUiThread { turn = turn.copy(status = RunStatus.COMPLETED, isStreaming = false) }
-            ui.mainClock.advanceTimeBy(400); ui.waitForIdle()
+            advanceUntilObserved("terminal leaf publication") { completed.get() }
             body("leaf-only", plain).assertTextEquals(plain)
             assertTrue(completed.get())
         } finally { ui.mainClock.autoAdvance = true }
     }
 
-    fun testStreamingRevealUsesCachedAstWithoutPerFrameParsingAndDrainsUnicodeText() {
+    fun testStreamingRevealUsesCachedAstAndFollowsReceivedUnicodeText() {
         val plain = "TYPE😀𠮷e\u0301 " + "word ".repeat(80) + "END"
         val source = "**$plain**"
         val calls = AtomicInteger()
@@ -1711,19 +1717,19 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             ui.runOnUiThread { turn = turn.copy(finalText = source) }
-            ui.mainClock.advanceTimeBy(80)
-            ui.waitForIdle()
-            val matcher = hasAnyAncestor(hasTestTag("typing-live")) and hasText("TYPE", substring = true)
-            val partial = annotation(ui.onNode(matcher, useUnmergedTree = true))
-            assertTrue(partial.length in 1 until plain.length)
-            assertTrue(plain.startsWith(partial.text))
-            assertTrue(partial.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
+            val matcher = hasAnyAncestor(hasTestTag("typing-live")) and hasText(plain)
+            advanceUntilObserved("complete received Unicode chunk", maxFrames = 12) {
+                ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().size == 1 && ready.get()
+            }
+            val received = annotation(ui.onNode(matcher, useUnmergedTree = true))
+            assertEquals(plain, received.text)
+            assertTrue(received.spanStyles.any { it.item.fontWeight == FontWeight.Bold })
             assertTrue(ready.get())
-            assertFalse(settled.get())
             repeat(6) {
                 ui.mainClock.advanceTimeByFrame()
                 ui.waitForIdle()
                 val text = annotation(ui.onNode(matcher, useUnmergedTree = true)).text
+                assertEquals("Time cannot fabricate a new received chunk", plain, text)
                 text.forEachIndexed { index, c ->
                     if (c.isHighSurrogate()) assertTrue(index + 1 < text.length && text[index + 1].isLowSurrogate())
                     if (c.isLowSurrogate()) assertTrue(index > 0 && text[index - 1].isHighSurrogate())
@@ -1732,13 +1738,10 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             assertEquals(1, calls.get())
             ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
             ui.runOnUiThread { turn = turn.copy(status = RunStatus.COMPLETED, isStreaming = false) }
-            ui.mainClock.advanceTimeBy(80)
-            ui.waitForIdle()
-            assertFalse(settled.get())
-            for (action in listOf("复制回答", "朗读", "分支", "重新生成", "删除")) {
-                ui.onNodeWithContentDescription(action, useUnmergedTree = true).assertDoesNotExist()
+            advanceUntilObserved("terminal Unicode text and actions") {
+                settled.get() && ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().size == 1 &&
+                    ui.onAllNodes(hasContentDescription("复制回答"), useUnmergedTree = true).fetchSemanticsNodes().size == 1
             }
-            advanceTerminalReveal(plain.length)
             body("typing-live", plain).assertTextEquals(plain)
             assertTrue(settled.get())
             ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertIsDisplayed()
@@ -1765,10 +1768,11 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             ui.runOnUiThread { turn = turn.copy(content = listOf(MessageContentUi.Text("new-part", source))) }
-            ui.mainClock.advanceTimeBy(80)
-            ui.waitForIdle()
-            val partial = annotation(ui.onNode(hasTestTag("message-content-text:0") and hasText("MIXED", substring = true), useUnmergedTree = true))
-            assertTrue(partial.length in 1 until plain.length)
+            val matcher = hasTestTag("message-content-text:0") and hasText(plain)
+            advanceUntilObserved("complete received mixed chunk", maxFrames = 12) {
+                ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().size == 1
+            }
+            assertEquals(plain, annotation(ui.onNode(matcher, useUnmergedTree = true)).text)
             ui.runOnUiThread { mounted = false }
             ui.mainClock.advanceTimeByFrame()
             ui.waitForIdle()
@@ -1780,7 +1784,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         } finally { ui.mainClock.autoAdvance = true }
     }
 
-    fun testCompletedReadWaitsForCurrentRevealToDrainEvenWithAnAlreadyCachedProjection() {
+    fun testCompletedReadWaitsForCurrentReceivedTextPublicationWithCachedProjection() {
         val source = "READ-DRAIN " + "next ".repeat(24)
         val displayText = markdownBlocksDisplayText(MarkdownParser.parse(source))
         val parser: (String) -> List<MarkdownBlock> = { MarkdownParser.parse(it) }
@@ -1794,16 +1798,18 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             ui.runOnUiThread { turn = turn.copy(finalText = source) }
-            ui.mainClock.advanceTimeBy(64)
-            ui.waitForIdle()
-            ui.runOnUiThread { turn = turn.copy(status = RunStatus.COMPLETED, isStreaming = false) }
-            ui.mainClock.advanceTimeBy(80)
-            ui.waitForIdle()
+            advanceUntilObserved("received body before completion", maxFrames = 12) {
+                ui.onAllNodes(hasText(displayText), useUnmergedTree = true).fetchSemanticsNodes().size == 1
+            }
             assertTrue(confirmed.none { turn.listKey in it })
-            ui.onAllNodes(hasText(displayText), useUnmergedTree = true).assertCountEquals(0)
             ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
             ui.onNodeWithContentDescription("重新生成", useUnmergedTree = true).assertDoesNotExist()
-            advanceTerminalReveal(displayText.length)
+            ui.runOnUiThread { turn = turn.copy(status = RunStatus.COMPLETED, isStreaming = false) }
+            advanceUntilObserved("drawn terminal body and completed read") {
+                confirmed.any { turn.listKey in it } &&
+                    ui.onAllNodes(hasText(displayText), useUnmergedTree = true).fetchSemanticsNodes().size == 1 &&
+                    ui.onAllNodes(hasContentDescription("复制回答"), useUnmergedTree = true).fetchSemanticsNodes().size == 1
+            }
             ui.onNodeWithText(displayText, useUnmergedTree = true).assertTextEquals(displayText)
             assertTrue(confirmed.any { turn.listKey in it })
             ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertIsDisplayed()

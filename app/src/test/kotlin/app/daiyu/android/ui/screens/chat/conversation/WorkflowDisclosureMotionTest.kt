@@ -12,15 +12,15 @@ import kotlinx.coroutines.test.runTest
 class WorkflowDisclosureMotionTest {
     private val viewport = Rect(20f, 100f, 340f, 500f)
 
-    @Test fun streamingFollowWinsEvenInTheUpperHalf() {
-        assertTrue(workflowDisclosureExpandsUp(true, true, 120f, viewport))
-        assertTrue(workflowDisclosureExpandsUp(true, true, 480f, viewport))
+    @Test fun upperAndLowerHeadersUseTheSafeViewportMidpoint() {
+        assertFalse(workflowDisclosureExpandsUp(120f, viewport))
+        assertTrue(workflowDisclosureExpandsUp(480f, viewport))
     }
 
     @Test fun idleAtTheBottomUsesTheSafeViewportMidpoint() {
-        assertFalse(workflowDisclosureExpandsUp(true, false, 299f, viewport))
-        assertTrue(workflowDisclosureExpandsUp(true, false, 300f, viewport))
-        assertTrue(workflowDisclosureExpandsUp(true, false, 301f, viewport))
+        assertFalse(workflowDisclosureExpandsUp(299f, viewport))
+        assertTrue(workflowDisclosureExpandsUp(300f, viewport))
+        assertTrue(workflowDisclosureExpandsUp(301f, viewport))
     }
 
     @Test fun inactiveOutputDoesNotResumeFollowEvenWhenTheListRemainsAtBottom() {
@@ -34,15 +34,15 @@ class WorkflowDisclosureMotionTest {
     }
 
     @Test fun detachedReaderUsesTheSafeViewportMidpoint() {
-        assertFalse(workflowDisclosureExpandsUp(false, true, 299f, viewport))
-        assertTrue(workflowDisclosureExpandsUp(false, true, 300f, viewport))
-        assertTrue(workflowDisclosureExpandsUp(false, true, 301f, viewport))
+        assertFalse(workflowDisclosureExpandsUp(299f, viewport))
+        assertTrue(workflowDisclosureExpandsUp(300f, viewport))
+        assertTrue(workflowDisclosureExpandsUp(301f, viewport))
     }
 
     @Test fun translatedViewportHasTheSameDirection() {
         val translated = Rect(20f, 1100f, 340f, 1500f)
-        assertFalse(workflowDisclosureExpandsUp(false, true, 1299f, translated))
-        assertTrue(workflowDisclosureExpandsUp(false, true, 1301f, translated))
+        assertFalse(workflowDisclosureExpandsUp(1299f, translated))
+        assertTrue(workflowDisclosureExpandsUp(1301f, translated))
     }
 
     @Test fun pressRemembersFollowBeforeTheListCancelsIt() {

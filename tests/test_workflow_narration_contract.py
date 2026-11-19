@@ -43,7 +43,7 @@ class WorkflowNarrationContract(unittest.TestCase):
         self.assertNotIn('HapticEngine', narration)
         self.assertNotIn('TouchHaptics', narration)
 
-    def test_new_live_entries_wait_for_visible_text_and_admission_survives_lazy_items(self):
+    def test_received_entries_follow_composition_and_admission_survives_lazy_items(self):
         narration = (BASE / 'WorkflowNarration.kt').read_text()
         chat = (BASE / 'ChatMessageList.kt').read_text()
         content = (BASE / 'MessageContent.kt').read_text()
@@ -53,51 +53,32 @@ class WorkflowNarrationContract(unittest.TestCase):
         self.assertIn('admission = visualAdmission', chat)
         self.assertIn('entryVisible = narration.entryVisible', chat)
         self.assertIn('precedingReady && entryVisible(block.workflowKey(index))', content)
-        self.assertIn('entry.precedingText.all { currentReveal.ready(it.id, it.text, it.window) }', narration)
-        self.assertEqual(2, narration.count('withFrameNanos { }'))
         self.assertIn('val playback = LocalReplyPlayback.current', narration)
         self.assertIn('val displayPaused = paused || playback?.paused == true', narration)
-        self.assertIn(
-            'rememberMarkdownReveal(sources, projection, streaming = running && !displayPaused,',
-            narration,
-        )
-        self.assertIn(
-            'LaunchedEffect(admission, baselineOnly, displayPaused, revealResetEpoch) {\n'
-            '            val gate = admission ?: return@LaunchedEffect\n'
-            '            if (baselineOnly || displayPaused) return@LaunchedEffect\n'
-            '            var presentedText: List<MarkdownTypingSource>? = null\n'
-            '            snapshotFlow {',
-            narration,
-        )
-        self.assertIn('val currentPlan by rememberUpdatedState(plan)', narration)
-        self.assertIn('currentPlan.firstOrNull { !gate.contains(it.key) }', narration)
-        self.assertIn('gate.admit(listOf(candidate))', narration)
+        self.assertIn('rememberMarkdownReveal(sources, projection, streaming = running && !displayPaused,', narration)
+        self.assertIn('if (!paused && playback?.paused != true) admission?.admit(keys)', narration)
         self.assertIn('!this@WorkflowVisualAdmission.contains(item.workflowKey(index))', narration)
         self.assertIn('val entriesSettled = visualAdmission?.settled(steps) != false', chat)
-        self.assertIn('if (baselineOnly) admission?.admit(plan.map { it.key })', narration)
         self.assertIn('(initialBaseline ?: sources).toList()', typing)
         tests = (ROOT / 'app/src/test/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNarrationCompositionTest.kt').read_text()
-        for method in ('newPlainWorkflowAdmitsEachToolAfterItsVisibleNarration',
-                       'newMarkdownWorkflowAdmitsEachToolAfterItsVisibleNarration',
+        for method in ('newPlainWorkflowAdmitsReceivedToolsAndStopsNewAdmissionWhilePaused',
+                       'newMarkdownWorkflowAdmitsReceivedToolsAndStopsNewAdmissionWhilePaused',
                        'restoredAndTerminalOwnersHaveSilentBaselinesAndSurviveLazyRemount',
                        'admittedToolsReleaseFollowingTextWithoutWaitingForLaterTools'):
             self.assertIn(method, tests)
 
-    def test_ready_tools_reuse_only_the_same_presented_text_frontier(self):
+    def test_tools_do_not_wait_for_synthetic_text_or_parser_frames(self):
         narration = (BASE / 'WorkflowNarration.kt').read_text()
-        self.assertIn('var presentedText: List<MarkdownTypingSource>? = null', narration)
-        self.assertIn('entry.precedingText != presentedText', narration)
-        self.assertIn('}.collectLatest { entry ->', narration)
-        self.assertIn('val candidate = entry.key', narration)
-        self.assertIn('current.precedingText == entry.precedingText', narration)
-        self.assertIn('if (current.tool) presentedText = current.precedingText', narration)
-        self.assertLess(narration.index('gate.admit(listOf(candidate))'),
-                        narration.index('if (current.tool) presentedText = current.precedingText'))
+        self.assertIn('SideEffect {', narration)
+        self.assertIn('steps.mapIndexed { index, item -> item.workflowKey(index) }', narration)
+        self.assertIn('if (!paused && playback?.paused != true) admission?.admit(keys)', narration)
+        self.assertNotIn('withFrameNanos', narration)
+        self.assertNotIn('presentedText', narration)
+        self.assertNotIn('currentReveal.ready', narration)
         tests = (ROOT / 'app/src/test/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNarrationCompositionTest.kt').read_text()
-        for token in ('toolsAfterTheSamePresentedNarrationDoNotRepeatFrameWaits',
-                      'ready tools must not consume more frame-clock waits',
-                      'new narration still requires its own two presented frames',
-                      'one presented frame cannot release a tool after new narration'):
+        for token in ('receivedToolsDoNotWaitForNarrationFramesOrParserCompletion',
+                      'A newly received tool must wait for resume',
+                      'Already admitted cards remain visible while paused'):
             self.assertIn(token, tests)
 
     def test_automatic_close_waits_for_narration_but_manual_close_can_finish(self):

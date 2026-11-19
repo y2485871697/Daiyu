@@ -134,7 +134,7 @@ class RunnerToolBoundaryTest {
             runtimeStore = object : RuntimeStore {
                 override fun save(checkpoint: RunCheckpoint) { writes += checkpoint }
             },
-            batchExecutor = BatchToolExecutor { _, invocations ->
+            batchExecutor = BatchToolExecutor { _, invocations, _ ->
                 dispatched++
                 assertEquals(listOf(call, second), invocations)
                 throw IllegalStateException("dispatcher outcome lost")
@@ -181,7 +181,7 @@ class RunnerToolBoundaryTest {
             }
         }, store(), BatteryTool { "unused" }, RunnerOptions(
             runtimeStore = runtime,
-            batchExecutor = BatchToolExecutor { _, calls ->
+            batchExecutor = BatchToolExecutor { _, calls, _ ->
                 assertEquals(listOf(call), calls)
                 assertTrue(runner.pause())
                 entered.countDown()
@@ -231,7 +231,7 @@ class RunnerToolBoundaryTest {
             runtimeStore = object : RuntimeStore {
                 override fun save(checkpoint: RunCheckpoint) { writes += checkpoint }
             },
-            batchExecutor = BatchToolExecutor { _, _ ->
+            batchExecutor = BatchToolExecutor { _, _, _ ->
                 entered.countDown()
                 assertTrue(release.await(5, TimeUnit.SECONDS))
                 listOf(ToolOutput(call.id, "late-result"))

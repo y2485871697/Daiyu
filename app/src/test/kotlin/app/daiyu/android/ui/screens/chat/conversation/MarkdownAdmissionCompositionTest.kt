@@ -70,8 +70,7 @@ class MarkdownAdmissionCompositionTest {
             clearance.update(null, null, 0, 0, 0, protect = false, clampToViewport = false)
             val lengths = mutableListOf<Int>()
             repeat(40) { frame(); lengths += reveal!!.limit("answer") }
-            assertTrue("The first admitted chunk must contain intermediate prefixes: $lengths",
-                lengths.any { it in 1 until first.length })
+            assertTrue("Placement must admit the received chunk: $lengths", lengths.any { it == first.length })
             assertTrue(lengths.zipWithNext().all { (before, after) -> after >= before })
             assertEquals(first.length, lengths.last())
             assertTrue(advances > 0)
@@ -154,12 +153,13 @@ class MarkdownAdmissionCompositionTest {
             assertFalse(reveal!!.settled)
             admitted.value = true
             repeat(5) { frame() }
-            assertTrue("First admitted body frames must be partial", reveal!!.limit("answer") in 1 until text.length)
+            assertEquals("Admission follows the complete received body", text.length, reveal!!.limit("answer"))
             assertTrue(advances > 0)
+            val receivedFeedback = advances
             repeat(50) { frame() }
-            val afterOldDrain = reveal!!.limit("answer")
-            assertTrue("The first second must remain paced: $afterOldDrain", afterOldDrain in 1..65)
-            assertFalse(reveal!!.settled)
+            assertEquals("Time cannot fabricate another received chunk", text.length, reveal!!.limit("answer"))
+            assertEquals(receivedFeedback, advances)
+            assertTrue(reveal!!.settled)
             admitted.value = false
             frame()
             val paused = reveal!!.limit("answer")
@@ -168,7 +168,7 @@ class MarkdownAdmissionCompositionTest {
             assertEquals(paused, reveal!!.limit("answer"))
             assertEquals(feedback, advances)
             admitted.value = true
-            repeat(450) { frame() }
+            repeat(5) { frame() }
             assertEquals(text.length, reveal!!.limit("answer"))
             assertTrue(reveal!!.settled)
         } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
@@ -210,8 +210,7 @@ class MarkdownAdmissionCompositionTest {
             assertEquals(0, advances)
             parsed.value = projection(text)
             repeat(5) { frame() }
-            assertTrue("Accepted projection must advance only part of the suffix: visible=${reveal!!.limit("answer")}",
-                reveal!!.limit("answer") in prefix.length + 1 until text.length)
+            assertEquals("The accepted projection exposes its received suffix", text.length, reveal!!.limit("answer"))
             assertTrue(advances > 0)
             repeat(25) { frame() }
             assertEquals(text.length, reveal!!.limit("answer"))
@@ -259,8 +258,7 @@ class MarkdownAdmissionCompositionTest {
             assertFalse(reveal!!.settled)
             admitted.value = true
             repeat(5) { frame() }
-            val partial = reveal!!.limit("answer")
-            assertTrue("Admission starts a real intermediate reveal: $partial", partial in 1 until text.length)
+            assertEquals("Admission exposes the complete received body", text.length, reveal!!.limit("answer"))
             assertTrue(advances > 0)
             complete.value = true
             repeat(25) { frame() }

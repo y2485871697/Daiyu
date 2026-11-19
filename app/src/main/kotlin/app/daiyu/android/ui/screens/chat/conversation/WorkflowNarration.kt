@@ -2,17 +2,11 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateMapOf
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
-import androidx.compose.runtime.withFrameNanos
-import kotlinx.coroutines.flow.collectLatest
 import app.daiyu.android.domain.ReportedReasoning
 
 internal class WorkflowNarration(val projection: MarkdownProjection?, val reveal: MarkdownReveal,
@@ -69,17 +63,6 @@ internal class WorkflowVisualAdmission(initial: List<String>, private var animat
     }
 }
 
-private data class WorkflowAdmissionEntry(val key: String, val tool: Boolean,
-    val precedingText: List<MarkdownTypingSource>)
-
-private fun workflowAdmissionPlan(steps: List<MessageContentUi>): List<WorkflowAdmissionEntry> {
-    val preceding = mutableListOf<MarkdownTypingSource>()
-    return steps.mapIndexed { index, item ->
-        if (item is MessageContentUi.Text && item.text.isNotBlank()) preceding += MarkdownTypingSource(item.itemId, item.text, item.markdownWindow)
-        WorkflowAdmissionEntry(item.workflowKey(index), item is MessageContentUi.Tool, preceding.toList())
-    }
-}
-
 internal fun workflowBlockedTextSources(steps: List<MessageContentUi>, reasoningReady: (ReportedReasoning) -> Boolean): Set<String> {
     var ready = true
     return buildSet {
@@ -123,33 +106,9 @@ internal fun WorkflowNarrationContent(
                 enabled = expanded && !stopped && !paused, allowBaselinePrefix = false, blockedSources = blocked, live = running,
                 initialBaseline = baseline, presentationLane = admission.takeUnless { baselineOnly })
         }
-        val plan = remember(steps) { workflowAdmissionPlan(steps) }
-        SideEffect { if (baselineOnly) admission?.admit(plan.map { it.key }) }
-        val currentPlan by rememberUpdatedState(plan)
-        val currentReveal by rememberUpdatedState(reveal)
-        LaunchedEffect(admission, baselineOnly, displayPaused, revealResetEpoch) {
-            val gate = admission ?: return@LaunchedEffect
-            if (baselineOnly || displayPaused) return@LaunchedEffect
-            var presentedText: List<MarkdownTypingSource>? = null
-            snapshotFlow {
-                currentPlan.firstOrNull { !gate.contains(it.key) }?.takeIf { entry ->
-                    !entry.tool || entry.precedingText.all { currentReveal.ready(it.id, it.text, it.window) }
-                }
-            }.collectLatest { entry ->
-                if (entry != null) {
-                    val candidate = entry.key
-                    if (entry.tool && entry.precedingText.isNotEmpty() && entry.precedingText != presentedText) {
-                        withFrameNanos { }
-                        withFrameNanos { }
-                    }
-                    val current = currentPlan.firstOrNull { !gate.contains(it.key) }
-                    if (current?.key == candidate && current.precedingText == entry.precedingText &&
-                        (!current.tool || current.precedingText.all { currentReveal.ready(it.id, it.text, it.window) })) {
-                        gate.admit(listOf(candidate))
-                        if (current.tool) presentedText = current.precedingText
-                    }
-                }
-            }
+        val keys = remember(steps) { steps.mapIndexed { index, item -> item.workflowKey(index) } }
+        SideEffect {
+            if (!paused && playback?.paused != true) admission?.admit(keys)
         }
         val entryVisible = remember(admission, baselineOnly) {
             { key: String -> baselineOnly || admission?.contains(key) != false }

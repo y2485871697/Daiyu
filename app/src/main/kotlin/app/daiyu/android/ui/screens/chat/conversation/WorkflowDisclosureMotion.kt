@@ -25,8 +25,8 @@ import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.semantics
 import kotlin.math.abs
 
-internal fun workflowDisclosureExpandsUp(followingBottom: Boolean, outputActive: Boolean, headerCenter: Float, viewport: Rect): Boolean =
-    followingBottom && outputActive || headerCenter >= viewport.center.y
+internal fun workflowDisclosureExpandsUp(headerCenter: Float, viewport: Rect): Boolean =
+    headerCenter >= viewport.center.y
 
 internal val WorkflowDisclosureUp = SemanticsPropertyKey<Boolean>("WorkflowDisclosureUp")
 internal val WorkflowDisclosureGeometry = SemanticsPropertyKey<() -> String>("WorkflowDisclosureGeometry")
@@ -115,7 +115,7 @@ internal class WorkflowDisclosureMotion(
 
     val headerModifier: Modifier get() = Modifier.onGloballyPositioned {
         header = it
-        if (expanded && !cycleChosen) cycleChosen = chooseDirection(context?.viewport?.follows?.invoke() == true)
+        if (expanded && !cycleChosen) cycleChosen = chooseDirection()
     }
         .semantics {
             this[WorkflowDisclosureUp] = upwards
@@ -177,15 +177,14 @@ internal class WorkflowDisclosureMotion(
         return abs(anchorDelta()) <= .5f && (viewport.anchorClearance(context.itemKey) ?: 0f) <= .5f
     }
 
-    private fun chooseDirection(following: Boolean): Boolean {
+    private fun chooseDirection(): Boolean {
         val coordinates = header?.takeIf { it.isAttached } ?: return false
         val root = coordinates.findRootCoordinates()
         val viewport = context?.viewport?.bounds?.invoke() ?: run {
             val origin = root.positionInWindow()
             Rect(origin.x, origin.y, origin.x + root.size.width, origin.y + root.size.height)
         }
-        upwards = workflowDisclosureExpandsUp(following, context?.outputActive?.invoke() == true,
-            coordinates.positionInWindow().y + coordinates.size.height / 2f, viewport)
+        upwards = workflowDisclosureExpandsUp(coordinates.positionInWindow().y + coordinates.size.height / 2f, viewport)
         return true
     }
 
@@ -212,7 +211,7 @@ internal class WorkflowDisclosureMotion(
             viewport?.let { it.follows() || followingOnPress && pressGesture == it.gesture } == true
         followingOnPress = false
         // Freeze direction through reversals and the matching collapse; a new closed cycle may choose again.
-        if ((opening || expanded) && !cycleChosen) cycleChosen = chooseDirection(following)
+        if ((opening || expanded) && !cycleChosen) cycleChosen = chooseDirection()
         manualChange = true
         if (viewport != null) {
             viewport.followingOnPress = false
@@ -229,7 +228,7 @@ internal class WorkflowDisclosureMotion(
     fun observeExpanded(value: Boolean) {
         if (!value && expanded && !manualChange && collapseUp) toggle(opening = false)
         if (value && !expanded && !manualChange && !cycleChosen) {
-            cycleChosen = chooseDirection(context?.viewport?.follows?.invoke() == true)
+            cycleChosen = chooseDirection()
         }
         if (value) closingDetailHeight = null
         expanded = value

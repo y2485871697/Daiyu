@@ -170,7 +170,7 @@ class RunnerReceiptBatchTest {
     }
     @Test fun twoBatchRoutesCannotBeConfiguredTogether() {
         try {
-            RunnerOptions(batchExecutor = BatchToolExecutor { _, _ -> emptyList() },
+            RunnerOptions(batchExecutor = BatchToolExecutor { _, _, _ -> emptyList() },
                 receiptBatchExecutor = ReceiptBatchToolExecutor { _, _, _ -> emptyList() })
             fail("ambiguous execution routes accepted")
         } catch (_: IllegalArgumentException) {}

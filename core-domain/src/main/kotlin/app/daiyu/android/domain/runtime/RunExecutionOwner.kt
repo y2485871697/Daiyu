@@ -10,6 +10,7 @@ class RunExecutionOwner private constructor(
     val assistantMessageId: MessageId,
     val ownerId: String,
     private val targetChanged: (RunExecutionOwner) -> Unit,
+    internal val toolStarts: ToolStartControl,
 ) {
     @Volatile var terminalTargets: Map<ToolInvocation, TerminalExecutionTarget> = emptyMap()
         private set
@@ -25,9 +26,13 @@ class RunExecutionOwner private constructor(
         message.conversationId == conversationId && message.runId == runId && message.id == assistantMessageId
 
     companion object {
-        internal fun issue(message: Message, targetChanged: (RunExecutionOwner) -> Unit = {}): RunExecutionOwner {
+        internal fun issue(message: Message, targetChanged: (RunExecutionOwner) -> Unit = {}): RunExecutionOwner =
+            issue(message, targetChanged, ToolStartControl { it() })
+
+        internal fun issue(message: Message, targetChanged: (RunExecutionOwner) -> Unit,
+            toolStarts: ToolStartControl): RunExecutionOwner {
             require(message.role == Message.ASSISTANT_ROLE && message.status == RunStatus.RUNNING)
-            return RunExecutionOwner(message.conversationId, message.runId, message.id, UUID.randomUUID().toString(), targetChanged)
+            return RunExecutionOwner(message.conversationId, message.runId, message.id, UUID.randomUUID().toString(), targetChanged, toolStarts)
         }
     }
 }

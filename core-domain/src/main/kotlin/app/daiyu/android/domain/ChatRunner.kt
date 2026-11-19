@@ -42,6 +42,32 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     /** Control state only. No I/O, callbacks, cancellation, or waits may run under this lock. */
     private val terminalLock = Object()
     private val eventLock = Any()
+    private val toolWaiters = java.util.concurrent.ConcurrentHashMap.newKeySet<Thread>()
+    private val toolStarts = ToolStartControl { admit ->
+        val thread = Thread.currentThread()
+        toolWaiters.add(thread)
+        try {
+            var started = false
+            while (!started) {
+                val epoch = synchronized(terminalLock) {
+                    if (stopped.get() || terminalReserved || terminal || thread.isInterrupted) return@ToolStartControl false
+                    pauseEpoch.takeUnless { pauseRequested }
+                }
+                if (epoch == null) {
+                    LockSupport.park(this)
+                    continue
+                }
+                // Admission may block; recheck the pause epoch after it, outside all I/O.
+                if (!admit()) return@ToolStartControl false
+                started = synchronized(terminalLock) {
+                    if (stopped.get() || terminalReserved || terminal || thread.isInterrupted) return@ToolStartControl false
+                    !pauseRequested && epoch == pauseEpoch
+                }
+            }
+            true
+        } finally { toolWaiters.remove(thread) }
+    }
+    private fun wakeToolWaiters() { toolWaiters.forEach { LockSupport.unpark(it) } }
     @Volatile private var terminal = false
     @Volatile private var terminalReserved = false
     private var started = false
@@ -175,12 +201,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             Pair(session, boundaryWaiter)
         }
         captured.second?.let { LockSupport.unpark(it) }
+        wakeToolWaiters()
         reconnectBudget?.finish("stopped")
         cancelSession(captured.first)
         options.contextRuntime?.cancel()
         compactingRuntime?.cancel()
     }
-    /** Nonblocking control call. A tool already executing is allowed to finish its batch. */
+    /** Nonblocking control call. Already started tools finish; new calls wait for resume. */
     fun pause(): Boolean = requestPause(requireRunning = false) != null
     fun pauseForBrowser(): Long? = requestPause(requireRunning = true)
     private fun requestPause(requireRunning: Boolean): Long? {
@@ -226,6 +253,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             execution = execution.copy(pauseRequested = false)
             boundaryWaiter
         }
+        wakeToolWaiters()
         syncReconnectPause()
         waiter?.let { LockSupport.unpark(it) }
         return true
@@ -292,6 +320,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             completeAdmission(pending, SupplementAdmission.Rejected(message.id))
             return false
         }
+        wakeToolWaiters()
         syncReconnectPause()
         captured.second?.let { LockSupport.unpark(it) }
         cancelSession(captured.first)
@@ -352,7 +381,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var usageRequests = emptyList<RequestCheckpoint>()
         var usage: List<RequestUsageCheckpoint> =
             (options.runtimeStore as? PreparationRuntimeStore)?.preparationUsage(initial).orEmpty()
-        val executionOwner = RunExecutionOwner.issue(initial, options.onTerminalTargetChanged)
+        val executionOwner = RunExecutionOwner.issue(initial, options.onTerminalTargetChanged, toolStarts)
         targetOwner = executionOwner
         val owner = executionOwner.ownerId
         var ownerBound = false
@@ -1382,7 +1411,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     }
                     continue
                 }
-                // Pause/supplement requests during this batch wait until ALL calls finish.
+                // New tool calls wait for resume; started calls still finish and persist their receipts.
+                awaitPause()
+                if (stopped.get() || terminalReserved) throw InterruptedException()
                 val batch = options.batchExecutor
                 val receiptBatch = options.receiptBatchExecutor
                 synchronized(terminalLock) {
@@ -1469,7 +1500,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     pending.forEach { records[it.id] = ToolRecord(it, ToolDisposition.IN_FLIGHT) }
                     checkpoint()
                     if (stopped.get() || terminalReserved) throw InterruptedException()
-                    val batchOutputs = try { diagnostic(RunDiagnosticStage.TOOL_EXECUTION) { batch.execute(current, pending.toList()) } } catch (_: Exception) {
+                    val batchOutputs = try { diagnostic(RunDiagnosticStage.TOOL_EXECUTION) { batch.execute(current, pending.toList(), toolStarts) } } catch (_: Exception) {
                         execution = execution.copy(activeToolCalls = emptySet())
                         pending.forEach {
                             records[it.id] = ToolRecord(it, ToolDisposition.UNKNOWN)
@@ -1512,8 +1543,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 records[call.id] = ToolRecord(call, ToolDisposition.IN_FLIGHT)
                                 checkpoint() // Must commit before crossing the tool boundary.
                                 try {
-                                    if (stopped.get()) throw InterruptedException()
-                                    val value = diagnostic(RunDiagnosticStage.TOOL_EXECUTION) { tool.execute(call) }
+                                    val value = diagnostic(RunDiagnosticStage.TOOL_EXECUTION) {
+                                        if (!toolStarts.awaitStart()) throw InterruptedException()
+                                        tool.execute(call)
+                                    }
                                     options.toolJournal?.complete(current, call, value)
                                     value
                                 } catch (failure: Exception) {
@@ -1624,6 +1657,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             try { publish(current) } catch (_: Exception) { }
             return current
         } finally {
+            wakeToolWaiters()
             val toCancel = synchronized(terminalLock) {
                 val captured = session
                 session = null

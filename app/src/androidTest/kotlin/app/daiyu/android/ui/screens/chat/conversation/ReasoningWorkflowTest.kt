@@ -204,7 +204,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     fun testLegacyTerminalBodyTypesWithoutAStreamingSnapshot() = verifyAnswerAdmission(mixed = false, terminal = true, streamed = false)
     fun testMixedTerminalBodyTypesWithoutAStreamingSnapshot() = verifyAnswerAdmission(mixed = true, terminal = true, streamed = false)
 
-    fun testPureFinalBodyDoesNotRushWhenCompletionArrives() =
+    fun testPureFinalBodyFollowsReceivedOutputWhenCompletionArrives() =
         verifyAnswerAdmission(mixed = false, terminal = true, workflow = false)
     fun testCompletedHistoryDoesNotReplayTypewriterOrFeedback() =
         verifyAnswerAdmission(mixed = false, terminal = true, workflow = false, history = true)
@@ -233,6 +233,8 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             if (reconnect) projectMarkdown(listOf(answer), windows = listOf(
                 app.daiyu.android.MarkdownSourceWindow(answer, 0, answer.length)))
         }
+        val firstChunk = answer.take(8)
+        var delivered by mutableStateOf(if (history) answer else firstChunk)
         var ready by mutableStateOf(history)
         var done by mutableStateOf(history)
         val advances = java.util.concurrent.atomic.AtomicInteger()
@@ -240,7 +242,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                val source = message((if (workflow) listOf(tool("t1")) else emptyList()) + if (ready) listOf(MessageBlock.Text("body", answer)) else emptyList(), emptyList())
+                val source = message((if (workflow) listOf(tool("t1")) else emptyList()) + if (ready) listOf(MessageBlock.Text("body", delivered)) else emptyList(), emptyList())
                     .copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
                 val reconnects = if (reconnect) listOf(app.daiyu.android.timeline.ChatTimelineEntry.Reconnect(
                     "cut", app.daiyu.android.timeline.TimelineAnchor(source.conversationId.value, source.runId.value, source.id.value, 0),
@@ -286,18 +288,15 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 } else if (!currentText.isNullOrEmpty()) firstVisible = currentText
                 firstVisible != null
             }
-            assertTrue("First body frame is partial: ${firstVisible?.length}", firstVisible!!.length in 1 until answer.length)
-            assertTrue(answer.startsWith(firstVisible!!))
-            assertTrue("First body frame cannot be a catch-up chunk", firstVisible!!.length <= 8)
+            assertEquals("The first received chunk appears after workflow disposal", firstChunk, firstVisible)
             assertTrue(advances.get() > 0)
             val beforeFeedback = advances.get()
             ui.mainClock.advanceTimeBy(512)
-            val paced = ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
+            val unchanged = ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
                 .single().config[SemanticsProperties.Text].joinToString("") { it.text }
-            assertTrue("Final body still types after the old 250 ms deadline", paced.length in firstVisible!!.length + 1..48)
-            assertTrue(advances.get() > beforeFeedback)
-            assertFalse(settled.get())
-            mainThread { done = true }
+            assertEquals("Elapsed time cannot reveal output that has not arrived", firstChunk, unchanged)
+            assertEquals("No fabricated visible feedback between received chunks", beforeFeedback, advances.get())
+            mainThread { delivered = answer; done = true }
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeBy(32)
                 ui.onAllNodesWithText(answer, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() && settled.get()
@@ -340,8 +339,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 if (!value.isNullOrEmpty()) first = value
                 first != null
             }
-            assertTrue(first!!.length in 1 until text.length)
-            assertTrue(text.startsWith(first!!))
+            assertEquals("Confirmed narration follows the complete received chunk", text, first)
             assertTrue(advances.get() > 0)
             ui.onNodeWithTag("tool-step:t1").assertExists()
             mainThread { source = source.copy(status = RunStatus.COMPLETED) }

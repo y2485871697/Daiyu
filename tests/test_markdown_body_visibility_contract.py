@@ -46,22 +46,18 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('if (live || streaming) { seenLive = true; closed = false }', motion)
         self.assertIn('if (terminal && total > 0 && start >= total) closed = true', motion)
 
-    def test_terminal_answer_is_paced_without_changing_workflow_narration_drain(self):
-        chat = (BASE / 'ChatMessageList.kt').read_text()
-        narration = (BASE / 'WorkflowNarration.kt').read_text()
+    def test_received_answer_obeys_layout_admission_without_a_synthetic_rate(self):
         motion = (BASE / 'MarkdownReveal.kt').read_text()
-        self.assertIn('live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true,', chat)
-        self.assertIn('initialBaseline = initialBaseline, presentationLane = "body:${turn.listKey}")', chat)
-        self.assertNotIn('paceTerminal = true', narration)
-        self.assertIn('expected.streaming || expected.paceTerminal', motion)
-        self.assertIn('val speed = 70.0', motion)
-        self.assertNotIn('(end - position) * 7.0', motion)
-        self.assertIn('250_000_000.0', motion)
-        device = (Path(__file__).resolve().parents[1] /
-                  'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ReasoningWorkflowTest.kt').read_text()
-        for token in ('advanceTimeBy(512)', 'paced.length in firstVisible!!.length + 1..48',
-                      'testPureFinalBodyDoesNotRushWhenCompletionArrives',
-                      'testCompletedHistoryDoesNotReplayTypewriterOrFeedback'):
+        self.assertIn('val end = maxOf(previous, limit.coerceIn(0, expected.total))', motion)
+        self.assertIn('position = end.toDouble()', motion)
+        self.assertIn('if (shown > previous) onAdvance()', motion)
+        self.assertIn('if (position >= expected.total && expected.terminal) closed = true', motion)
+        self.assertNotIn('val speed = 70.0', motion)
+        self.assertNotIn('250_000_000.0', motion)
+        device = (Path(__file__).resolve().parents[1] / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ReasoningWorkflowTest.kt').read_text()
+        for token in ('testPureFinalBodyFollowsReceivedOutputWhenCompletionArrives',
+                      'testCompletedHistoryDoesNotReplayTypewriterOrFeedback',
+                      'No answer text may overlap the closing workflow'):
             self.assertIn(token, device)
 
     def test_container_passes_state_without_subscribing_to_the_frame(self):

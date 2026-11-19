@@ -35,6 +35,7 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
     private var currentHost: MainActivity? = null
     private var voicePreferenceSnapshot: Pair<Boolean, String?>? = null
     protected open val engineeringUi: Boolean = false
+    protected open val requiresWindowDraw: Boolean = false
     private fun runLegacy() = super.runBare()
     override fun runBare() {
         try {
@@ -44,12 +45,25 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
             ui.apply(object : Statement() {
                 override fun evaluate() {
                     var primary: Throwable? = null
-                    try { runLegacy() }
-                    catch (failure: Throwable) { primary = failure; throw failure }
+                    val drawingEnabled = if (requiresWindowDraw)
+                        androidx.test.platform.graphics.HardwareRendererCompat.isDrawingEnabled() else null
+                    try {
+                        if (drawingEnabled == false)
+                            androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
+                        try { runLegacy() }
+                        catch (failure: Throwable) { primary = failure; throw failure }
+                        finally {
+                            try { cleanupAfterLegacy() }
+                            catch (cleanup: Throwable) {
+                                if (primary == null) throw cleanup else primary.addSuppressed(cleanup)
+                            }
+                        }
+                    } catch (failure: Throwable) { primary = failure; throw failure }
                     finally {
-                        try { cleanupAfterLegacy() }
-                        catch (cleanup: Throwable) {
-                            if (primary == null) throw cleanup else primary.addSuppressed(cleanup)
+                        if (drawingEnabled != null) try {
+                            androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(drawingEnabled)
+                        } catch (restore: Throwable) {
+                            if (primary == null) throw restore else primary.addSuppressed(restore)
                         }
                     }
                 }

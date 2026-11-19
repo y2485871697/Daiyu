@@ -18,6 +18,7 @@ import kotlinx.coroutines.runBlocking
 
 /** Real production renderers with a recording visible-advance callback, not a motor test. */
 class ReportedReasoningTypingTest : WiredActivityTestCase() {
+    override val requiresWindowDraw = true
     private enum class Path { STANDALONE, MIXED, WORK }
 
     private fun turn(path: Path, text: String, live: Boolean = true): ChatTurnUi.Assistant {
@@ -685,17 +686,21 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                 phase = ComposerPhase.IDLE
             }
             ui.mainClock.advanceTimeBy(32)
+            captureScreenNode(ui.onRoot(), advanceAnimationClock = false)
+            val beforePause = count()
+            assertTrue("Painted thought must be partial before pause: path=$path count=$beforePause", beforePause in 1 until 240)
             node("chat-control").assertContentDescriptionEquals("暂停").performClick()
             ui.mainClock.advanceTimeBy(32)
             node("chat-control").assertContentDescriptionEquals("继续")
             ui.onNodeWithText("已暂停").assertExists()
             val paused = count()
-            assertTrue(paused in 1 until 240)
+            assertTrue("Paused thought prefix must remain partial: path=$path before=$beforePause paused=$paused", paused in 1 until 240)
             repeat(12) {
                 ui.mainClock.advanceTimeByFrame()
                 assertEquals("Paused paint frontier must not admit a late prefix", paused, count())
             }
             ui.mainClock.advanceTimeBy(1200)
+            captureScreenNode(ui.onRoot(), advanceAnimationClock = false)
             assertEquals(paused, count())
             node("chat-control").performClick()
             await { count() > paused }

@@ -8,6 +8,7 @@ import app.daiyu.android.domain.runtime.ExecutionPhase
 import java.util.concurrent.TimeUnit
 
 class RunControlActivityTest : WiredActivityTestCase() {
+    override val requiresWindowDraw = true
     private fun send(): Message {
         setDraft("initial user"); node("chat-send").performClick()
         awaitTextSendResult(activity)
@@ -212,12 +213,16 @@ class RunControlActivityTest : WiredActivityTestCase() {
     fun testCompletedRunKeepsRealPresentationPauseAndResumeUntilTheLastCharacter() {
         try {
             val owner = completedTail()
+            captureScreenNode(ui.onRoot(), advanceAnimationClock = false)
+            val beforePause = visibleTailCharacters()
+            assertTrue("Painted body must be partial before pause: $beforePause", beforePause in 1 until 400)
             node("chat-control").performClick()
             ui.mainClock.advanceTimeBy(32)
             node("chat-control").assertContentDescriptionEquals("继续")
             val paused = visibleTailCharacters()
-            assertTrue(paused in 1 until 400)
+            assertTrue("Paused body prefix must remain partial: before=$beforePause paused=$paused", paused in 1 until 400)
             ui.mainClock.advanceTimeBy(1200)
+            captureScreenNode(ui.onRoot(), advanceAnimationClock = false)
             assertEquals("Pause must freeze the visible prefix", paused, visibleTailCharacters())
             assertNull(fixture.controller.active)
             assertEquals(1, fixture.opens.get())

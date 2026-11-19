@@ -246,6 +246,14 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     private fun verifyAnswerAdmission(mixed: Boolean, terminal: Boolean, streamed: Boolean = true,
         workflow: Boolean = true, history: Boolean = false, listEntry: Boolean = false, reconnect: Boolean = false) {
         prepare()
+        val paintSlots = MarkdownPaintSlotsProbe()
+        fun paintDump(): String {
+            var result = "not sampled"
+            instrumentation.runOnMainSync {
+                result = runCatching { paintSlots.sample("body") }.getOrElse { "probeFailure=${it.javaClass.simpleName}" }
+            }
+            return result
+        }
         val answer = "ANSWER " + "visible text ".repeat(18)
         runBlocking {
             projectMarkdown(listOf(answer))
@@ -262,6 +270,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                if (!listEntry) paintSlots.Capture("body")
                 val source = message((if (workflow) listOf(tool("t1")) else emptyList()) + if (ready) listOf(MessageBlock.Text("body", delivered)) else emptyList(), emptyList())
                     .copy(status = if (done) RunStatus.COMPLETED else RunStatus.RUNNING)
                 val reconnects = if (reconnect) listOf(app.daiyu.android.timeline.ChatTimelineEntry.Reconnect(
@@ -273,7 +282,8 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 if (listEntry) Box(Modifier.size(320.dp, 480.dp)) {
                     ChatMessageList(listOf(displayed), ChatScreenActions(
                         onVisibleTextAdvance = { advances.incrementAndGet() },
-                        onVisibleCompleted = { settled.set(it.isNotEmpty()) }), timeline = reconnects)
+                        onVisibleCompleted = { settled.set(it.isNotEmpty()) }),
+                        turnExtras = { paintSlots.Capture("body") }, timeline = reconnects)
                 } else if (reconnect) ReconnectedAssistantTurn(displayed, reconnectParts(displayed, reconnects), ChatScreenActions(),
                     onVisibleAdvance = { advances.incrementAndGet() }, onRevealSettled = { settled.set(it) })
                 else AssistantTurn(displayed, ChatScreenActions(),
@@ -303,22 +313,34 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             val textMatcher = hasTestTag("message-content-text:0") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Text)
             var firstVisible: String? = null
             val admissionFrames = ArrayDeque<String>()
-            ui.waitUntil(5_000) {
-                ui.mainClock.advanceTimeByFrame()
-                val bodies = ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
-                val currentText = bodies.firstOrNull()?.config?.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }
-                val workflowExists = ui.onAllNodesWithTag("tool-step:t1").fetchSemanticsNodes().isNotEmpty()
-                admissionFrames.addLast("clock=${ui.mainClock.currentTime} workflow=$workflowExists " +
-                    "shown=${currentText?.length} feedback=${advances.get()} settled=${settled.get()}")
-                if (admissionFrames.size > 24) admissionFrames.removeFirst()
-                if (workflowExists) {
-                    assertTrue("No answer text may overlap the closing workflow", currentText.isNullOrEmpty())
-                    assertEquals("No body feedback during workflow exit", 0, advances.get())
-                    assertFalse("Hidden body is not fully revealed", settled.get())
-                } else if (!currentText.isNullOrEmpty()) firstVisible = currentText
-                firstVisible != null
+            val admissionPaints = ArrayDeque<String>()
+            var lastPaintFeedback = advances.get()
+            try {
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    val bodies = ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
+                    val currentText = bodies.firstOrNull()?.config?.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }
+                    val workflowExists = ui.onAllNodesWithTag("tool-step:t1").fetchSemanticsNodes().isNotEmpty()
+                    admissionFrames.addLast("clock=${ui.mainClock.currentTime} workflow=$workflowExists " +
+                        "shown=${currentText?.length} feedback=${advances.get()} settled=${settled.get()}")
+                    if (admissionFrames.size > 24) admissionFrames.removeFirst()
+                    val feedback = advances.get()
+                    if (feedback != lastPaintFeedback && currentText.isNullOrEmpty()) {
+                        lastPaintFeedback = feedback
+                        admissionPaints.addLast("clock=${ui.mainClock.currentTime} feedback=$feedback\n${paintDump()}")
+                        if (admissionPaints.size > 8) admissionPaints.removeFirst()
+                    }
+                    if (workflowExists) {
+                        assertTrue("No answer text may overlap the closing workflow", currentText.isNullOrEmpty())
+                        assertEquals("No body feedback during workflow exit", 0, advances.get())
+                        assertFalse("Hidden body is not fully revealed", settled.get())
+                    } else if (!currentText.isNullOrEmpty()) firstVisible = currentText
+                    firstVisible != null
+                }
+            } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+                throw AssertionError("Answer admission timed out: trace=$admissionFrames\n$admissionPaints", timeout)
             }
-            assertTrue("The first received chunk must actually type after workflow disposal: first=$firstVisible trace=$admissionFrames",
+            assertTrue("The first received chunk must actually type after workflow disposal: first=$firstVisible trace=$admissionFrames\n$admissionPaints",
                 firstVisible!!.length in 1 until firstChunk.length)
             assertTrue(firstChunk.startsWith(firstVisible!!))
             assertTrue(advances.get() > 0)

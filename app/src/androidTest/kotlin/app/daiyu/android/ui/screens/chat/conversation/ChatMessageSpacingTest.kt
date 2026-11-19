@@ -28,6 +28,15 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
     private var attachmentHeight by mutableStateOf(0.dp)
     private var density = 1f
     private var liveGeometry: () -> String = { "not sampled" }
+    private val paintSlots = MarkdownPaintSlotsProbe()
+
+    private fun paintDump(key: String): String {
+        var result = "not sampled"
+        instrumentation.runOnMainSync {
+            result = runCatching { paintSlots.sample(key) }.getOrElse { "probeFailure=${it.javaClass.simpleName}" }
+        }
+        return result
+    }
 
     private fun answer(marker: String, lines: Int = 60) =
         List(lines) { "正文第${it + 1}行，检查长回复末尾与输入区的间距。" }.joinToString("\n") + "\n\n$marker"
@@ -49,6 +58,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     SideEffect { density = currentDensity }
                     Box(Modifier.requiredWidth(320.dp).fillMaxHeight().testTag("spacing-host")) {
                         DaiyuChatScreen(screen, ChatScreenActions(), hasTurnExtras = { !plainText }, turnExtras = { turn ->
+                            if (turn.id == "tail" || turn.id == "start-reply") paintSlots.Capture(turn.id)
                             if (turn.id == "start-reply") {
                                 val viewport = LocalWorkflowDisclosureContext.current?.viewport
                                 val clearance = LocalStreamingTextClearance.current
@@ -97,7 +107,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                 }
             }
         } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
-            throw AssertionError("Compact tail after composer growth: $lastGeometry", timeout)
+            throw AssertionError("Compact tail after composer growth: $lastGeometry\n${paintDump("tail")}", timeout)
         }
         awaitVisualIdle()
         awaitVisualIdle()
@@ -288,7 +298,8 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                 if (shown == received) batchReached = true
                 if (frame % 30 == 29) assertEquals("Every received batch must finish within its original frame budget: " +
                     "frame=$frame clock=${ui.mainClock.currentTime} lengths=$lengths received=${received.length} " +
-                    "shown=${shown.length} geometry=${liveGeometry()}", received, shown)
+                    "shown=${shown.length} geometry=${liveGeometry()}" +
+                    if (received != shown) "\n${paintDump("start-reply")}" else "", received, shown)
                 if (shown.length in batchStart + 1 until received.length) batchTyped = true
                 lengths += shown.length
                 if (frame % 10 == 0 || frame == 89) geometryFrames += "frame=$frame ${liveGeometry()}"

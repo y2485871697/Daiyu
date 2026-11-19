@@ -82,7 +82,7 @@ internal fun ReportedReasoningCard(
     val hasSummary = summaries.isNotEmpty()
     val arrived = appearance?.arrived != false
     val visualScope = LocalWorkflowVisualScope.current
-    val paused = LocalReasoningPaused.current
+    val paused = LocalReasoningPaused.current || LocalReplyPlayback.current?.paused == true
     val colors = conversationColors()
     var observedLive by rememberSaveable(ownerKey) { mutableStateOf(isThinking) }
     SideEffect { if (isThinking) observedLive = true }
@@ -133,16 +133,22 @@ internal fun ReportedReasoningCard(
                     )
                 }
             }
-            ReasoningSummaryDisplay(summary, projection, reveal, firstPresentation,
+            var displayedCompletion by remember(ownerKey, summary.itemId, text, sourceWindow,
+                MarkdownParserIdentity(LocalMarkdownParser.current), revealResetEpoch, isThinking) { mutableStateOf(false) }
+            val fullyDisplayed = !isThinking && !paused && revealEnabled && reveal.publication.active && reveal.settled
+            // Shrinking the disclosure must not invalidate text already fully drawn for this source.
+            SideEffect { if (fullyDisplayed) displayedCompletion = true }
+            val displaySettled = displayedCompletion || reveal.settled
+            ReasoningSummaryDisplay(summary, projection, reveal, firstPresentation, displaySettled,
                 waitingForReveal = firstPresentation && projection?.sources != listOf(text) ||
-                    revealEnabled && (observedDisplayLive || firstPresentation) && !reveal.settled)
+                    revealEnabled && (observedDisplayLive || firstPresentation) && !displaySettled)
         }
     }
-    val settled = summaryDisplays.all { it.reveal.settled }
+    val settled = summaryDisplays.all { it.displaySettled }
     val presenting = observedLive || summaryDisplays.any { it.firstPresentation }
     val waitingForReveal = summaryDisplays.any { it.waitingForReveal }
     val displayThinking = isThinking
-    val displayPaused = LocalReplyPlayback.current?.paused == true
+    val displayPaused = paused
     val disclosureExpanded = currentOverride ?: (!stopped && (isThinking || presenting && (!settled || waitingForReveal)))
     val expanded = hasSummary && disclosureExpanded && summaryDisplays.any { display ->
         display.projection?.sources?.any(::hasReportedReasoningText) == true
@@ -231,6 +237,7 @@ private data class ReasoningSummaryDisplay(
     val projection: MarkdownProjection?,
     val reveal: MarkdownReveal,
     val firstPresentation: Boolean,
+    val displaySettled: Boolean,
     val waitingForReveal: Boolean,
 )
 
@@ -298,7 +305,7 @@ internal fun ReasoningStepRow(
 ) {
     val colors = conversationColors()
     val lineMotion = LocalWorkflowLineMotion.current
-    val displayPaused = LocalReplyPlayback.current?.paused == true
+    val displayPaused = LocalReasoningPaused.current || LocalReplyPlayback.current?.paused == true
     val appearance = rememberWorkflowToolAppearance("reasoning:${reported.itemId}")
     ReportedReasoningCard("$ownerKey:reasoning:${reported.itemId}", listOf(reported),
         allowLiveTiming = allowLiveTiming, generationComplete = generationComplete, stopped = stopped, embedded = true,

@@ -920,6 +920,8 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             repeat(12) {
                 ui.mainClock.advanceTimeByFrame()
                 assertEquals("No new input cannot advance text", 240, count())
+                ui.onAllNodesWithTag("chat-control").assertCountEquals(0)
+                node("chat-send").assertContentDescriptionEquals("发送")
             }
             assertEquals("Presentation controls must not reopen the model", 0, backendControls)
         } catch (failure: Throwable) {

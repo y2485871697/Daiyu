@@ -68,8 +68,10 @@ jobs:
           from pathlib import Path
           scope = os.environ['WORKFLOW_CHECK_SCOPE']
           names = {
-              'task-scroll': ('tests/test_streaming_occlusion_contract.py', 'tests/test_chat_resume_scroll_contract.py'),
-              'workflow': ('tests/test_streaming_occlusion_contract.py', 'tests/test_chat_resume_scroll_contract.py'),
+              'task-scroll': ('tests/test_streaming_occlusion_contract.py', 'tests/test_chat_resume_scroll_contract.py',
+                             'tests/test_task_scroll_smoke_scope.py', 'tests/test_reasoning_typewriter_contract.py'),
+              'workflow': ('tests/test_streaming_occlusion_contract.py', 'tests/test_chat_resume_scroll_contract.py',
+                             'tests/test_task_scroll_smoke_scope.py', 'tests/test_reasoning_typewriter_contract.py'),
               'message-actions': ('tests/test_pane_question_smoke_scope.py', 'tests/test_message_confirmation_contract.py'),
           }[scope]
           files = []

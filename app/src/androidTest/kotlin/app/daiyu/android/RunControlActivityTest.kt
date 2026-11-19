@@ -6,10 +6,62 @@ import androidx.compose.ui.test.*
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.ExecutionPhase
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicReference
+import app.daiyu.android.ui.screens.chat.conversation.projectMarkdown
+import kotlinx.coroutines.runBlocking
 
 class RunControlActivityTest : WiredActivityTestCase() {
     override val requiresWindowDraw: Boolean
         get() = name == "testCompletedRunKeepsRealPresentationPauseAndResumeUntilTheLastCharacter"
+    private class ParserGate : AutoCloseable {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        private val failure = AtomicReference<Throwable?>()
+        private val worker = kotlin.concurrent.thread(name = "presentation-parser-gate") {
+            try {
+                runBlocking {
+                    projectMarkdown(listOf("parser gate ${java.util.UUID.randomUUID()}"), parser = { source ->
+                        entered.countDown()
+                        check(release.await(30, TimeUnit.SECONDS)) { "Presentation parser gate was not released" }
+                        MarkdownParser.parse(source)
+                    })
+                }
+            } catch (problem: Throwable) { failure.set(problem) }
+        }
+        override fun close() {
+            release.countDown()
+            worker.join(5_000)
+            check(!worker.isAlive) { "Presentation parser gate did not finish" }
+            failure.get()?.let { throw AssertionError("Presentation parser gate failed", it) }
+        }
+    }
+    private val parserGates = mutableListOf<ParserGate>()
+    private fun holdParser(): ParserGate = ParserGate().also { gate ->
+        parserGates += gate
+        assertTrue("Production interactive parser lane must be held", gate.entered.await(5, TimeUnit.SECONDS))
+    }
+    override fun cleanupFixture() {
+        var failure: Throwable? = null
+        fun remember(problem: Throwable) {
+            val first = failure
+            if (first == null) failure = problem else first.addSuppressed(problem)
+        }
+        parserGates.forEach { it.release.countDown() }
+        parserGates.forEach { gate -> try { gate.close() } catch (problem: Throwable) { remember(problem) } }
+        parserGates.clear()
+        try { super.cleanupFixture() } catch (problem: Throwable) { remember(problem) }
+        failure?.let { throw it }
+    }
+    private fun receivedBaseline(session: RunControlFixture.Session, character: Char = '甲') {
+        checkNotNull(session.sink.get())(ModelEvent.TextDelta("body",
+            "received ${java.util.UUID.randomUUID()} " + character.toString().repeat(80)))
+        ui.waitUntil(10_000) {
+            ui.mainClock.advanceTimeBy(32)
+            visibleTailCharacters(character) == 80
+        }
+        if (requiresWindowDraw) captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
+    }
     private fun send(): Message {
         setDraft("initial user"); node("chat-send").performClick()
         awaitTextSendResult(activity)
@@ -121,9 +173,11 @@ class RunControlActivityTest : WiredActivityTestCase() {
         try {
             target.performTouchInput { down(center) }
             first.release.countDown(); awaitControl("old owner completed") { fixture.controller.active == null }
-            val second = fixture.session("乙".repeat(400), holdSeconds = 120); val conversation = fixture.database.conversations().single()
+            val second = fixture.session("乙".repeat(320), holdSeconds = 120); val conversation = fixture.database.conversations().single()
             assertNotNull(fixture.controller.send(conversation, "next user"))
             val next = checkNotNull(fixture.controller.active); assertTrue(second.entered.await(5, TimeUnit.SECONDS))
+            receivedBaseline(second, '乙')
+            holdParser()
             ui.mainClock.advanceTimeBy(32)
             controlMain { oldLong() }
             ui.mainClock.advanceTimeBy(android.view.ViewConfiguration.getLongPressTimeout().toLong() + 200L)
@@ -141,7 +195,7 @@ class RunControlActivityTest : WiredActivityTestCase() {
             second.release.countDown(); awaitControl("next run unaffected") { fixture.controller.active == null }
             ui.waitUntil(10_000) {
                 ui.mainClock.advanceTimeBy(32)
-                visibleTailCharacters('乙') in 1 until 400
+                visibleTailCharacters('乙') == 80
             }
             node("chat-control").assertContentDescriptionEquals("暂停")
             assertEquals(RunStatus.COMPLETED, fixture.database.messages(old.conversationId).last().second.status)
@@ -155,15 +209,17 @@ class RunControlActivityTest : WiredActivityTestCase() {
         .sumOf { text -> text.text.count { it == character } }
 
     private fun completedTail(): Message {
-        val session = fixture.session("终态输出" + "甲".repeat(400))
+        val session = fixture.session("甲".repeat(320), holdSeconds = 120)
         val owner = send()
         assertTrue(session.entered.await(5, TimeUnit.SECONDS))
         ui.mainClock.autoAdvance = false
+        receivedBaseline(session)
+        holdParser()
         session.release.countDown()
         awaitControl("backend is completed before the presentation") { fixture.controller.active == null }
         ui.waitUntil(10_000) {
             ui.mainClock.advanceTimeBy(32)
-            visibleTailCharacters() in 1 until 400
+            visibleTailCharacters() == 80
         }
         node("chat-control").assertIsEnabled().assertContentDescriptionEquals("暂停")
         assertEquals(RunStatus.COMPLETED, fixture.database.messages(owner.conversationId).last().second.status)
@@ -179,11 +235,14 @@ class RunControlActivityTest : WiredActivityTestCase() {
             val old = completedTail()
             val root = ui.onNode(isRoot() and hasAnyDescendant(hasTestTag("chat-draft")))
             node("chat-control").performTouchInput { down(center) }
-            val nextSession = fixture.session("乙".repeat(400), holdSeconds = 120)
+            val nextSession = fixture.session("乙".repeat(320), holdSeconds = 120)
             val conversation = fixture.database.conversations().single()
             assertNotNull(fixture.controller.send(conversation, "next user"))
             val next = checkNotNull(fixture.controller.active)
             assertTrue(nextSession.entered.await(5, TimeUnit.SECONDS))
+            parserGates.last().release.countDown()
+            receivedBaseline(nextSession, '乙')
+            holdParser()
             ui.mainClock.advanceTimeBy(32)
             if (longPress) {
                 ui.mainClock.advanceTimeBy(android.view.ViewConfiguration.getLongPressTimeout().toLong() + 200L)
@@ -202,7 +261,7 @@ class RunControlActivityTest : WiredActivityTestCase() {
             awaitControl("next run survives the presentation gesture") { fixture.controller.active == null }
             ui.waitUntil(10_000) {
                 ui.mainClock.advanceTimeBy(32)
-                visibleTailCharacters('乙') in 1 until 400
+                visibleTailCharacters('乙') == 80
             }
             node("chat-control").assertContentDescriptionEquals("暂停")
             assertEquals(2, fixture.opens.get())
@@ -216,12 +275,17 @@ class RunControlActivityTest : WiredActivityTestCase() {
             val owner = completedTail()
             captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
             val beforePause = visibleTailCharacters()
-            assertTrue("Painted body must be partial before pause: $beforePause", beforePause in 1 until 400)
+            assertEquals("The drawn baseline must precede the late parsed suffix", 80, beforePause)
             node("chat-control").performClick()
             ui.mainClock.advanceTimeBy(32)
             node("chat-control").assertContentDescriptionEquals("继续")
             val paused = visibleTailCharacters()
-            assertTrue("Paused body prefix must remain partial: before=$beforePause paused=$paused", paused in 1 until 400)
+            assertEquals("Pause must retain the received drawn baseline", beforePause, paused)
+            parserGates.last().release.countDown()
+            repeat(12) {
+                ui.mainClock.advanceTimeByFrame()
+                assertEquals("Late parsing must not cross the paused paint frontier", paused, visibleTailCharacters())
+            }
             ui.mainClock.advanceTimeBy(1200)
             captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
             assertEquals("Pause must freeze the visible prefix", paused, visibleTailCharacters())
@@ -230,13 +294,11 @@ class RunControlActivityTest : WiredActivityTestCase() {
             node("chat-control").performClick()
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeBy(16)
-                visibleTailCharacters() > paused
-            }
-            assertTrue("Resume must not jump to the end", visibleTailCharacters() < 400)
-            node("chat-control").assertContentDescriptionEquals("暂停")
-            ui.waitUntil(15_000) {
-                ui.mainClock.advanceTimeBy(64)
                 visibleTailCharacters() == 400
+            }
+            repeat(12) {
+                ui.mainClock.advanceTimeByFrame()
+                assertEquals("Without new input the received frontier must not grow", 400, visibleTailCharacters())
             }
             ui.mainClock.advanceTimeBy(64)
             node("chat-control").assertDoesNotExist()

@@ -105,20 +105,27 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
     private fun assertCompletionWaitsForVisibleText(path: Path, terminal: Boolean) {
         val baseline = "思考开头"
         val pending = baseline + "继续显示".repeat(90)
-        prepare(baseline, pending)
+        val parsing = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val parser: (String) -> List<app.daiyu.android.MarkdownBlock> = { source ->
+            if (source == pending) { parsing.countDown(); release.await() }
+            MarkdownParser.parse(source)
+        }
         ui.mainClock.autoAdvance = false
         var value by mutableStateOf(turn(path, baseline))
         var advances = 0
         try {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    AssistantTurn(value, ChatScreenActions(), onVisibleAdvance = { advances++ })
+                    CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                        AssistantTurn(value, ChatScreenActions(), onVisibleAdvance = { advances++ })
+                    }
                 }
             } }
             await { visibleText().contains(baseline) }
             mainThread { value = turn(path, pending) }
-            await { advances > 0 }
-            await { visibleText().contains(pending) }
+            await { parsing.count == 0L }
+            assertFalse(visibleText().contains(pending))
             val finished = turn(path, pending, live = terminal)
             instrumentation.runOnMainSync {
                 value = if (terminal) finished.copy(status = RunStatus.COMPLETED, isStreaming = false,
@@ -126,27 +133,29 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                 else finished.copy(status = RunStatus.RUNNING, isStreaming = true,
                     workProcess = finished.workProcess?.copy(running = true))
             }
-            ui.waitUntil(5_000) {
-                ui.mainClock.advanceTimeByFrame()
-                if (!visibleText().contains(pending)) {
-                    ui.onNodeWithText("正在显示…").assertExists()
-                    ui.onNodeWithText("已思考").assertDoesNotExist()
-                    ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)
-                        .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))
-                    ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertExists()
-                    ui.onNodeWithText("正在思考…").assertDoesNotExist()
-                    ui.onNodeWithTag("work-process-header").assert(
-                        SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
-                    false
-                } else true
+            await {
+                ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true).fetchSemanticsNode()
+                    .config[SemanticsProperties.StateDescription] == "已思考"
             }
+            assertFalse(visibleText().contains(pending))
+            ui.onNodeWithText("正在显示…").assertExists()
+            ui.onNodeWithText("已思考").assertDoesNotExist()
+            ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))
+            ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertExists()
+            ui.onNodeWithText("正在思考…").assertDoesNotExist()
+            ui.onNodeWithTag("work-process-header").assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
+            release.countDown()
+            await { advances > 0 }
+            await { visibleText().contains(pending) }
             await { ui.onAllNodesWithText("正在显示…").fetchSemanticsNodes().isEmpty() }
             ui.onNodeWithText("已思考").assertExists()
             ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))
             ui.onNodeWithText("正在思考…").assertDoesNotExist()
             ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertExists()
-        } finally { ui.mainClock.autoAdvance = true }
+        } finally { release.countDown(); ui.mainClock.autoAdvance = true }
     }
 
     fun testStandaloneFinalWaitsForVisibleThought() = assertCompletionWaitsForVisibleText(Path.STANDALONE, false)

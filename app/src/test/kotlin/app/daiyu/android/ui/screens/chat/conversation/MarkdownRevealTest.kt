@@ -13,7 +13,7 @@ class MarkdownRevealTest {
         val currentCanAdvance = mutableStateOf(true)
         val state = MarkdownTypingState(listOf(source("")))
         state.update(listOf(part("")), 0, streaming = true, terminal = false)
-        val target = state.update(listOf(part("字".repeat(200))), 0, streaming = true, terminal = false)!!
+        val target = state.update(listOf(part("字".repeat(200))), 0, streaming = false, terminal = true, paceTerminal = true)!!
         var advances = 0
         val queuedFrame: (Long) -> Int = { nanos ->
             if (markdownTypingCanAdvance(currentCanAdvance.value, currentPlayback.value)) {

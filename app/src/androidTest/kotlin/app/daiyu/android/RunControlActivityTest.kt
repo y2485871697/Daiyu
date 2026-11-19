@@ -8,7 +8,8 @@ import app.daiyu.android.domain.runtime.ExecutionPhase
 import java.util.concurrent.TimeUnit
 
 class RunControlActivityTest : WiredActivityTestCase() {
-    override val requiresWindowDraw = true
+    override val requiresWindowDraw: Boolean
+        get() = name == "testCompletedRunKeepsRealPresentationPauseAndResumeUntilTheLastCharacter"
     private fun send(): Message {
         setDraft("initial user"); node("chat-send").performClick()
         awaitTextSendResult(activity)

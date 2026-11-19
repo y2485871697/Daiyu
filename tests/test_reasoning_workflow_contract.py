@@ -90,8 +90,8 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertNotIn('key(revealEnabled)', card)
         gate = card[card.index('val revealGate ='):card.index('val revealEnabled =')]
         self.assertNotIn('hasReportedReasoningText', gate)
-        for token in ('live = isThinking', 'paceTerminal = queuedForArrival',
-                      'initialBaseline = if (queuedForArrival) emptyList() else null',
+        for token in ('live = isThinking || firstPresentation,', 'paceTerminal = firstPresentation,',
+                      'initialBaseline = if (firstPresentation) emptyList() else null,',
                       'onHandoffReady(appearance?.settled != false && handoffReady)'):
             self.assertIn(token, card)
         body = card[card.index('AnimatedVisibility('):card.index('internal fun rememberReasoningElapsed(')]
@@ -251,7 +251,9 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
 
     def test_handoff_waits_for_reveal_and_exit_before_releasing_successors(self):
         card = ' '.join((CHAT / 'ReportedReasoningCard.kt').read_text().split())
-        self.assertIn('val handoffReady = stopped || !observedLive || !isThinking && settled && '
+        self.assertIn('val presenting = observedLive || summaryDisplays.any { it.firstPresentation }', card)
+        self.assertIn('val waitingForReveal = summaryDisplays.any { it.waitingForReveal }', card)
+        self.assertIn('val handoffReady = stopped || !presenting || !paused && !isThinking && settled && !waitingForReveal && '
                       '(manualExpansion || visibility.isIdle && !visibility.currentState && !visibility.targetState)', card)
         self.assertIn('SideEffect { onHandoffReady(appearance?.settled != false && handoffReady) }', card)
         handoff = (CHAT / 'ReasoningHandoff.kt').read_text()

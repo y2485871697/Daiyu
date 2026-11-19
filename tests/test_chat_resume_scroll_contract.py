@@ -52,14 +52,16 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn('val viewport = Triple(layout.viewportSize, layout.beforeContentPadding, currentOcclusionPx + currentFollowClearancePx)', ' '.join(follow.split()))
         self.assertNotIn('val viewport = Triple(layout.viewportSize, layout.beforeContentPadding, layout.afterContentPadding)', ' '.join(follow.split()))
         self.assertIn('internal val ChatTailClearance = 8.dp', self.chat)
-        self.assertIn('readyTurns[tail.listKey] == tail && revealedTurns[tail.listKey] == tail', follow)
+        resume = follow.split('val resumeReady =', 1)[1].split('Triple(canFollowBottom()', 1)[0]
+        self.assertIn('readyTurns[tail.listKey] == tail', resume)
+        self.assertNotIn('revealedTurns', resume)
         self.assertIn('if (followDistance <= 0f)', follow)
-        self.assertIn('val alignment = alignViewport || resumeFollowPending', follow)
+        self.assertIn('val alignment = (alignViewport || resumeFollowPending) && !currentNestedTail.textClearance.pacedFollowing', follow)
         self.assertIn('var delta = if (alignment) followDistance else 0f', follow)
         self.assertIn('val frameFollowDistance = maxOf(frameOverflow.toFloat(), frameObscuredTail.toFloat())', follow)
         self.assertIn('delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity, continuous = currentNestedTail.textClearance.typingPending)', ' '.join(follow.split()))
         self.assertIn('while (canFollowBottom())', follow)
-        self.assertIn('readyTurns[tail.listKey] == tail && revealedTurns[tail.listKey] == tail', follow)
+        self.assertIn('currentNestedTail.textClearance.finishPacedFollow()', follow)
         self.assertIn('overflow.toFloat()', follow)
         self.assertIn('motion.reset()', follow)
         stream = follow.split('val visibleBottom', 1)[1]
@@ -82,7 +84,7 @@ class ChatResumeScrollContract(unittest.TestCase):
             'terminal = generationComplete, resetEpoch = revealResetEpoch, '
             'onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources, '
             'live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true, '
-            'initialBaseline = initialBaseline)',
+            'initialBaseline = initialBaseline, presentationLane = "body:${turn.listKey}")',
             ' '.join(self.chat.split()),
         )
         self.assertIn(
@@ -94,8 +96,9 @@ class ChatResumeScrollContract(unittest.TestCase):
         narration = (BASE / 'WorkflowNarration.kt').read_text()
         self.assertIn('private val bodyOwners = mutableSetOf<String>()', narration)
         self.assertIn('if (bodyOwners.add(key) && !baseline && live) emptyList() else sources.toList()', narration)
-        self.assertIn('remember(identity, resetEpoch) { (initialBaseline ?: sources).toList() }', self.typing)
-        self.assertIn('remember(identity, resetEpoch) { MarkdownTypingState(baseline) }', self.typing)
+        self.assertIn('remember(identity, resetEpoch, retainedLane) { retainedLane?.baseline ?: (initialBaseline ?: sources).toList() }', self.typing)
+        self.assertIn('remember(identity, resetEpoch, retainedLane) { retainedLane?.motion ?: MarkdownTypingState(baseline) }', self.typing)
+        self.assertIn('remember(playback?.control, presentationLane, identity, resetEpoch)', self.typing)
         self.assertIn(
             'return rememberMarkdownReveal(sources, prefixProjection, turn.isStreaming, '
             'turn.status != RunStatus.RUNNING && prefix.size == turn.content.size, resetEpoch, onVisibleAdvance, enabled, '
@@ -105,13 +108,17 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn('remember(motion, parts, baselineLength, streaming, targetTerminal, live, paceTerminal)', self.typing)
         self.assertIn('motion.update(parts, baselineLength, streaming, targetTerminal, live, paceTerminal)', self.typing)
         self.assertNotIn('key(revealResetEpoch)', self.chat)
-        resume_gate = (
+        resume_prefix = (
             'resumeFollowPending && tail != null && !tail.isStreaming && '
             'layout.visibleItemsInfo.any { it.key == tail.listKey } && '
-            '(readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)'
         )
         normalized_chat = ' '.join(self.chat.split())
-        self.assertEqual(2, normalized_chat.count(resume_gate))
+        self.assertEqual(1, normalized_chat.count(resume_prefix + 'readyTurns[tail.listKey] != tail'))
+        self.assertEqual(1, normalized_chat.count(resume_prefix +
+            '(readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)'))
+        resume = self.chat.split('val resumeReady =', 1)[1].split('Triple(canFollowBottom()', 1)[0]
+        self.assertIn('readyTurns[tail.listKey] == tail', resume)
+        self.assertNotIn('revealedTurns', resume)
         self.assertNotIn('if (tail.isStreaming) displayedTurns[tail.listKey]', normalized_chat)
         self.assertNotIn('displayedTurns[tail.listKey] != tail', normalized_chat)
         self.assertIn('val contentReady = projection?.sources == sources', self.chat)

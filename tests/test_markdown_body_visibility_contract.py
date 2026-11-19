@@ -51,7 +51,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         narration = (BASE / 'WorkflowNarration.kt').read_text()
         motion = (BASE / 'MarkdownReveal.kt').read_text()
         self.assertIn('live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true,', chat)
-        self.assertIn('initialBaseline = initialBaseline)', chat)
+        self.assertIn('initialBaseline = initialBaseline, presentationLane = "body:${turn.listKey}")', chat)
         self.assertNotIn('paceTerminal = true', narration)
         self.assertIn('expected.streaming || expected.terminal && expected.paceTerminal', motion)
         self.assertIn('else 70.0', motion)
@@ -82,7 +82,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('visibility = budget, paintOffset = paintOffset + offsets[column])', row)
         inline = ui.split('private fun MarkdownInlineText(', 1)[1].split('private fun MarkdownBlocks(', 1)[0]
         self.assertIn('ClearanceText(visible, paintOffset, modifier, style)', inline)
-        clearance = ui.split('private fun ClearanceText(', 1)[1].split('private fun TextLayoutResult.canPaintPrefixOf', 1)[0]
+        clearance = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun TextLayoutResult.canPaintPrefixOf', 1)[0]
         self.assertIn('BasicText(text, modifier.onPlaced', clearance)
         self.assertIn('clearance.fits(frame.coordinates, size.height.toInt())', clearance)
         self.assertIn('SelectionContainer {', ui)

@@ -74,15 +74,46 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn('val candidateText = if (playback?.paused == true) displayed?.layoutInput?.text ?: AnnotatedString("") else text', leaf)
         self.assertIn("measurer.measure(candidateText, style", leaf)
         self.assertIn("}, style, softWrap = softWrap, onTextLayout", leaf)
-        self.assertIn("fun published(): Boolean = text.isEmpty() || frame.drawn?.let", leaf)
+        publication = leaf.split("fun published(): Boolean =", 1)[1].split("fun placed(", 1)[0]
+        self.assertEqual(" ".join(publication.split()),
+                         "text.isEmpty() || frame.layout?.let { candidate -> "
+                         "candidate.layoutInput.text == text && clearance.whollyAboveViewport(frame.coordinates, "
+                         "maxOf(candidate.size.height, frame.coordinates?.size?.height ?: 0)) "
+                         "} == true || frame.drawn?.let { actual -> "
+                         "actual.layoutInput.text == text && frame.layout?.let { actual.canPaintPrefixOf(it) } == true && "
+                         "clearance.fits(frame.coordinates, actual.size.height) } == true")
+        self.assertNotIn("frame.drawn =", publication)
+        self.assertNotIn("painted[", publication)
         self.assertIn("!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text", leaf)
         placed, drawn = leaf.split(".drawWithContent {", 1)
         self.assertNotIn("painted[paintOffset] =", placed)
+        self.assertNotIn("frame.drawn =", placed)
         self.assertLess(drawn.index("drawContent()"), drawn.index("frame.drawn = actual"))
         self.assertLess(drawn.index("frame.drawn = actual"), drawn.index("publication?.setPending"))
         layout = drawn.split("onTextLayout = {", 1)[1]
         self.assertIn("frame.rendered = it", layout)
         self.assertNotIn("publication?.setPending", layout)
+        self.assertNotIn("frame.drawn =", layout)
+        self.assertNotIn("painted[paintOffset] =", layout)
+
+    def test_wholly_offscreen_receipt_does_not_relax_visible_paint_or_other_owners(self):
+        source = CHAT.read_text()
+        geometry = source.split("fun whollyAboveViewport(", 1)[1].split("fun fits(", 1)[0]
+        for token in ("!positioned || height <= 0", "viewportGeometry ?: return false",
+                      "current.list?.takeIf { it.isAttached }", "current.viewport?.takeIf { it.isAttached }",
+                      "coordinates?.takeIf { it.isAttached }",
+                      "list.localPositionOf(leaf, Offset.Zero).y + height <= maxOf(0f, current.viewportTop)"):
+            self.assertIn(token, geometry)
+        self.assertIn("viewportGeometry = placed.takeIf { attached }", source)
+        self.assertIn("geometry = if (protect) placed else null", source)
+        markdown = (CHAT.parent / "MessageMarkdown.kt").read_text()
+        self.assertIn("snapshotFlow { publicationCheck() }.collect { publication?.setPending(owner, !it) }", markdown)
+        self.assertIn("onDispose { publication?.setPending(owner, false) }", markdown)
+        device = DEVICE.read_text().split("fun testUnpaintedLeafAboveViewportReleasesOnlyItsPendingReceipt()", 1)[1]
+        device = device.split("fun testProtectedCodeViewport", 1)[0]
+        for token in ("publication.setPending(otherOwner, true)", "publication.setPending(otherOwner, false)",
+                      "assertFalse", "origin = (-120).dp", "origin = 240.dp", "origin = 0.dp"):
+            self.assertIn(token, device)
 
     def test_code_and_workflow_placement_publish_only_changed_height_and_keep_full_border_geometry(self):
         code = (CHAT.parent / "MarkdownCodeReveal.kt").read_text()

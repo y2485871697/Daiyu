@@ -110,6 +110,15 @@ class WorkflowNarrationContract(unittest.TestCase):
         self.assertIn('fullyClosed && !contentMounted', card)
         self.assertIn('workflowTimeline = true', chat)
 
+    def test_node_check_reuses_the_existing_robolectric_repository(self):
+        workflow = (ROOT / '.github/workflows/chat-workflow-checks.yml').read_text()
+        setup = workflow.split('          robolectric_init=()', 1)[1].split('          ./gradlew', 1)[0]
+        self.assertIn('if [[ "$WORKFLOW_CHECK_SCOPE" == task-scroll || "$WORKFLOW_CHECK_SCOPE" == workflow-node-motion ]]; then', setup)
+        self.assertIn("systemProperty 'robolectric.dependency.repo.url', 'https://maven-central.storage-download.googleapis.com/maven2'", setup)
+        self.assertIn('robolectric_init=(-I "$RUNNER_TEMP/daiyu-robolectric-mirror.init.gradle")', setup)
+        self.assertIn('          fi\n          if [[ "$WORKFLOW_CHECK_SCOPE" == task-scroll ]]; then\n            domain_tasks=(:core-domain:test --tests app.daiyu.android.domain.BottomFollowMotionTest)', setup)
+        self.assertIn('-I scripts/cooperation/checks_only.init.gradle "${robolectric_init[@]}"', workflow)
+
 
 if __name__ == '__main__':
     unittest.main()

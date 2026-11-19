@@ -315,7 +315,7 @@ jobs:
           done
           robolectric_init=()
           domain_tasks=()
-          if [[ "$WORKFLOW_CHECK_SCOPE" == task-scroll ]]; then
+          if [[ "$WORKFLOW_CHECK_SCOPE" == task-scroll || "$WORKFLOW_CHECK_SCOPE" == workflow-node-motion ]]; then
             cat > "$RUNNER_TEMP/daiyu-robolectric-mirror.init.gradle" <<'GRADLE'
           gradle.projectsEvaluated {
               gradle.rootProject.project(':app').tasks.withType(org.gradle.api.tasks.testing.Test).configureEach {
@@ -328,6 +328,8 @@ jobs:
           GRADLE
             cp "$RUNNER_TEMP/daiyu-robolectric-mirror.init.gradle" workflow-checks/robolectric-mirror.init.gradle
             robolectric_init=(-I "$RUNNER_TEMP/daiyu-robolectric-mirror.init.gradle")
+          fi
+          if [[ "$WORKFLOW_CHECK_SCOPE" == task-scroll ]]; then
             domain_tasks=(:core-domain:test --tests app.daiyu.android.domain.BottomFollowMotionTest)
           fi
           ./gradlew --no-daemon --parallel --build-cache --console=plain \

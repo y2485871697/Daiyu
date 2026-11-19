@@ -14,7 +14,7 @@ class RunControlsContractTest(unittest.TestCase):
         model = (APP / 'ui/screens/chat/conversation/ChatScreenModels.kt').read_text()
         self.assertIn('val textAction = hasText', composer)
         self.assertIn('else actions.onSupplement(state.text)', composer)
-        self.assertIn('onLongClick = if (preparingSend) actions.onCancelSend else if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE) controlActions.onPrimaryLongPress', composer)
+        self.assertIn('onLongClick = if (mediaSubmitting) null else if (preparingSend) actions.onCancelSend else if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE) controlActions.onPrimaryLongPress', composer)
         self.assertIn('phase == ComposerPhase.IDLE || presentationOnly -> text.isNotBlank() || editingMessageCanSubmit || imageSendAvailable || videoSendAvailable', model)
         self.assertIn('else -> text.isNotBlank() && supplementAvailable', model)
         self.assertIn('if (state.phase == ComposerPhase.IDLE || state.presentationOnly) actions.onSend(state.text)', composer)

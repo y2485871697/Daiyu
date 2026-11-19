@@ -77,9 +77,9 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
         self.assertIn('val pressedActions = press.actions', composer)
         self.assertIn('pressedActions.onControlRelease()', composer)
         self.assertIn('view.post { if (pressed.value === press) pressed.value = null }', composer)
-        self.assertIn('if (preparingSend) Modifier else Modifier.controlGesture', composer)
+        self.assertIn('if (submitting) Modifier else Modifier.controlGesture', composer)
         self.assertIn('preparingSend -> "取消发送"', composer)
-        self.assertIn('!preparingSend && state.mainContextCompressing', composer)
+        self.assertIn('!submitting && state.mainContextCompressing', composer)
 
     def test_pending_draft_is_only_hidden_for_its_exact_editor_and_ticket(self):
         main = (APP / 'MainActivity.kt').read_text()

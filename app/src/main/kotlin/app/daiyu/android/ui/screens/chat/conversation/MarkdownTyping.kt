@@ -131,8 +131,10 @@ internal fun rememberMarkdownReveal(
     paceTerminal: Boolean = false,
     initialBaseline: List<MarkdownTypingSource>? = null,
     presentationLane: Any? = null,
+    awaitPaintAdmission: Boolean = false,
 ): MarkdownReveal {
     val currentAdvance by rememberUpdatedState(onVisibleAdvance)
+    val currentAwaitPaintAdmission by rememberUpdatedState(awaitPaintAdmission)
     val parser = LocalMarkdownParser.current
     val identity = MarkdownParserIdentity(parser)
     val playback = LocalReplyPlayback.current
@@ -192,11 +194,12 @@ internal fun rememberMarkdownReveal(
         if (!canAdvance) { motion.pause(current); return@produceState }
         val end = maxOf(shown, minOf(current.total, advanceLimit))
         while (shown < end) {
-            shown = withFrameNanos { frameNanos ->
-                if (markdownTypingCanAdvance(currentCanAdvance, currentPlayback) && textClearance?.held != true) motion.advance(current, frameNanos, end) { currentAdvance() }
+            withFrameNanos { frameNanos ->
+                shown = if (markdownTypingCanAdvance(currentCanAdvance, currentPlayback) && textClearance?.held != true &&
+                    (!currentAwaitPaintAdmission || publication.ready)) motion.advance(current, frameNanos, end) { currentAdvance() }
                 else { motion.pause(current); motion.visible(current) }
+                value = MarkdownTypingFrame(current, shown)
             }
-            value = MarkdownTypingFrame(current, shown)
         }
         if (end < current.total) motion.pause(current)
     }

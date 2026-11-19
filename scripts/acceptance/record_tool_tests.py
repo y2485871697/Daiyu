@@ -185,6 +185,8 @@ TASK_SCROLL_MODULES = (
     'test_reasoning_stream_cost_contract',
     'test_workflow_render_isolation_contract',
     'test_markdown_typing_contract',
+    'test_typewriter_haptics_contract',
+    'test_r77_candidate_repairs_contract.R77CandidateRepairsContract.test_spacing_keeps_original_wait_and_geometry_oracle_with_last_sample_diagnostics',
     'test_chat_resume_scroll_contract',
     'test_diagnostic_smoke_source',
     'test_record_tool_tests_scope',
@@ -608,6 +610,8 @@ WORKFLOW_BODY_MODULES = (
     "test_reasoning_workflow_contract", "test_workflow_narration_contract",
     "test_workflow_render_isolation_contract", "test_workflow_body_scope",
     "test_markdown_typing_contract", "test_chat_resume_scroll_contract",
+    "test_typewriter_haptics_contract",
+    "test_r77_candidate_repairs_contract.R77CandidateRepairsContract.test_spacing_keeps_original_wait_and_geometry_oracle_with_last_sample_diagnostics",
     "test_record_tool_tests_scope", "test_acceptance_tool_receipt",
     "test_smoke_boot.SourceTests.test_compile_source_requires_same_sha_and_explicit_targeted_scope",
 )

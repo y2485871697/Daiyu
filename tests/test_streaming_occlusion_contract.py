@@ -531,5 +531,24 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("The strict latest-line ink probe must detect the deliberately clipped line", source)
 
 
+    def test_header_probe_subtracts_the_actual_editor_background_without_masking_pixels(self):
+        source = DEVICE.read_text()
+        case = source.split("fun testNewToolHeaderHasNoPartialInkAtTheOriginalSafetyEdge()", 1)[1].split("private fun shortWorkflow", 1)[0]
+        for token in ("fun contrast(sample: Sample, index: Int)",
+                      "sample.x0 + index % sample.width + .5f",
+                      "sample.y0 + index / sample.width + .5f",
+                      "if (sample.surface.contains(at)) inkSurfaceColor else Color(sample.pixels[0])",
+                      "contrast(flatEditor, 0)", "contrast(editorWithInk, 0) > .22f",
+                      "reference.pixels.indices.filter { contrast(reference, it) > .22f }",
+                      "if (alpha <= .06f) continue", "* alpha - .05f",
+                      "sample.y0 + lastY + 1f > sample.safe + 1f", "repeat(48)",
+                      "movement >= -1f && movement <= 14f * density + 1f",
+                      "Original O+8dp safety gap must remain empty"):
+            self.assertIn(token, case)
+        contrast = case.split("fun contrast(sample: Sample, index: Int)", 1)[1].split("val flatEditor", 1)[0]
+        self.assertNotIn("return 0", contrast)
+        self.assertNotIn("continue", contrast)
+
+
 if __name__ == "__main__":
     unittest.main()

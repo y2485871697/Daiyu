@@ -195,8 +195,12 @@ jobs:
                           'test_workflow_render_isolation_contract.py', 'test_workflow_narration_contract.py',
                           'test_record_tool_tests_scope.py', 'test_reasoning_typewriter_contract.py',
                           'test_markdown_typing_contract.py', 'test_reported_reasoning_markdown_contract.py')
+          if os.environ['WORKFLOW_CHECK_SCOPE'] in ('task-scroll', 'workflow'):
+              patterns += ('test_typewriter_haptics_contract.py',
+                           'test_r77_candidate_repairs_contract.R77CandidateRepairsContract.test_spacing_keeps_original_wait_and_geometry_oracle_with_last_sample_diagnostics')
           for pattern in patterns:
-              suite = unittest.TestLoader().discover('tests', pattern=pattern)
+              suite = (unittest.TestLoader().discover('tests', pattern=pattern) if pattern.endswith('.py')
+                       else unittest.TestLoader().loadTestsFromName(pattern))
               discovered = suite.countTestCases()
               result = unittest.TextTestRunner(verbosity=2).run(suite)
               records.append(dict(pattern=pattern, tests=result.testsRun, skipped=len(result.skipped),

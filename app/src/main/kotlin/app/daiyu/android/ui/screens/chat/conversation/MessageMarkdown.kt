@@ -196,9 +196,9 @@ private val LocalMarkdownPaintedText = staticCompositionLocalOf<MutableMap<Int, 
 private class MarkdownTextFrame {
     var coordinates: LayoutCoordinates? = null
     var availableHeight by mutableStateOf(0f)
-    var layout: TextLayoutResult? = null
-    var rendered: TextLayoutResult? = null
-    var drawn: TextLayoutResult? = null
+    var layout by mutableStateOf<TextLayoutResult?>(null)
+    var rendered by mutableStateOf<TextLayoutResult?>(null)
+    var drawn by mutableStateOf<TextLayoutResult?>(null)
     var committed by mutableStateOf<TextLayoutResult?>(null)
 }
 
@@ -269,8 +269,12 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
         }
     }.onPlaced(::placed).onGloballyPositioned(::placed).drawWithContent {
         val available = minOf(frame.availableHeight, clearance.availableHeight(frame.coordinates))
-        val actual = frame.rendered?.takeIf { it.layoutInput.text == displayed?.layoutInput?.text }
         val frozen = playback?.paused == true
+        val selected = if (frozen) frame.drawn else frame.committed
+        val actual = frame.rendered?.takeIf { result ->
+            result.layoutInput.text == selected?.layoutInput?.text ||
+                (!frozen && selected?.let { result.canPaintPrefixOf(it) } == true)
+        }
         if (actual != null && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
             actual.size.height <= available + .01f && (!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text)) {
             drawContent()

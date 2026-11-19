@@ -5,6 +5,7 @@ import androidx.compose.runtime.BroadcastFrameClock
 import androidx.compose.runtime.Composition
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Recomposer
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.Snapshot
 import app.daiyu.android.MarkdownParser
@@ -74,6 +75,139 @@ class MarkdownAdmissionCompositionTest {
             assertTrue(lengths.zipWithNext().all { (before, after) -> after >= before })
             assertEquals(first.length, lengths.last())
             assertTrue(advances > 0)
+        } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
+    }
+
+    @Test fun bodyFirstPaintDebtSurvivesAppendAndDoesNotBlockAConcurrentLane() = runBlocking {
+        val clock = BroadcastFrameClock()
+        val recomposer = Recomposer(coroutineContext + clock)
+        val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
+        val composition = Composition(NoNodes(), recomposer)
+        val sources = mutableStateOf(emptyList<MarkdownTypingSource>())
+        val parsed = mutableStateOf(projectMarkdown(emptyList()))
+        val terminal = mutableStateOf(false)
+        val holdFirstPrefix = mutableStateOf(true)
+        val owner = Any()
+        var body: MarkdownReveal? = null
+        var narration: MarkdownReveal? = null
+        var bodyFeedback = 0
+        var narrationFeedback = 0
+        var time = 1_000_000_000L
+        suspend fun frame() {
+            Snapshot.sendApplyNotifications()
+            repeat(12) { yield() }
+            time += 16_000_000L
+            if (clock.hasAwaiters) clock.sendFrame(time)
+            repeat(12) { yield() }
+        }
+        try {
+            composition.setContent {
+                CompositionLocalProvider(LocalMarkdownReceiptClock provides { time }) {
+                    body = rememberMarkdownReveal(sources.value, parsed.value, streaming = !terminal.value,
+                        terminal = terminal.value, onVisibleAdvance = { bodyFeedback++ }, live = true,
+                        paceTerminal = true, presentationLane = "body", awaitPaintAdmission = true)
+                    narration = rememberMarkdownReveal(sources.value, parsed.value, streaming = !terminal.value,
+                        terminal = terminal.value, onVisibleAdvance = { narrationFeedback++ }, live = true,
+                        paceTerminal = true, presentationLane = "narration")
+                    val prefix = body!!.limit("answer")
+                    val hold = holdFirstPrefix.value
+                    SideEffect { if (hold && prefix > 0) body!!.publication.setPending(owner, true) }
+                }
+            }
+            repeat(4) { frame() }
+            body!!.publication.setPending(owner, true)
+            val first = "一二三四五六七八"
+            sources.value = listOf(MarkdownTypingSource("answer", first))
+            parsed.value = projectMarkdown(listOf(first))
+            repeat(120) { frame() }
+            assertEquals("Pre-existing paint debt must keep the first body budget at zero", 0, body!!.limit("answer"))
+            assertEquals(0, bodyFeedback)
+            assertEquals("A concurrent lane must not inherit body paint debt", first.length, narration!!.limit("answer"))
+            assertTrue(narrationFeedback > 0)
+            body!!.publication.setPending(owner, false)
+            repeat(20) { if (body!!.limit("answer") == 0) frame() }
+            assertEquals("The first pending prefix must be published in its own frame", 1, body!!.limit("answer"))
+            val feedback = bodyFeedback
+            val appended = first + "九十十一十二"
+            sources.value = listOf(MarkdownTypingSource("answer", appended))
+            parsed.value = projectMarkdown(listOf(appended))
+            terminal.value = true
+            repeat(120) { frame() }
+            assertEquals("Append and terminal transition must retain the first paint debt", 1, body!!.limit("answer"))
+            assertEquals(feedback, bodyFeedback)
+            assertEquals(appended.length, narration!!.limit("answer"))
+            holdFirstPrefix.value = false
+            body!!.publication.setPending(owner, false)
+            frame()
+            assertTrue("Waiting must not buy a catchup chunk", body!!.limit("answer") in 1..2)
+            repeat(120) { frame() }
+            assertEquals(appended.length, body!!.limit("answer"))
+        } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
+    }
+
+    @Test fun bodyPaintDebtFreezesBudgetAndFeedbackWithoutResumeCatchup() = verifyPaintDebt(true)
+    @Test fun otherLanesDoNotInheritBodyPaintAdmission() = verifyPaintDebt(null)
+    @Test fun explicitPaintAdmissionDisableKeepsTheOriginalLane() = verifyPaintDebt(false)
+
+    private fun verifyPaintDebt(awaitPaint: Boolean?) = runBlocking {
+        val clock = BroadcastFrameClock()
+        val recomposer = Recomposer(coroutineContext + clock)
+        val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
+        val composition = Composition(NoNodes(), recomposer)
+        val sources = mutableStateOf(emptyList<MarkdownTypingSource>())
+        val parsed = mutableStateOf(projectMarkdown(emptyList()))
+        val text = "一二三四五六七八"
+        val owner = Any()
+        var reveal: MarkdownReveal? = null
+        var time = 1_000_000_000L
+        var advances = 0
+        var synchronousPrefixFrames = 0
+        suspend fun frame() {
+            Snapshot.sendApplyNotifications()
+            repeat(12) { yield() }
+            time += 16_000_000L
+            if (clock.hasAwaiters) {
+                val beforeCallback = reveal?.limit("answer") ?: 0
+                clock.sendFrame(time)
+                if ((reveal?.limit("answer") ?: 0) > beforeCallback) synchronousPrefixFrames++
+            }
+            repeat(12) { yield() }
+        }
+        try {
+            composition.setContent {
+                CompositionLocalProvider(LocalMarkdownReceiptClock provides { time }) {
+                    reveal = if (awaitPaint == null) rememberMarkdownReveal(sources.value, parsed.value, streaming = true,
+                        terminal = false, onVisibleAdvance = { advances++ }, live = true)
+                    else rememberMarkdownReveal(sources.value, parsed.value, streaming = true,
+                        terminal = false, onVisibleAdvance = { advances++ }, live = true,
+                        awaitPaintAdmission = awaitPaint)
+                }
+            }
+            repeat(4) { frame() }
+            sources.value = listOf(MarkdownTypingSource("answer", text))
+            parsed.value = projectMarkdown(listOf(text))
+            repeat(20) { if (reveal!!.limit("answer") == 0) frame() }
+            val before = reveal!!.limit("answer")
+            assertTrue("Must first admit a strict prefix", before in 1 until text.length)
+            assertTrue("The reveal frame must publish before its frame callback returns", synchronousPrefixFrames > 0)
+            val feedback = advances
+            reveal!!.publication.setPending(owner, true)
+            repeat(120) { frame() }
+            if (awaitPaint == true) {
+                assertEquals("An unpainted prefix must retain its reveal budget", before, reveal!!.limit("answer"))
+                assertEquals("Paint debt must not consume new typing feedback", feedback, advances)
+                reveal!!.publication.setPending(owner, false)
+                frame()
+                val first = reveal!!.limit("answer")
+                assertTrue("Paint waiting must not buy a catchup chunk: before=$before first=$first",
+                    first in before..minOf(before + 1, text.length - 1))
+                repeat(60) { frame() }
+                assertEquals(text.length, reveal!!.limit("answer"))
+                assertTrue(advances > feedback)
+            } else {
+                assertEquals("Other lanes must retain their existing admission", text.length, reveal!!.limit("answer"))
+                assertTrue(advances > feedback)
+            }
         } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
     }
 

@@ -42,7 +42,17 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,", self.chat)
         self.assertIn("onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources,", self.chat)
         self.assertIn("live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty()", self.chat)
-        self.assertIn("if (markdownTypingCanAdvance(currentCanAdvance, currentPlayback) && textClearance?.held != true) motion.advance(current, frameNanos, end) { currentAdvance() }", self.typing)
+        callback = self.typing.split("withFrameNanos { frameNanos ->", 1)[1].split("\n            }", 1)[0]
+        self.assertIn("shown = if (markdownTypingCanAdvance(currentCanAdvance, currentPlayback) && textClearance?.held != true &&", callback)
+        self.assertIn("(!currentAwaitPaintAdmission || publication.ready)", callback)
+        self.assertIn("motion.advance(current, frameNanos, end) { currentAdvance() }", callback)
+        self.assertIn("else { motion.pause(current); motion.visible(current) }", callback)
+        self.assertIn("value = MarkdownTypingFrame(current, shown)", callback)
+        self.assertLess(callback.index("motion.advance("), callback.index("value = MarkdownTypingFrame("))
+        self.assertNotIn("shown = withFrameNanos", self.typing)
+        self.assertIn("awaitPaintAdmission: Boolean = false", self.typing)
+        self.assertIn("val currentAwaitPaintAdmission by rememberUpdatedState(awaitPaintAdmission)", self.typing)
+        self.assertIn('presentationLane = "body:${turn.listKey}", awaitPaintAdmission = true', self.chat)
         self.assertIn("val clearance = LocalStreamingTextClearance.current\n"
                       "    val textClearance by rememberUpdatedState(clearance)", self.typing)
         self.assertIn("target, canAdvance, advanceLimit", self.typing)

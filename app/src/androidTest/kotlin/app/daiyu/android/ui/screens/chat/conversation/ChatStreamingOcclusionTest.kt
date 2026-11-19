@@ -919,11 +919,19 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 assertTrue(samples.isNotEmpty())
                 val reference = samples.last()
                 assertTrue(reference.top + reference.height <= reference.safe + 1f)
-                fun contrast(pixels: IntArray, index: Int): Float {
-                    val bg = Color(pixels[0]); val c = Color(pixels[index])
+                fun contrast(sample: Sample, index: Int): Float {
+                    val at = androidx.compose.ui.geometry.Offset(sample.x0 + index % sample.width + .5f,
+                        sample.y0 + index / sample.width + .5f)
+                    val bg = if (sample.surface.contains(at)) inkSurfaceColor else Color(sample.pixels[0])
+                    val c = Color(sample.pixels[index])
                     return (bg.red + bg.green + bg.blue - c.red - c.green - c.blue) / 3f
                 }
-                val ink = reference.pixels.indices.filter { contrast(reference.pixels, it) > .22f }
+                val flatEditor = reference.copy(pixels = IntArray(reference.pixels.size) { inkSurfaceColor.toArgb() },
+                    x0 = ceil(reference.surface.left).toInt(), y0 = ceil(reference.surface.top).toInt())
+                assertEquals("An independent editor background is not header ink", 0f, contrast(flatEditor, 0), .0001f)
+                val editorWithInk = flatEditor.copy(pixels = flatEditor.pixels.clone().apply { this[0] = Color.Black.toArgb() })
+                assertTrue("Real ink over the editor must still be measured", contrast(editorWithInk, 0) > .22f)
+                val ink = reference.pixels.indices.filter { contrast(reference, it) > .22f }
                 assertTrue("The reference must contain complete real header ink", ink.size > 10)
                 val firstY = ink.minOf { it / reference.width }
                 val lastY = ink.maxOf { it / reference.width }
@@ -931,15 +939,17 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 for (sample in samples) {
                     assertEquals(reference.width, sample.width); assertEquals(reference.height, sample.height)
                     if (sample.top + firstY < sample.safe && sample.top + lastY >= sample.safe) crossedInk = true
-                    val hit = ink.maxBy { (contrast(sample.pixels, it) / contrast(reference.pixels, it)).coerceIn(0f, 1f) }
-                    val alpha = (contrast(sample.pixels, hit) / contrast(reference.pixels, hit)).coerceIn(0f, 1f)
+                    val hit = ink.maxBy { (contrast(sample, it) / contrast(reference, it)).coerceIn(0f, 1f) }
+                    val alpha = (contrast(sample, hit) / contrast(reference, hit)).coerceIn(0f, 1f)
                     if (alpha <= .06f) continue
                     painted = true
                     val hitX = sample.x0 + hit % sample.width
                     val hitY = sample.y0 + hit / sample.width
+                    val hitBackground = if (sample.surface.contains(androidx.compose.ui.geometry.Offset(hitX + .5f, hitY + .5f)))
+                        inkSurfaceColor else Color(sample.pixels[0])
                     val detail = "next=$next frame=${sample.frame} clock=${sample.clock} " +
                         "top=${sample.top} height=${sample.height} y0=${sample.y0} lastY=$lastY safe=${sample.safe} " +
-                        "alpha=$alpha hit=$hitX,$hitY background=${Integer.toHexString(sample.pixels[0])} " +
+                        "alpha=$alpha hit=$hitX,$hitY background=${Integer.toHexString(hitBackground.toArgb())} " +
                         "sampleArgb=${Integer.toHexString(sample.pixels[hit])} referenceArgb=${Integer.toHexString(reference.pixels[hit])} " +
                         "surface=${sample.surface} hitInsideSurface=${sample.surface.contains(androidx.compose.ui.geometry.Offset(hitX.toFloat(), hitY.toFloat()))} " +
                         "before=${sample.before} after=${sample.after} " +
@@ -975,7 +985,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                         fail("Any painted header must fit its complete reference ink, not just its first glyph row: $detail $capture")
                     }
                     // Normalize the existing uniform fade; missing lower glyphs cannot hide behind it.
-                    for (i in ink) if (contrast(sample.pixels, i) < contrast(reference.pixels, i) * alpha - .05f) {
+                    for (i in ink) if (contrast(sample, i) < contrast(reference, i) * alpha - .05f) {
                         val capture = saveFailure()
                         fail("Header ink must be complete at the same fade opacity: index=$i $detail $capture")
                     }

@@ -184,7 +184,7 @@ internal fun rememberMarkdownReveal(
         val end = maxOf(shown, minOf(current.total, advanceLimit))
         while (shown < end) {
             shown = withFrameNanos { frameNanos ->
-                if (currentCanAdvance && textClearance?.held != true && publication.ready) motion.advance(current, frameNanos, end) { currentAdvance() }
+                if (currentCanAdvance && textClearance?.held != true) motion.advance(current, frameNanos, end) { currentAdvance() }
                 else { motion.pause(current); motion.visible(current) }
             }
             value = MarkdownTypingFrame(current, shown)

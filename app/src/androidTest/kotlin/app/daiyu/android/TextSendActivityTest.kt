@@ -220,7 +220,7 @@ class TextSendActivityTest private constructor(
                     host.state.items.size == index + 1 && host.state.items.all { it is VideoChatHost.Item.Ready }
                 }
                 val ready = mainThreadValue { host.state.items.filterIsInstance<VideoChatHost.Item.Ready>() }
-                val journal = VideoHostDraftStore(context.getSharedPreferences("video-drafts", 0)).read()
+                val journal = VideoHostDraftStore(fixture.application.getSharedPreferences("video-drafts", 0)).read()
                     .single { it.conversation == before.conversation }
                 assertEquals(ready.map { it.video }, journal.videos)
                 assertEquals(0, journal.blockedSlots)

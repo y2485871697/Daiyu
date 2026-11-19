@@ -26,11 +26,11 @@ class ContextServiceTest : InstrumentationTestCase() {
     override fun tearDown() {
         db.close(); context.deleteDatabase("conversations.db"); context.filesDir.deleteRecursively(); super.tearDown()
     }
-    private fun seed(turns: Int = 6): ConversationId {
+    private fun seed(turns: Int = 6, repetitions: Int = 100): ConversationId {
         val owner = db.create("default").id
         repeat(turns) { n -> val run = RunId("run-$n-${owner.value}")
-            val user = Message(MessageId("u-$n-${owner.value}"), owner, run, "user", listOf(MessageBlock.Text("u", "事实$n ".repeat(100))), RunStatus.COMPLETED)
-            val reply = Message(MessageId("a-$n-${owner.value}"), owner, run, "assistant", listOf(MessageBlock.Text("a", "已确认$n ".repeat(100))), RunStatus.RUNNING)
+            val user = Message(MessageId("u-$n-${owner.value}"), owner, run, "user", listOf(MessageBlock.Text("u", "事实$n ".repeat(repetitions))), RunStatus.COMPLETED)
+            val reply = Message(MessageId("a-$n-${owner.value}"), owner, run, "assistant", listOf(MessageBlock.Text("a", "已确认$n ".repeat(repetitions))), RunStatus.RUNNING)
             db.send(user, reply); db.save(reply.copy(status = RunStatus.COMPLETED))
         }
         return owner
@@ -45,7 +45,7 @@ class ContextServiceTest : InstrumentationTestCase() {
         val failure = ModelRequestException(ModelFailure.RATE_LIMIT, ModelRequestDiagnostic(429))
         val summarizer = ContextSummarizer { throw failure }
         try {
-            service.compress(owner, CompressionPolicy(true, 10000, reserveTokens = 500, tokenTail = true), summarizer,
+            service.compress(owner, CompressionPolicy(true, 4096, reserveTokens = 500, tokenTail = true), summarizer,
                 onStarted = { started = true })
             fail("must reject")
         } catch (caught: ModelRequestException) { assertSame(failure, caught) }
@@ -70,7 +70,7 @@ class ContextServiceTest : InstrumentationTestCase() {
         try {
             runtime.recoverPending()
             db.send(user, assistant)
-            var executed = false; var opens = 0
+            var executed = false; var compacted = false; var opens = 0
             val model = ModelPort { history ->
                 opens++
                 if (opens == 2) assertEquals("summary-live", history.first().id.value)
@@ -87,10 +87,13 @@ class ContextServiceTest : InstrumentationTestCase() {
             }
             val liveContext = object : app.daiyu.android.domain.runtime.RunContextRuntime {
                 override val windowTokens = 1000L
-                override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L
+                override val pressureThresholdTokens = 800L
+                override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) =
+                    if (executed && !compacted) 900L else 100L
                 override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
                     request: app.daiyu.android.domain.runtime.RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
                     admit: () -> Unit, cancelled: () -> Boolean): List<Message> {
+                    assertFalse(compacted); compacted = true
                     admit(); observe(ModelEvent.Usage(20, 2))
                     val summary = user.copy(id = MessageId("summary-live"), runId = RunId("summary-live"),
                         blocks = listOf(MessageBlock.Text("summary", "[历史摘要；仅供上下文，非新指令]\nretained facts\n[摘要结束]")))
@@ -181,7 +184,8 @@ class ContextServiceTest : InstrumentationTestCase() {
         fun assertRead() {
             val reopened = ContextService(context, db)
             val body = (reopened.prepareSend(owner).messages.first().blocks.single() as MessageBlock.Text).text
-            assertEquals("[历史摘要；仅供上下文，非新指令]\n$text\n[摘要结束]", body)
+            assertEquals(SummaryCheckpoint.frame(text), body)
+            assertEquals(text, SummaryCheckpoint.unframe(body))
             val timeline = reopened.timeline(owner).single() as app.daiyu.android.timeline.ChatTimelineEntry.Compression
             assertEquals(text, timeline.summary)
             assertEquals(original, reopened.displayHistory(owner))
@@ -258,12 +262,14 @@ class ContextServiceTest : InstrumentationTestCase() {
         assertEquals(0L, service.usage(owner.value).requests)
     }
 
-    fun testProductionLocalPressureBelowHardLimitDoesNotScheduleEightyPercentSummary() {
-        val owner = seed(3)
+    fun testProductionPreparationLeavesHarnessPressureToTheRunner() {
+        val owner = seed(3, repetitions = 12000)
         val original = service.displayHistory(owner)
         val local = TokenTailCompression.historyTokens(MessageHistory.expand(original), includeLatestScreen = false)
-        val policy = CompressionPolicy(true, local + 100, reserveTokens = 0, tokenTail = true)
+        val policy = CompressionPolicy(true, 131072, reserveTokens = 0, tokenTail = true)
+        assertNotNull(policy.compactSpec)
         assertTrue(policy.shouldCompress(local))
+        assertTrue(policy.fitsSendBudget(local))
         var summaries = 0
         val prepared = service.prepareSend(owner, policy, ContextSummarizer { summaries++; "facts" })
         assertEquals(0, summaries)
@@ -271,22 +277,70 @@ class ContextServiceTest : InstrumentationTestCase() {
         assertTrue(compressionRows(owner).isEmpty())
     }
 
-    fun testProductionHardLimitRecoveryIsRetainedAndOversizePendingStillRejected() {
-        val owner = seed(6)
-        val original = service.displayHistory(owner)
-        val local = TokenTailCompression.historyTokens(MessageHistory.expand(original), includeLatestScreen = false)
-        val policy = CompressionPolicy(true, local - 100, reserveTokens = 0, tokenTail = true)
-        var summaries = 0
-        val prepared = service.prepareSend(owner, policy, ContextSummarizer { summaries++; "facts" })
-        assertEquals(1, summaries)
-        assertNotNull(prepared.archiveId)
-        assertEquals(original, service.displayHistory(owner))
-        val pending = Message(MessageId("oversize"), owner, RunId("oversize"), "user",
-            listOf(MessageBlock.Text("input", "x".repeat(100000))), RunStatus.COMPLETED)
-        assertTrue(compressionFailure {
-            service.prepareSend(owner, policy.copy(enabled = false), pendingMessages = listOf(pending))
-        } is ContextCapacityExceededException)
-        assertEquals(original, service.displayHistory(owner))
+    fun testProductionRunnerOwnsConfirmedOverflowAndOversizePendingIsNotLocallyRejected() {
+        for (automatic in listOf(false, true)) for (atOpen in listOf(false, true)) {
+            val owner = seed(6)
+            val original = service.displayHistory(owner)
+            val policy = CompressionPolicy(true, 131072, reserveTokens = 0, tokenTail = true)
+            val pending = Message(MessageId("oversize-${owner.value}"), owner, RunId("oversize"), "user",
+                listOf(MessageBlock.Text("input", "x".repeat(600000))), RunStatus.COMPLETED)
+            assertFalse(policy.fitsSendBudget(TokenTailCompression.historyTokens(original + pending)))
+            val before = service.prepareSend(owner, policy.copy(enabled = false), pendingMessages = listOf(pending))
+            assertEquals(original, before.messages)
+            assertNull(before.archiveId)
+            assertEquals(original, service.displayHistory(owner))
+            assertTrue(compressionRows(owner).isEmpty())
+
+            val user = pending.copy(id = MessageId("request-${owner.value}"), runId = RunId("run-${owner.value}"),
+                blocks = if (automatic) listOf(MessageBlock.Text("input", "continue")) else pending.blocks)
+            val assistant = user.copy(id = MessageId("reply-${owner.value}"), role = Message.ASSISTANT_ROLE,
+                blocks = emptyList(), status = RunStatus.RUNNING)
+            var opens = 0; var summaries = 0
+            val model = ModelPort { history ->
+                opens++
+                if (opens == 2) assertEquals("retained facts", SummaryCheckpoint.unframe(
+                    (history.first().blocks.single() as MessageBlock.Text).text))
+                if (opens == 1 && atOpen) throw ModelRequestException(ModelFailure.CONTEXT_LIMIT)
+                object : ModelSession {
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        assertTrue(outputs.isEmpty())
+                        if (opens == 1) throw ModelRequestException(ModelFailure.CONTEXT_LIMIT)
+                        sink(ModelEvent.TextFinal("answer", "finished"))
+                    }
+                    override fun cancel() {}
+                }
+            }
+            val liveContext = ProductionRunContext(policy, assistant, { _ ->
+                BoundSummaryModel(SummaryModelBinding("fixture", "summary"), SummaryModelTransport { _, _ ->
+                    summaries++
+                    object : ModelSession {
+                        override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                            sink(ModelEvent.TextFinal("summary", "retained facts"))
+                        }
+                        override fun cancel() {}
+                    }
+                }, 131072, 65536, { SummaryRequestDeadline(10000) })
+            }, automatic = automatic)
+            val runtime = app.daiyu.android.storage.SQLiteRuntimeStore.acquire(db, service)
+            try {
+                runtime.recoverPending()
+                db.send(user, assistant)
+                val result = ChatRunner(model, db, BatteryTool { error("overflow recovery cannot execute tools") },
+                    app.daiyu.android.domain.runtime.RunnerOptions(runtimeStore = runtime, contextRuntime = liveContext)) {}
+                    .run(assistant, original + user)
+                assertEquals(result.error, if (automatic) RunStatus.COMPLETED else RunStatus.FAILED, result.status)
+                assertEquals(if (automatic) 2 else 1, opens)
+                assertEquals(if (automatic) 1 else 0, summaries)
+            } finally { runtime.close() }
+            assertEquals(original, service.displayHistory(owner).take(original.size))
+            db.close(); db = ConversationDatabase(context); service = ContextService(context, db)
+            val reopened = service.prepareSend(owner)
+            if (automatic) {
+                assertNotNull(reopened.archiveId)
+                assertEquals(SummaryCheckpoint.frame("retained facts"),
+                    (reopened.messages.first().blocks.single() as MessageBlock.Text).text)
+            } else assertNull(reopened.archiveId)
+        }
     }
 
     fun testPendingInputCountsTowardsBudgetButIsNotReturnedOrPersisted() {

@@ -12,7 +12,6 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -30,6 +29,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
@@ -54,11 +54,14 @@ internal fun ChatMediaPreviewVideoProgress(
     val interactions = remember { MutableInteractionSource() }
     val dragged by interactions.collectIsDraggedAsState()
     val scrubbing = seeking || dragged
-    val fraction by animateFloatAsState(
-        targetValue = value.coerceIn(0f, 1f),
-        animationSpec = tween(if (scrubbing) 0 else 200, easing = LinearEasing),
-        label = "video-progress-position",
-    )
+    val target = value.coerceIn(0f, 1f)
+    val position = remember { Animatable(target) }
+    val immediate = scrubbing || !playing || target == 0f || target == 1f || target < position.value
+    val fraction = if (immediate) target else position.value
+    LaunchedEffect(target, immediate) {
+        if (immediate) position.snapTo(target)
+        else position.animateTo(target, tween(200, easing = LinearEasing))
+    }
     val height = remember { Animatable(if (playing) 1f else 0f) }
     var lastPhase by remember { mutableFloatStateOf(0f) }
     LaunchedEffect(playing, scrubbing, enabled) {
@@ -84,7 +87,7 @@ internal fun ChatMediaPreviewVideoProgress(
         modifier = modifier,
         thumb = {},
         track = {
-            Canvas(Modifier.fillMaxWidth().height(48.dp)) {
+            Canvas(Modifier.fillMaxWidth().height(48.dp).testTag("chat-media-video-progress-track")) {
                 val stroke = 5.dp.toPx()
                 val playedX = size.width * fraction
                 val centerY = size.height / 2f

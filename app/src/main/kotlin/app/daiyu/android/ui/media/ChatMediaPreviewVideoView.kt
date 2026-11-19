@@ -16,10 +16,16 @@ internal class ChatMediaPreviewVideoView(context: Context) : TextureView(context
     private var output: Surface? = null
     private var source: Uri? = null
     private var prepared = false
+    private var seeking = false
     private var playRequested = false
     private var preparedListener: MediaPlayer.OnPreparedListener? = null
     private var errorListener: (() -> Unit)? = null
     private var interruptedListener: (() -> Unit)? = null
+    private var completionListener: (() -> Unit)? = null
+    private var seekCompleteListener: (() -> Unit)? = null
+    private var firstFrameListener: (() -> Unit)? = null
+    private val firstFrame = ChatMediaPreviewVideoFirstFrameState()
+    private var sourceGeneration = 0L
     private var sizeListener: MediaPlayer.OnVideoSizeChangedListener? = null
     private val audio = checkNotNull(context.getSystemService(AudioManager::class.java))
     private val attributes = AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA)
@@ -31,6 +37,9 @@ internal class ChatMediaPreviewVideoView(context: Context) : TextureView(context
 
     init { surfaceTextureListener = this }
     val currentPosition: Int get() = if (prepared) player?.currentPosition ?: 0 else 0
+    fun setOnCompletionListener(listener: (() -> Unit)?) { completionListener = listener }
+    fun setOnSeekCompleteListener(listener: (() -> Unit)?) { seekCompleteListener = listener }
+    fun setOnFirstFrameListener(listener: (() -> Unit)?) { firstFrameListener = listener }
     fun setOnPreparedListener(listener: MediaPlayer.OnPreparedListener?) { preparedListener = listener }
     fun setOnErrorListener(listener: (() -> Unit)?) { errorListener = listener }
     fun setOnPlaybackInterruptedListener(listener: (() -> Unit)?) { interruptedListener = listener }
@@ -40,7 +49,12 @@ internal class ChatMediaPreviewVideoView(context: Context) : TextureView(context
         source = uri
         surfaceTexture?.takeIf { isAvailable }?.let(::attach)
     }
-    fun seekTo(position: Int) { if (prepared) player?.seekTo(position.coerceAtLeast(0)) }
+    fun seekTo(position: Int) {
+        val current = player ?: return
+        if (!prepared || seeking) return
+        seeking = true
+        current.seekTo(position.coerceAtLeast(0).toLong(), MediaPlayer.SEEK_CLOSEST)
+    }
     fun start() {
         playRequested = true
         val current = player
@@ -58,6 +72,9 @@ internal class ChatMediaPreviewVideoView(context: Context) : TextureView(context
         playRequested = false
         source = null
         prepared = false
+        seeking = false
+        sourceGeneration++
+        firstFrame.reset(sourceGeneration)
         val previous = player
         player = null
         previous?.release()
@@ -76,6 +93,7 @@ internal class ChatMediaPreviewVideoView(context: Context) : TextureView(context
                 if (playRequested) start()
                 return
             }
+            val generation = sourceGeneration
             val current = MediaPlayer().also { player = it }
             current.setAudioAttributes(attributes)
             current.setSurface(surface)
@@ -86,6 +104,26 @@ internal class ChatMediaPreviewVideoView(context: Context) : TextureView(context
                 if (player === owner) {
                     prepared = true
                     preparedListener?.onPrepared(owner)
+                }
+            }
+            current.setOnInfoListener { owner, what, _ ->
+                if (player === owner && generation == sourceGeneration &&
+                    what == MediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START && firstFrame.renderingStarted(generation)) {
+                    firstFrameListener?.invoke()
+                }
+                false
+            }
+            current.setOnCompletionListener { owner ->
+                if (player === owner) {
+                    playRequested = false
+                    audio.abandonAudioFocusRequest(focus)
+                    completionListener?.invoke()
+                }
+            }
+            current.setOnSeekCompleteListener { owner ->
+                if (player === owner && seeking) {
+                    seeking = false
+                    seekCompleteListener?.invoke()
                 }
             }
             current.setOnErrorListener { owner, _, _ ->
@@ -101,7 +139,12 @@ internal class ChatMediaPreviewVideoView(context: Context) : TextureView(context
     }
     override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) = attach(surface)
     override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) { }
-    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) { }
+    override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
+        if (surface === surfaceTexture && prepared && player != null && output != null &&
+            firstFrame.textureUpdated(sourceGeneration)) {
+            firstFrameListener?.invoke()
+        }
+    }
     override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
         if (prepared) player?.takeIf { it.isPlaying }?.pause()
         player?.setSurface(null)

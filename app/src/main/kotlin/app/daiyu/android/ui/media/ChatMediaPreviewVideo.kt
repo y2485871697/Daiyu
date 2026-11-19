@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.media
 
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +17,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -26,7 +29,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
-import top.yukonga.miuix.kmp.basic.CircularProgressIndicator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -40,13 +44,21 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
     val currentActive by rememberUpdatedState(active)
     val view = remember(context, item.key) { ChatMediaPreviewVideoView(context) }
     var controls by remember(item.key) { mutableStateOf(ChatMediaPreviewVideoControlsState()) }
-    var loading by remember(item) { mutableStateOf(false) }
+    var cover by remember(item) { mutableStateOf(item.cachedImage()) }
+    var firstFrame by remember(item.key) { mutableStateOf(false) }
     var failed by remember(item) { mutableStateOf(false) }
     var prepared by remember(item.key) { mutableStateOf(false) }
     var videoSize by remember(item.key) { mutableStateOf(0 to 0) }
     val resumed = lifecycleState.isAtLeast(Lifecycle.State.RESUMED)
     val shouldStage = chatMediaPreviewVideoShouldPlay(active, resumed)
 
+    LaunchedEffect(item) {
+        if (cover == null) {
+            cover = try { withContext(Dispatchers.IO) { item.loadImage(1024) } }
+            catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { null }
+        }
+    }
     DisposableEffect(view, lifecycle) {
         val observer = LifecycleEventObserver { _, _ ->
             // Pause synchronously on background/navigation, before cancellation releases the private file.
@@ -64,6 +76,9 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
             view.setOnPreparedListener(null)
             view.setOnErrorListener(null)
             view.setOnPlaybackInterruptedListener(null)
+            view.setOnCompletionListener(null)
+            view.setOnSeekCompleteListener(null)
+            view.setOnFirstFrameListener(null)
             view.stopPlayback()
         }
     }
@@ -73,19 +88,21 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
             controls = controls.hidden()
             return@LaunchedEffect
         }
-        loading = true
+        firstFrame = false
         failed = false
         try {
             withChatMediaPreviewVideo(context, item) { file ->
                 try {
+                    view.setOnFirstFrameListener { firstFrame = true }
+                    view.setOnCompletionListener { controls = controls.completed() }
+                    view.setOnSeekCompleteListener { controls = controls.seekCompleted() }
                     view.setOnPlaybackInterruptedListener { controls = controls.copy(playRequested = false) }
                     view.setOnVideoSizeChangedListener { _, width, height -> videoSize = width to height }
                     view.setOnPreparedListener { player ->
                         videoSize = player.videoWidth to player.videoHeight
-                        player.isLooping = true
-                        controls = controls.prepared(player.duration)
+                        player.isLooping = false
+                        controls = controls.prepared(player.duration).copy(seekPending = true)
                         prepared = true
-                        loading = false
                         view.seekTo(controls.positionMillis)
                         if (controls.shouldPlay(
                                 currentActive,
@@ -98,7 +115,6 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
                     }
                     view.setOnErrorListener {
                         prepared = false
-                        loading = false
                         failed = true
                         controls = controls.hidden()
                     }
@@ -109,21 +125,22 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
                     if (prepared) controls = controls.positionChanged(view.currentPosition)
                     prepared = false
                     controls = controls.hidden()
-                    loading = false
                     view.setOnPreparedListener(null)
                     view.setOnErrorListener(null)
                     view.setOnPlaybackInterruptedListener(null)
+                    view.setOnCompletionListener(null)
+                    view.setOnSeekCompleteListener(null)
+                    view.setOnFirstFrameListener(null)
                     view.stopPlayback()
                 }
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Exception) {
-            loading = false
             failed = true
         }
     }
-    LaunchedEffect(view, prepared, shouldStage, controls.playRequested, controls.seeking) {
+    LaunchedEffect(view, prepared, shouldStage, controls.playRequested, controls.seeking, controls.seekPending) {
         if (!prepared || !shouldStage) return@LaunchedEffect
         if (!controls.shouldPlay(active, resumed)) {
             view.pause()
@@ -145,15 +162,16 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
             update = { if (!controls.shouldPlay(active, resumed)) it.pause() },
             onRelease = { it.stopPlayback() },
         )
+        if (!firstFrame && !failed) cover?.let { image ->
+            Image(image, contentDescription = item.displayName, contentScale = ContentScale.Fit,
+                filterQuality = FilterQuality.High, modifier = Modifier.fillMaxSize().testTag("chat-media-video-cover"))
+        }
         when {
             failed -> Text(
                 text = "视频加载失败",
                 color = Color.White,
                 style = MiuixTheme.textStyles.body1,
                 modifier = Modifier.align(Alignment.Center),
-            )
-            loading -> CircularProgressIndicator(
-                modifier = Modifier.align(Alignment.Center), size = 28.dp, strokeWidth = 2.5.dp,
             )
         }
         ChatMediaPreviewVideoControls(
@@ -164,21 +182,22 @@ internal fun ChatMediaPreviewVideo(item: ChatMediaPreviewItem, active: Boolean, 
             onToggleOrientation = onToggleOrientation,
             onToggleVisibility = { controls = controls.toggleVisibility() },
             onTogglePlayback = {
-                if (prepared && shouldStage) {
+                if (prepared && shouldStage && !controls.seekPending) {
                     view.pause()
                     controls = controls.positionChanged(view.currentPosition).togglePlayback()
+                    if (controls.seekPending) view.seekTo(controls.positionMillis)
                 }
             },
             onScrub = { fraction ->
-                if (prepared && shouldStage) {
+                if (prepared && shouldStage && !controls.seekPending) {
                     view.pause()
                     controls = controls.positionChanged(view.currentPosition).scrub(fraction)
                 }
             },
             onSeekFinished = {
-                if (prepared && shouldStage && controls.seeking) {
-                    view.seekTo(controls.displayedPositionMillis)
+                if (prepared && shouldStage && controls.seeking && !controls.seekPending) {
                     controls = controls.finishSeeking()
+                    view.seekTo(controls.positionMillis)
                 }
             },
             modifier = Modifier.fillMaxSize(),

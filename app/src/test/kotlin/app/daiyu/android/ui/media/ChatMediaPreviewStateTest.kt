@@ -65,4 +65,22 @@ class ChatMediaPreviewStateTest {
         assertFalse(chatMediaPreviewVideoShouldPlay(true, false))
         assertFalse(chatMediaPreviewVideoShouldPlay(false, false))
     }
+    @org.junit.Test fun originalConstructorAndCopiedCacheKeepTheirOwnCallbacks() = kotlinx.coroutines.runBlocking {
+        var originalCalls = 0
+        val old = ChatMediaPreviewItem("old", "video/mp4", "video.mp4", { null }) {
+            originalCalls++
+            null
+        }
+        org.junit.Assert.assertNull(old.cachedImage())
+        org.junit.Assert.assertEquals(0, originalCalls)
+        old.openOriginal()
+        org.junit.Assert.assertEquals(1, originalCalls)
+        var cacheCalls = 0
+        val cached = ChatMediaPreviewItem("new", "video/mp4", "video.mp4", { null },
+            openOriginal = { originalCalls++; null }, cachedImage = { cacheCalls++; null })
+        cached.copy(displayName = "renamed.mp4").cachedImage()
+        org.junit.Assert.assertEquals(1, cacheCalls)
+        org.junit.Assert.assertEquals(1, originalCalls)
+    }
+
 }

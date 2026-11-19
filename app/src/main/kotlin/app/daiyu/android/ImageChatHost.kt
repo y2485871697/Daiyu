@@ -51,6 +51,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         }
         val imports = mutableMapOf<ImageAttachmentItemKey, CancellationSignal>()
         var attempt: Attempt? = null
+        var submissionVisualKey: String? = null
         var frozen: FrozenImageSend? = restored?.frozen
         var editorReplaced = restored?.editorReplaced == true
         var abandoned = false
@@ -88,6 +89,9 @@ internal class ImageChatHost private constructor(controller: ChatController) {
     var mediaPreviews by mutableStateOf<PreviewLease?>(null); private set
     var draftLoader by mutableStateOf<ImageAttachmentPreviewLoader>(lease.draftLoader); private set
 
+    val submissionVisualKey: String? get() = session.submissionVisualKey.takeIf {
+        visible && !closed && !session.abandoned && !session.editorReplaced
+    }
     val hasAttachments: Boolean get() = session.attachments.state.value.items.isNotEmpty()
     val busy: Boolean get() = sending || session.uncertain || storageFailed
     val fenced: Boolean get() = session.uncertain || storageFailed
@@ -257,6 +261,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         }, ImageSendIdentity.create())
         target.frozen = frozen
         target.attempt = attempt
+        target.submissionVisualKey = frozen.identity.assistantId.value
         outstanding++
         // Durably fence this exact owner/revision before any Controller enqueue. A restart
         // cannot reinterpret a process-lost attempt as a fresh draft with a new journal key.
@@ -312,6 +317,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
         val submission = expected.attachments.beginSubmission() ?: return
         val attempt = Attempt(submission, frozen.text)
         expected.attempt = attempt
+        expected.submissionVisualKey = frozen.identity.assistantId.value
         outstanding++
         changed()
         io.launch {
@@ -392,6 +398,7 @@ internal class ImageChatHost private constructor(controller: ChatController) {
             }
         }
         outstanding--
+        target.submissionVisualKey = null
         if (!closed) changed()
     }
 

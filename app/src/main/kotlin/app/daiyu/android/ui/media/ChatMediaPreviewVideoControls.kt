@@ -47,26 +47,36 @@ internal data class ChatMediaPreviewVideoControlsState(
     val durationMillis: Int = 0,
     val positionMillis: Int = 0,
     val seekPositionMillis: Int? = null,
+    val seekPending: Boolean = false,
 ) {
     val seeking: Boolean get() = seekPositionMillis != null
     val displayedPositionMillis: Int get() = (seekPositionMillis ?: positionMillis).coerceIn(0, durationMillis)
     val fraction: Float get() = if (durationMillis > 0) displayedPositionMillis.toFloat() / durationMillis else 0f
 
     fun toggleVisibility() = copy(visible = !visible)
-    fun togglePlayback() = copy(playRequested = !playRequested)
+    fun togglePlayback() = if (seekPending) this else if (!playRequested && durationMillis > 0 && positionMillis >= durationMillis)
+        copy(playRequested = true, positionMillis = 0, seekPending = true)
+    else copy(playRequested = !playRequested)
+    fun completed() = if (seeking || seekPending) this else copy(playRequested = false, positionMillis = durationMillis,
+        seekPositionMillis = null, seekPending = false)
     fun prepared(duration: Int) = copy(
         durationMillis = duration.coerceAtLeast(0),
         positionMillis = positionMillis.coerceIn(0, duration.coerceAtLeast(0)),
         seekPositionMillis = null,
+        seekPending = false,
     )
-    fun positionChanged(position: Int) = copy(positionMillis = position.coerceIn(0, durationMillis))
-    fun scrub(fraction: Float) = if (durationMillis > 0) copy(
+    fun positionChanged(position: Int) = if (seekPending || (!playRequested && positionMillis == durationMillis)) this
+        else copy(positionMillis = position.coerceIn(0, durationMillis))
+    fun seekCompleted() = copy(seekPending = false)
+    fun scrub(fraction: Float) = if (durationMillis > 0 && !seekPending) copy(
         seekPositionMillis = (durationMillis.toDouble() * fraction.coerceIn(0f, 1f)).roundToInt(),
     ) else this
-    fun finishSeeking() = copy(positionMillis = displayedPositionMillis, seekPositionMillis = null)
+    fun finishSeeking() = if (!seeking || seekPending) this else copy(
+        playRequested = playRequested && displayedPositionMillis < durationMillis,
+        positionMillis = displayedPositionMillis, seekPositionMillis = null, seekPending = true)
     fun hidden() = copy(visible = false, seekPositionMillis = null)
     fun shouldPlay(active: Boolean, resumed: Boolean) =
-        chatMediaPreviewVideoShouldPlay(active, resumed) && playRequested && !seeking
+        chatMediaPreviewVideoShouldPlay(active, resumed) && playRequested && !seeking && !seekPending
 }
 
 internal fun chatMediaPreviewVideoTime(milliseconds: Int): String {
@@ -91,7 +101,7 @@ internal fun ChatMediaPreviewVideoControls(
     onToggleOrientation: () -> Unit = {},
 ) {
     val controlsEnabled = active && state.visible
-    val playbackEnabled = controlsEnabled && ready
+    val playbackEnabled = controlsEnabled && ready && !state.seekPending
     val density = LocalDensity.current
     val direction = LocalLayoutDirection.current
     val physical = WindowInsets.safeDrawing

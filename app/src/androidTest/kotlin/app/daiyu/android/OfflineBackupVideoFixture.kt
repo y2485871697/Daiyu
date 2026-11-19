@@ -8,7 +8,7 @@ import java.io.File
 import java.util.concurrent.TimeUnit
 
 /** 使用设备编解码器生成本地 64px AVC 测试原件；缺少所需编解码器时报告失败。 */
-internal fun encodeOfflineBackupMp4(file: File) {
+internal fun encodeOfflineBackupMp4(file: File, frameCount: Int = 3) {
     val codec = MediaCodec.createEncoderByType("video/avc")
     val muxer = MediaMuxer(file.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
     var started = false
@@ -29,10 +29,10 @@ internal fun encodeOfflineBackupMp4(file: File) {
         var track = -1
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)
         while (!outputEnded && System.nanoTime() < deadline) {
-            if (inputCount <= 3) {
+            if (inputCount <= frameCount) {
                 val index = codec.dequeueInputBuffer(10_000)
                 if (index >= 0) {
-                    if (inputCount == 3) codec.queueInputBuffer(index, 0, 0, 300_000, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    if (inputCount == frameCount) codec.queueInputBuffer(index, 0, 0, frameCount * 100_000L, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
                     else {
                         codec.getInputBuffer(index)!!.apply { clear(); put(frame) }
                         codec.queueInputBuffer(index, 0, frame.size, inputCount * 100_000L, 0)

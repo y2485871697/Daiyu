@@ -35,6 +35,7 @@ private class ComposerActionTestScale : MotionDurationScale {
 }
 
 class ChatComposerActionMotionTest private constructor(private val scale: ComposerActionTestScale) : WiredActivityTestCase(scale) {
+    override val requiresWindowDraw: Boolean = true
     constructor() : this(ComposerActionTestScale())
 
     private var icon by mutableStateOf(ChatPreviewIcons.Send)
@@ -279,6 +280,29 @@ class ChatComposerActionMotionTest private constructor(private val scale: Compos
             assertEquals(5, releases)
         }
     }
+    fun testMediaSubmissionStaysVisuallyActiveWithoutCancelOrRunAuthority() {
+        var state by mutableStateOf(ComposerUi(text = "图片消息", enabled = false,
+            phase = ComposerPhase.IDLE, mediaSubmissionKey = "exact-image-attempt"))
+        var sends = 0; var cancellations = 0; var controls = 0
+        val actions = ChatScreenActions(onSend = { sends++ }, onCancelSend = { cancellations++ },
+            onPrimaryTap = { controls++ })
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                Box(Modifier.width(320.dp)) { ChatComposer(state, actions) }
+            }
+        } }
+        node("media-send-pending").assertContentDescriptionEquals("正在发送").assertIsNotEnabled()
+            .performTouchInput { click() }
+        ui.runOnIdle { state = state.copy(text = "", editorGeneration = 1) }
+        node("media-send-pending").assertIsNotEnabled()
+        ui.runOnIdle { state = state.copy(mediaSubmissionKey = null, enabled = true,
+            phase = ComposerPhase.RUNNING, controlOwnerKey = "accepted-owner") }
+        node("chat-control").assertContentDescriptionEquals("暂停").assertIsEnabled().performClick()
+        assertEquals(0, sends)
+        assertEquals(0, cancellations)
+        assertEquals(1, controls)
+    }
+
     private fun showAttachmentExit(content: @androidx.compose.runtime.Composable () -> Unit) {
         mainThread {
             activity.setContent {

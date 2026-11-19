@@ -66,6 +66,40 @@ class PreviewDialogContract(unittest.TestCase):
         self.assertIn('view.stopPlayback()', video)
         self.assertIn('Lifecycle.State.RESUMED', video)
 
+    def test_media_download_first_frame_has_no_mutating_status_bar_padding(self):
+        host = (MEDIA / 'ChatMediaPreviewHost.kt').read_text()
+        self.assertNotIn('statusBarsPadding()', host)
+        self.assertIn('Modifier.align(Alignment.TopEnd).padding(if (video) 24.dp else 8.dp)', host)
+
+    def test_video_poster_survives_prepared_until_current_source_texture(self):
+        video = (MEDIA / 'ChatMediaPreviewVideo.kt').read_text()
+        self.assertIn('mutableStateOf(item.cachedImage())', video)
+        self.assertIn('if (!firstFrame && !failed) cover?.let', video)
+        self.assertNotIn('CircularProgressIndicator', video)
+        self.assertIn('view.setOnFirstFrameListener { firstFrame = true }', video)
+        view = (MEDIA / 'ChatMediaPreviewVideoView.kt').read_text()
+        self.assertIn('generation == sourceGeneration', view)
+        self.assertIn('MEDIA_INFO_VIDEO_RENDERING_START', view)
+        self.assertIn('surface === surfaceTexture', view)
+        self.assertIn('firstFrame.renderingStarted(generation)', view)
+        self.assertIn('firstFrame.textureUpdated(sourceGeneration)', view)
+        self.assertIn('firstFrame.reset(sourceGeneration)', view)
+        self.assertIn('firstFrameListener?.invoke()', view)
+
+    def test_video_completion_and_seek_are_native_events_not_polling_guesses(self):
+        video = (MEDIA / 'ChatMediaPreviewVideo.kt').read_text()
+        self.assertIn('player.isLooping = false', video)
+        self.assertIn('view.setOnCompletionListener { controls = controls.completed() }', video)
+        self.assertIn('view.setOnSeekCompleteListener { controls = controls.seekCompleted() }', video)
+        self.assertLess(video.index('controls = controls.finishSeeking()'),
+                        video.index('view.seekTo(controls.positionMillis)', video.index('onSeekFinished =')))
+        progress = (MEDIA / 'ChatMediaPreviewVideoProgress.kt').read_text()
+        self.assertIn('target == 0f || target == 1f', progress)
+        self.assertIn('val fraction = if (immediate) target else position.value', progress)
+        bridge = (SRC / 'ChatMediaPreviewBridge.kt').read_text()
+        self.assertIn('displayLoader?.cachedVideo(video.expectedOwner, video.reference, 4096)', bridge)
+        self.assertIn('if (!lease.isOpen()) null', bridge)
+
     def test_committed_video_invalidates_projection_even_when_editor_no_longer_matches(self):
         source = (SRC / 'MainActivity.kt').read_text()
         receipt = source.split('private fun settleRetainedVideoReceipt()', 1)[1].split('// A mount', 1)[0]

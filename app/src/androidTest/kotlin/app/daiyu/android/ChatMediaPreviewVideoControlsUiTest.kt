@@ -20,10 +20,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.test.*
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.ui.app.AgentAppTheme
@@ -34,6 +36,7 @@ import app.daiyu.android.ui.media.ChatMediaPreviewVideoControlsState
 class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : MotionDurationScale {
     override val scaleFactor: Float = 1f
 }) {
+    override val requiresWindowDraw: Boolean = true
     private var controls by mutableStateOf(ChatMediaPreviewVideoControlsState())
     private var surfaceTaps = 0
     private var playbackTaps = 0
@@ -48,7 +51,7 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             onToggleVisibility = { surfaceTaps++; controls = controls.toggleVisibility() },
             onTogglePlayback = { playbackTaps++; controls = controls.togglePlayback() },
             onScrub = { scrubChanges++; controls = controls.scrub(it) },
-            onSeekFinished = { completedSeeks++; controls = controls.finishSeeking() },
+            onSeekFinished = { completedSeeks++; controls = controls.finishSeeking().seekCompleted() },
             modifier = Modifier.fillMaxSize(),
         )
     }
@@ -188,7 +191,7 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
     }
     fun testRealVideoPreviewKeepsPauseAndSeekAcrossOrientationAndBack() {
         val file = java.io.File(activity.cacheDir, "preview-${java.util.UUID.randomUUID()}.mp4")
-        encodeOfflineBackupMp4(file)
+        encodeOfflineBackupMp4(file, frameCount = 200)
         val original = file.readBytes()
         val accent = Color(0xFF58C9D4)
         var opened by mutableStateOf(true)
@@ -246,6 +249,144 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             ui.waitForIdle()
             file.delete()
         }
+    }
+
+    fun testProgressEndpointsAndBackwardSeekHaveNoInterpolatedResidual() {
+        val accent = Color(0xFF58C9D4)
+        var fraction by mutableStateOf(0f)
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = accent)) {
+                    Box(Modifier.widthIn(max = 360.dp).fillMaxWidth().height(64.dp).background(Color.Black)) {
+                        app.daiyu.android.ui.media.ChatMediaPreviewVideoProgress(
+                            value = fraction, playing = true, seeking = false, enabled = true,
+                            onValueChange = {}, onValueChangeFinished = {}, modifier = Modifier.fillMaxWidth())
+                    }
+                }
+            }
+        } }
+        val auto = ui.mainClock.autoAdvance
+        try {
+            ui.mainClock.autoAdvance = false
+            assertProgressHandle(0f, accent)
+            mainThread { fraction = 0.86f }
+            ui.mainClock.advanceTimeBy(240)
+            assertProgressHandle(0.86f, accent)
+            mainThread { fraction = 0.2f }
+            ui.mainClock.advanceTimeByFrame()
+            assertProgressHandle(0.2f, accent)
+            mainThread { fraction = 1f }
+            ui.mainClock.advanceTimeByFrame()
+            assertProgressHandle(1f, accent)
+            mainThread { fraction = 0f }
+            ui.mainClock.advanceTimeByFrame()
+            assertProgressHandle(0f, accent)
+        } finally { ui.mainClock.autoAdvance = auto }
+    }
+
+    fun testVideoPosterRemainsVisibleWhileAuthorizedOriginalIsOpening() {
+        val poster = android.graphics.Bitmap.createBitmap(12, 12, android.graphics.Bitmap.Config.ARGB_8888)
+            .apply { eraseColor(android.graphics.Color.MAGENTA) }
+        val image = poster.asImageBitmap()
+        var opened by mutableStateOf(true)
+        var originalOpened = false
+        val item = app.daiyu.android.ui.media.ChatMediaPreviewItem(
+            "blocked-video-original", "video/mp4", "poster.mp4", { image },
+            openOriginal = { originalOpened = true; kotlinx.coroutines.awaitCancellation() }, cachedImage = { image })
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    if (opened) app.daiyu.android.ui.media.ChatMediaPreviewDialog(
+                        app.daiyu.android.ui.media.ChatMediaPreviewSelection(listOf(item), 0)) { opened = false }
+                }
+            } }
+            ui.waitUntil(5_000) { originalOpened }
+            val pixels = captureScreenNode(node("chat-media-video-cover")).toPixelMap()
+            val center = pixels[pixels.width / 2, pixels.height / 2]
+            assertTrue("poster must be visible before staging or prepared", center.red > 0.9f && center.blue > 0.9f && center.green < 0.1f)
+            ui.onNodeWithText("视频加载失败").assertDoesNotExist()
+        } finally { mainThread { opened = false }; ui.waitForIdle() }
+    }
+
+    fun testShortRealVideoCompletesAtEndAndReplayReturnsToStart() {
+        val file = java.io.File(activity.cacheDir, "preview-completion-${java.util.UUID.randomUUID()}.mp4")
+        encodeOfflineBackupMp4(file, frameCount = 20)
+        var opened by mutableStateOf(true)
+        val item = app.daiyu.android.ui.media.ChatMediaPreviewItem("completion-video", "video/mp4", file.name,
+            { null }, { app.daiyu.android.ui.media.ChatMediaPreviewOriginal(file.inputStream(), "video/mp4", file.name) })
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    if (opened) app.daiyu.android.ui.media.ChatMediaPreviewDialog(
+                        app.daiyu.android.ui.media.ChatMediaPreviewSelection(listOf(item), 0)) { opened = false }
+                }
+            } }
+            node("chat-media-video-surface").performClick()
+            ui.waitUntil(20_000) {
+                ui.onAllNodes(hasTestTag("chat-media-video-progress") and isEnabled())
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).singleOrNull()?.config
+                    ?.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo)?.current == 1f
+            }
+            ui.onNodeWithContentDescription("播放").assertIsDisplayed()
+            val end = node("chat-media-video-progress").fetchSemanticsNode().config[
+                androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo].current
+            assertEquals(1f, end, 0f)
+            node("chat-media-video-play-pause").performClick()
+            ui.waitUntil(5_000) {
+                ui.onAllNodes(hasTestTag("chat-media-video-progress"))
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).singleOrNull()?.config
+                    ?.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo)?.current?.let { it < 1f } == true
+            }
+            ui.waitUntil(20_000) {
+                ui.onAllNodes(hasTestTag("chat-media-video-progress") and isEnabled())
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).singleOrNull()?.config
+                    ?.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo)?.current == 1f
+            }
+            ui.onNodeWithContentDescription("播放").assertIsDisplayed()
+        } finally { mainThread { opened = false }; ui.waitForIdle(); file.delete() }
+    }
+
+    fun testImageAndVideoDownloadKeepTheirFirstFrameOffsets() {
+        for (mime in listOf("image/png", "video/mp4")) {
+            var opened by mutableStateOf(true)
+            val item = app.daiyu.android.ui.media.ChatMediaPreviewItem("download-$mime", mime, "media",
+                { null }, openOriginal = { kotlinx.coroutines.awaitCancellation() })
+            try {
+                mainThread { activity.setContent {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                        if (opened) app.daiyu.android.ui.media.ChatMediaPreviewDialog(
+                            app.daiyu.android.ui.media.ChatMediaPreviewSelection(listOf(item), 0)) { opened = false }
+                    }
+                } }
+                val initial = node("chat-media-download").fetchSemanticsNode().boundsInRoot
+                val viewport = node("chat-media-preview-viewport").fetchSemanticsNode().boundsInRoot
+                val inset = with(ui.density) { (if (mime.startsWith("video")) 24.dp else 8.dp).toPx() }
+                assertEquals("$mime initial top", inset, initial.top - viewport.top, 1.5f)
+                assertEquals("$mime initial right", inset, viewport.right - initial.right, 1.5f)
+                awaitVisualIdle()
+                assertEquals("$mime download must not jump after status bars hide", initial,
+                    node("chat-media-download").fetchSemanticsNode().boundsInRoot)
+            } finally { mainThread { opened = false }; ui.waitForIdle() }
+        }
+    }
+
+    private fun assertProgressHandle(fraction: Float, accent: Color) {
+        val image = captureScreenNode(node("chat-media-video-progress-track"), advanceAnimationClock = false)
+        try {
+            val pixels = image.toPixelMap()
+            val expected = (fraction * (pixels.width - 1)).toInt()
+            val y = pixels.height / 2
+            val radius = with(ui.density) { 1.dp.toPx() }.toInt().coerceAtLeast(1)
+            val handleY = y - with(ui.density) { 6.dp.toPx() }.toInt()
+            var ink = 0
+            for (xx in (expected - radius).coerceAtLeast(0)..(expected + radius).coerceAtMost(pixels.width - 1)) {
+                val color = pixels[xx, handleY]
+                if (kotlin.math.abs(color.red - accent.red) < 0.08f &&
+                    kotlin.math.abs(color.green - accent.green) < 0.08f &&
+                    kotlin.math.abs(color.blue - accent.blue) < 0.08f) ink++
+            }
+            assertTrue("handle must reach fraction=$fraction at x=$expected", ink > 0)
+        } finally { image.asAndroidBitmap().recycle() }
     }
 
     private fun assertAccentInk(target: SemanticsNodeInteraction, accent: Color) {

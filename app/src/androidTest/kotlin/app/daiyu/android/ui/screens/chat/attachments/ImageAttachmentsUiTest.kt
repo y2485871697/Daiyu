@@ -37,6 +37,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Component-only instrumentation. No SAF launcher, model request or production controller is used. */
 class ImageAttachmentsUiTest : WiredActivityTestCase() {
+    override val requiresWindowDraw: Boolean = true
     private val owner = ImageAttachmentOwner("component-conversation", "component-draft")
     private val draft = ImageAttachmentDraft(owner, 1)
     private var selection: ImageAttachmentSelection? = null

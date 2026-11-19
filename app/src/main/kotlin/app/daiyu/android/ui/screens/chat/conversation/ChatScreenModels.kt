@@ -209,10 +209,12 @@ data class ComposerUi(
     /** Keep colors steady during the owned speed write; enabled still gates every operation. */
     val gptSpeedSaving: Boolean = false,
     val preparingSendKey: String? = null,
+    /** Display-only submission ownership; does not grant cancellation or run control. */
+    val mediaSubmissionKey: String? = null,
     val presentationOnly: Boolean = false,
 )
 
-internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !mainContextCompressing && preparingSendKey == null && !editingMessageBlocked && !imageSendBlocked && !videoSendBlocked && !supplementPending && !dictationPreview && when {
+internal fun ComposerUi.textActionEnabled(): Boolean = enabled && !mainContextCompressing && preparingSendKey == null && mediaSubmissionKey == null && !editingMessageBlocked && !imageSendBlocked && !videoSendBlocked && !supplementPending && !dictationPreview && when {
     phase == ComposerPhase.IDLE || presentationOnly -> text.isNotBlank() || editingMessageCanSubmit || imageSendAvailable || videoSendAvailable
     else -> text.isNotBlank() && supplementAvailable
 }

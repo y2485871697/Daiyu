@@ -68,5 +68,27 @@ class MediaPresentationHandoffContract(unittest.TestCase):
         self.assertIn('lease === target && target.isOpen()', host)
 
 
+class MediaSubmissionHandoffContract(unittest.TestCase):
+    def test_display_submission_does_not_grant_send_cancel_or_runtime_authority(self):
+        root = Path(__file__).resolve().parents[1] / 'app/src/main/kotlin/app/daiyu/android'
+        composer = (root / 'ui/screens/chat/conversation/ChatComposer.kt').read_text()
+        model = (root / 'ui/screens/chat/conversation/ChatScreenModels.kt').read_text()
+        host = (root / 'ImageChatHost.kt').read_text()
+        main = (root / 'MainActivity.kt').read_text()
+        self.assertIn('val mediaSubmitting = state.mediaSubmissionKey != null', composer)
+        self.assertIn('val primaryEnabled = !mediaSubmitting &&', composer)
+        self.assertIn('mediaSubmitting -> "正在发送"', composer)
+        self.assertIn('if (mediaSubmitting) return@ChatIconButton', composer)
+        self.assertIn('mediaSubmissionKey == null', model)
+        self.assertIn('target.submissionVisualKey = frozen.identity.assistantId.value', host)
+        finish = host.split('private fun finish(', 1)[1].split('private fun cancelTransient', 1)[0]
+        self.assertLess(finish.index('outstanding--'), finish.index('target.submissionVisualKey = null'))
+        self.assertLess(finish.index('settled(result, attempt.text)'), finish.index('target.submissionVisualKey = null'))
+        image = main.split('private fun settleImageReceipt(', 1)[1].split('private val streamingHistoryRefresh', 1)[0]
+        self.assertLess(image.index('controlOwner = controller.active?'), image.index('publishChat()'))
+        video = main.split('private fun settleRetainedVideoReceipt()', 1)[1].split('// A mount', 1)[0]
+        self.assertLess(video.index('controlOwner = controller.active?'), video.index('publishChat(); loadAcceptedHistory'))
+
+
 if __name__ == '__main__':
     unittest.main()

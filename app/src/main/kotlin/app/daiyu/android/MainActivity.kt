@@ -966,6 +966,7 @@ class MainActivity : ComponentActivity() {
         videoSending = true
         userEntranceVideoRequest = request
         videoReceiptRequest = request; videoReceiptEditor = original
+        publishChat(rowsChanged = false)
         val queued = controller.sendVideos(selected, request, original, onPreparedUser = { userId ->
             if (activityUsable() && userEntranceVideoRequest === request && videoUi.editor() == original) {
                 userMessageEntrance = UserMessageEntrance(userId.value, waitForIme = true, waitForMedia = true)
@@ -982,6 +983,7 @@ class MainActivity : ComponentActivity() {
             videoReceiptRequest = null; videoReceiptEditor = null
             settle(VideoDraftReceipt(request.conversation, request.owner, request.revision, request.videos,
                 VideoDraftOutcome.REJECTED))
+            publishChat(rowsChanged = false)
         }
     }
     private fun settleRetainedVideoReceipt() {
@@ -1020,6 +1022,7 @@ class MainActivity : ComponentActivity() {
             selected = conversation; editorGeneration++; draftRevision++
             draft = ""; selectionStart = 0; selectionEnd = 0
             controller.preferences.edit().putString("selected", conversation.id.value).apply()
+            controlOwner = controller.active?.takeIf { it.conversationId == conversation.id && it.status == RunStatus.RUNNING }
             publishChat(); loadAcceptedHistory(conversation, animateUserMessage = liveSubmission)
         }
     }
@@ -2580,10 +2583,10 @@ class MainActivity : ComponentActivity() {
                                 it.id == (if (selected == null) activeAssistant else selected?.assistantId)
                             }
                                     val mediaLease = imageHost.mediaPreviews
-                                    val mediaGallery = remember(chatState.turns, mediaLease, messageMediaSnapshot, displayWindow) {
+                                    val mediaGallery = remember(chatState.turns, mediaLease, messageMediaSnapshot, displayWindow, pageImageLoader) {
                                         chatMediaPreviewGallery(if (displayWindow == null) chatState.turns else emptyList(),
                                             mediaLease.takeIf { displayWindow == null },
-                                            messageMediaSnapshot.takeIf { displayWindow == null })
+                                            messageMediaSnapshot.takeIf { displayWindow == null }, pageImageLoader)
                                     }
                             val pageUserMessageEntrance = app.daiyu.android.ui.screens.chat.conversation.rememberUserMessageEntrance(
                                 pageState.userMessageEntrance, routeActive && !sidebarVisible, awaitPlacement = true)
@@ -5887,6 +5890,7 @@ class MainActivity : ComponentActivity() {
         selected = receipt.conversation; editorGeneration++; draftRevision++
         draft = ""; selectionStart = 0; selectionEnd = 0
         controller.preferences.edit().putString("selected", receipt.conversation.id.value).apply()
+        controlOwner = controller.active?.takeIf { it.conversationId == receipt.conversation.id && it.status == RunStatus.RUNNING }
         if (userMessageEntrance?.messageId != receipt.userId.value && shown.none { it.second.id == receipt.userId }) {
             userMessageEntrance = UserMessageEntrance(receipt.userId.value)
         }
@@ -7936,6 +7940,10 @@ class MainActivity : ComponentActivity() {
                     preparingSendKey = pendingTextSend?.takeIf { pending ->
                         controller.textSendState()?.let { it.ticket === pending.ticket } == true
                     }?.ticket?.previewKey,
+                    mediaSubmissionKey = imageHost.submissionVisualKey ?: videoReceiptRequest?.takeIf {
+                        videoSending && videoReceiptEditor == videoUi.editor() &&
+                            videoReceiptEditor?.conversation == selected?.id?.value
+                    }?.let { "video:${it.owner}:${it.revision}" },
                     editorGeneration = editorGeneration,
                     phase = phase, controlOwnerKey = controlOwner?.id?.value,
                     imageSendAvailable = inlineMessageEditor == null && imageHost.session.attachments.state.value.canSubmit && !imageHost.busy &&

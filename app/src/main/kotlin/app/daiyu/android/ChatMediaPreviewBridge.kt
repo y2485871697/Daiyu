@@ -60,7 +60,8 @@ internal fun messageMediaSequence(turns: List<ChatTurnUi>): List<MessageContentU
 }.filter { it is MessageContentUi.Image || it is MessageContentUi.Video }
 
 internal fun chatMediaPreviewGallery(turns: List<ChatTurnUi>, lease: PreviewLease?,
-    snapshot: ControllerMessageMediaSnapshot?): List<ChatMediaPreviewItem> {
+    snapshot: ControllerMessageMediaSnapshot?,
+    displayLoader: app.daiyu.android.ui.screens.chat.conversation.MessageImageLoader? = null): List<ChatMediaPreviewItem> {
     if (lease == null || !lease.isOpen()) return emptyList()
     return messageMediaSequence(turns).mapNotNull { item ->
         when (item) {
@@ -72,15 +73,24 @@ internal fun chatMediaPreviewGallery(turns: List<ChatTurnUi>, lease: PreviewLeas
                 else ChatMediaPreviewItem(messageImagePreviewKey(image), image.reference.mime,
                     messageMediaDisplayName("image", image.reference.mime),
                     loadImage = { edge -> lease.loadDisplay(image, edge.coerceIn(1, 4096)) },
-                    openOriginal = { lease.openImageOriginal(image) })
+                    openOriginal = { lease.openImageOriginal(image) },
+                    cachedImage = {
+                        if (!lease.isOpen()) null else displayLoader?.cached(image.expectedOwner, image.reference, 4096)
+                            ?: lease.historyLoader.cached(image.expectedOwner, image.reference, 4096)
+                    })
             }
             is MessageContentUi.Video -> {
                 val video = item.video
                 val binding = snapshot?.takeIf { it.conversation.value == lease.conversation }?.binding(video)
                 if (binding == null || video.expectedOwner != video.reference.owner) null
                 else ChatMediaPreviewItem(messageVideoPreviewKey(video), video.reference.mime,
-                    messageMediaDisplayName("video", video.reference.mime), loadImage = { null },
-                    openOriginal = { lease.openVideoOriginal(binding) })
+                    messageMediaDisplayName("video", video.reference.mime),
+                    loadImage = { edge -> lease.historyLoader.loadVideo(video.expectedOwner, video.reference, edge.coerceIn(1, 1024)) },
+                    openOriginal = { lease.openVideoOriginal(binding) },
+                    cachedImage = {
+                        if (!lease.isOpen()) null else displayLoader?.cachedVideo(video.expectedOwner, video.reference, 4096)
+                            ?: lease.historyLoader.cachedVideo(video.expectedOwner, video.reference, 4096)
+                    })
             }
             else -> null
         }

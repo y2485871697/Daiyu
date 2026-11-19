@@ -56,6 +56,7 @@ class ChatMediaPreviewVideoControlsTest {
             assertFalse(committed.seeking)
             assertEquals(scrubbed.displayedPositionMillis, committed.positionMillis)
             assertEquals(requested, committed.playRequested)
+            assertTrue(committed.seekPending)
             assertEquals(0, original.scrub(-1f).displayedPositionMillis)
             assertEquals(10_000, original.scrub(2f).displayedPositionMillis)
         }
@@ -87,6 +88,48 @@ class ChatMediaPreviewVideoControlsTest {
         assertFalse(hidden.seeking)
         assertFalse(hidden.playRequested)
         assertEquals(2_000, hidden.positionMillis)
+    }
+
+    @Test fun completionPinsTheExactEndAndReplayWaitsForTheNativeSeek() {
+        val ended = ChatMediaPreviewVideoControlsState(visible = true).prepared(10_000)
+            .positionChanged(8_600).completed()
+        assertEquals(1f, ended.fraction, 0f)
+        assertFalse(ended.playRequested)
+        assertEquals(ended, ended.positionChanged(8_600))
+        val replay = ended.togglePlayback()
+        assertEquals(0f, replay.fraction, 0f)
+        assertTrue(replay.playRequested)
+        assertTrue(replay.seekPending)
+        assertFalse(replay.shouldPlay(true, true))
+        assertEquals(0, replay.positionChanged(8_600).positionMillis)
+        assertTrue(replay.seekCompleted().shouldPlay(true, true))
+    }
+
+    @Test fun seekCommitCannotBeOverwrittenByOldNativePosition() {
+        val pending = ChatMediaPreviewVideoControlsState().prepared(10_000)
+            .positionChanged(8_000).scrub(0f).finishSeeking()
+        assertTrue(pending.seekPending)
+        assertFalse(pending.shouldPlay(true, true))
+        assertEquals(0f, pending.positionChanged(8_000).fraction, 0f)
+        assertEquals(0f, pending.seekCompleted().fraction, 0f)
+        assertTrue(pending.seekCompleted().shouldPlay(true, true))
+        val end = pending.seekCompleted().scrub(1f).finishSeeking().seekCompleted().completed()
+        assertEquals(1f, end.fraction, 0f)
+        assertFalse(end.playRequested)
+    }
+
+    @Test fun endSeekStopsAndPendingRequestCannotBeOvertaken() {
+        val pending = ChatMediaPreviewVideoControlsState().prepared(10_000).scrub(1f).finishSeeking()
+        assertEquals(1f, pending.fraction, 0f)
+        assertFalse(pending.playRequested)
+        assertEquals(pending, pending.togglePlayback())
+        assertEquals(pending, pending.scrub(0.25f))
+        assertEquals(pending, pending.completed())
+        val ended = pending.seekCompleted()
+        assertFalse(ended.shouldPlay(true, true))
+        assertEquals(ended, ended.positionChanged(9_800))
+        val dragging = ChatMediaPreviewVideoControlsState().prepared(10_000).scrub(0.3f)
+        assertEquals(dragging, dragging.completed())
     }
 
     @Test fun videoTimeUsesMinutesAndHoursWithoutNegativeValues() {

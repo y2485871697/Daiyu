@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
@@ -46,6 +45,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -128,7 +128,7 @@ internal fun ChatMediaPreviewDialog(selection: ChatMediaPreviewSelection,
         properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
     ) {
         ChatMediaPreviewHideStatusBars()
-        BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black)) {
+        BoxWithConstraints(Modifier.fillMaxSize().background(Color.Black).testTag("chat-media-preview-viewport")) {
             // Rotate only the preview viewport; keep the Activity, player and media owner intact.
             Box(Modifier.align(Alignment.Center)
                 .requiredSize(if (landscape) maxHeight else maxWidth, if (landscape) maxWidth else maxHeight)
@@ -178,7 +178,7 @@ internal fun ChatMediaPreviewDialog(selection: ChatMediaPreviewSelection,
                         }
                     }
                 },
-                modifier = Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(if (video) 24.dp else 8.dp),
+                modifier = Modifier.align(Alignment.TopEnd).padding(if (video) 24.dp else 8.dp).testTag("chat-media-download"),
             ) {
                 Icon(Icons.Rounded.Download, contentDescription = "下载原件",
                     tint = if (video) MaterialTheme.colorScheme.primary else Color.White)
@@ -208,7 +208,7 @@ private fun ChatMediaPreviewPage(
     val currentTransform by rememberUpdatedState(transform)
     val updateTransform by rememberUpdatedState(onTransform)
     val updateTransforming by rememberUpdatedState(onTransforming)
-    var bitmap by remember(item) { mutableStateOf<ImageBitmap?>(null) }
+    var bitmap by remember(item) { mutableStateOf(item.cachedImage()) }
     var failed by remember(item) { mutableStateOf(false) }
     val video = chatMediaPreviewIsVideo(item.mimeType)
     LaunchedEffect(item) {

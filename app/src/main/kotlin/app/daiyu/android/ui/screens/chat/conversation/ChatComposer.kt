@@ -149,13 +149,16 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     val voiceMenuEnabled = toolbarEnabled && state.voiceModes.isNotEmpty()
     val hasText = state.text.isNotBlank() || state.editingMessageCanSubmit || ((state.phase == ComposerPhase.IDLE || state.presentationOnly) && (state.imageSendAvailable || state.videoSendAvailable))
     val preparingSend = state.preparingSendKey != null
-    val textAction = hasText && !preparingSend
-    val compressionBlocked = !preparingSend && state.mainContextCompressing && (textAction || state.phase == ComposerPhase.IDLE)
-    val primaryEnabled = preparingSend || if (textAction) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE
-    val primaryVisualEnabled = preparingSend || if (textAction) state.copy(enabled = visualEnabled).textActionEnabled()
+    val mediaSubmitting = state.mediaSubmissionKey != null
+    val submitting = preparingSend || mediaSubmitting
+    val textAction = hasText && !submitting
+    val compressionBlocked = !submitting && state.mainContextCompressing && (textAction || state.phase == ComposerPhase.IDLE)
+    val primaryEnabled = !mediaSubmitting && (preparingSend || if (textAction) state.textActionEnabled() else state.enabled && state.phase != ComposerPhase.IDLE)
+    val primaryVisualEnabled = submitting || if (textAction) state.copy(enabled = visualEnabled).textActionEnabled()
         else visualEnabled && state.phase != ComposerPhase.IDLE
     val primaryIcon = when {
         preparingSend -> ChatPreviewIcons.Pause
+        mediaSubmitting -> ChatPreviewIcons.Pause
         state.phase == ComposerPhase.PAUSED && !hasText -> ChatPreviewIcons.Play
         textAction && state.phase != ComposerPhase.IDLE && !state.presentationOnly -> ChatPreviewIcons.Append
         textAction -> ChatPreviewIcons.Send
@@ -163,6 +166,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         else -> ChatPreviewIcons.Send
     }
     val primaryLabel = when {
+        mediaSubmitting -> "正在发送"
         preparingSend -> "取消发送"
         state.phase == ComposerPhase.PAUSED && !hasText -> "继续"
         textAction && state.supplementPending && !state.presentationOnly -> "正在追加"
@@ -333,6 +337,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     .widthIn(max = 72.dp), animateChanges = true, iconSize = 16.dp,
                                 textStyle = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 28.sp))
                             ChatIconButton(primaryIcon, primaryLabel, {
+                                if (mediaSubmitting) return@ChatIconButton
                                 if (preparingSend) actions.onCancelSend()
                                 else if (compressionBlocked) actions.onCompressionSendBlocked()
                                 else if (!textAction) controlActions.onPrimaryTap()
@@ -344,18 +349,19 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                     else actions.onSupplement(state.text)
                                 }
                             }, Modifier.size(32.dp).testTag(when {
+                                mediaSubmitting -> "media-send-pending"
                                 preparingSend -> "text-send-cancel"
                                 textAction || state.phase == ComposerPhase.IDLE -> "chat-send"
                                 else -> "chat-control"
-                            }).then(if (preparingSend) Modifier else Modifier.controlGesture(actions, pageActive && primaryEnabled, pressedControlActions)),
+                            }).then(if (submitting) Modifier else Modifier.controlGesture(actions, pageActive && primaryEnabled, pressedControlActions)),
                                 containerColor = if (compressionBlocked) MiuixTheme.colorScheme.onSurface.copy(alpha = .12f)
-                                    else (if (preparingSend || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
+                                    else (if (submitting || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
                                         .copy(alpha = if (primaryVisualEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f),
-                                enabled = pageActive && (primaryEnabled || compressionBlocked), containerSize = 28.dp, visualEnabled = primaryVisualEnabled, animateChanges = true, motion = primaryMotion,
+                                enabled = pageActive && (primaryEnabled || compressionBlocked), containerSize = 28.dp, visualEnabled = primaryVisualEnabled, animateChanges = true, motion = primaryMotion, iconCrossfade = !mediaSubmitting,
                                 tint = if (compressionBlocked) MiuixTheme.colorScheme.onSurface
-                                    else if (preparingSend || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
-                                iconSize = if (preparingSend || !textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp,
-                                onLongClick = if (preparingSend) actions.onCancelSend else if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE) controlActions.onPrimaryLongPress else null)
+                                    else if (submitting || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
+                                iconSize = if (submitting || !textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp,
+                                onLongClick = if (mediaSubmitting) null else if (preparingSend) actions.onCancelSend else if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE) controlActions.onPrimaryLongPress else null)
                         }
                     }
                     Box {

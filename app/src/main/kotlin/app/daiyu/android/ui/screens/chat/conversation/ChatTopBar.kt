@@ -160,6 +160,7 @@ internal fun ChatIconButton(
     visualEnabled: Boolean = enabled,
     animateChanges: Boolean = false,
     motion: ChatActionMotion? = null,
+    iconCrossfade: Boolean = true,
 ) {
     val actionMotion = if (animateChanges) motion ?: rememberChatActionMotion() else null
     val interactionSource = actionMotion?.interactionSource ?: remember { MutableInteractionSource() }
@@ -178,12 +179,18 @@ internal fun ChatIconButton(
             contentAlignment = Alignment.Center) {
             val imageSize = iconSize ?: if (containerColor == null) 20.dp else 12.dp
             if (animateChanges) {
-                AnimatedContent(icon, modifier = Modifier.testTag("chat-action-icon"), contentAlignment = Alignment.Center,
+                AnimatedContent(icon to iconCrossfade, modifier = Modifier.testTag("chat-action-icon"), contentAlignment = Alignment.Center,
+                    contentKey = { it.first },
                     transitionSpec = {
-                        ((fadeIn(tween(200)) + scaleIn(tween(200), initialScale = .72f)) togetherWith
-                            (fadeOut(tween(120)) + scaleOut(tween(120), targetScale = .72f))).using(null)
+                        if (initialState.second && targetState.second) {
+                            ((fadeIn(tween(200)) + scaleIn(tween(200), initialScale = .72f)) togetherWith
+                                (fadeOut(tween(120)) + scaleOut(tween(120), targetScale = .72f))).using(null)
+                        } else {
+                            scaleIn(tween(200), initialScale = .72f).togetherWith(
+                                androidx.compose.animation.ExitTransition.None).using(null)
+                        }
                     }, label = "chat-action-icon") { image ->
-                    Icon(image, contentDescription = null, modifier = Modifier.size(imageSize), tint = if (visualEnabled) tint else tint.copy(alpha = 0.38f))
+                    Icon(image.first, contentDescription = null, modifier = Modifier.size(imageSize), tint = if (visualEnabled) tint else tint.copy(alpha = 0.38f))
                 }
             } else {
                 Icon(icon, contentDescription = label, modifier = Modifier.size(imageSize), tint = if (visualEnabled) tint else tint.copy(alpha = 0.38f))

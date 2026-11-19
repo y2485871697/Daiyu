@@ -147,6 +147,9 @@ private fun VideoAttachmentsContent(
     onControlsDisposed: ((VideoComposerControls) -> Unit)?,
 ) {
     var cover by remember { mutableStateOf<VideoChatHost.Item.Ready?>(null) }
+    val coverImages = remember(host, state.owner, state.visit, state.revision) {
+        mutableMapOf<app.daiyu.android.media.video.VideoAttachment, ImageBitmap>()
+    }
     val canEdit = enabled && state.visible && !state.fenced && !state.storageFailed && !state.recovering
     val controls by rememberUpdatedState(onControls)
     val releaseControls by rememberUpdatedState(onControlsDisposed)
@@ -196,7 +199,8 @@ private fun VideoAttachmentsContent(
             state.items.forEachIndexed { index, item ->
                 key(state.owner, state.visit, state.revision, item.key) {
                     if (compact) CompactVideoAttachment(host, state, item, index, canEdit && !picker.selecting,
-                        onPreview = { if (sameVideoVisit(state, host.state)) cover = item as? VideoChatHost.Item.Ready })
+                        onPreview = { if (sameVideoVisit(state, host.state)) cover = item as? VideoChatHost.Item.Ready },
+                        onCover = { ready, image -> coverImages[ready.video] = image })
                     else Column(Modifier.width(168.dp).clip(RoundedCornerShape(12.dp))
                         .background(colors.surfaceContainerHigh).testTag("video_attachments_item:${item.key}")) {
                         Box(Modifier.fillMaxWidth().height(104.dp).then(
@@ -209,7 +213,7 @@ private fun VideoAttachmentsContent(
                             when (item) {
                                 is VideoChatHost.Item.Importing -> VideoStatus("正在导入原视频…", "video_attachments_importing:${item.key}")
                                 is VideoChatHost.Item.Failed -> VideoStatus(videoFailureText(item.failure), "video_attachments_failed:${item.key}")
-                                is VideoChatHost.Item.Ready -> VideoCover(host, state, item, 256)
+                                is VideoChatHost.Item.Ready -> VideoCover(host, state, item, 256, onLoaded = { coverImages[item.video] = it })
                             }
                         }
                         if (item is VideoChatHost.Item.Ready) {
@@ -237,7 +241,8 @@ private fun VideoAttachmentsContent(
                 key = "draft-video:${state.owner}:${item.video.id}",
                 mimeType = item.video.mime,
                 displayName = name,
-                loadImage = { null },
+                loadImage = { coverImages[item.video] },
+                cachedImage = { if (sameVideoVisit(state, host.state) && host.state.items.contains(item)) coverImages[item.video] else null },
                 openOriginal = {
                     host.openPreviewOriginal(item.video, state, originals)?.let {
                         ChatMediaPreviewOriginal(it, item.video.mime, name)
@@ -260,6 +265,7 @@ private fun CompactVideoAttachment(
     index: Int,
     canRemove: Boolean,
     onPreview: () -> Unit,
+    onCover: (VideoChatHost.Item.Ready, ImageBitmap) -> Unit,
 ) {
     val colors = chatChromeColors()
     Row(Modifier.width(188.dp).clip(RoundedCornerShape(12.dp))
@@ -272,7 +278,7 @@ private fun CompactVideoAttachment(
                 role = Role.Button, onClickLabel = "播放第 ${index + 1} 个视频", onClick = onPreview,
             ) else Modifier,
         ).testTag("video_attachments_thumbnail:${item.key}"), contentAlignment = Alignment.Center) {
-            if (item is VideoChatHost.Item.Ready) VideoCover(host, state, item, 256, compact = true)
+            if (item is VideoChatHost.Item.Ready) VideoCover(host, state, item, 256, compact = true, onLoaded = { onCover(item, it) })
             else androidx.compose.material3.Icon(DaiyuIcons.Video, null, Modifier.size(18.dp), tint = colors.accent)
         }
         Text(when (item) {
@@ -300,7 +306,7 @@ private sealed interface VideoCoverResult {
 }
 
 @Composable
-private fun VideoCover(host: VideoChatHost, state: VideoChatHost.Snapshot, item: VideoChatHost.Item.Ready, edge: Int, compact: Boolean = false) {
+private fun VideoCover(host: VideoChatHost, state: VideoChatHost.Snapshot, item: VideoChatHost.Item.Ready, edge: Int, compact: Boolean = false, onLoaded: (ImageBitmap) -> Unit = {}) {
     var retry by remember { mutableStateOf(0) }
     val result by produceState<VideoCoverResult>(VideoCoverResult.Loading, host, state.owner, state.visit, state.revision, item, edge, retry, state.visible) {
         value = VideoCoverResult.Loading
@@ -330,8 +336,11 @@ private fun VideoCover(host: VideoChatHost, state: VideoChatHost.Snapshot, item:
             VideoStatus("封面不可用，原视频仍保留", "video_attachments_cover_failed:${item.key}")
             TextButton(text = "重试封面", onClick = { retry++ }, modifier = Modifier.heightIn(min = 48.dp))
         }
-        is VideoCoverResult.Loaded -> Image(current.image, contentDescription = "原视频的封面（不是视频）",
-            modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+        is VideoCoverResult.Loaded -> {
+            androidx.compose.runtime.SideEffect { onLoaded(current.image) }
+            Image(current.image, contentDescription = "原视频的封面（不是视频）",
+                modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+        }
     }
 }
 

@@ -12,7 +12,12 @@ data class ChatMediaPreviewItem(
     val displayName: String,
     val loadImage: suspend (Int) -> ImageBitmap?,
     val openOriginal: suspend () -> ChatMediaPreviewOriginal?,
-)
+    val cachedImage: () -> ImageBitmap?,
+) {
+    constructor(key: String, mimeType: String, displayName: String,
+        loadImage: suspend (Int) -> ImageBitmap?, openOriginal: suspend () -> ChatMediaPreviewOriginal?) :
+        this(key, mimeType, displayName, loadImage, openOriginal, { null })
+}
 
 class ChatMediaPreviewOriginal(
     val stream: InputStream,

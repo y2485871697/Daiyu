@@ -1467,6 +1467,31 @@ class TaskScrollFrozenCheckToolsTest(unittest.TestCase):
             finally:
                 os.chdir(old)
 
+class MediaMessageEntranceToolTestsScopeTest(unittest.TestCase):
+    CLASSES = (
+        'app.daiyu.android.ui.screens.chat.conversation.UserMessageEntranceTest',
+        'app.daiyu.android.ui.screens.chat.conversation.UserMessageMediaEntranceTest',
+        'app.daiyu.android.ui.screens.chat.conversation.MessageMediaLayoutGeometryTest',
+    )
+
+    def test_exact_media_entrance_filters_keep_the_existing_send_and_scroll_contracts(self):
+        self.assertEqual(self.CLASSES, recorder.MEDIA_MESSAGE_ENTRANCE_PLATFORM_CLASSES)
+        for selected in itertools.permutations(self.CLASSES):
+            command, scope = recorder.command_for('python3', dict(
+                SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=','.join(selected)))
+            self.assertEqual('user-message-entrance-targeted', scope)
+            self.assertEqual(['python3', '-B', '-m', 'unittest', *recorder.USER_MESSAGE_ENTRANCE_MODULES, '-v'], command)
+            self.assertNotIn('discover', command)
+
+    def test_partial_duplicate_unknown_and_non_smoke_media_filters_do_not_expand_the_scope(self):
+        raw = ','.join(self.CLASSES)
+        for invalid in ('', ','.join(self.CLASSES[:-1]), raw + ',unknown', raw + ',' + self.CLASSES[0], raw + ','):
+            self.assertEqual('full', recorder.command_for('python3', dict(
+                SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=invalid))[1])
+        self.assertEqual('full', recorder.command_for('python3', dict(
+            SMOKE_MODE='checks', SMOKE_TEST_CLASSES=raw))[1])
+
+
 class UserMessageEntranceToolTestsScopeTest(unittest.TestCase):
     CLASSES = (
         'app.daiyu.android.ui.screens.chat.conversation.UserMessageEntranceTest',

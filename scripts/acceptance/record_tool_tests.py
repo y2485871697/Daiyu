@@ -398,6 +398,11 @@ USER_MESSAGE_ENTRANCE_PLATFORM_CLASSES = (
     'app.daiyu.android.ChatSubmissionActivityTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
 )
+MEDIA_MESSAGE_ENTRANCE_PLATFORM_CLASSES = (
+    'app.daiyu.android.ui.screens.chat.conversation.UserMessageEntranceTest',
+    'app.daiyu.android.ui.screens.chat.conversation.UserMessageMediaEntranceTest',
+    'app.daiyu.android.ui.screens.chat.conversation.MessageMediaLayoutGeometryTest',
+)
 USER_MESSAGE_ENTRANCE_MODULES = tuple(dict.fromkeys((
     'test_chat_submission_preview_contract', 'test_composer_surface_color_contract',
     'test_compression_send_gate_contract', 'test_delegation_batch_and_send_contract',
@@ -943,7 +948,8 @@ def command_for(python, env):
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(VIDEO_PICKER_PLATFORM_CLASSES)):
         return [python, "-B", "-m", "unittest", *VIDEO_PICKER_MODULES, "-v"], "video-picker-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
-            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(USER_MESSAGE_ENTRANCE_PLATFORM_CLASSES)):
+            and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) in (
+                sorted(USER_MESSAGE_ENTRANCE_PLATFORM_CLASSES), sorted(MEDIA_MESSAGE_ENTRANCE_PLATFORM_CLASSES))):
         return [python, "-B", "-m", "unittest", *USER_MESSAGE_ENTRANCE_MODULES, "-v"], "user-message-entrance-targeted"
     if (env.get("SMOKE_MODE") == "smoke"
             and sorted(env.get("SMOKE_TEST_CLASSES", "").split(",")) == sorted(ERROR_DETAILS_PLATFORM_CLASSES)):

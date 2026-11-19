@@ -1017,11 +1017,14 @@ internal fun ChatMessageList(
         val entrance = userMessageEntrance ?: return@LaunchedEffect
         snapshotFlow {
             val layout = listState.layoutInfo
+            val enteringKeys: Set<Any> = currentTurns.filterIsInstance<ChatTurnUi.User>().filter {
+                it.matchesKey(entrance.request.key) || it.matchesKey(entrance.request.messageId)
+            }.map { it.listKey }.toSet()
             presentationActive && pageActive && scrollResumed && !initialPositionPending && !currentRetainingRows &&
                 (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial) &&
                 (!followBottom || !listState.canScrollForward) &&
                 layout.visibleItemsInfo.any { item ->
-                    (item.key == entrance.request.key || item.key == entrance.request.messageId) &&
+                    item.key in enteringKeys &&
                         item.size > 0 && item.offset < layout.viewportEndOffset - currentOcclusionPx &&
                         item.offset + item.size > layout.viewportStartOffset &&
                         item.offset + item.size <= layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx + 1

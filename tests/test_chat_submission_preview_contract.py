@@ -164,6 +164,25 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
         after_ime = motion.split('withTimeoutOrNull(240)', 1)[1]
         self.assertLess(after_ime.index('snapshotFlow { !awaitPlacement || motion.positioned }'), after_ime.index('if (request.claim())'))
 
+    def test_media_only_send_and_encoded_mapper_keys_cannot_stall_entrance(self):
+        preview = (CHAT / 'ChatSubmissionPreview.kt').read_text()
+        rows = (CHAT / 'ChatMessageList.kt').read_text()
+        self.assertIn('val text = preview.text.orEmpty()', preview)
+        self.assertNotIn('preview.text ?: return turns', preview)
+        readiness = rows.split('val entrance = userMessageEntrance ?: return@LaunchedEffect', 1)[1].split(
+            '.collect { positioned -> entrance.updatePlacement(listState, positioned) }', 1)[0]
+        for token in ('currentTurns.filterIsInstance<ChatTurnUi.User>()',
+                      'it.matchesKey(entrance.request.key) || it.matchesKey(entrance.request.messageId)',
+                      'map { it.listKey }.toSet()', 'item.key in enteringKeys'):
+            self.assertIn(token, readiness)
+        self.assertNotIn('item.key == entrance.request.messageId', readiness)
+        device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/UserMessageMediaEntranceTest.kt').read_text()
+        for token in ('ChatTurnMapper.map(', 'MessageBlock.Image(image)', 'MessageVideoUi(videoOwner, reference)',
+                      'ChatSubmissionPreview(ticket.key)', 'ticket.messageId = durable.id',
+                      'mapped media must not remain transparent', 'real thumbnail pixels must paint',
+                      'advanceAnimationClock = false', 'message-video-play:1'):
+            self.assertIn(token, device)
+
     def test_retained_chat_page_refreshes_only_ime_geometry_during_the_handoff(self):
         host = (CHAT / 'ChatPageHost.kt').read_text()
         self.assertIn('motionInsets: WindowInsets = WindowInsets.ime', host)

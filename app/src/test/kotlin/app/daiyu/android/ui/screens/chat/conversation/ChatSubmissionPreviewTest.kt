@@ -45,6 +45,27 @@ class ChatSubmissionPreviewTest {
         assertEquals(2, history.size)
     }
 
+    @Test fun mediaOnlySendReservesAPendingUserWithoutInventingAssetOwnership() {
+        val preview = ChatSubmissionPreview("media-ticket")
+        val pending = submissionTurns(history, preview).last() as ChatTurnUi.User
+        assertEquals("media-ticket", pending.listKey)
+        assertEquals("", pending.text)
+        assertTrue(pending.pending)
+        assertTrue(pending.content.isEmpty())
+        assertEquals("", pending.timestamp)
+        assertSame(history, submissionTurns(history, null))
+    }
+
+    @Test fun mediaOnlyPendingStaysBeforeTheAcceptedAssistantUntilItsUserArrives() {
+        val preview = ChatSubmissionPreview("media-ticket", settledUserId = "media-user", settledAssistantId = "media-answer")
+        val assistantOnly = history + ChatTurnUi.Assistant("media-answer")
+        assertEquals(listOf("user", "answer", "media-ticket", "media-answer"),
+            submissionTurns(assistantOnly, preview).map { it.id })
+        val complete = history + ChatTurnUi.User("media-user", "", listKey = "encoded-media-segment") +
+            ChatTurnUi.Assistant("media-answer")
+        assertSame(complete, submissionTurns(complete, preview))
+    }
+
     @Test fun cancellationOrRejectionRestoresOriginalListIdentity() {
         assertEquals(3, submissionTurns(history, ChatSubmissionPreview("ticket", "send")).size)
         assertSame(history, submissionTurns(history, null))

@@ -105,6 +105,7 @@ jobs:
             --tests '*ToolCardPresentationTest' \
             --tests '*ComposerReferencesTest' \
             --tests '*ToolReceiptSourceTest' \
+            --tests '*ChatSubmissionPreviewTest' \
             --tests '*ChatTurnMapperTest' \
             --tests '*ReasoningWorkflowMapperTest' \
             :app:compileDebugAndroidTestKotlin 2>&1 | tee media-inline-checks/gradle.log
@@ -119,7 +120,7 @@ jobs:
                              'EditingImageSelectionStoreTest', 'MessageEditBaselineTest', 'MessageActionRenderedRevisionTest',
                              'ForegroundComposerStateTest', 'MessageImageContractTest', 'ImageAttachmentsStateTest',
                              'VideoChatHostTest', 'ControllerVideoFilesTest', 'ControllerVideoNativeRouteTest', 'VideoDefaultReasoningTest', 'OpenRouterVideoInputTest', 'ScreenToolImageStoreTest', 'ScreenToolImageInputTest', 'TerminalImageReadTest', 'RunCommandToolsTest', 'ToolCardPresentationTest', 'ComposerReferencesTest', 'ToolReceiptSourceTest',
-                             'ChatTurnMapperTest', 'ReasoningWorkflowMapperTest')
+                             'ChatSubmissionPreviewTest', 'ChatTurnMapperTest', 'ReasoningWorkflowMapperTest')
           suites = [ET.parse(p).getroot() for p in Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml')]
           names = {suite.attrib['name'].rsplit('.', 1)[-1] for suite in suites}
           assert all(any(group in name for name in names) for group in expected_groups), (names, expected_groups)

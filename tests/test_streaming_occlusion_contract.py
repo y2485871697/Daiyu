@@ -35,12 +35,12 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("val listHeight: Int, val viewportTop: Float, val viewportHeight: Int", source)
         self.assertIn("if (attached) list!!.localPositionOf(viewport!!, Offset.Zero).y", source)
         typing = (CHAT.parent / "MarkdownTyping.kt").read_text()
-        self.assertIn("currentCanAdvance && textClearance?.held != true", typing)
+        self.assertIn("markdownTypingCanAdvance(currentCanAdvance, currentPlayback) && textClearance?.held != true", typing)
         self.assertIn("else { motion.pause(current); motion.visible(current) }", typing)
         markdown = (CHAT.parent / "MessageMarkdown.kt").read_text()
         for token in ("remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }",
-                      "clearance.fits(coordinates, candidate.size.height)", "painted[paintOffset] = it",
-                      "clearance.fits(frame.coordinates, displayed.size.height)", "frame.committed",
+                      "clearance.fits(coordinates, candidate.size.height)", "painted[paintOffset] = actual",
+                      "actual.size.height <= available + .01f", "frame.committed",
                       'BasicText(displayed?.layoutInput?.text ?: AnnotatedString("")',
                       "paintOffset + offset", "paintOffset + offsets[column]",
                       "previous?.canPaintPrefixOf(candidate) == true", "current.text.text.startsWith(previous.text.text)",
@@ -61,6 +61,25 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("hasTurnExtras = hasTurnExtras", (CHAT.parent / "ChatScreen.kt").read_text())
         self.assertIn("turn.segmentIndex == 0 && questionRows[turn.id]?.retryCleanup == true",
                       (ROOT / "app/src/main/kotlin/app/daiyu/android/MainActivity.kt").read_text())
+
+    def test_leaf_pause_uses_drawn_prefix_and_layout_does_not_report_paint(self):
+        markdown = (CHAT.parent / "MessageMarkdown.kt").read_text()
+        frame = markdown.split("private class MarkdownTextFrame", 1)[1].split("@Composable", 1)[0]
+        self.assertIn("var coordinates: LayoutCoordinates? = null", frame)
+        self.assertIn("var availableHeight by mutableStateOf(0f)", frame)
+        self.assertNotIn("neverEqualPolicy", frame)
+        leaf = markdown.split("internal fun ClearanceText", 1)[1].split("internal fun TextLayoutResult.canPaintPrefixOf", 1)[0]
+        self.assertIn("val displayed = if (playback?.paused == true) frame.drawn else frame.committed", leaf)
+        self.assertIn("playback?.paused == true -> frame.drawn", leaf)
+        self.assertIn("fun published(): Boolean = text.isEmpty() || frame.drawn?.let", leaf)
+        self.assertIn("!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text", leaf)
+        placed, drawn = leaf.split(".drawWithContent {", 1)
+        self.assertNotIn("painted[paintOffset] =", placed)
+        self.assertLess(drawn.index("drawContent()"), drawn.index("frame.drawn = actual"))
+        self.assertLess(drawn.index("frame.drawn = actual"), drawn.index("publication?.setPending"))
+        layout = drawn.split("onTextLayout = {", 1)[1]
+        self.assertIn("frame.rendered = it", layout)
+        self.assertNotIn("publication?.setPending", layout)
 
     def test_glyph_regression_rejects_the_visual_edge_and_verifies_committed_complete_lines(self):
         device = DEVICE.read_text()

@@ -27,7 +27,6 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.neverEqualPolicy
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
@@ -194,9 +193,11 @@ internal fun ParsedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, m
 
 private val LocalMarkdownPaintedText = staticCompositionLocalOf<MutableMap<Int, TextLayoutResult>?> { null }
 private class MarkdownTextFrame {
-    var coordinates by mutableStateOf<LayoutCoordinates?>(null, neverEqualPolicy())
+    var coordinates: LayoutCoordinates? = null
+    var availableHeight by mutableStateOf(0f)
     var layout: TextLayoutResult? = null
     var rendered: TextLayoutResult? = null
+    var drawn: TextLayoutResult? = null
     var committed by mutableStateOf<TextLayoutResult?>(null)
 }
 
@@ -216,28 +217,31 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                 input.style == style && input.softWrap == softWrap && text.length >= input.text.length &&
                     text.subSequence(0, input.text.length) == input.text
             }
+            drawn = committed
         }
     }
+    val playback = LocalReplyPlayback.current
     val measurer = rememberTextMeasurer(cacheSize = 1)
     val publication = LocalMarkdownPaintPublication.current
-    val displayed = frame.committed
+    val displayed = if (playback?.paused == true) frame.drawn else frame.committed
     val owner = remember(frame) { Any() }
-    fun published(): Boolean = text.isEmpty() || frame.rendered?.let { actual ->
+    fun published(): Boolean = text.isEmpty() || frame.drawn?.let { actual ->
         actual.layoutInput.text == text && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
             clearance.fits(frame.coordinates, actual.size.height)
     } == true
     fun placed(coordinates: LayoutCoordinates) {
         frame.coordinates = coordinates
+        frame.availableHeight = clearance.availableHeight(coordinates)
         frame.layout?.let { candidate ->
             val previous = frame.committed ?: paintOffset?.let { painted[it] }
             val accepted = when {
+                playback?.paused == true -> frame.drawn
                 clearance.fits(coordinates, candidate.size.height) -> candidate
                 previous?.canPaintPrefixOf(candidate) == true -> previous
                 else -> null
             }
             if (frame.committed?.layoutInput != accepted?.layoutInput || frame.committed?.size != accepted?.size)
                 frame.committed = accepted
-            accepted?.let { if (paintOffset != null) painted[paintOffset] = it }
         }
         publication?.setPending(owner, !published())
     }
@@ -255,11 +259,18 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             committed.placeRelative(0, 0)
         }
     }.onPlaced(::placed).onGloballyPositioned(::placed).drawWithContent {
-        if (displayed != null && frame.layout?.let { displayed.canPaintPrefixOf(it) } == true &&
-            clearance.fits(frame.coordinates, displayed.size.height)) drawContent()
+        val available = minOf(frame.availableHeight, clearance.availableHeight(frame.coordinates))
+        val actual = frame.rendered?.takeIf { it.layoutInput.text == displayed?.layoutInput?.text }
+        val frozen = playback?.paused == true
+        if (actual != null && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
+            actual.size.height <= available + .01f && (!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text)) {
+            drawContent()
+            frame.drawn = actual
+            if (paintOffset != null) painted[paintOffset] = actual
+        }
+        publication?.setPending(owner, !published())
     }, displayed?.layoutInput?.style ?: style, softWrap = softWrap, onTextLayout = {
         frame.rendered = it
-        publication?.setPending(owner, !published())
     })
 }
 

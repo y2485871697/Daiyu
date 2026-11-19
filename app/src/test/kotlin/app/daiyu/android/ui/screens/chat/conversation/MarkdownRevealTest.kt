@@ -1,10 +1,63 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import app.daiyu.android.MarkdownParser
+import androidx.compose.runtime.mutableStateOf
 import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownRevealTest {
+    @Test fun queuedFrameSeesPauseBeforeRecompositionAndResumeDoesNotCatchUp() {
+        val control = ReplyPresentationControl(null, initiallyLive = true)
+        val playback = ReplyPlayback(control, runtimePaused = false)
+        val currentPlayback = mutableStateOf<ReplyPlayback?>(playback)
+        val currentCanAdvance = mutableStateOf(true)
+        val state = MarkdownTypingState(listOf(source("")))
+        state.update(listOf(part("")), 0, streaming = true, terminal = false)
+        val target = state.update(listOf(part("字".repeat(200))), 0, streaming = true, terminal = false)!!
+        var advances = 0
+        val queuedFrame: (Long) -> Int = { nanos ->
+            if (markdownTypingCanAdvance(currentCanAdvance.value, currentPlayback.value)) {
+                state.advance(target, nanos, target.total) { advances++ }
+            } else {
+                state.pause(target)
+                state.visible(target)
+            }
+        }
+        assertEquals(0, queuedFrame(1_000_000_000L))
+        val shown = queuedFrame(1_100_000_000L)
+        assertTrue(shown in 1 until target.total)
+        val before = advances
+        control.pause(true)
+        assertTrue(currentCanAdvance.value)
+        assertSame(playback, currentPlayback.value)
+        assertEquals(shown, queuedFrame(1_116_000_000L))
+        assertEquals(shown, queuedFrame(11_116_000_000L))
+        assertEquals(before, advances)
+        control.pause(false)
+        assertEquals(shown, queuedFrame(21_116_000_000L))
+        val resumed = queuedFrame(21_166_000_000L)
+        assertTrue("Resume must retain normal pace: $shown -> $resumed", resumed in (shown + 1)..(shown + 4))
+        assertEquals(before + 1, advances)
+    }
+
+    @Test fun frameGatePreservesDisabledRuntimePausedAndExplicitFinishSemantics() {
+        assertTrue(markdownTypingCanAdvance(true, null))
+        assertFalse(markdownTypingCanAdvance(false, null))
+        val control = ReplyPresentationControl(null, initiallyLive = true)
+        val playback = ReplyPlayback(control, runtimePaused = false)
+        assertTrue(markdownTypingCanAdvance(true, playback))
+        assertFalse(markdownTypingCanAdvance(false, playback))
+        control.pause(true)
+        assertFalse(markdownTypingCanAdvance(true, playback))
+        control.pause(false)
+        assertTrue(markdownTypingCanAdvance(true, playback))
+        val runtimePaused = playback.copy(runtimePaused = true)
+        assertFalse(markdownTypingCanAdvance(true, runtimePaused))
+        control.finish()
+        assertTrue(markdownTypingCanAdvance(true, runtimePaused))
+        assertFalse(markdownTypingCanAdvance(false, runtimePaused))
+    }
+
     @Test fun finalBudgetWaitsForItsOwnPlacedSourceAndPendingLeaves() {
         val motion = MarkdownTypingState(emptyList())
         val target = motion.update(listOf(part("final")), 0, false, true)!!

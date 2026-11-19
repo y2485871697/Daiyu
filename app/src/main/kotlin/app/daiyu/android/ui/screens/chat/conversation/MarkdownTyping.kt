@@ -81,6 +81,9 @@ private val hiddenMarkdownVisibility: State<Int> = derivedStateOf { 0 }
 
 internal data class MarkdownTypingFrame(val target: MarkdownTypingTarget?, val visible: Int)
 
+internal fun markdownTypingCanAdvance(canAdvance: Boolean, playback: ReplyPlayback?): Boolean =
+    canAdvance && playback?.paused != true
+
 @Composable
 internal fun rememberMarkdownReveal(
     turn: ChatTurnUi.Assistant,
@@ -169,6 +172,7 @@ internal fun rememberMarkdownReveal(
     val finishImmediately = playback?.control?.finished == true
     val canAdvance = enabled && sourcesCompatible && playback?.paused != true
     val currentCanAdvance by rememberUpdatedState(canAdvance)
+    val currentPlayback by rememberUpdatedState(playback)
     val clearance = LocalStreamingTextClearance.current
     val textClearance by rememberUpdatedState(clearance)
     val publication = remember(identity, resetEpoch, motion) { MarkdownPaintPublication() }
@@ -184,7 +188,7 @@ internal fun rememberMarkdownReveal(
         val end = maxOf(shown, minOf(current.total, advanceLimit))
         while (shown < end) {
             shown = withFrameNanos { frameNanos ->
-                if (currentCanAdvance && textClearance?.held != true) motion.advance(current, frameNanos, end) { currentAdvance() }
+                if (markdownTypingCanAdvance(currentCanAdvance, currentPlayback) && textClearance?.held != true) motion.advance(current, frameNanos, end) { currentAdvance() }
                 else { motion.pause(current); motion.visible(current) }
             }
             value = MarkdownTypingFrame(current, shown)

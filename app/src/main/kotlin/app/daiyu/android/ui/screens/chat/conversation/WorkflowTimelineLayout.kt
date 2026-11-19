@@ -17,12 +17,23 @@ import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layoutId
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.ui.unit.constrainWidth
 import kotlin.math.roundToInt
 
 internal class WorkflowItemLayout {
+    var coordinates: LayoutCoordinates? = null
     var motion: WorkflowLineMotion? = null
     var spacingAfter: Dp = Dp.Unspecified
     var appearance: WorkflowToolAppearance? = null
@@ -43,7 +54,7 @@ internal class WorkflowItemLayout {
         val outgoing = line?.outgoing
         val through = line?.through
         // Once the connector arrives, fade the complete row rather than slicing its ink at the bottom.
-        if (!fullyVisible && line?.incoming != null && entrance?.arrived == true) fullyVisible = true
+        if (!fullyVisible && entrance?.arrived == true) fullyVisible = true
         if (!fullyVisible && (entrance?.settled == true || entrance?.progress?.value?.let { it >= 1f } == true ||
             (entrance == null && (through == null || through.fraction() >= 1f)))) fullyVisible = true
         val visibleBody = when {
@@ -84,7 +95,7 @@ internal fun WorkflowTimelineItem(item: MessageContentUi, motion: WorkflowLineMo
     layout.motion = motion
     layout.spacingAfter = spacingAfter
     CompositionLocalProvider(LocalWorkflowItemLayout provides layout) {
-        Box(Modifier.layoutId(layout).drawWithContent {
+        Box(Modifier.layoutId(layout).onPlaced { layout.coordinates = it }.drawWithContent {
             // Extra space below the rail is blank, not permission to paint a queued item.
             clipRect(bottom = layout.allocatedHeight.toFloat()) { this@drawWithContent.drawContent() }
         }) { content() }
@@ -170,5 +181,50 @@ internal fun WorkflowTimelineColumn(timeline: Boolean, content: @Composable () -
                 top += child.height
             }
         }
+    }
+}
+
+private class WorkflowPaintFrame {
+    var coordinates: LayoutCoordinates? = null
+}
+
+/** The candidate keeps its measured extent; the visible surface ends at the same safe edge as its ink. */
+@Composable
+internal fun Modifier.streamingWorkflowSurface(background: Color, border: Color, radius: Dp,
+    highlight: Color? = null): Modifier {
+    val clearance = LocalStreamingTextClearance.current
+    val frame = remember(clearance) { WorkflowPaintFrame() }
+    return onPlaced { frame.coordinates = it }.drawWithContent {
+        val available = clearance?.availableHeight(frame.coordinates) ?: Float.POSITIVE_INFINITY
+        val height = minOf(size.height, available)
+        if (height > 0f) {
+            val corner = minOf(radius.toPx(), size.width / 2f, height / 2f)
+            val path = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, height, CornerRadius(corner))) }
+            clipPath(path) {
+                drawRoundRect(background, size = Size(size.width, height), cornerRadius = CornerRadius(corner))
+                this@drawWithContent.drawContent()
+                highlight?.let { drawLine(it, Offset(0f, .5.dp.toPx()), Offset(size.width, .5.dp.toPx()), 1.dp.toPx()) }
+                val stroke = 1.dp.toPx()
+                if (height >= stroke && size.width >= stroke) drawRoundRect(border,
+                    topLeft = Offset(stroke / 2f, stroke / 2f), size = Size(size.width - stroke, height - stroke),
+                    cornerRadius = CornerRadius((corner - stroke / 2f).coerceAtLeast(0f)), style = Stroke(stroke))
+            }
+        }
+    }
+}
+
+/** A node's title/icon enters whole; the connector may still advance independently. */
+@Composable
+internal fun Modifier.workflowInkClearance(): Modifier {
+    val clearance = LocalStreamingTextClearance.current
+    val item = LocalWorkflowItemLayout.current
+    val frame = remember(clearance, item) { WorkflowPaintFrame() }
+    return onPlaced { frame.coordinates = it }.drawWithContent {
+        val coordinates = frame.coordinates
+        val parent = item?.coordinates
+        val allocated = if (item != null && coordinates?.isAttached == true && parent?.isAttached == true)
+            parent.localPositionOf(coordinates, androidx.compose.ui.geometry.Offset.Zero).y + size.height <= item.allocatedHeight + .01f
+        else item == null
+        if (allocated && clearance?.fits(coordinates, size.height.toInt()) != false) drawContent()
     }
 }

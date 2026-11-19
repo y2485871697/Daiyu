@@ -9,6 +9,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.SemanticsActions
@@ -686,6 +687,96 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         val entranceTop = entering.maxOf { it.positionInRoot.y }
         val entranceBottom = entering.minOf { it.positionInRoot.y + it.size.height }
         return minOf(bottom, entranceBottom).takeIf { it > maxOf(top, entranceTop) }
+    }
+
+    fun testNewToolHeaderHasNoPartialInkAtTheOriginalSafetyEdge() {
+        data class Sample(val pixels: IntArray, val width: Int, val height: Int, val top: Float, val safe: Float)
+        var count by mutableStateOf(1)
+        val tail = shortWorkflow(1)
+        val hostTag = "atomic-tool-header"
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(themeMode = app.daiyu.android.data.model.AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
+                density = LocalDensity.current.density
+                Box(Modifier.size(320.dp, 420.dp).background(Color.White).testTag(hostTag)) {
+                    ChatConversationLayers(Modifier.size(320.dp, 420.dp), messages = { inset ->
+                        ChatMessageList(List(6) { ChatTurnUi.User("atomic-history-$it", "history $it") } + shortWorkflow(count),
+                            ChatScreenActions(), scrollRequest = ChatScrollRequest(1), composerBottomInset = inset)
+                    }, composer = { InkEditor() })
+                }
+            }
+        } }
+        ui.waitForIdle()
+        assertEquals(8f, ChatTailClearance.value, 0f)
+        val host = ui.onNodeWithTag(hostTag)
+        val editor = inkRect(hostTag, "ink-editor")
+        var previousTop = inkRect(hostTag, "chat-turn:${tail.id}").top
+        var crossedInk = false
+        var moved = false
+        ui.mainClock.autoAdvance = false
+        try {
+            for (next in 2..5) {
+                val samples = mutableListOf<Sample>()
+                mainThread { count = next }
+                repeat(48) {
+                    frame()
+                    val clock = ui.mainClock.currentTime
+                    assertEquals(editor, inkRect(hostTag, "ink-editor"))
+                    val top = inkRect(hostTag, "chat-turn:${tail.id}").top
+                    val movement = previousTop - top
+                    assertTrue("Follow must retain 14dp/frame: $movement", movement >= -1f && movement <= 14f * density + 1f)
+                    moved = moved || movement > 1f
+                    previousTop = top
+                    val safe = editor.top - kotlin.math.round(ChatTailClearance.value * density)
+                    val shot = captureScreenNode(host, advanceAnimationClock = false).toPixelMap()
+                    assertEquals(clock, ui.mainClock.currentTime)
+                    val surface = inkRect(hostTag, "ink-surface")
+                    for (y in ceil(safe).toInt().coerceAtLeast(0) until floor(surface.top).toInt()) {
+                        for (x in 0 until shot.width) assertTrue("Original O+8dp safety gap must remain empty", inkDelta(shot[x, y], Color.White) <= .025f)
+                    }
+                    val node = ui.onAllNodesWithTag("tool-step-header:short-step-${next - 1}").fetchSemanticsNodes().singleOrNull() ?: return@repeat
+                    val origin = host.fetchSemanticsNode().positionInRoot
+                    val at = node.positionInRoot - origin
+                    val w = node.size.width
+                    val h = node.size.height
+                    if (w <= 0 || h <= 0 || at.y < 0f) return@repeat
+                    val x0 = kotlin.math.round(at.x).toInt()
+                    val y0 = kotlin.math.round(at.y).toInt()
+                    val pixels = IntArray(w * h) { index ->
+                        val x = x0 + index % w
+                        val y = y0 + index / w
+                        if (x in 0 until shot.width && y in 0 until shot.height) shot[x, y].toArgb() else Color.White.toArgb()
+                    }
+                    samples += Sample(pixels, w, h, at.y, safe)
+                }
+                assertTrue(samples.isNotEmpty())
+                val reference = samples.last()
+                assertTrue(reference.top + reference.height <= reference.safe + 1f)
+                fun contrast(pixels: IntArray, index: Int): Float {
+                    val bg = Color(pixels[0]); val c = Color(pixels[index])
+                    return (bg.red + bg.green + bg.blue - c.red - c.green - c.blue) / 3f
+                }
+                val ink = reference.pixels.indices.filter { contrast(reference.pixels, it) > .22f }
+                assertTrue("The reference must contain complete real header ink", ink.size > 10)
+                val firstY = ink.minOf { it / reference.width }
+                val lastY = ink.maxOf { it / reference.width }
+                var painted = false
+                for (sample in samples) {
+                    assertEquals(reference.width, sample.width); assertEquals(reference.height, sample.height)
+                    if (sample.top + firstY < sample.safe && sample.top + lastY >= sample.safe) crossedInk = true
+                    val alpha = ink.maxOf { (contrast(sample.pixels, it) / contrast(reference.pixels, it)).coerceIn(0f, 1f) }
+                    if (alpha <= .06f) continue
+                    painted = true
+                    assertTrue("Any painted header must fit whole, not just its first glyph row", sample.top + sample.height <= sample.safe + 1f)
+                    // Normalize the existing uniform fade; missing lower glyphs cannot hide behind it.
+                    for (i in ink) assertTrue("Header ink must be complete at the same fade opacity",
+                        contrast(sample.pixels, i) >= contrast(reference.pixels, i) * alpha - .05f)
+                }
+                assertTrue("A new tool must not remain invisible", painted)
+            }
+            assertTrue("Must exercise a glyph actually crossing the physical safety edge", crossedInk)
+            assertTrue("Must exercise the follower rather than a stationary fixture", moved)
+            assertEquals(0, fixture.opens.get())
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
     private fun shortWorkflow(count: Int): ChatTurnUi.Assistant {

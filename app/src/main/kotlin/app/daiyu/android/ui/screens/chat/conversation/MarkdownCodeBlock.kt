@@ -139,12 +139,11 @@ internal fun MarkdownCodeBlock(block: MarkdownBlock.Code, visibleCharacters: Int
         }
     }
     val maxBodyHeight = (LocalConfiguration.current.screenHeightDp.dp * .25f).coerceIn(128.dp, 220.dp)
-    val shape = RoundedCornerShape(8.dp)
     DisableSelection {
         Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp).clip(shape)
-                .background(colors.soft).border(1.dp, colors.line, shape).testTag("markdown-code-block")) {
-                Row(Modifier.fillMaxWidth().padding(start = 12.dp, end = 2.dp).testTag("markdown-code-header"),
+            Column(Modifier.fillMaxWidth().padding(horizontal = 4.dp)
+                .streamingWorkflowSurface(colors.soft, colors.line, 8.dp).testTag("markdown-code-block")) {
+                Row(Modifier.fillMaxWidth().workflowInkClearance().padding(start = 12.dp, end = 2.dp).testTag("markdown-code-header"),
                     verticalAlignment = Alignment.CenterVertically) {
                     BasicText(block.language.ifBlank { "text" }, Modifier.weight(1f).padding(end = 4.dp),
                         style = TextStyle(fontSize = 14.sp, lineHeight = 20.sp, color = colors.muted), maxLines = 1)

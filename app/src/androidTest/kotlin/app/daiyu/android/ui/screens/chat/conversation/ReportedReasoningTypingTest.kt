@@ -192,13 +192,14 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             ui.mainClock.advanceTimeBy(32)
             ui.onNodeWithTag("reported-reasoning-header:queued-final").performClick()
             mainThread { appearance.arrived = true; appearance.settled = true }
-            await { advances > 0 }
-            assertFalse(visibleText().contains(text))
-            ui.onNodeWithText("正在显示…").assertExists()
-            ui.onNodeWithText("已思考").assertDoesNotExist()
+            await { visibleText().contains(text) }
+            assertEquals(0, advances)
+            ui.onNodeWithText("正在思考…").assertDoesNotExist()
+            ui.onNodeWithText("已思考").assertExists()
             ui.onNodeWithTag("reported-reasoning-duration:queued-final", useUnmergedTree = true).assertTextEquals("1.1s")
             ui.mainClock.advanceTimeBy(3_000)
             await { visibleText().contains(text) }
+            assertEquals(0, advances)
             ui.onNodeWithText("已思考").assertExists()
             ui.onNodeWithTag("reported-reasoning-duration:queued-final", useUnmergedTree = true).assertTextEquals("1.1s")
         } finally { ui.mainClock.autoAdvance = true }
@@ -225,12 +226,13 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             ui.onNodeWithText("正在思考…").assertDoesNotExist()
             ui.onNodeWithTag("reported-reasoning-content:queued-collapsed").assertDoesNotExist()
             ui.onNodeWithTag("reported-reasoning-header:queued-collapsed").performClick()
-            await { advances > 0 }
-            assertFalse(visibleText().contains(text))
-            ui.onNodeWithText("正在显示…").assertExists()
+            await { visibleText().contains(text) }
+            assertEquals(0, advances)
+            ui.onNodeWithText("正在思考…").assertDoesNotExist()
             ui.onNodeWithTag("reported-reasoning-duration:queued-collapsed", useUnmergedTree = true).assertTextEquals("1.1s")
             ui.mainClock.advanceTimeBy(3_000)
             await { visibleText().contains(text) }
+            assertEquals(0, advances)
             ui.onNodeWithText("已思考").assertExists()
             ui.onNodeWithTag("reported-reasoning-duration:queued-collapsed", useUnmergedTree = true).assertTextEquals("1.1s")
         } finally { ui.mainClock.autoAdvance = true }

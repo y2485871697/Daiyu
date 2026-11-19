@@ -120,7 +120,20 @@ internal class StreamingTextClearance {
     private data class Geometry(val viewport: LayoutCoordinates?, val offset: Int, val bottom: Float, val height: Int)
     private var geometry by mutableStateOf<Geometry?>(null)
     private var drawn by mutableStateOf(false)
-    var typingPending by mutableStateOf(false)
+    private val typingOwners = mutableStateMapOf<Any, Unit>()
+    val typingPending: Boolean get() = typingOwners.isNotEmpty()
+    var pacedFollowing by mutableStateOf(false)
+        private set
+
+    fun setTypingPending(owner: Any, pending: Boolean) {
+        if (pending) {
+            typingOwners[owner] = Unit
+            pacedFollowing = true
+        } else typingOwners.remove(owner)
+    }
+    fun finishPacedFollow() {
+        if (!typingPending) pacedFollowing = false
+    }
     val held: Boolean get() = !drawn || geometry?.let { it.height > it.bottom + .01f } == true
 
     fun update(viewport: LayoutCoordinates?, offset: Int, bottom: Float, height: Int, protect: Boolean) {
@@ -128,13 +141,16 @@ internal class StreamingTextClearance {
         drawn = true
     }
 
-    fun fits(coordinates: LayoutCoordinates?, height: Int): Boolean {
-        val current = geometry ?: return true
-        val viewport = current.viewport?.takeIf { it.isAttached } ?: return false
-        val leaf = coordinates?.takeIf { it.isAttached } ?: return false
+    fun availableHeight(coordinates: LayoutCoordinates?): Float {
+        val current = geometry ?: return Float.POSITIVE_INFINITY
+        val viewport = current.viewport?.takeIf { it.isAttached } ?: return 0f
+        val leaf = coordinates?.takeIf { it.isAttached } ?: return 0f
         val top = viewport.localPositionOf(leaf, Offset.Zero).y + current.offset
-        return top + height <= current.bottom + .01f
+        return (current.bottom - top).coerceAtLeast(0f)
     }
+
+    fun fits(coordinates: LayoutCoordinates?, height: Int): Boolean =
+        height <= availableHeight(coordinates) + .01f
 }
 
 internal class StreamingTailViewport(initiallyBounded: Boolean) {
@@ -523,6 +539,7 @@ internal fun ChatMessageList(
             val activeTail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
             if (nestedTail.migrating || !clearanceLayout.active || clearanceLayout.correcting ||
                 !canFollowBottom() || currentOcclusionPx <= 0) return
+            if (nestedTail.textClearance.pacedFollowing) return
             val remeasurement = clearanceLayout.remeasurement ?: return
             var layout = listState.layoutInfo
             if (layout.viewportSize.height <= 0) return
@@ -799,7 +816,7 @@ internal fun ChatMessageList(
             val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
             val resumeReady = !resumeFollowPending || tail == null || tail.isStreaming ||
                 layout.visibleItemsInfo.none { it.key == tail.listKey } ||
-                readyTurns[tail.listKey] == tail && revealedTurns[tail.listKey] == tail
+                readyTurns[tail.listKey] == tail
             Triple(canFollowBottom(), Triple(index, last?.offset ?: Int.MIN_VALUE, last?.size ?: 0),
                 Triple(layout.viewportSize, Triple(layout.beforeContentPadding, layout.afterContentPadding,
                     currentOcclusionPx + currentFollowClearancePx),
@@ -848,15 +865,14 @@ internal fun ChatMessageList(
                 val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
                 if (resumeFollowPending && tail != null && !tail.isStreaming &&
                     layout.visibleItemsInfo.any { it.key == tail.listKey } &&
-                    (readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail)) {
-                    currentNestedTail.followDiagnostic = "wait-resume-reveal"
+                    readyTurns[tail.listKey] != tail) {
+                    currentNestedTail.followDiagnostic = "wait-resume-format"
                     motion.reset()
                     return@collect
                 }
                 val overflow = last.offset + last.size + layout.afterContentPadding - layout.viewportEndOffset
                 val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
-                val obscuredTail = if (currentOcclusionPx > 0)
-                    (last.offset + last.size - visibleBottom).coerceAtLeast(0) else 0
+                val obscuredTail = (last.offset + last.size - visibleBottom).coerceAtLeast(0)
                 val followDistance = maxOf(overflow.toFloat(), obscuredTail.toFloat())
                 currentNestedTail.followDiagnostic = "distance=$followDistance"
                 if (followDistance <= 0f) {
@@ -891,10 +907,12 @@ internal fun ChatMessageList(
                         }
                         continue
                     }
+                    currentNestedTail.textClearance.finishPacedFollow()
                     motion.reset()
                     return@collect
                 }
-                val alignment = alignViewport || resumeFollowPending
+                // Reveal may be waiting for this very movement to clear its next line.
+                val alignment = (alignViewport || resumeFollowPending) && !currentNestedTail.textClearance.pacedFollowing
                 var delta = if (alignment) followDistance else 0f
                 if (!alignment) {
                     // Keep one cancellable frame loop alive while measured overflow remains.
@@ -914,8 +932,7 @@ internal fun ChatMessageList(
                                 val frameOverflow = frameLast.offset + frameLast.size +
                                     frameLayout.afterContentPadding - frameLayout.viewportEndOffset
                                 val frameVisibleBottom = frameLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx
-                                val frameObscuredTail = if (currentOcclusionPx > 0)
-                                    (frameLast.offset + frameLast.size - frameVisibleBottom).coerceAtLeast(0) else 0
+                                val frameObscuredTail = (frameLast.offset + frameLast.size - frameVisibleBottom).coerceAtLeast(0)
                                 val frameFollowDistance = maxOf(frameOverflow.toFloat(), frameObscuredTail.toFloat())
                                 if (frameFollowDistance > 0f) {
                                     delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity,
@@ -1125,16 +1142,13 @@ internal fun ChatMessageList(
                         val tailViewportHeight = {
                             viewportHeightPx.intValue - currentOcclusionPx - with(density) { 11.dp.roundToPx() + ChatTailClearance.roundToPx() }
                         }
-                        val plainTextBody = turn.hasPlainTextBody(allowEmpty = true) && !hasTurnExtras(turn) &&
-                            reconnectPartsByKey.getValue(turn.listKey).placedIds.isEmpty() &&
-                            fallbackAfter[turn.listKey].isNullOrEmpty() && compressionAfter[turn.listKey].isNullOrEmpty()
                         StreamingTailContainer(viewportState, { clearanceLayout.coordinates }, turn.listKey,
                             userScrollEnabled = pageActive && !initialPositionPending && !retainingRows && presentationActive,
                             follows = { turn.listKey == assistantOwnerKey && followBottom && (initialPositionPending || canFollowBottom()) },
                             clearance = { currentOcclusionPx + currentFollowClearancePx },
                             protectClearance = { turn.listKey == assistantOwnerKey && followBottom },
                             viewportHeight = tailViewportHeight,
-                            preserveTextClearance = plainTextBody && turn.listKey == currentTailKey,
+                            preserveTextClearance = turn.listKey == currentTailKey,
                             listViewportHeight = { viewportHeightPx.intValue },
                             initialContent = initialQuestionContent,
                             followIntent = { turn.listKey == assistantOwnerKey && followBottom },
@@ -1248,7 +1262,10 @@ internal fun AssistantTurn(
         (ordered.leading + ordered.body).filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text, it.markdownWindow) }
     }
     val sources = remember(bodySources) { bodySources.map { it.text } }
-    val handoff = remember(turn.listKey) { ReasoningHandoff(turn.reportedReasoning) }
+    val visualScope = LocalWorkflowVisualScope.current
+    val handoff = remember(turn.listKey, visualScope) {
+        visualScope?.handoff(turn.listKey, turn.reportedReasoning) ?: ReasoningHandoff(turn.reportedReasoning)
+    }
     SideEffect {
         turn.reportedReasoning.filter { turn.reasoningStopped || it.activeSinceNanos == null && !hasReportedReasoningText(it.text) }
             .forEach(handoff::complete)
@@ -1265,7 +1282,6 @@ internal fun AssistantTurn(
     val blockedSources = remember(ordered.body, bodyVisible) {
         if (bodyVisible) emptySet() else ordered.body.filterIsInstance<MessageContentUi.Text>().map { it.itemId }.toSet()
     }
-    val visualScope = LocalWorkflowVisualScope.current
     val initialBaseline = remember(turn.listKey, visualScope, revealResetEpoch) {
         visualScope?.bodyBaseline(turn.listKey, bodySources,
             turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty())

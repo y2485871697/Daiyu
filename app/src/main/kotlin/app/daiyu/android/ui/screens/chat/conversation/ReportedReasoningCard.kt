@@ -81,8 +81,9 @@ internal fun ReportedReasoningCard(
     if (summaries.isEmpty() && !isThinking) { SideEffect { onHandoffReady(appearance?.settled != false) }; return }
     val hasSummary = summaries.isNotEmpty()
     val arrived = appearance?.arrived != false
+    val visualScope = LocalWorkflowVisualScope.current
+    val paused = LocalReasoningPaused.current
     val colors = conversationColors()
-    val shape = RoundedCornerShape(14.dp)
     var observedLive by rememberSaveable(ownerKey) { mutableStateOf(isThinking) }
     SideEffect { if (isThinking) observedLive = true }
     var expandedOverride by rememberSaveable(ownerKey, stopped) { mutableStateOf<Boolean?>(null) }
@@ -101,36 +102,43 @@ internal fun ReportedReasoningCard(
             val presentationLane = listOf("reasoning", ownerKey, summary.itemId)
             val playback = LocalReplyPlayback.current
             SideEffect { if (!revealGate) playback?.control?.skipLane(presentationLane) }
+            val ticket = remember(visualScope, ownerKey, summary.itemId) {
+                ReasoningRevealTicket(visualScope?.claimReasoning(ownerKey, summary.itemId) == true)
+            }
+            val firstPresentation = remember(ticket, revealGate, revealResetEpoch) {
+                ticket.take() && revealGate && !stopped
+            }
             val revealEnabled = arrived && revealGate && hasReportedReasoningText(text) &&
-                (isThinking || observedLive || currentOverride == true)
+                (isThinking || observedLive || firstPresentation || currentOverride == true)
             var observedDisplayLive by remember(revealGate, revealResetEpoch) { mutableStateOf(isThinking) }
             SideEffect { if (isThinking) observedDisplayLive = true }
-            val queuedForArrival = remember(revealGate, revealResetEpoch) { !arrived && !stopped }
             val reveal = key(revealGate) {
-                // First visible summaries are silent; arrival-queued output keeps its explicit empty baseline.
-                key(queuedForArrival || hasReportedReasoningText(text)) {
+                key(firstPresentation || hasReportedReasoningText(text)) {
                     rememberMarkdownReveal(
                         listOf(MarkdownTypingSource(summary.itemId, text, sourceWindow)), projection,
-                        streaming = isThinking && revealEnabled, terminal = !isThinking,
+                        streaming = isThinking && revealEnabled && !paused, terminal = !isThinking,
                         resetEpoch = revealResetEpoch,
                         onVisibleAdvance = onVisibleAdvance,
-                        enabled = revealEnabled,
+                        enabled = revealEnabled && !paused,
                         allowBaselinePrefix = false,
-                        live = isThinking || queuedForArrival,
-                        paceTerminal = queuedForArrival,
-                        initialBaseline = if (queuedForArrival) emptyList() else null,
+                        live = isThinking || firstPresentation,
+                        paceTerminal = firstPresentation,
+                        initialBaseline = if (firstPresentation) emptyList() else null,
                         presentationLane = presentationLane.takeIf { revealGate },
                     )
                 }
             }
-            ReasoningSummaryDisplay(summary, projection, reveal,
-                waitingForReveal = revealEnabled && (observedDisplayLive || queuedForArrival) && !reveal.settled)
+            ReasoningSummaryDisplay(summary, projection, reveal, firstPresentation,
+                waitingForReveal = firstPresentation && projection?.sources != listOf(text) ||
+                    revealEnabled && (observedDisplayLive || firstPresentation) && !reveal.settled)
         }
     }
     val settled = summaryDisplays.all { it.reveal.settled }
-    val displayThinking = isThinking || !stopped && summaryDisplays.any { it.waitingForReveal }
+    val presenting = observedLive || summaryDisplays.any { it.firstPresentation }
+    val waitingForReveal = summaryDisplays.any { it.waitingForReveal }
+    val displayThinking = isThinking || !stopped && waitingForReveal
     val displayPaused = LocalReplyPlayback.current?.paused == true
-    val disclosureExpanded = currentOverride ?: (!stopped && (isThinking || observedLive && !settled))
+    val disclosureExpanded = currentOverride ?: (!stopped && (isThinking || presenting && (!settled || waitingForReveal)))
     val expanded = hasSummary && disclosureExpanded && summaryDisplays.any { display ->
         display.projection?.sources?.any(::hasReportedReasoningText) == true
     } && arrived
@@ -138,7 +146,7 @@ internal fun ReportedReasoningCard(
     visibility.targetState = expanded
     val disclosure = rememberWorkflowDisclosureMotion(ownerKey, visibility)
     val manualExpansion = currentOverride == true
-    val handoffReady = stopped || !observedLive || !isThinking && settled &&
+    val handoffReady = stopped || !presenting || !paused && !isThinking && settled && !waitingForReveal &&
         (manualExpansion || visibility.isIdle && !visibility.currentState && !visibility.targetState)
     SideEffect { onHandoffReady(appearance?.settled != false && handoffReady) }
     val chevronRotation = animateFloatAsState(
@@ -149,8 +157,8 @@ internal fun ReportedReasoningCard(
     Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
     leadingIndicator?.invoke(displayThinking)
     Column(Modifier.weight(1f).testTag("reported-reasoning:$ownerKey").then(disclosure.containerModifier)
-        .then(if (embedded) Modifier else Modifier.clip(shape).border(1.dp, colors.line, shape).background(colors.surface))) {
-        Row(Modifier.fillMaxWidth().heightIn(min = if (embedded) 44.dp else 35.dp).testTag("reported-reasoning-header:$ownerKey").workflowToolAppearance(appearance).then(disclosure.headerModifier)
+        .then(if (embedded) Modifier else Modifier.streamingWorkflowSurface(colors.surface, colors.line, 14.dp))) {
+        Row(Modifier.fillMaxWidth().heightIn(min = if (embedded) 44.dp else 35.dp).testTag("reported-reasoning-header:$ownerKey").workflowInkClearance().workflowToolAppearance(appearance).then(disclosure.headerModifier)
             .then(if (hasSummary) Modifier.conversationClickable(
                 onClickLabel = if (expanded) "收起思考摘要" else "展开思考摘要"
             ) { disclosure.toggle(opening = !disclosureExpanded); overridePhase = isThinking; overrideStopped = stopped; expandedOverride = !disclosureExpanded }.semantics {
@@ -161,7 +169,7 @@ internal fun ReportedReasoningCard(
             Icon(ChatPreviewIcons.Thought, null, Modifier.size(if (embedded) 18.dp else 14.dp), tint = colors.accent)
             Text(reasoningDisplayLabel(isThinking, displayThinking, displayPaused), Modifier.weight(1f), color = if (embedded) colors.text else colors.accent,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium))
-            ReasoningElapsedTime(ownerKey, rememberReasoningTiming(reported), isThinking && allowLiveTiming, nanoTime, embedded)
+            ReasoningElapsedTime(ownerKey, rememberReasoningTiming(reported), isThinking && allowLiveTiming && !paused, nanoTime, embedded)
             if (hasSummary) {
                 Icon(ChatPreviewIcons.Chevron,
                     if (expanded) "收起模型已报告的思考 / 摘要" else "展开模型已报告的思考 / 摘要",
@@ -209,10 +217,15 @@ internal fun ReportedReasoningCard(
     }
 }
 
+private class ReasoningRevealTicket(private var unused: Boolean) {
+    fun take(): Boolean = unused.also { unused = false }
+}
+
 private data class ReasoningSummaryDisplay(
     val reported: ReportedReasoning,
     val projection: MarkdownProjection?,
     val reveal: MarkdownReveal,
+    val firstPresentation: Boolean,
     val waitingForReveal: Boolean,
 )
 
@@ -294,8 +307,8 @@ internal fun ReasoningStepRow(
         leadingIndicator = { displayThinking ->
             Box(Modifier.padding(top = 17.dp).width(12.dp)) {
                 val complete = (generationComplete || reported.activeSinceNanos == null) && !displayThinking
-                val spinning = displayThinking && !stopped && !displayPaused && LocalWorkflowNodeMotionEnabled.current
-                Box(Modifier.size(10.dp).testTag("reasoning-step-state:${reported.itemId}")
+                val spinning = displayThinking && !stopped && !displayPaused && LocalWorkflowNodeMotionEnabled.current && !LocalReasoningPaused.current
+                Box(Modifier.size(10.dp).workflowInkClearance().testTag("reasoning-step-state:${reported.itemId}")
                     .semantics { stateDescription = reasoningDisplayLabel(!generationComplete && reported.activeSinceNanos != null, !complete, displayPaused).removeSuffix("…") }
                     .workflowCompletion("reasoning:${reported.itemId}", complete, appearance = appearance)
                     .clip(CircleShape).then(when {

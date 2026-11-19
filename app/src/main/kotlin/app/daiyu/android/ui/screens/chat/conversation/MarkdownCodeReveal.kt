@@ -8,6 +8,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.semantics.getTextLayoutResult
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.text
@@ -26,7 +28,7 @@ import kotlin.math.ceil
 @Composable
 internal fun MarkdownCodeText(block: MarkdownBlock.Code, visibleCharacters: Int, modifier: Modifier, style: TextStyle) {
     if (visibleCharacters >= block.text.length) {
-        BasicText(markdownCodeDisplayText(block, block.text), modifier, style = style, softWrap = false)
+        ClearanceText(AnnotatedString(markdownCodeDisplayText(block, block.text)), null, modifier, style, softWrap = false)
         return
     }
     val boundaries = remember(block.text) { MarkdownTextBoundaries(block.text) }
@@ -34,7 +36,7 @@ internal fun MarkdownCodeText(block: MarkdownBlock.Code, visibleCharacters: Int,
     val visible = remember(block.text, end) { block.text.substring(0, end) }
     val simpleShaping = remember(block.text) { block.text.all { it.code < 128 } }
     if (end >= block.text.length || !simpleShaping) {
-        BasicText(markdownCodeDisplayText(block, visible), modifier, style = style, softWrap = false)
+        ClearanceText(AnnotatedString(markdownCodeDisplayText(block, visible)), null, modifier, style, softWrap = false)
         return
     }
     val measurer = rememberTextMeasurer(cacheSize = 1)
@@ -44,7 +46,9 @@ internal fun MarkdownCodeText(block: MarkdownBlock.Code, visibleCharacters: Int,
     val reveal = remember(layout.multiParagraph) { MarkdownCodeClip(layout) }
     reveal.advance(end)
     val semanticText = remember(visible) { AnnotatedString(visible) }
-    Canvas(modifier.semantics {
+    val clearance = LocalStreamingTextClearance.current
+    val painted = remember(clearance) { MarkdownCodePaintFrame() }
+    Canvas(modifier.onPlaced { painted.coordinates = it }.semantics {
         text = semanticText
         getTextLayoutResult { results ->
             // Accessibility/test queries get the visible text's layout, never the hidden suffix.
@@ -57,8 +61,26 @@ internal fun MarkdownCodeText(block: MarkdownBlock.Code, visibleCharacters: Int,
         val placeable = measurable.measure(Constraints.fixed(width, height))
         layout(width, height) { placeable.place(0, 0) }
     }) {
-        clipPath(reveal.path) { drawText(layout) }
+        if (clearance?.fits(painted.coordinates, reveal.height) != false) {
+            if (painted.layout !== layout) {
+                painted.layout = layout
+                painted.clip = MarkdownCodeClip(layout)
+            }
+            painted.clip?.advance(end)
+        }
+        val previous = painted.layout
+        val clip = painted.clip
+        if (previous != null && clip != null && previous.canPaintPrefixOf(layout) &&
+            clearance?.fits(painted.coordinates, clip.height) != false) {
+            clipPath(clip.path) { drawText(previous) }
+        }
     }
+}
+
+private class MarkdownCodePaintFrame {
+    var coordinates: LayoutCoordinates? = null
+    var layout: TextLayoutResult? = null
+    var clip: MarkdownCodeClip? = null
 }
 
 internal class MarkdownCodeClip(private val layout: TextLayoutResult) {

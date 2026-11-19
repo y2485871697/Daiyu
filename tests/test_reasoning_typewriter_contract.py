@@ -71,20 +71,24 @@ class ReasoningTypewriterContract(unittest.TestCase):
         self.assertIn('val expanded = hasSummary && disclosureExpanded', card)
         self.assertNotIn('key(ownerKey, summary.itemId, isThinking)', card)
 
-    def test_title_and_marker_share_visible_completion_without_delaying_the_timer(self):
+    def test_terminal_state_is_independent_of_first_display_backlog(self):
         card = (CHAT / 'ReportedReasoningCard.kt').read_text()
-        for token in ('val displayThinking = isThinking || !stopped && summaryDisplays.any { it.waitingForReveal }',
-                      'waitingForReveal = revealEnabled && (observedDisplayLive || queuedForArrival) && !reveal.settled',
-                      'remember(revealGate, revealResetEpoch) { mutableStateOf(isThinking) }',
-                      'live = isThinking || queuedForArrival',
-                      '(isThinking || observedLive || currentOverride == true)',
-                      'leadingIndicator?.invoke(displayThinking)',
-                      'Text(reasoningDisplayLabel(isThinking, displayThinking, displayPaused)',
-                      'leadingIndicator = { displayThinking ->',
+        for token in ('val displayThinking = isThinking || !stopped && waitingForReveal',
+                      'reasoningDisplayLabel(isThinking, displayThinking, displayPaused)', 'visualScope?.claimReasoning(ownerKey, summary.itemId)',
+                      'ticket.take() && revealGate && !stopped', 'paceTerminal = firstPresentation',
+                      'initialBaseline = if (firstPresentation) emptyList() else null',
+                      'enabled = revealEnabled && !paused', 'leadingIndicator?.invoke(displayThinking)',
                       'val complete = (generationComplete || reported.activeSinceNanos == null) && !displayThinking'):
             self.assertIn(token, card)
-        self.assertIn('ReasoningElapsedTime(ownerKey, rememberReasoningTiming(reported), isThinking && allowLiveTiming', card)
-        self.assertNotIn('onDisplaySettled', card)
+        self.assertNotIn('queuedForArrival', card)
+        scope = (CHAT / 'WorkflowNarration.kt').read_text()
+        self.assertIn('reasoningClaims.add(owner to itemId) && !baseline', scope)
+        self.assertIn('ReasoningHandoff(if (baseline) initial else emptyList())', scope)
+        chat = (CHAT / 'ChatMessageList.kt').read_text()
+        resume = chat.split('val resumeReady =', 1)[1].split('Triple(canFollowBottom()', 1)[0]
+        self.assertNotIn('revealedTurns', resume)
+        self.assertIn('readyTurns[tail.listKey] == tail', resume)
+        self.assertIn('(alignViewport || resumeFollowPending) && !currentNestedTail.textClearance.pacedFollowing', chat)
 
     def test_body_adapter_and_reasoning_share_one_clock(self):
         typing = (CHAT / 'MarkdownTyping.kt').read_text()

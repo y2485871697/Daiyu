@@ -177,29 +177,32 @@ private val LocalMarkdownPaintedText = staticCompositionLocalOf<MutableMap<Int, 
 private class MarkdownTextFrame {
     var coordinates: LayoutCoordinates? = null
     var layout: TextLayoutResult? = null
+    var painted: TextLayoutResult? = null
 }
 
 @Composable
-private fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: Modifier, style: TextStyle) {
+internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: Modifier, style: TextStyle,
+    softWrap: Boolean = true) {
     val clearance = LocalStreamingTextClearance.current
-    val painted = LocalMarkdownPaintedText.current
-    if (clearance == null || painted == null) {
-        BasicText(text, modifier, style)
+    val painted = LocalMarkdownPaintedText.current ?: remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }
+    if (clearance == null) {
+        BasicText(text, modifier, style, softWrap = softWrap)
         return
     }
     val frame = remember { MarkdownTextFrame() }
     BasicText(text, modifier.onPlaced { frame.coordinates = it }.drawWithContent {
         if (clearance.fits(frame.coordinates, size.height.toInt())) {
             drawContent()
+            frame.painted = frame.layout
             if (paintOffset != null) frame.layout?.let { painted[paintOffset] = it }
-        } else paintOffset?.let { painted[it] }?.takeIf { previous ->
+        } else (paintOffset?.let { painted[it] } ?: frame.painted)?.takeIf { previous ->
             frame.layout?.let { previous.canPaintPrefixOf(it) } == true &&
                 clearance.fits(frame.coordinates, previous.size.height)
         }?.let { drawText(it) }
-    }, style, onTextLayout = { frame.layout = it })
+    }, style, softWrap = softWrap, onTextLayout = { frame.layout = it })
 }
 
-private fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boolean {
+internal fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boolean {
     val previous = layoutInput
     val current = candidate.layoutInput
     if (!current.text.text.startsWith(previous.text.text) ||

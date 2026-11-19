@@ -181,9 +181,10 @@ internal fun rememberMarkdownReveal(
             if (retainedLane == null) playback?.control?.reportPending(motion, false)
         }
     }
-    SideEffect { clearance?.typingPending = typingPending }
-    DisposableEffect(clearance) {
-        onDispose { clearance?.typingPending = false }
+    val clearanceOwner = remember(motion) { Any() }
+    SideEffect { clearance?.setTypingPending(clearanceOwner, typingPending) }
+    DisposableEffect(clearance, clearanceOwner) {
+        onDispose { clearance?.setTypingPending(clearanceOwner, false) }
     }
     val exact = exactProjection && baselineLength != null && target != null &&
         target.parts == parts && target.parts.map { it.source } == sources

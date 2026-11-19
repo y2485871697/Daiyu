@@ -15,14 +15,14 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("if (protect) drawClearance() else 0", drawing)
         self.assertIn("val safeBottom = currentListHeight - clearance()", placement)
         self.assertNotIn("drawClearance()", placement)
-        production = source.split("val plainTextBody =", 1)[1].split("else turnContent()", 1)[0]
+        production = source.split("val tailViewportHeight =", 1)[1].split("else turnContent()", 1)[0]
         self.assertNotIn("drawClearance =", production)
         self.assertNotIn("currentVisualTopInsetPx", source)
         self.assertNotIn("composerVisualTopInset", source)
         for token in ("clearance = { currentOcclusionPx + currentFollowClearancePx }",
-                      "turn.hasPlainTextBody(allowEmpty = true)", "!hasTurnExtras(turn)",
-                      "preserveTextClearance = plainTextBody && turn.listKey == currentTailKey",
-                      "compressionAfter[turn.listKey].isNullOrEmpty()"):
+                      "preserveTextClearance = turn.listKey == currentTailKey",
+                      "val typingPending: Boolean get() = typingOwners.isNotEmpty()",
+                      "typingOwners[owner] = Unit", "pacedFollowing = true", "} else typingOwners.remove(owner)"):
             self.assertIn(token, source)
         self.assertIn("state.textClearance.update(viewport, state.scrollOffset.roundToInt(), clipBottom", drawing)
         self.assertIn("preserveTextClearance && protect && followIntent()", drawing)
@@ -136,7 +136,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("val frameVisibleBottom = frameLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx", follow)
         self.assertIn("val currentFollowClearancePx by rememberUpdatedState(with(density) { ChatTailClearance.roundToPx() })", source)
         self.assertIn("bottom = composerBottomInset + ChatTailClearance", source)
-        self.assertIn("val obscuredTail = if (currentOcclusionPx > 0)", follow)
+        self.assertIn("val obscuredTail = (last.offset + last.size - visibleBottom).coerceAtLeast(0)", follow)
         self.assertIn("(last.offset + last.size - visibleBottom).coerceAtLeast(0)", follow)
         self.assertIn("(frameLast.offset + frameLast.size - frameVisibleBottom).coerceAtLeast(0)", follow)
         self.assertIn("val followDistance = maxOf(overflow.toFloat(), obscuredTail.toFloat())", follow)

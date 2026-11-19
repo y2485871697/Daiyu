@@ -89,6 +89,44 @@ class AssistantWorkflowCompositionTest {
         assertEquals(12, viewport.viewportOffset)
     }
 
+    @Test fun reasoningAndAnswerReleaseOnlyTheirOwnClearanceClaim() {
+        val clearance = StreamingTextClearance()
+        val reasoning = Any()
+        val answer = Any()
+        clearance.setTypingPending(reasoning, true)
+        clearance.setTypingPending(answer, true)
+        clearance.setTypingPending(reasoning, false)
+        assertTrue(clearance.typingPending)
+        clearance.setTypingPending(answer, false)
+        assertFalse(clearance.typingPending)
+        assertTrue(clearance.pacedFollowing)
+        clearance.finishPacedFollow()
+        assertFalse(clearance.pacedFollowing)
+    }
+
+    @Test fun freshTerminalReasoningNeedsOnePresentationButHistoryNeverReplays() {
+        val thought = app.daiyu.android.domain.ReportedReasoning("terminal", "首挂即终态", 11L)
+        val fresh = WorkflowVisualScope(false)
+        val flow = fresh.handoff("owner", listOf(thought))
+        assertFalse(flow.ready(thought))
+        assertTrue(fresh.claimReasoning("owner", thought.itemId))
+        assertFalse(fresh.claimReasoning("owner", thought.itemId))
+        flow.complete(thought)
+        assertTrue(fresh.handoff("owner", emptyList()).ready(thought))
+        val history = WorkflowVisualScope(true)
+        assertTrue(history.handoff("owner", listOf(thought)).ready(thought))
+        assertFalse(history.claimReasoning("owner", thought.itemId))
+    }
+
+    @Test fun firstWorkflowNodeReservesCompleteInkAsSoonAsItsEntranceArrives() {
+        val entrance = WorkflowToolAppearance(true)
+        val layout = WorkflowItemLayout().also { it.appearance = entrance }
+        assertEquals(0, layout.extent(200, 12, 17f, 27f))
+        entrance.arrived = true
+        assertFalse(entrance.settled)
+        assertEquals(200, layout.extent(200, 12, 17f, 27f))
+    }
+
     private class NoNodes : AbstractApplier<Unit>(Unit) {
         override fun insertBottomUp(index: Int, instance: Unit) = Unit
         override fun insertTopDown(index: Int, instance: Unit) = Unit

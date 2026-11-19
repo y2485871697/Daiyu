@@ -69,6 +69,86 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.onAllNodesWithContentDescription("复制回答").assertCountEquals(1)
     }
 
+    fun testNewTerminalReasoningTypesOnceAndNeverReactivatesOnReopen() {
+        val text = "新终态摘要" + "甲".repeat(96)
+        runBlocking {
+            projectMarkdown(listOf(text))
+            projectMarkdown(listOf(text), parser = streamingMarkdownParser)
+        }
+        val finalMessage = message(emptyList(), listOf(ReportedReasoning("first-final", text, 1100L, blockOffset = 0)))
+        val owner = mapped(finalMessage).listKey
+        val bodyTag = "reported-reasoning-content:$owner:reasoning:first-final"
+        val inner = "reported-reasoning-header:$owner:reasoning:first-final"
+        val advances = java.util.concurrent.atomic.AtomicInteger()
+        var source by mutableStateOf<Message?>(null)
+        fun body(): String = ui.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text) and
+            (hasTestTag(bodyTag) or hasAnyAncestor(hasTestTag(bodyTag))), useUnmergedTree = true)
+            .fetchSemanticsNodes().flatMap { it.config[SemanticsProperties.Text] }.joinToString("") { it.text }
+        fun completed() {
+            ui.onNodeWithText("正在思考…").assertDoesNotExist()
+            ui.onAllNodesWithTag("reasoning-step-state:first-final", useUnmergedTree = true).fetchSemanticsNodes().forEach {
+                assertTrue(it.config[SemanticsProperties.StateDescription] in listOf("已思考", "正在显示"))
+            }
+        }
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                Box(Modifier.size(320.dp, 480.dp)) {
+                    ChatMessageList(listOf<ChatTurnUi>(ChatTurnUi.User("history", "历史")) +
+                        (source?.let { listOf(mapped(it)) } ?: emptyList()),
+                        ChatScreenActions(onVisibleTextAdvance = { advances.incrementAndGet() }), scrollRequest = ChatScrollRequest(1))
+                }
+            }
+        } }
+        ui.waitForIdle()
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { source = finalMessage }
+            var partialFrames = 0
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                completed()
+                val shown = body()
+                if (shown.isNotEmpty() && shown != text) {
+                    partialFrames++
+                    assertTrue(text.startsWith(shown))
+                    assertDisclosure("work-process-header", true)
+                    assertDisclosure(inner, true)
+                }
+                shown == text
+            }
+            assertTrue("New terminal output must actually reveal a prefix", partialFrames > 0)
+            assertTrue(advances.get() > 0)
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                completed()
+                ui.onNodeWithTag("work-process-header").fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "已折叠"
+            }
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.onAllNodesWithTag(bodyTag).fetchSemanticsNodes().isEmpty()
+            }
+            val once = advances.get()
+            fun staticFrame() {
+                ui.mainClock.advanceTimeByFrame()
+                completed()
+                assertEquals("Reopening must not replay typing or feedback", once, advances.get())
+                if (body().isNotEmpty()) assertEquals(text, body())
+            }
+            repeat(2) {
+                ui.onNodeWithTag("work-process-header").performClick()
+                repeat(24) { staticFrame() }
+                if (ui.onNodeWithTag(inner).fetchSemanticsNode().config[SemanticsProperties.StateDescription] == "已折叠") {
+                    ui.onNodeWithTag(inner).performClick()
+                    repeat(24) { staticFrame() }
+                }
+                assertEquals(text, body())
+                ui.onNodeWithTag("reported-reasoning-duration:$owner:reasoning:first-final", useUnmergedTree = true).assertTextEquals("1.1s")
+                ui.onNodeWithTag("work-process-header").performClick()
+                repeat(24) { staticFrame() }
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     fun testNewLiveNarrationAndToolAdmissionFinishBeforeAutomaticAnswerHandoff() {
         val narration = "NARRATION " + "字".repeat(180)
         val answer = "FINAL AFTER ADMISSION"

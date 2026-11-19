@@ -64,7 +64,10 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     val displayedWork = remember(work) { work.withResolvedTerminalCards() } ?: return
     val segments = displayedWork.segments
     val reasoning = segments.mapNotNull { it.reasoning }
-    val sequence = handoff ?: remember(ownerKey) { ReasoningHandoff(reasoning) }
+    val visualScope = LocalWorkflowVisualScope.current
+    val sequence = handoff ?: remember(ownerKey, visualScope) {
+        visualScope?.handoff(ownerKey, reasoning) ?: ReasoningHandoff(reasoning)
+    }
     val reasoningReady = stopped || sequence.ready(reasoning)
     val finishing = !work.running || answerPending
     val finished = finishing && reasoningReady && workflowTextSettled
@@ -83,7 +86,8 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     }
     val fullyClosed = visibility.isIdle && !visibility.currentState && !visibility.targetState
     var contentMounted by remember(ownerKey) { mutableStateOf(false) }
-    val disclosureHandoffReady = reasoningReady && fullyClosed && !contentMounted
+    val paused = work.controlActivity == ToolActivityUi.PAUSED || work.controlActivity == ToolActivityUi.PAUSING
+    val disclosureHandoffReady = reasoningReady && fullyClosed && !contentMounted && !(work.running && paused)
     androidx.compose.runtime.SideEffect { onDisclosureHandoffReady(disclosureHandoffReady); onExpandedChange(expanded) }
     val manuallyClosed = currentOverride == false && fullyClosed
     androidx.compose.runtime.SideEffect {
@@ -99,19 +103,18 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     val colors = conversationColors()
     val title = work.title
     val progressSummary = displayedWork.progressSummary
-    val shape = RoundedCornerShape(12.dp)
     CompositionLocalProvider(LocalWorkflowDisclosureParent provides disclosure,
         LocalWorkflowNodeMotions provides motions,
-        LocalWorkflowNodeMotionEnabled provides (expanded && !stopped && work.controlActivity != ToolActivityUi.PAUSED)) {
-    Column(modifier.fillMaxWidth().then(disclosure.containerModifier).clip(shape).background(colors.surface).drawWithContent {
-        drawContent()
-        drawLine(if (colors.dark) Color(0x05FFFFFF) else Color(0x40FFFFFF),
-            Offset(0f, .5.dp.toPx()), Offset(size.width, .5.dp.toPx()), 1.dp.toPx())
-    }.border(1.dp, colors.line, shape).testTag("work-process-surface")) {
+        LocalWorkflowNodeMotionEnabled provides (expanded && !stopped && work.controlActivity != ToolActivityUi.PAUSED && work.controlActivity != ToolActivityUi.PAUSING),
+        LocalReasoningPaused provides (work.controlActivity == ToolActivityUi.PAUSED || work.controlActivity == ToolActivityUi.PAUSING)) {
+    Column(modifier.fillMaxWidth().then(disclosure.containerModifier)
+        .streamingWorkflowSurface(colors.surface, colors.line, 12.dp,
+            if (colors.dark) Color(0x05FFFFFF) else Color(0x40FFFFFF))
+        .testTag("work-process-surface")) {
         BoxWithConstraints(Modifier.fillMaxWidth()) {
             val summaryWidth = maxWidth * .56f
             val stacked = maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f
-            Row(Modifier.fillMaxWidth().testTag("work-process-header").then(disclosure.headerModifier).heightIn(min = 44.dp).conversationClickable {
+            Row(Modifier.fillMaxWidth().testTag("work-process-header").workflowInkClearance().then(disclosure.headerModifier).heightIn(min = 44.dp).conversationClickable {
                 disclosure.toggle(opening = !expanded)
                 overrideFinished = finishing; overrideStopped = stopped; expandedOverride = !expanded
             }
@@ -234,7 +237,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
                 ToolActivityUi.QUEUED, ToolActivityUi.PREPARING, ToolActivityUi.RUNNING, ToolActivityUi.WAITING,
                 ToolActivityUi.PAUSING, ToolActivityUi.STOPPING)
             val ring = running && !terminal
-            Box(Modifier.size(10.dp).workflowCompletion("tool:${step.renderKey}", step.state == WorkStepState.OK,
+            Box(Modifier.size(10.dp).workflowInkClearance().workflowCompletion("tool:${step.renderKey}", step.state == WorkStepState.OK,
                 failed = step.state == WorkStepState.FAILED, appearance = appearance).clip(CircleShape).then(when {
                     spinning -> Modifier
                     ring -> Modifier.border(1.5.dp, tint, CircleShape)
@@ -248,7 +251,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
         Column(Modifier.weight(1f).testTag("tool-step-body:${step.toolCallId}").workflowToolAppearance(appearance)) {
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val stacked = maxWidth < 280.dp || LocalDensity.current.fontScale >= 1.2f
-                Row(Modifier.fillMaxWidth().testTag("tool-step-header:${step.toolCallId}").then(disclosure.headerModifier).heightIn(min = 44.dp).conversationClickable {
+                Row(Modifier.fillMaxWidth().testTag("tool-step-header:${step.toolCallId}").workflowInkClearance().then(disclosure.headerModifier).heightIn(min = 44.dp).conversationClickable {
                     disclosure.toggle(opening = !expanded); expanded = !expanded
                 }
                     .semantics { stateDescription = "$stateLabel · ${if (expanded) "已展开" else "已折叠"}" }

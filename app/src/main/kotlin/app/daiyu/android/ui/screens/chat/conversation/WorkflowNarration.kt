@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
@@ -24,7 +25,15 @@ internal class WorkflowVisualAdmissions(initialOwners: Set<String>) {
     fun retain(owners: Set<String>) { scopes.keys.retainAll(owners) }
 }
 
+internal val LocalReasoningPaused = staticCompositionLocalOf { false }
+
 internal class WorkflowVisualScope(private val baseline: Boolean) {
+    private val reasoningClaims = mutableSetOf<Pair<String, String>>()
+    private val handoffs = mutableMapOf<String, ReasoningHandoff>()
+    fun claimReasoning(owner: String, itemId: String): Boolean = reasoningClaims.add(owner to itemId) && !baseline
+    fun handoff(owner: String, initial: List<ReportedReasoning>) = handoffs.getOrPut(owner) {
+        ReasoningHandoff(if (baseline) initial else emptyList())
+    }
     private val bodyOwners = mutableSetOf<String>()
     fun bodyBaseline(key: String, sources: List<MarkdownTypingSource>, live: Boolean): List<MarkdownTypingSource> =
         if (bodyOwners.add(key) && !baseline && live) emptyList() else sources.toList()
@@ -145,6 +154,8 @@ internal fun WorkflowNarrationContent(
         val entryVisible = remember(admission, baselineOnly) {
             { key: String -> baselineOnly || admission?.contains(key) != false }
         }
-        content(remember(projection, reveal, entryVisible) { WorkflowNarration(projection, reveal, entryVisible) })
+        CompositionLocalProvider(LocalReasoningPaused provides paused) {
+            content(remember(projection, reveal, entryVisible) { WorkflowNarration(projection, reveal, entryVisible) })
+        }
     }
 }

@@ -42,7 +42,7 @@ class StreamingFollowContract(unittest.TestCase):
     def test_measured_overflow_is_integrated_not_paid_as_a_single_scroll(self):
         self.assertIn("val followDistance = maxOf(overflow.toFloat(), obscuredTail.toFloat())", self.follow)
         self.assertIn("if (followDistance <= 0f)", self.follow)
-        self.assertIn("val alignment = alignViewport || resumeFollowPending", self.follow)
+        self.assertIn("val alignment = (alignViewport || resumeFollowPending) && !currentNestedTail.textClearance.pacedFollowing", self.follow)
         self.assertIn("var delta = if (alignment) followDistance else 0f", self.follow)
         self.assertIn("val frameFollowDistance = maxOf(frameOverflow.toFloat(), frameObscuredTail.toFloat())", self.follow)
         self.assertIn("delta = motion.step(frameFollowDistance, frameTimeNanos, currentDensity,", self.follow)
@@ -78,7 +78,7 @@ class StreamingFollowContract(unittest.TestCase):
         typing = (CHAT.parent / "MarkdownTyping.kt").read_text()
         self.assertIn("if (progress.target === target) progress.visible else target.start", typing)
         self.assertIn("minOf(target.total, advanceLimit)", typing)
-        self.assertIn("onDispose { clearance?.typingPending = false }", typing)
+        self.assertIn("onDispose { clearance?.setTypingPending(clearanceOwner, false) }", typing)
         self.assertIn("textClearance?.held != true", typing)
 
     def test_explicit_scroll_and_touch_keep_ownership(self):
@@ -88,7 +88,9 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("consumedScrollSerial = currentScrollSerial", self.source)
         self.assertIn("listState.animateScrollToItem(index)", self.source)
         self.assertIn("readyTurns[it.listKey] == it", self.source)
-        self.assertIn("readyTurns[tail.listKey] == tail && revealedTurns[tail.listKey] == tail", self.follow)
+        resume = self.follow.split("val resumeReady =", 1)[1].split("Triple(canFollowBottom()", 1)[0]
+        self.assertIn("readyTurns[tail.listKey] == tail", resume)
+        self.assertNotIn("revealedTurns", resume)
 
     def test_idle_wait_rechecks_current_layout_without_ending_the_worker(self):
         self.assertIn("if (followDistance <= 0f)", self.follow)

@@ -93,7 +93,7 @@ class ComposerReferencesTest {
     }
     @Test fun realUnknownNamedFileIsNotTreatedAsTheLegacyPlaceholder() {
         val p = ComposerReferences("$file\n附件信息（按需读取）：名称及大小未知.txt（32 字节）；按需读取")
-        assertEquals("名称及大小未知.txt（32 字节）", p.references.single().label)
+        assertEquals("名称及大小未知.txt", p.references.single().label)
     }
 
     @Test fun directoryNamesThatLookLikeSizesRemainExact() {
@@ -103,6 +103,27 @@ class ComposerReferencesTest {
             assertEquals(name, p.references.single().label)
             assertEquals(raw, p.edit(p.text))
         }
+    }
+
+    @Test fun fileLabelsExcludeOnlyGeneratedSizeAndKeepOriginalParentheses() {
+        for (name in listOf("scroll-flicker（5）.log", "报告 (2).txt", "资料（42 字节）", "资料（大小未知）", "日志+中文.txt")) {
+            for (suffix in listOf("（0 字节）", "（218953 字节）", "（大小未知）")) {
+                val raw = "$file\n附件信息（按需读取）：$name$suffix；用 read_text_file 按需读取"
+                val p = ComposerReferences(raw)
+                assertEquals(name, p.references.single().label)
+                assertEquals(raw, p.edit(p.text))
+                assertEquals(raw, p.references.single().serialized)
+            }
+        }
+    }
+
+    @Test fun sentReferenceProjectionKeepsBodyAndPayloadSeparateWithoutChangingInput() {
+        val raw = "检查日志\n$file\n附件信息（按需读取）：scroll-flicker（5）.log（218953 字节）；用 read_text_file 按需读取\n$folder\n附件信息（按需读取）：我的目录；用 list_files 按需列举"
+        val p = ComposerReferences(raw)
+        assertEquals("检查日志", p.text)
+        assertEquals(listOf("scroll-flicker（5）.log", "我的目录"), p.references.map { it.label })
+        assertEquals(raw, p.source)
+        assertEquals(raw, p.edit(p.text))
     }
 
 }

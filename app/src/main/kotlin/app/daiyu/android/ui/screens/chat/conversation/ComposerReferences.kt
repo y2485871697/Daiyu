@@ -3,6 +3,8 @@ package app.daiyu.android.ui.screens.chat.conversation
 import java.net.URLDecoder
 import app.daiyu.android.references.PromptReferences
 
+private val fileReferenceSizeSuffix = Regex("（(?:[0-9]+ 字节|大小未知)）$")
+
 /** Presentation of the existing literal-reference draft format. Does not resolve or read a URI. */
 internal class ComposerReferences(val source: String, composing: IntRange? = null) {
     data class Reference(val line: Int, val kind: String, val value: String, val serialized: String,
@@ -10,7 +12,7 @@ internal class ComposerReferences(val source: String, composing: IntRange? = nul
         val label: String get() {
             if (kind == "会话") return PromptReferences.conversation(serialized)?.title?.ifBlank { "会话" } ?: "会话"
             details?.substringBefore('；')?.takeIf { it.isNotBlank() && it != "名称及大小未知" }
-                ?.let { return it.take(200) }
+                ?.let { return (if (kind == "文件") it.replace(fileReferenceSizeSuffix, "") else it).take(200) }
             val tail = value.trimEnd('/').substringAfterLast('/').substringAfterLast('\\')
             val decoded = runCatching { URLDecoder.decode(tail.replace("+", "%2B"), "UTF-8") }.getOrDefault(tail)
             return decoded.substringAfterLast(':').filterNot { it.isISOControl() }.take(120).ifBlank { kind }

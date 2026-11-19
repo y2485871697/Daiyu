@@ -1346,6 +1346,19 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, ordered: AssistantW
 
 @Composable
 internal fun UserMessageText(text: String, modifier: Modifier = Modifier) {
+    val projected = remember(text) { ComposerReferences(text) }
+    if (projected.references.isEmpty()) {
+        UserMessageBody(text, modifier)
+    } else {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (projected.text.isNotEmpty()) UserMessageBody(projected.text)
+            MessageReferenceChips(projected.references)
+        }
+    }
+}
+
+@Composable
+private fun UserMessageBody(text: String, modifier: Modifier = Modifier) {
     SelectionContainer {
         Text(text, modifier, color = conversationColors().bubbleText,
             style = MiuixTheme.textStyles.body1.copy(fontSize = 16.sp, lineHeight = 26.sp))

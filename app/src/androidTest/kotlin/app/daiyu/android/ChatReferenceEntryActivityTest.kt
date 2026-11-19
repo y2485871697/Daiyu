@@ -4,10 +4,16 @@ import android.app.Activity
 import android.app.Instrumentation
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.*
+import app.daiyu.android.data.model.AppearanceSettings
+import app.daiyu.android.ui.app.AgentAppTheme
+import app.daiyu.android.ui.screens.chat.conversation.*
 import app.daiyu.android.platform.PlatformSafGrants
 import app.daiyu.android.storage.ConversationDatabase
-import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 import java.util.concurrent.atomic.AtomicInteger
 
 class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
@@ -384,4 +390,75 @@ class ChatReferenceEntryActivityTest : WiredActivityTestCase() {
         assertDraft(original)
         assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
     }
+
+    private val displayFileReference = "文件引用（未读取）：content://reference-never-read.invalid/document/log"
+    private val displayFileDetails = "附件信息（按需读取）：scroll-flicker（5）.log（218953 字节）；用 read_text_file 按需读取"
+    private val displayFolderReference = "目录引用（未读取）：content://reference-never-read.invalid/tree/primary%3A%E6%96%87%E6%A1%A3"
+
+    private fun mountReferenceMessage(raw: String, ordered: Boolean = false, pending: Boolean = false) {
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                androidx.compose.foundation.layout.Box(Modifier.requiredWidth(320.dp)) {
+                    UserTurn(ChatTurnUi.User("reference-message", raw,
+                        content = if (ordered) listOf(MessageContentUi.Text("reference-text", raw)) else emptyList(),
+                        pending = pending), ChatScreenActions())
+                }
+            }
+        } }
+    }
+
+    private fun assertReferenceMessageHasNoInternalPrompt() {
+        for (internal in listOf("content://", "附件信息（按需读取）", "引用（未读取）", "read_text_file", "218953")) {
+            ui.onNodeWithText(internal, substring = true, useUnmergedTree = true).assertDoesNotExist()
+        }
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testSentFileAndDirectoryUseIconsAndOriginalNamesWithoutInternalPrompt() {
+        val raw = "检查日志\n$displayFileReference\n$displayFileDetails\n$displayFolderReference\n" +
+            "附件信息（按需读取）：我的文档；用 list_files 按需列举，勿自动读取全部文件。"
+        mountReferenceMessage(raw)
+        ui.onNodeWithText("检查日志").assertIsDisplayed()
+        ui.onNodeWithText("scroll-flicker（5）.log").assertIsDisplayed()
+        ui.onNodeWithText("我的文档").assertIsDisplayed()
+        ui.onNode(hasContentDescription("文件") and hasTestTag("message-reference-icon:0"), useUnmergedTree = true).assertIsDisplayed()
+        ui.onNode(hasContentDescription("文件夹") and hasTestTag("message-reference-icon:1"), useUnmergedTree = true).assertIsDisplayed()
+        ui.onNodeWithTag("chat-reference-remove:0", useUnmergedTree = true).assertDoesNotExist()
+        assertReferenceMessageHasNoInternalPrompt()
+    }
+
+    fun testOrderedReferenceOnlyPendingMessageUsesSameFilePresentation() {
+        val raw = "$displayFileReference\n$displayFileDetails"
+        mountReferenceMessage(raw, ordered = true, pending = true)
+        ui.onNodeWithTag("chat-send-preview").assertExists()
+        ui.onNodeWithText("scroll-flicker（5）.log").assertIsDisplayed()
+        ui.onNodeWithTag("message-reference-icon:0", useUnmergedTree = true).assertIsDisplayed()
+        assertReferenceMessageHasNoInternalPrompt()
+    }
+
+    fun testOldReferenceWithoutMetadataUsesDecodedNameAndPreservesLiteralUserText() {
+        val raw = "说明 content://ordinary/text\n目录引用（未读取）：content://reference-never-read.invalid/tree/primary%3A%E4%B8%AD%E6%96%87%2B%E7%9B%AE%E5%BD%95"
+        mountReferenceMessage(raw, ordered = true)
+        ui.onNodeWithText("说明 content://ordinary/text").assertIsDisplayed()
+        ui.onNodeWithText("中文+目录").assertIsDisplayed()
+        ui.onNodeWithText("目录引用（未读取）", substring = true, useUnmergedTree = true).assertDoesNotExist()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testComposerUsesOriginalFileNameButSendsUnchangedMetadata() {
+        val raw = "$displayFileReference\n$displayFileDetails"
+        var sent: String? = null
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                ChatMenuLayer { ChatComposer(ComposerUi(text = raw), ChatScreenActions(onSend = { sent = it }),
+                    Modifier.requiredWidth(320.dp)) }
+            }
+        } }
+        ui.onNodeWithText("文件 · scroll-flicker（5）.log").assertIsDisplayed()
+        ui.onNodeWithText("218953", substring = true, useUnmergedTree = true).assertDoesNotExist()
+        node("chat-send").assertIsEnabled().performClick()
+        assertEquals(raw, sent)
+        assertEquals(0, fixture.opens.get())
+    }
+
 }

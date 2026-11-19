@@ -261,6 +261,13 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
     fun visible(expected: MarkdownTypingTarget): Int =
         if (target === expected) position.toInt().coerceIn(0, expected.total) else expected.start
 
+    fun hold(expected: MarkdownTypingTarget, frameNanos: Long) {
+        if (target !== expected) return
+        // Backpressure freezes elapsed time, not the active rate or fractional frontier.
+        if (lastFrame != 0L) lastFrame = frameNanos
+        arrivalFrame = 0L
+    }
+
     fun pause(expected: MarkdownTypingTarget) {
         if (target !== expected) return
         lastFrame = 0L

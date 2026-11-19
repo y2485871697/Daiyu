@@ -138,137 +138,6 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    private fun awaitNativePaint(text: String, accepts: (MarkdownPaintSlotsProbe.PaintSample) -> Boolean): MarkdownPaintSlotsProbe.PaintSample {
-        repeat(8) {
-            ui.mainClock.advanceTimeByFrame()
-            ui.waitForIdle()
-            val sample = ui.runOnIdle {
-                var selected: MarkdownPaintSlotsProbe.PaintSample? = null
-                paintSlots.sample("native-environment") {
-                    if (it.candidate?.layoutInput?.text?.text == text) selected = it
-                }
-                selected
-            }
-            if (sample != null && accepts(sample)) return sample
-        }
-        throw AssertionError("Native paint did not settle in eight frames\n${paintDump("native-environment")}")
-    }
-
-    private fun assertNativeInk(color: Color) {
-        val pixels = ui.onNodeWithTag("native-text").captureToImage().toPixelMap()
-        var ink = 0
-        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
-            val pixel = pixels[x, y]
-            if (kotlin.math.abs(pixel.red - color.red) < .08f &&
-                kotlin.math.abs(pixel.green - color.green) < .08f &&
-                kotlin.math.abs(pixel.blue - color.blue) < .08f) ink++
-        }
-        assertTrue("The actual native draw must contain $color pixels, found $ink", ink > 0)
-    }
-
-    private fun showNativePaint(text: String, clearance: StreamingTextClearance,
-        publication: MarkdownPaintPublication, color: () -> Color, fontScale: () -> Float,
-        heightPx: () -> Int) {
-        mainThread {
-            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
-                val originalDensity = LocalDensity.current
-                CompositionLocalProvider(
-                    LocalDensity provides Density(originalDensity.density, fontScale()),
-                    LocalStreamingTextClearance provides clearance,
-                    LocalMarkdownPaintPublication provides publication,
-                ) {
-                    val density = LocalDensity.current
-                    val style = TextStyle(color = color(), fontSize = 16.sp, lineHeight = 26.sp)
-                    val measurer = rememberTextMeasurer()
-                    val measured = measurer.measure(AnnotatedString(text), style,
-                        constraints = Constraints(maxWidth = with(density) { 240.dp.roundToPx() }))
-                    val fullHeight = heightPx().takeIf { it > 0 } ?: measured.size.height
-                    paintSlots.Capture("native-environment")
-                    Box(Modifier.requiredWidth(240.dp).height(with(density) { fullHeight.toDp() })
-                        .background(Color.Magenta).onGloballyPositioned {
-                            clearance.update(it, it, 0, 0, 0, protect = true, clampToViewport = true)
-                        }.testTag("native-host")) {
-                        ClearanceText(AnnotatedString(text), 0,
-                            Modifier.requiredWidth(240.dp).wrapContentHeight(Alignment.Top, unbounded = true)
-                                .testTag("native-text"), style)
-                    }
-                }
-            }
-        }
-        awaitNodeWindowFocus(ui.onNodeWithTag("native-host"))
-    }
-
-    fun testSameTextColorChangeRepaintsWithoutRemountingThePaintFrame() {
-        val text = "Same native paint."
-        val clearance = StreamingTextClearance()
-        val publication = MarkdownPaintPublication()
-        var color by mutableStateOf(Color.Red)
-        val autoAdvance = ui.mainClock.autoAdvance
-        ui.mainClock.autoAdvance = false
-        try {
-            showNativePaint(text, clearance, publication, { color }, { 1f }, { 0 })
-            val before = awaitNativePaint(text) {
-                val candidate = it.candidate
-                candidate != null && it.drawn?.canPaintPrefixOf(candidate) == true && publication.ready
-            }
-            assertNativeInk(Color.Red)
-            mainThread { color = Color.Blue }
-            val after = awaitNativePaint(text) {
-                val candidate = it.candidate
-                candidate?.layoutInput?.style?.color == Color.Blue &&
-                    it.drawn?.canPaintPrefixOf(candidate) == true && publication.ready
-            }
-            assertSame("Only BasicText may remount", before.frame, after.frame)
-            assertEquals(before.candidate!!.size, after.candidate!!.size)
-            assertEquals(before.candidate.layoutInput.text, after.candidate.layoutInput.text)
-            assertNativeInk(Color.Blue)
-        } finally {
-            ui.mainClock.autoAdvance = autoAdvance
-        }
-    }
-
-    fun testSameTextScaledPaintDebtClearsAfterPlacementOnlyGrowth() {
-        val text = "Clearance one.\nClearance two.\nClearance three."
-        val clearance = StreamingTextClearance()
-        val publication = MarkdownPaintPublication()
-        var fontScale by mutableStateOf(1f)
-        var heightPx by mutableStateOf(0)
-        val autoAdvance = ui.mainClock.autoAdvance
-        ui.mainClock.autoAdvance = false
-        try {
-            showNativePaint(text, clearance, publication, { Color.Blue }, { fontScale }, { heightPx })
-            val before = awaitNativePaint(text) {
-                val candidate = it.candidate
-                it.fits == true && candidate != null &&
-                    it.drawn?.canPaintPrefixOf(candidate) == true && publication.ready
-            }
-            mainThread {
-                heightPx = before.candidate!!.size.height
-                fontScale = 1.6f
-            }
-            val blocked = awaitNativePaint(text) {
-                it.candidate?.layoutInput?.density?.fontScale == 1.6f &&
-                    it.candidate.size.height > before.candidate!!.size.height &&
-                    it.fits == false && it.above == false && !publication.ready
-            }
-            assertSame(before.frame, blocked.frame)
-            mainThread { heightPx = blocked.candidate!!.size.height }
-            val after = awaitNativePaint(text) {
-                val candidate = it.candidate
-                it.fits == true && candidate != null &&
-                    it.drawn?.canPaintPrefixOf(candidate) == true && publication.ready
-            }
-            assertSame(blocked.frame, after.frame)
-            assertEquals(blocked.candidate!!.layoutInput.text, after.candidate!!.layoutInput.text)
-            assertEquals(blocked.candidate.layoutInput.style, after.candidate.layoutInput.style)
-            assertEquals(blocked.candidate.layoutInput.density.fontScale,
-                after.candidate.layoutInput.density.fontScale, 0f)
-            assertNativeInk(Color.Blue)
-        } finally {
-            ui.mainClock.autoAdvance = autoAdvance
-        }
-    }
-
     fun testCompletedLongReplyHasCompactSpacingAcrossThemesAndInterfaceScales() {
         for (dark in listOf(false, true)) for (scale in listOf(1f, .8f)) {
             show(scale, dark)
@@ -503,4 +372,135 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         assertTrue("Short reply remains above the composer", short.bottom < surface.top)
         ui.onNodeWithContentDescription("上一条用户消息").assertDoesNotExist()
     }
+    private fun awaitNativePaint(text: String, accepts: (MarkdownPaintSlotsProbe.PaintSample) -> Boolean): MarkdownPaintSlotsProbe.PaintSample {
+        repeat(8) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+            val sample = ui.runOnIdle {
+                var selected: MarkdownPaintSlotsProbe.PaintSample? = null
+                paintSlots.sample("native-environment") {
+                    if (it.candidate?.layoutInput?.text?.text == text) selected = it
+                }
+                selected
+            }
+            if (sample != null && accepts(sample)) return sample
+        }
+        throw AssertionError("Native paint did not settle in eight frames\n${paintDump("native-environment")}")
+    }
+
+    private fun assertNativeInk(color: Color) {
+        val pixels = ui.onNodeWithTag("native-text").captureToImage().toPixelMap()
+        var ink = 0
+        for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
+            val pixel = pixels[x, y]
+            if (kotlin.math.abs(pixel.red - color.red) < .08f &&
+                kotlin.math.abs(pixel.green - color.green) < .08f &&
+                kotlin.math.abs(pixel.blue - color.blue) < .08f) ink++
+        }
+        assertTrue("The actual native draw must contain $color pixels, found $ink", ink > 0)
+    }
+
+    private fun showNativePaint(text: String, clearance: StreamingTextClearance,
+        publication: MarkdownPaintPublication, color: () -> Color, fontScale: () -> Float,
+        heightPx: () -> Int) {
+        mainThread {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
+                val originalDensity = LocalDensity.current
+                CompositionLocalProvider(
+                    LocalDensity provides Density(originalDensity.density, fontScale()),
+                    LocalStreamingTextClearance provides clearance,
+                    LocalMarkdownPaintPublication provides publication,
+                ) {
+                    val density = LocalDensity.current
+                    val style = TextStyle(color = color(), fontSize = 16.sp, lineHeight = 26.sp)
+                    val measurer = rememberTextMeasurer()
+                    val measured = measurer.measure(AnnotatedString(text), style,
+                        constraints = Constraints(maxWidth = with(density) { 240.dp.roundToPx() }))
+                    val fullHeight = heightPx().takeIf { it > 0 } ?: measured.size.height
+                    paintSlots.Capture("native-environment")
+                    Box(Modifier.requiredWidth(240.dp).height(with(density) { fullHeight.toDp() })
+                        .background(Color.Magenta).onGloballyPositioned {
+                            clearance.update(it, it, 0, 0, 0, protect = true, clampToViewport = true)
+                        }.testTag("native-host")) {
+                        ClearanceText(AnnotatedString(text), 0,
+                            Modifier.requiredWidth(240.dp).wrapContentHeight(Alignment.Top, unbounded = true)
+                                .testTag("native-text"), style)
+                    }
+                }
+            }
+        }
+        awaitNodeWindowFocus(ui.onNodeWithTag("native-host"))
+    }
+
+    fun testSameTextColorChangeRepaintsWithoutRemountingThePaintFrame() {
+        val text = "Same native paint."
+        val clearance = StreamingTextClearance()
+        val publication = MarkdownPaintPublication()
+        var color by mutableStateOf(Color.Red)
+        val autoAdvance = ui.mainClock.autoAdvance
+        ui.mainClock.autoAdvance = false
+        try {
+            showNativePaint(text, clearance, publication, { color }, { 1f }, { 0 })
+            val before = awaitNativePaint(text) {
+                val candidate = it.candidate
+                candidate != null && it.drawn?.canPaintPrefixOf(candidate) == true && publication.ready
+            }
+            assertNativeInk(Color.Red)
+            mainThread { color = Color.Blue }
+            val after = awaitNativePaint(text) {
+                val candidate = it.candidate
+                candidate?.layoutInput?.style?.color == Color.Blue &&
+                    it.drawn?.canPaintPrefixOf(candidate) == true && publication.ready
+            }
+            assertSame("Only BasicText may remount", before.frame, after.frame)
+            assertEquals(before.candidate!!.size, after.candidate!!.size)
+            assertEquals(before.candidate.layoutInput.text, after.candidate.layoutInput.text)
+            assertNativeInk(Color.Blue)
+        } finally {
+            ui.mainClock.autoAdvance = autoAdvance
+        }
+    }
+
+    fun testSameTextScaledPaintDebtClearsAfterPlacementOnlyGrowth() {
+        val text = "Clearance one.\nClearance two.\nClearance three."
+        val clearance = StreamingTextClearance()
+        val publication = MarkdownPaintPublication()
+        var fontScale by mutableStateOf(1f)
+        var heightPx by mutableStateOf(0)
+        val autoAdvance = ui.mainClock.autoAdvance
+        ui.mainClock.autoAdvance = false
+        try {
+            showNativePaint(text, clearance, publication, { Color.Blue }, { fontScale }, { heightPx })
+            val before = awaitNativePaint(text) {
+                val candidate = it.candidate
+                it.fits == true && candidate != null &&
+                    it.drawn?.canPaintPrefixOf(candidate) == true && publication.ready
+            }
+            mainThread {
+                heightPx = before.candidate!!.size.height
+                fontScale = 1.6f
+            }
+            val blocked = awaitNativePaint(text) {
+                it.candidate?.layoutInput?.density?.fontScale == 1.6f &&
+                    it.candidate.size.height > before.candidate!!.size.height &&
+                    it.fits == false && it.above == false && !publication.ready
+            }
+            assertSame(before.frame, blocked.frame)
+            mainThread { heightPx = blocked.candidate!!.size.height }
+            val after = awaitNativePaint(text) {
+                val candidate = it.candidate
+                it.fits == true && candidate != null &&
+                    it.drawn?.canPaintPrefixOf(candidate) == true && publication.ready
+            }
+            assertSame(blocked.frame, after.frame)
+            assertEquals(blocked.candidate!!.layoutInput.text, after.candidate!!.layoutInput.text)
+            assertEquals(blocked.candidate.layoutInput.style, after.candidate.layoutInput.style)
+            assertEquals(blocked.candidate.layoutInput.density.fontScale,
+                after.candidate.layoutInput.density.fontScale, 0f)
+            assertNativeInk(Color.Blue)
+        } finally {
+            ui.mainClock.autoAdvance = autoAdvance
+        }
+    }
+
 }

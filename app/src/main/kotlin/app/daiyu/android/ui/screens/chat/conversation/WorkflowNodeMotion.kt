@@ -18,6 +18,11 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.withSaveLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
@@ -149,9 +154,14 @@ internal fun rememberWorkflowToolAppearance(key: String): WorkflowToolAppearance
 
 internal fun Modifier.workflowToolAppearance(appearance: WorkflowToolAppearance?): Modifier {
     if (appearance == null) return this
-    return graphicsLayer {
+    val paint = Paint()
+    return drawWithContent {
         val fraction = appearance.progress.value.coerceIn(0f, 1f)
-        alpha = fraction
+        if (fraction >= 1f) drawContent()
+        else if (fraction > 0f) {
+            paint.alpha = fraction
+            drawContext.canvas.withSaveLayer(Rect(Offset.Zero, size), paint) { drawContent() }
+        }
     }
 }
 

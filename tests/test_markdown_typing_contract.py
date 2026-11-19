@@ -43,13 +43,19 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources,", self.chat)
         self.assertIn("live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty()", self.chat)
         callback = self.typing.split("withFrameNanos { frameNanos ->", 1)[1].split("\n            }", 1)[0]
-        self.assertIn("shown = if (markdownTypingCanAdvance(currentCanAdvance, currentPlayback) && textClearance?.held != true &&", callback)
-        self.assertIn("(!currentAwaitPaintAdmission || publication.ready)", callback)
-        self.assertIn("motion.advance(current, frameNanos, end) { currentAdvance() }", callback)
-        self.assertIn("else { motion.pause(current); motion.visible(current) }", callback)
+        self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true || currentAwaitPaintAdmission && !publication.ready -> { motion.hold(current, frameNanos) motion.visible(current) } else -> motion.advance(current, frameNanos, end) { currentAdvance() } }', " ".join(callback.split()))
+        self.assertEqual(1, callback.count("motion.advance("))
+        self.assertEqual(1, callback.count("motion.pause("))
+        self.assertEqual(1, callback.count("motion.hold("))
         self.assertIn("value = MarkdownTypingFrame(current, shown)", callback)
         self.assertLess(callback.index("motion.advance("), callback.index("value = MarkdownTypingFrame("))
         self.assertNotIn("shown = withFrameNanos", self.typing)
+        hold = self.reveal.split("fun hold(expected: MarkdownTypingTarget, frameNanos: Long) {", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("if (target !== expected) return", hold)
+        self.assertIn("if (lastFrame != 0L) lastFrame = frameNanos", hold)
+        self.assertIn("arrivalFrame = 0L", hold)
+        for forbidden in ("position =", "rate =", "desiredRate =", "resuming =", "receiptNanos =", "receiptRate =", "receivedEnd ="):
+            self.assertNotIn(forbidden, hold)
         self.assertIn("awaitPaintAdmission: Boolean = false", self.typing)
         self.assertIn("val currentAwaitPaintAdmission by rememberUpdatedState(awaitPaintAdmission)", self.typing)
         self.assertIn('presentationLane = "body:${turn.listKey}", awaitPaintAdmission = true', self.chat)

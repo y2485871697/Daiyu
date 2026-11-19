@@ -56,7 +56,12 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('sharedAppearance?.progress?.value ?: progress.value', motion)
         body = motion[motion.index('internal fun Modifier.workflowToolAppearance'):motion.index('internal fun Modifier.workflowCompletion')]
         self.assertNotIn('translationY', body)
-        self.assertIn('alpha = fraction', body)
+        self.assertIn('return drawWithContent {', body)
+        self.assertNotIn('graphicsLayer', body)
+        self.assertIn('if (fraction >= 1f) drawContent()', body)
+        self.assertIn('else if (fraction > 0f)', body)
+        self.assertIn('paint.alpha = fraction', body)
+        self.assertIn('drawContext.canvas.withSaveLayer(Rect(Offset.Zero, size), paint) { drawContent() }', body)
         self.assertIn('if (incoming.value != null) appearance.progress.snapTo(.12f)', appearance)
         self.assertIn('val appearance = rememberWorkflowToolAppearance("tool:${step.renderKey}")', work)
         self.assertIn('failed = step.state == WorkStepState.FAILED, appearance = appearance', work)

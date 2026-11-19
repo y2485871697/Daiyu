@@ -649,4 +649,48 @@ class MarkdownRevealTest {
         assertEquals(1, frames.first())
         assertTrue("A sampled raw rate is real even before its first parsed frame", frames.last() in 15..20)
     }
+    @Test fun holdPreservesFractionalPhaseWithoutBuyingRestartCharacters() {
+        fun trace(interval: Long, wait: Long): List<Int> {
+            val prefix = "prefix "
+            val state = MarkdownTypingState(listOf(source(prefix)))
+            state.update(listOf(part(prefix)), prefix.length, true, false)
+            state.receive(listOf(source(prefix + "字".repeat(100))), 1_000_000_000L)
+            state.receive(listOf(source(prefix + "字".repeat(200))), 1_000_000_000L + interval)
+            val target = state.update(listOf(part(prefix + "字".repeat(200))), prefix.length, true, false)!!
+            var time = 10_000_000_000L
+            if (wait > 0) {
+                state.hold(target, time - 16_000_000L)
+                assertEquals(prefix.length, state.visible(target))
+            }
+            assertEquals(prefix.length + 1, state.advance(target, time))
+            time += 5_000_000L
+            state.advance(target, time)
+            return buildList {
+                repeat(12) {
+                    val before = state.visible(target)
+                    if (wait > 0) {
+                        time += wait
+                        state.hold(target, time)
+                        assertEquals(before, state.visible(target))
+                    }
+                    time += 1_000_000L
+                    val shown = state.advance(target, time)
+                    assertTrue(shown in before..target.total)
+                    assertEquals(prefix.length, target.start)
+                    add(shown - prefix.length)
+                }
+            }
+        }
+        val slow = trace(1_000_000_000L, 0)
+        val fast = trace(10_000_000L, 0)
+        for (interval in listOf(1_000_000_000L, 10_000_000L)) {
+            val uninterrupted = trace(interval, 0)
+            assertEquals(uninterrupted, trace(interval, 16_000_000L))
+            assertEquals(uninterrupted, trace(interval, 60_000_000_000L))
+        }
+        assertTrue("Subcharacter releases must not each invent +1", slow.zipWithNext().any { (a, b) -> a == b })
+        assertTrue("Hold must retain measured receipt-rate separation", fast.last() > slow.last())
+        assertTrue(fast.last() < 200)
+    }
+
 }

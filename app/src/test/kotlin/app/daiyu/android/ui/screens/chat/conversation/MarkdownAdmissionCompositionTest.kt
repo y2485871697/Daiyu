@@ -402,4 +402,72 @@ class MarkdownAdmissionCompositionTest {
             assertTrue(reveal!!.settled)
         } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
     }
+    @Test fun cyclicGeometryHoldMatchesUninterruptedReleaseFrames() = verifyCyclicHold(paint = false)
+    @Test fun cyclicPaintHoldMatchesUninterruptedReleaseFrames() = verifyCyclicHold(paint = true)
+
+    private fun verifyCyclicHold(paint: Boolean) = runBlocking {
+        suspend fun trace(waitFrames: Int): List<Int> {
+            val clock = BroadcastFrameClock()
+            val recomposer = Recomposer(coroutineContext + clock)
+            val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
+            val composition = Composition(NoNodes(), recomposer)
+            val clearance = StreamingTextClearance()
+            clearance.update(null, null, 0, 0, 0, protect = false, clampToViewport = false)
+            val sources = mutableStateOf(emptyList<MarkdownTypingSource>())
+            val parsed = mutableStateOf(projectMarkdown(emptyList()))
+            val owner = Any()
+            var reveal: MarkdownReveal? = null
+            var advances = 0
+            var time = 1_000_000_000L
+            suspend fun frame() {
+                Snapshot.sendApplyNotifications()
+                repeat(12) { yield() }
+                time += 16_000_000L
+                if (clock.hasAwaiters) clock.sendFrame(time)
+                repeat(12) { yield() }
+            }
+            fun hold(value: Boolean) {
+                if (paint) reveal!!.publication.setPending(owner, value)
+                else clearance.update(null, null, 0, 0, 1, protect = value, clampToViewport = false)
+            }
+            try {
+                composition.setContent {
+                    CompositionLocalProvider(LocalStreamingTextClearance provides clearance,
+                        LocalMarkdownReceiptClock provides { time }) {
+                        reveal = rememberMarkdownReveal(sources.value, parsed.value, streaming = true,
+                            terminal = false, live = true, awaitPaintAdmission = paint,
+                            onVisibleAdvance = { advances++ })
+                    }
+                }
+                repeat(3) { frame() }
+                val text = "字".repeat(20_000)
+                sources.value = listOf(MarkdownTypingSource("answer", text))
+                parsed.value = projectMarkdown(listOf(text))
+                repeat(3) { frame() }
+                assertTrue(reveal!!.limit("answer") in 1 until text.length)
+                return buildList {
+                    repeat(4) {
+                        val before = reveal!!.limit("answer")
+                        val feedback = advances
+                        if (waitFrames > 0) {
+                            hold(true)
+                            repeat(waitFrames) { frame() }
+                            assertEquals(before, reveal!!.limit("answer"))
+                            assertEquals(feedback, advances)
+                        }
+                        hold(false)
+                        frame()
+                        val shown = reveal!!.limit("answer")
+                        assertTrue(shown in before until text.length)
+                        add(shown)
+                    }
+                }
+            } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
+        }
+        val uninterrupted = trace(0)
+        assertEquals(uninterrupted, trace(1))
+        assertEquals(uninterrupted, trace(60))
+    }
+
+
 }

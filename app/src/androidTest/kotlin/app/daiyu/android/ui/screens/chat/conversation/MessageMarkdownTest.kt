@@ -61,6 +61,39 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         "image/png", 10, "b".repeat(64), 2, 2)
     private val image = MessageImageUi(owner, reference)
 
+    fun testNativeTextAndCandidateCompareDensityMetricsInsteadOfProviderObjects() {
+        var native: TextLayoutResult? = null
+        var equivalent: TextLayoutResult? = null
+        var changedDensity: TextLayoutResult? = null
+        var changedFontScale: TextLayoutResult? = null
+        show {
+            val text = AnnotatedString("真实布局与候选必须使用相同密度数值。\nSecond line stays visible.")
+            val style = androidx.compose.ui.text.TextStyle(color = Color.Black, fontSize = 16.sp, lineHeight = 26.sp)
+            val measurer = androidx.compose.ui.text.rememberTextMeasurer(cacheSize = 0)
+            val density = LocalDensity.current
+            val otherProvider = object : Density by density {}
+            androidx.compose.foundation.text.BasicText(text, Modifier.width(220.dp).testTag("native-density"), style,
+                onTextLayout = { actual ->
+                    native = actual
+                    fun candidate(provider: Density) = measurer.measure(text, style,
+                        constraints = actual.layoutInput.constraints,
+                        layoutDirection = actual.layoutInput.layoutDirection, density = provider)
+                    equivalent = candidate(otherProvider)
+                    changedDensity = candidate(Density(density.density * 1.2f, density.fontScale))
+                    changedFontScale = candidate(Density(density.density, density.fontScale * 1.2f))
+                })
+        }
+        val actual = checkNotNull(native)
+        val candidate = checkNotNull(equivalent)
+        assertNotSame("The probe must exercise distinct Density providers",
+            actual.layoutInput.density, candidate.layoutInput.density)
+        assertEquals(actual.layoutInput.density.density, candidate.layoutInput.density.density, 0f)
+        assertEquals(actual.layoutInput.density.fontScale, candidate.layoutInput.density.fontScale, 0f)
+        assertTrue("Matching metrics must admit the native painted prefix", actual.canPaintPrefixOf(candidate))
+        assertFalse("Changed pixel density must still invalidate the layout", actual.canPaintPrefixOf(checkNotNull(changedDensity)))
+        assertFalse("Changed font scale must still invalidate the layout", actual.canPaintPrefixOf(checkNotNull(changedFontScale)))
+    }
+
     fun testPendingListPrefixesKeepThePublishedParagraphAtBodySize() {
         var source by mutableStateOf("Search and analyse")
         show { Column(Modifier.testTag("syntax-size")) {

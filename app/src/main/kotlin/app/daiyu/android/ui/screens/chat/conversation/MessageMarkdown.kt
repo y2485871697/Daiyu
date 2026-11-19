@@ -280,7 +280,8 @@ internal fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boo
     val current = candidate.layoutInput
     if (!current.text.text.startsWith(previous.text.text) ||
         previous.constraints.maxWidth != current.constraints.maxWidth || previous.style != current.style ||
-        previous.density != current.density || previous.layoutDirection != current.layoutDirection) return false
+        previous.density.density != current.density.density ||
+        previous.density.fontScale != current.density.fontScale || previous.layoutDirection != current.layoutDirection) return false
     val prefix = current.text.subSequence(0, previous.text.length)
     return previous.text == prefix
 }

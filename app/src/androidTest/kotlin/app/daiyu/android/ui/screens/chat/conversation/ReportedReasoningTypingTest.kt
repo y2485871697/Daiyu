@@ -389,14 +389,17 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         val next = hidden + " visible " + "丙".repeat(180)
         prepare("", first, hidden, next)
         val appearance = WorkflowToolAppearance(animate = false).apply { arrived = false; settled = false }
+        val visualScope = WorkflowVisualScope(false)
         var text by mutableStateOf("")
         var advances = 0
         ui.mainClock.autoAdvance = false
         try {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    ReportedReasoningCard("queued-cold", listOf(ReportedReasoning("r", text, 0L, 0L)),
-                        appearance = appearance, onVisibleAdvance = { advances++ })
+                    CompositionLocalProvider(LocalWorkflowVisualScope provides visualScope) {
+                        ReportedReasoningCard("queued-cold", listOf(ReportedReasoning("r", text, 0L, 0L)),
+                            appearance = appearance, onVisibleAdvance = { advances++ })
+                    }
                 }
             } }
             ui.mainClock.advanceTimeBy(32)

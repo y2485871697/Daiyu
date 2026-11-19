@@ -112,22 +112,32 @@ class RunControlActivityTest : WiredActivityTestCase() {
         assertEquals("other draft", fixture.database.conversations().single { it.id == other.id }.draft)
     }
     fun testGestureOwnerCannotRetargetNextRunBeforeRelease() {
-        val first = fixture.session(); val old = send(); assertTrue(first.entered.await(5, TimeUnit.SECONDS))
+        val first = fixture.session(holdSeconds = 120); val old = send(); assertTrue(first.entered.await(5, TimeUnit.SECONDS))
         val target = node("chat-control")
         val oldLong = retainedControls(activity).onPrimaryLongPress
-        target.performTouchInput { down(center) }
-        first.release.countDown(); awaitControl("old owner completed") { fixture.controller.active == null }
-        val second = fixture.session(); val conversation = fixture.database.conversations().single()
-        assertNotNull(fixture.controller.send(conversation, "next user"))
-        val next = checkNotNull(fixture.controller.active); assertTrue(second.entered.await(5, TimeUnit.SECONDS))
-        ui.waitForIdle()
-        mainThread { oldLong() }
-        assertFalse(fixture.controller.runState(next)!!.pauseRequested); assertEquals(1L, second.cancelled.count)
-        node("chat-control").performTouchInput { up() }
-        assertFalse(fixture.controller.runState(next)!!.pauseRequested); assertEquals(1L, second.cancelled.count)
-        second.release.countDown(); awaitControl("next run unaffected") { fixture.controller.active == null }
-        assertEquals(RunStatus.COMPLETED, fixture.database.messages(old.conversationId).last().second.status)
-        assertEquals(2, fixture.opens.get())
+        ui.mainClock.autoAdvance = false
+        try {
+            target.performTouchInput { down(center) }
+            first.release.countDown(); awaitControl("old owner completed") { fixture.controller.active == null }
+            val second = fixture.session(holdSeconds = 120); val conversation = fixture.database.conversations().single()
+            assertNotNull(fixture.controller.send(conversation, "next user"))
+            val next = checkNotNull(fixture.controller.active); assertTrue(second.entered.await(5, TimeUnit.SECONDS))
+            ui.mainClock.advanceTimeBy(32)
+            controlMain { oldLong() }
+            controlMain {
+                assertFalse(checkNotNull(fixture.controller.runState(next)) { "next run disappeared before release" }.pauseRequested)
+                assertEquals(1L, second.cancelled.count)
+            }
+            node("chat-control").performTouchInput { up() }
+            ui.mainClock.advanceTimeBy(32)
+            controlMain {
+                assertFalse(checkNotNull(fixture.controller.runState(next)) { "next run disappeared after old gesture release" }.pauseRequested)
+                assertEquals(1L, second.cancelled.count)
+            }
+            second.release.countDown(); awaitControl("next run unaffected") { fixture.controller.active == null }
+            assertEquals(RunStatus.COMPLETED, fixture.database.messages(old.conversationId).last().second.status)
+            assertEquals(2, fixture.opens.get())
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
     private fun visibleTailCharacters(): Int = ui.onAllNodes(
@@ -187,9 +197,16 @@ class RunControlActivityTest : WiredActivityTestCase() {
             val old = completedTail()
             node("chat-control").performClick()
             ui.mainClock.advanceTimeBy(32)
-            val next = fixture.session("next reply")
+            val next = fixture.session("next reply", holdSeconds = 120)
             setDraft("next user")
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                ui.onAllNodes(hasTestTag("chat-send") and hasContentDescription("发送") and isEnabled())
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+            }
+            assertDraft("next user")
             node("chat-send").assertContentDescriptionEquals("发送").assertIsEnabled().performClick()
+            ui.mainClock.autoAdvance = true
             awaitTextSendResult(activity)
             assertTrue(next.entered.await(5, TimeUnit.SECONDS))
             assertEquals(2, fixture.opens.get())

@@ -91,7 +91,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         gate = card[card.index('val revealGate ='):card.index('val revealEnabled =')]
         self.assertNotIn('hasReportedReasoningText', gate)
         for token in ('live = isThinking || firstPresentation,', 'paceTerminal = firstPresentation,',
-                      'initialBaseline = if (firstPresentation) emptyList() else null,',
+                      'initialBaseline = if (firstPresentation || queuedEmptyBaseline) emptyList() else null,',
                       'onHandoffReady(appearance?.settled != false && handoffReady)'):
             self.assertIn(token, card)
         body = card[card.index('AnimatedVisibility('):card.index('internal fun rememberReasoningElapsed(')]

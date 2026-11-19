@@ -85,7 +85,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertEqual(2, assistant.count('textBody = textBody'))
         self.assertIn('MessageContent(ordered.leading, actions, imageLoader, markdown = true, textBody = textBody)', assistant)
         self.assertIn('WorkflowNarrationContent(steps, plainText, textSources,', self.chat)
-        self.assertIn("ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)", self.ui)
+        self.assertIn("ProjectedMessageMarkdown(text, blocks, presented, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)", self.ui)
         content = (BASE / "MessageContent.kt").read_text()
         self.assertIn('key(block.workflowKey(index))', content)
         self.assertIn("textBody: @Composable (MessageContentUi.Text, Modifier)", content)

@@ -310,7 +310,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         drawing = viewport.split(".drawWithContent {", 1)[1].split(".scrollable", 1)[0]
         self.assertIn("import androidx.compose.runtime.neverEqualPolicy", source)
         self.assertIn("var viewportCoordinates by mutableStateOf<LayoutCoordinates?>(null, neverEqualPolicy())", source)
-        self.assertIn(".onPlaced { state.viewportCoordinates = it }", viewport)
+        self.assertIn(".onPlaced { viewport ->\n                state.viewportCoordinates = viewport", viewport)
         self.assertIn("val viewport = state.viewportCoordinates?.takeIf { it.isAttached }", drawing)
         geometry = drawing.split("val actualTop = ", 1)[1].split("} else size.height", 1)[0]
         self.assertEqual(

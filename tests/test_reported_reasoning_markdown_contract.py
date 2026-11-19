@@ -13,7 +13,13 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
         self.assertIn("RevealedMessageMarkdown(", source)
         self.assertIn("deferBlockReveal = true", source)
         leaf = (CHAT / "MessageMarkdown.kt").read_text().split("internal fun RevealedMessageMarkdown(", 1)[1].split("@Composable", 1)[0]
-        self.assertIn("ProjectedMessageMarkdown(text, blocks, modifier, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)", leaf)
+        self.assertIn("val presented = modifier.onPlaced { reveal.presented(partId) }", leaf)
+        self.assertIn(
+            "if (deferBlockReveal) ProjectedMessageMarkdown(text, blocks, presented,\n"
+            "            generationComplete = generationComplete, visibility = reveal.visibility(partId), sourceWindow = sourceWindow)",
+            leaf,
+        )
+        self.assertIn("else ProjectedMessageMarkdown(text, blocks, presented, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)", leaf)
         self.assertIn("projection?.blocksAt(0)", source)
         self.assertNotRegex(source, r"\bText\(it\.text")
         self.assertNotIn("MarkdownParser.parse", source)

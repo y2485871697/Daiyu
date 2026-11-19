@@ -140,7 +140,7 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
         self.assertIn('val userMessageEntrance = suppliedUserMessageEntrance ?:', screen)
         self.assertNotIn('Animatable(if (request.claim()', motion)
         self.assertLess(motion.index('if (!active)'), motion.index('if (request.claim())'))
-        self.assertLess(motion.index('snapshotFlow { !awaitPlacement || motion.positioned }'), motion.index('if (request.claim())'))
+        self.assertLess(motion.rindex('snapshotFlow { request.mediaReady && (!awaitPlacement || motion.positioned) }.first { it }'), motion.index('if (request.claim())'))
         self.assertIn('withTimeoutOrNull(240)', motion)
         self.assertIn('item.offset < layout.viewportEndOffset - currentOcclusionPx', rows)
         self.assertIn('alpha = userMessageActionEntranceAlpha(entering.progress.value)', rows)
@@ -165,7 +165,7 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
         motion = (CHAT / 'UserMessageEntrance.kt').read_text()
         self.assertIn('else if (placementOwner === owner)', motion)
         after_ime = motion.split('withTimeoutOrNull(240)', 1)[1]
-        self.assertLess(after_ime.index('snapshotFlow { !awaitPlacement || motion.positioned }'), after_ime.index('if (request.claim())'))
+        self.assertLess(after_ime.index('snapshotFlow { request.mediaReady && (!awaitPlacement || motion.positioned) }.first { it }'), after_ime.index('if (request.claim())'))
 
     def test_media_only_send_and_encoded_mapper_keys_cannot_stall_entrance(self):
         preview = (CHAT / 'ChatSubmissionPreview.kt').read_text()

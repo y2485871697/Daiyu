@@ -1402,7 +1402,9 @@ class TaskScrollFrozenCheckToolsTest(unittest.TestCase):
                 Path("tests").mkdir()
                 Path("tests/test_acceptance_tool_receipt.py").write_text("raise AssertionError('stale checkout')\n")
                 for python in ("python", "python3"):
-                    for selected in (classes, tuple(reversed(classes))):
+                    for selected in (classes, tuple(reversed(classes)),
+                                     recorder.TASK_SCROLL_NATIVE_LAYOUT_CLASSES,
+                                     tuple(reversed(recorder.TASK_SCROLL_NATIVE_LAYOUT_CLASSES))):
                         for code in (0, 9):
                             env = dict(GITHUB_SHA="b" * 40, EXPECTED_SHA="a" * 40,
                                        GITHUB_RUN_ID="42", GITHUB_RUN_ATTEMPT="1",

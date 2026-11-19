@@ -171,6 +171,9 @@ TASK_SCROLL_PLATFORM_CLASSES = (
     'app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
 )
+TASK_SCROLL_NATIVE_LAYOUT_CLASSES = TASK_SCROLL_PLATFORM_CLASSES + (
+    'app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest',
+)
 TASK_SCROLL_COMPLEMENT_CLASSES = (
     'app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
@@ -1221,7 +1224,8 @@ def command_for(python, env):
         return [python, '-B', '-m', 'unittest', *PAGE_BACK_MODULES, '-v'], 'page-back-targeted'
     if (env.get('SMOKE_MODE') == 'smoke'
             and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) in (
-                sorted(TASK_SCROLL_PLATFORM_CLASSES), sorted(TASK_SCROLL_COMPLEMENT_CLASSES),
+                sorted(TASK_SCROLL_PLATFORM_CLASSES), sorted(TASK_SCROLL_NATIVE_LAYOUT_CLASSES),
+                sorted(TASK_SCROLL_COMPLEMENT_CLASSES),
                 ['app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest'])):
         return [python, '-B', '-m', 'unittest', *TASK_SCROLL_MODULES, '-v'], 'task-scroll-targeted'
     if (env.get("SMOKE_MODE") == "smoke"

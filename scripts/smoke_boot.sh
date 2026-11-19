@@ -136,6 +136,9 @@ task_scroll_target = {
     'app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest',
     'app.daiyu.android.ui.screens.chat.conversation.ChatMessageListMeasurePhaseTest',
 }
+task_scroll_native_layout_target = task_scroll_target | {
+    'app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest',
+}
 task_scroll_complement = {
     'app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
@@ -143,7 +146,7 @@ task_scroll_complement = {
 }
 task_scroll_complement_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(task_scroll_complement)
 task_scroll_only = mode == 'smoke' and sorted(raw_filter.split(',')) in (
-    sorted(task_scroll_target), sorted(task_scroll_complement))
+    sorted(task_scroll_target), sorted(task_scroll_native_layout_target), sorted(task_scroll_complement))
 task_scroll_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
                        for name in raw_filter.split(',')}
 page_performance_target = task_scroll_target | {

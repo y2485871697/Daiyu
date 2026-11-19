@@ -306,3 +306,88 @@ class StreamingOcclusionScopeTests(unittest.TestCase):
                     self.assertEqual(str(root / 'tests'), call.call_args.kwargs['env']['PYTHONPATH'].split(os.pathsep)[0])
             finally:
                 os.chdir(old)
+
+class TaskScrollNativeLayoutScopeTests(unittest.TestCase):
+    CLASSES = CLASSES + ('app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest',)
+
+    def test_exact_native_layout_scope_retains_the_existing_contract_guards(self):
+        self.assertEqual(self.CLASSES, recorder.TASK_SCROLL_NATIVE_LAYOUT_CLASSES)
+        self.assertEqual(CLASSES, recorder.TASK_SCROLL_PLATFORM_CLASSES)
+        self.assertEqual(COMPLEMENT, recorder.TASK_SCROLL_COMPLEMENT_CLASSES)
+        for classes in (self.CLASSES, tuple(reversed(self.CLASSES))):
+            command, scope = recorder.command_for('python3', dict(
+                SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=','.join(classes)))
+            self.assertEqual('task-scroll-targeted', scope)
+            self.assertEqual(['python3', '-B', '-m', 'unittest', *recorder.TASK_SCROLL_MODULES, '-v'], command)
+            self.assertNotIn('discover', command)
+
+    def test_unapproved_native_layout_sets_and_other_modes_keep_full_selection(self):
+        raw = ','.join(self.CLASSES)
+        invalid = (','.join(self.CLASSES[1:]), ','.join(self.CLASSES[:-2] + self.CLASSES[-1:]),
+                   raw.replace('MessageMarkdownTest', 'MessageMarkdwonTest'),
+                   raw + ',app.daiyu.android.UnknownTest', raw + ',' + self.CLASSES[-1],
+                   raw + ',', ',' + raw, ' ' + raw, raw + ' ')
+        for classes in invalid:
+            with self.subTest(classes=classes):
+                self.assertEqual('full', recorder.command_for('python3', dict(
+                    SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=classes))[1])
+        for mode in ('', 'compile', 'candidate', 'daily', 'release'):
+            self.assertEqual('full', recorder.command_for('python3', dict(
+                SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
+
+    def fixture(self, root):
+        helper = TaskScrollSmokeScopeTests().fixture(root)
+        name = self.CLASSES[-1]
+        path = root / 'app/src/androidTest/kotlin' / (name.replace('.', '/') + '.kt')
+        path.parent.mkdir(parents=True, exist_ok=True)
+        package, _, short = name.rpartition('.')
+        path.write_text(chr(10).join(('package ' + package, 'class ' + short,
+                                     ' : TestCase() {', ' fun testOne() {}', '}', '')))
+        return helper
+
+    def test_native_layout_inventory_covers_exactly_nine_classes_once_across_four_shards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            selected = []
+            expected = 0
+            for shard in range(4):
+                result = helper.select(root, shard, classes=','.join(reversed(self.CLASSES)))
+                self.assertEqual(0, result.returncode, result.stderr)
+                selection = json.loads((root / 'smoke/selection.json').read_text())
+                inventory = json.loads((root / 'smoke/instrumentation-shards.json').read_text())
+                self.assertEqual('targeted', inventory['discovery_scope'])
+                self.assertEqual(set(self.CLASSES), set(inventory['all_classes']))
+                selected.extend(selection['selected_classes'])
+                expected += selection['expected_tests']
+            self.assertCountEqual(self.CLASSES, selected)
+            self.assertEqual(len(self.CLASSES), len(set(selected)))
+            self.assertEqual(9, expected)
+
+    def test_missing_and_ambiguous_native_layout_source_stay_fail_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            path = root / 'app/src/androidTest/kotlin' / (self.CLASSES[-1].replace('.', '/') + '.kt')
+            with path.open('a') as output:
+                output.write('class OtherTest : TestCase() {}' + chr(10))
+            result = helper.select(root, classes=','.join(self.CLASSES))
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn('Ambiguous instrumentation test declaration', result.stderr)
+            path.unlink()
+            result = helper.select(root, classes=','.join(self.CLASSES))
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn('Unknown instrumentation test class', result.stderr)
+
+    def test_unapproved_native_layout_scopes_cannot_bypass_full_inventory_validation(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            raw = ','.join(self.CLASSES)
+            for classes in (','.join(self.CLASSES[1:]),
+                            raw.replace('MessageMarkdownTest', 'MessageMarkdwonTest'),
+                            raw + ',app.daiyu.android.UnknownTest',
+                            raw + ',' + self.CLASSES[-1]):
+                result = helper.select(root, classes=classes)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn('Ambiguous instrumentation test declaration', result.stderr)

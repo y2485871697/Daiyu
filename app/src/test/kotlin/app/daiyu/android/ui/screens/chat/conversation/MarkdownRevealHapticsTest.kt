@@ -36,7 +36,7 @@ class MarkdownRevealHapticsTest {
         assertTrue(f.requests.isEmpty())
         assertEquals(0, f.advances)
         f.frame(target, 1016); assertEquals(1, f.requests.size)
-        f.frame(target, 1047); assertEquals(1, f.requests.size)
+        f.frame(target, 1032); assertEquals(1, f.requests.size)
         f.frame(target, 1048); assertEquals(2, f.requests.size)
         assertEquals(3, f.advances)
         assertEquals(2, f.requests.size)

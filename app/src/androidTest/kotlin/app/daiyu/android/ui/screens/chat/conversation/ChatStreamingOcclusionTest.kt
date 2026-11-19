@@ -1254,7 +1254,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             }
             for (index in 0 until 640) {
                 if (index == resumeAtFrame) {
-                    assertFalse("Resume must interrupt active terminal typing", ready)
+                    assertFalse("Resume must interrupt active terminal typing", ready.get())
                     assertTrue("Resume must preserve a partial answer", expectedFull != displayed(textLayouts()))
                     ui.runOnUiThread {
                         registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED

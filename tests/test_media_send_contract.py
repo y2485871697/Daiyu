@@ -59,13 +59,22 @@ class MediaSendContract(unittest.TestCase):
         self.assertIn("loader.cached(image.expectedOwner, image.reference, 1024)", ui)
         self.assertIn("loadMessageImage(image, loader, 1024)", ui)
 
-    def test_retained_media_projection_does_not_cross_dataset_or_commit_revision(self):
+    def test_retained_media_display_is_scoped_and_refresh_requires_exact_key_and_lease(self):
         source = (SRC / "MainActivity.kt").read_text()
         prepare = source.split("private fun prepareMessageMedia()", 1)[1].split("private var toolPresentations", 1)[0]
-        self.assertIn("messageMediaSnapshot?.conversation != key.conversation", prepare)
-        self.assertIn("messageMediaKey?.data != key.data", prepare)
-        self.assertIn("messageMediaKey?.mediaCommit != key.mediaCommit", prepare)
-        self.assertIn("currentMessageMediaKey() != key", prepare)
+        self.assertIn(
+            "MessageMediaKey(selected?.id, controller.dataRevision, "
+            "editorGeneration, messageMediaCommitRevision)", source)
+        self.assertIn(
+            "if (messageMediaSnapshot?.conversation != key.conversation || "
+            "messageMediaKey?.data != key.data)\n"
+            "            messageMediaSnapshot = null", prepare)
+        admission = prepare.split("val preparedLoader =", 1)[1].split("messageMediaKey = key", 1)[0]
+        for guard in ("currentMessageMediaKey() != key", "messageMediaRequested != key",
+                      "imageHost.historyLoader !== loader", "snapshot != null && preparedLoader !== loader"):
+            self.assertIn(guard, admission)
+        self.assertIn("return@launch", admission)
+        self.assertIn("if (snapshot != null) messageMediaSnapshot = snapshot", prepare)
 
     def test_cloud_checks_include_video_host_and_exact_media_device_scope(self):
         workflow = (ROOT / ".github/workflows/media-inline-checks.yml").read_text()

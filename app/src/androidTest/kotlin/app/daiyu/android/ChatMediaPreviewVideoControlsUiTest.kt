@@ -6,6 +6,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.pager.HorizontalPager
@@ -380,7 +381,8 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = accent)) {
-                    Box(Modifier.widthIn(max = 360.dp).fillMaxWidth().height(64.dp).background(Color.Black)) {
+                    Box(Modifier.widthIn(max = 360.dp).fillMaxWidth()
+                        .statusBarsPadding().height(64.dp).background(Color.Black)) {
                         app.daiyu.android.ui.media.ChatMediaPreviewVideoProgress(
                             value = fraction, playing = true, seeking = false, enabled = true,
                             onValueChange = {}, onValueChangeFinished = {}, modifier = Modifier.fillMaxWidth())

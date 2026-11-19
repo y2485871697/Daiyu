@@ -70,6 +70,16 @@ class ReplyPresentationSmokeScopeTest(unittest.TestCase):
                 with self.subTest(python=python, env=env):
                     self.assertEqual(full, recorder.command_for(python, env))
 
+    def test_refresh_exact_pair_has_an_isolated_concurrency_group(self):
+        workflow = (ROOT / ".github/workflows/test-refresh-regression.yml").read_text()
+        group, = (line for line in workflow.splitlines() if line.startswith("  group: "))
+        suffix = ("${{ inputs.smoke_classes == '" + ",".join(CLASSES) +
+                  "' && '-reply-presentation' || '' }}")
+        self.assertEqual(1, group.count(suffix))
+        self.assertTrue(group.endswith(suffix))
+        self.assertTrue(group.startswith("  group: daiyu-test-refresh-${{ github.ref }}"))
+        self.assertIn("\n  cancel-in-progress: false\n", workflow)
+
     def test_failure_receipt_keeps_exit_identity_and_raw_digest(self):
         raw = b"reply presentation fixture FAIL\r\nraw stderr\x00\n"
         expected = ["python3", "-B", "-m", "unittest", *MODULES, "-v"]

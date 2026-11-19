@@ -180,7 +180,7 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         self.assertIn('if (collapseUp) Alignment.Top else alignment', motion)
         self.assertIn('!value && expanded && !manualChange && collapseUp', motion)
-        self.assertIn('anchorAtTop = collapseUp && !opening', motion)
+        self.assertIn('anchorAtTop = !upwards || collapseUp && !opening', motion)
         self.assertIn('val visibility = remember(ownerKey) { MutableTransitionState(expanded) }', source)
         self.assertNotIn('remember(ownerKey, stopped) { MutableTransitionState', source)
 
@@ -219,7 +219,8 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
     def test_device_regression_covers_each_supplemental_path_and_real_nested_clipping(self):
         source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowDisclosureDirectionTest.kt').read_text()
         self.assertIn('listOf("question", "category", "child-live", "child-receipt")', source)
-        for name in ('testAllSupplementalDisclosuresUseActiveStreamingFollowPriority',
+        for name in ('testAllSupplementalDisclosuresFollowTheUpperHalfWhileStreaming',
+                     'testAllSupplementalDisclosuresFollowingInLowerHalfExpandUp',
                      'testAllSupplementalDisclosuresAtIdleBottomUseTheUpperHalf',
                      'testAllSupplementalDisclosuresDetachedInUpperHalfExpandDown',
                      'testAllSupplementalDisclosuresDetachedInLowerHalfExpandUp',

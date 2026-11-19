@@ -13,6 +13,7 @@ import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -104,6 +105,70 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
         node("chat-media-video-controls").assertDoesNotExist()
         assertEquals(2, surfaceTaps)
         assertTrue(controls.playRequested)
+    }
+
+    fun testAsymmetricGestureInsetsKeepTheWholeControlBarCentered() {
+        controls = ChatMediaPreviewVideoControlsState(visible = true).prepared(10_000)
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                Box(Modifier.fillMaxWidth().height(240.dp).background(Color.Black)) {
+                    ChatMediaPreviewVideoControls(controls, active = true, ready = true,
+                        onToggleVisibility = {}, onTogglePlayback = {}, onScrub = {}, onSeekFinished = {},
+                        modifier = Modifier.fillMaxSize(), landscape = true,
+                        insets = androidx.compose.foundation.layout.WindowInsets(bottom = 32.dp))
+                }
+            }
+        } }
+        val surface = node("chat-media-video-surface").fetchSemanticsNode().boundsInRoot
+        val bar = node("chat-media-video-controls").fetchSemanticsNode().boundsInRoot
+        assertEquals("rotation must not move the bar away from the viewport center", surface.center.x, bar.center.x, 1.5f)
+        val safeInset = with(ui.density) { 52.dp.toPx() }
+        assertEquals("left must reserve the rotated gesture inset", safeInset, bar.left - surface.left, 1.5f)
+        assertEquals("right must reserve the rotated gesture inset", safeInset, surface.right - bar.right, 1.5f)
+        for (tag in listOf("chat-media-video-play-pause", "chat-media-video-time", "chat-media-video-orientation")) {
+            assertEquals("$tag must share the bar centerline", bar.center.y,
+                node(tag).fetchSemanticsNode().boundsInRoot.center.y, 1.5f)
+        }
+    }
+
+    fun testHostKeepsImagePreviewAcrossBackgroundButRevokesOnRouteExitAndNewOwner() {
+        val image = android.graphics.Bitmap.createBitmap(12, 12, android.graphics.Bitmap.Config.ARGB_8888)
+            .apply { eraseColor(android.graphics.Color.MAGENTA) }.asImageBitmap()
+        var pageActive by mutableStateOf(true)
+        var routeCurrent by mutableStateOf(true)
+        var owner by mutableStateOf(Any())
+        var open: (String) -> Unit = {}
+        var loads = 0
+        val item = app.daiyu.android.ui.media.ChatMediaPreviewItem("retained-image", "image/png", "retained.png",
+            { loads++; image }, openOriginal = { kotlinx.coroutines.awaitCancellation() })
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                androidx.compose.runtime.CompositionLocalProvider(
+                    app.daiyu.android.ui.navigation.LocalPageContentActive provides pageActive,
+                    app.daiyu.android.ui.navigation.LocalPageInputOwned provides routeCurrent,
+                ) {
+                    app.daiyu.android.ui.media.ChatMediaPreviewHost(listOf(item), previewOwner = owner) {
+                        open = app.daiyu.android.ui.media.LocalOpenChatMediaPreview.current
+                    }
+                }
+            }
+        } }
+        mainThread { open(item.key) }
+        ui.waitUntil(5_000) { loads == 1 }
+        node("chat-media-preview-viewport").assertIsDisplayed()
+        mainThread { pageActive = false }
+        node("chat-media-preview-viewport").assertIsDisplayed()
+        mainThread { pageActive = true }
+        node("chat-media-preview-viewport").assertIsDisplayed()
+        assertEquals("background must not reconstruct the image page", 1, loads)
+        mainThread { routeCurrent = false }
+        node("chat-media-preview-viewport").assertDoesNotExist()
+        mainThread { routeCurrent = true }
+        node("chat-media-preview-viewport").assertDoesNotExist()
+        mainThread { open(item.key) }
+        node("chat-media-preview-viewport").assertIsDisplayed()
+        mainThread { owner = Any() }
+        node("chat-media-preview-viewport").assertDoesNotExist()
     }
 
     fun testPlayPauseButtonNeverTogglesSurfaceVisibility() {
@@ -202,8 +267,15 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = accent)) {
-                        if (opened) app.daiyu.android.ui.media.ChatMediaPreviewDialog(
-                            app.daiyu.android.ui.media.ChatMediaPreviewSelection(listOf(item), 0)) { opened = false }
+                        val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
+                        val phase by lifecycle.currentStateFlow.collectAsState()
+                        app.daiyu.android.ui.navigation.PageRetainedContent(visible = true,
+                            active = phase.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED), inputOwned = true) {
+                            if (opened) app.daiyu.android.ui.media.ChatMediaPreviewHost(listOf(item), previewOwner = item) {
+                                val openPreview = app.daiyu.android.ui.media.LocalOpenChatMediaPreview.current
+                                androidx.compose.runtime.LaunchedEffect(item) { openPreview(item.key) }
+                            }
+                        }
                     }
                 }
             } }
@@ -232,8 +304,37 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             node("chat-media-video-progress").performTouchInput {
                 swipe(Offset(width * 0.2f, centerY), Offset(width * 0.7f, centerY), 200)
             }
+            ui.waitUntil(5_000) {
+                ui.onAllNodes(hasTestTag("chat-media-video-progress") and isEnabled())
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+            }
+            val pausedNativePosition = previewVideoView().let { renderer -> ui.runOnIdle { renderer.currentPosition } }
+            assertTrue("native seek must reach the requested region", pausedNativePosition in 10_000..17_000)
             val pausedTime = node("chat-media-video-time").fetchSemanticsNode().config[
                 androidx.compose.ui.semantics.SemanticsProperties.Text].toString()
+            instrumentation.runOnMainSync {
+                instrumentation.callActivityOnPause(activity)
+                instrumentation.callActivityOnStop(activity)
+            }
+            awaitVisualIdle()
+            instrumentation.runOnMainSync {
+                instrumentation.callActivityOnRestart(activity)
+                instrumentation.callActivityOnStart(activity)
+                instrumentation.callActivityOnResume(activity)
+            }
+            awaitVisualIdle()
+            node("chat-media-preview-viewport").assertIsDisplayed()
+            node("chat-media-video-surface").performClick()
+            ui.waitUntil(20_000) {
+                ui.onAllNodes(hasTestTag("chat-media-video-progress") and isEnabled())
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+            }
+            ui.onNodeWithContentDescription("播放").assertIsDisplayed()
+            assertTrue("native paused seek must survive background",
+                kotlin.math.abs(pausedNativePosition - previewVideoView().let { renderer -> ui.runOnIdle { renderer.currentPosition } }) <= 500)
+            assertEquals("background must preserve the paused seek position", pausedTime,
+                node("chat-media-video-time").fetchSemanticsNode().config[
+                    androidx.compose.ui.semantics.SemanticsProperties.Text].toString())
             node("chat-media-video-orientation").performClick()
             ui.onNodeWithContentDescription("切换竖屏").assertIsDisplayed()
             ui.onNodeWithContentDescription("播放").assertIsDisplayed()
@@ -269,16 +370,16 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
         try {
             ui.mainClock.autoAdvance = false
             assertProgressHandle(0f, accent)
-            mainThread { fraction = 0.86f }
+            instrumentation.runOnMainSync { fraction = 0.86f }
             ui.mainClock.advanceTimeBy(240)
             assertProgressHandle(0.86f, accent)
-            mainThread { fraction = 0.2f }
+            instrumentation.runOnMainSync { fraction = 0.2f }
             ui.mainClock.advanceTimeByFrame()
             assertProgressHandle(0.2f, accent)
-            mainThread { fraction = 1f }
+            instrumentation.runOnMainSync { fraction = 1f }
             ui.mainClock.advanceTimeByFrame()
             assertProgressHandle(1f, accent)
-            mainThread { fraction = 0f }
+            instrumentation.runOnMainSync { fraction = 0f }
             ui.mainClock.advanceTimeByFrame()
             assertProgressHandle(0f, accent)
         } finally { ui.mainClock.autoAdvance = auto }
@@ -356,17 +457,31 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
                         kotlin.math.abs(center.red - center.green) < .08f &&
                         kotlin.math.abs(center.green - center.blue) < .08f)
             } finally { rendered.asAndroidBitmap().recycle() }
-            node("chat-media-video-play-pause").performClick()
-            ui.waitUntil(5_000) {
-                ui.onAllNodes(hasTestTag("chat-media-video-progress"))
-                    .fetchSemanticsNodes(atLeastOneRootRequired = false).singleOrNull()?.config
-                    ?.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo)?.current?.let { it < 1f } == true
-            }
-            ui.waitUntil(20_000) {
-                ui.onAllNodes(hasTestTag("chat-media-video-progress") and isEnabled())
-                    .fetchSemanticsNodes(atLeastOneRootRequired = false).singleOrNull()?.config
-                    ?.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo)?.current == 1f
-            }
+            val renderer = previewVideoView()
+            val replay = node("chat-media-video-play-pause")
+            val auto = ui.mainClock.autoAdvance
+            try {
+                ui.mainClock.autoAdvance = false
+                replay.performClick()
+                ui.mainClock.advanceTimeByFrame()
+                val restarted = node("chat-media-video-progress").fetchSemanticsNode().config[
+                    androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo].current
+                assertTrue("replay must leave the completed endpoint immediately: $restarted", restarted < 1f)
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    var position = Int.MAX_VALUE
+                    instrumentation.runOnMainSync { position = renderer.currentPosition }
+                    val ready = ui.onAllNodes(hasTestTag("chat-media-video-progress") and isEnabled())
+                        .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+                    ready && position in 0..500
+                }
+                ui.waitUntil(20_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.onAllNodes(hasTestTag("chat-media-video-progress") and isEnabled())
+                        .fetchSemanticsNodes(atLeastOneRootRequired = false).singleOrNull()?.config
+                        ?.getOrNull(androidx.compose.ui.semantics.SemanticsProperties.ProgressBarRangeInfo)?.current == 1f
+                }
+            } finally { ui.mainClock.autoAdvance = auto }
             ui.onNodeWithContentDescription("播放").assertIsDisplayed()
             node("chat-media-video-cover").assertDoesNotExist()
         } finally { mainThread { opened = false }; ui.waitForIdle(); poster.recycle(); file.delete() }
@@ -396,12 +511,26 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
         }
     }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    private fun previewVideoView(): app.daiyu.android.ui.media.ChatMediaPreviewVideoView {
+        val root = (node("chat-media-video-renderer").fetchSemanticsNode().root as
+            androidx.compose.ui.platform.ViewRootForTest).view.rootView
+        fun find(view: android.view.View): app.daiyu.android.ui.media.ChatMediaPreviewVideoView? {
+            if (view is app.daiyu.android.ui.media.ChatMediaPreviewVideoView) return view
+            if (view is android.view.ViewGroup) for (index in 0 until view.childCount) {
+                find(view.getChildAt(index))?.let { return it }
+            }
+            return null
+        }
+        return checkNotNull(find(root))
+    }
+
     private fun assertProgressHandle(fraction: Float, accent: Color) {
         val track = ui.onNodeWithTag("chat-media-video-progress-track", useUnmergedTree = true).assertExists()
         val bounds = track.fetchSemanticsNode().boundsInRoot
         val image = try {
             assertTrue("progress track must have positive bounds: $bounds", bounds.width > 0f && bounds.height > 0f)
-            captureScreenNode(track, advanceAnimationClock = false)
+            track.captureToImage()
         } catch (failure: AssertionError) {
             val directory = java.io.File(activity.getExternalFilesDir(null),
                 "visual-diagnostics/video-progress-track").apply { mkdirs() }

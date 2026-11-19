@@ -164,9 +164,12 @@ internal class ImageChatHost private constructor(controller: ChatController) {
                 catch (_: Exception) { /* The row displays the explicit unavailable state. */ }
             }
         }
-        snapshot.displayVideos().filter { it.expectedOwner.messageId == messageId }.forEach { video ->
+        val videos = snapshot.displayVideos()
+        val visibleVideos = videos.filter { it.expectedOwner.messageId == messageId } +
+            if (messageId == null) videos.takeLast(4) else emptyList()
+        visibleVideos.distinct().forEach { video ->
             if (loader.cachedVideo(video.expectedOwner, video.reference, 1024) == null) {
-                try { withContext(Dispatchers.IO) { loader.loadVideo(video.expectedOwner, video.reference, 256) } }
+                try { withContext(Dispatchers.IO) { loader.loadVideo(video.expectedOwner, video.reference, 1024) } }
                 catch (cancelled: CancellationException) { throw cancelled }
                 catch (_: Exception) { /* A failed cover must not look like a ready empty video. */ }
             }
@@ -477,10 +480,11 @@ internal class PreviewLease(private val controller: ChatController, val conversa
             value: androidx.compose.ui.graphics.ImageBitmap) = value.width * value.height * 4
     }
 
+    private data class VideoThumbnail(val bitmap: androidx.compose.ui.graphics.ImageBitmap, val requestedEdge: Int)
     private val videoThumbnails = object : android.util.LruCache<app.daiyu.android.media.video.MessageVideoReference,
-        androidx.compose.ui.graphics.ImageBitmap>(8 * 1024 * 1024) {
+        VideoThumbnail>(8 * 1024 * 1024) {
         override fun sizeOf(key: app.daiyu.android.media.video.MessageVideoReference,
-            value: androidx.compose.ui.graphics.ImageBitmap) = value.width * value.height * 4
+            value: VideoThumbnail) = value.bitmap.width * value.bitmap.height * 4
     }
 
     @Synchronized fun acceptedThumbnails(receipt: ImageSendResult.Accepted):
@@ -591,7 +595,7 @@ internal class PreviewLease(private val controller: ChatController, val conversa
             ref: app.daiyu.android.media.video.MessageVideoReference, maxEdge: Int): androidx.compose.ui.graphics.ImageBitmap? =
             synchronized(this@PreviewLease) {
                 if (!open.get() || maxEdge <= 0 || conversation == null || owner.conversationId != conversation || owner != ref.owner)
-                    null else videoThumbnails.get(ref)?.takeIf { it.width <= maxEdge && it.height <= maxEdge }
+                    null else videoThumbnails.get(ref)?.bitmap?.takeIf { it.width <= maxEdge && it.height <= maxEdge }
             }
 
         override suspend fun loadVideo(owner: app.daiyu.android.media.video.MessageVideoOwner,
@@ -599,11 +603,22 @@ internal class PreviewLease(private val controller: ChatController, val conversa
             if (conversation == null || owner.conversationId != conversation || owner != ref.owner) return null
             val context = currentCoroutineContext()
             return try {
-                decode { controller.messageVideoThumbnail(ConversationId(conversation),
+                val retained = synchronized(this@PreviewLease) {
+                    videoThumbnails.get(ref)?.takeIf { it.requestedEdge >= maxEdge }
+                }
+                if (retained != null) {
+                    controller.validateMessageVideo(ConversationId(conversation),
+                        app.daiyu.android.ui.screens.chat.conversation.MessageVideoUi(owner, ref)) {
+                        !open.get() || !context.isActive
+                    }
+                    context.ensureActive()
+                    if (!open.get()) throw CancellationException("Media page left")
+                    retained.bitmap
+                } else decode { controller.messageVideoThumbnail(ConversationId(conversation),
                     app.daiyu.android.ui.screens.chat.conversation.MessageVideoUi(owner, ref), maxEdge) {
                     !open.get() || !context.isActive
                 } }.also { bitmap -> synchronized(this@PreviewLease) {
-                    if (open.get()) videoThumbnails.put(ref, bitmap)
+                    if (open.get()) videoThumbnails.put(ref, VideoThumbnail(bitmap, maxEdge))
                 } }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) {

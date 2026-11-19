@@ -63,19 +63,22 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 @Composable
 internal fun ChatMediaPreviewHost(
     gallery: List<ChatMediaPreviewItem>,
+    previewOwner: Any? = Unit,
     content: @Composable () -> Unit,
 ) {
     val pageActive = app.daiyu.android.ui.navigation.LocalPageContentActive.current
-    var selection by remember { mutableStateOf<ChatMediaPreviewSelection?>(null) }
+    val routeCurrent = app.daiyu.android.ui.navigation.LocalPageInputOwned.current
+    var selection by remember(previewOwner) { mutableStateOf<ChatMediaPreviewSelection?>(null) }
     val currentGallery by rememberUpdatedState(gallery)
     CompositionLocalProvider(LocalOpenChatMediaPreview provides { requestedKey ->
-        if (pageActive) selection = chatMediaPreviewSelection(currentGallery, requestedKey)
+        if (routeCurrent && pageActive) selection = chatMediaPreviewSelection(currentGallery, requestedKey)
     }) {
         // Deliberately no layout wrapper: the caller retains its parent layout scope.
         content()
     }
-    LaunchedEffect(pageActive) { if (!pageActive) selection = null }
-    selection?.takeIf { pageActive }?.let { opened ->
+    // Input ownership follows the route; page activity also drops during an ordinary background pause.
+    LaunchedEffect(routeCurrent) { if (!routeCurrent) selection = null }
+    selection?.takeIf { routeCurrent }?.let { opened ->
         key(opened) {
             ChatMediaPreviewDialog(opened) { selection = null }
         }

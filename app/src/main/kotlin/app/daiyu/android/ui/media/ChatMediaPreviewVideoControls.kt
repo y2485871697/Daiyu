@@ -99,15 +99,17 @@ internal fun ChatMediaPreviewVideoControls(
     modifier: Modifier = Modifier,
     landscape: Boolean = false,
     onToggleOrientation: () -> Unit = {},
+    insets: WindowInsets = WindowInsets.safeDrawing,
 ) {
     val controlsEnabled = active && state.visible
     val playbackEnabled = controlsEnabled && ready && !state.seekPending
     val density = LocalDensity.current
     val direction = LocalLayoutDirection.current
-    val physical = WindowInsets.safeDrawing
+    val physical = insets
     val safe = chatMediaPreviewVideoInsets(physical.getLeft(density, direction), physical.getTop(density),
         physical.getRight(density, direction), physical.getBottom(density), landscape)
-    val controlInsets = WindowInsets(left = safe[0], top = safe[1], right = safe[2], bottom = safe[3])
+    val horizontalInset = maxOf(safe[0], safe[2])
+    val controlInsets = WindowInsets(left = horizontalInset, top = safe[1], right = horizontalInset, bottom = safe[3])
     Box(modifier) {
         // This sibling is below the controls: button and slider gestures cannot toggle the surface.
         Box(

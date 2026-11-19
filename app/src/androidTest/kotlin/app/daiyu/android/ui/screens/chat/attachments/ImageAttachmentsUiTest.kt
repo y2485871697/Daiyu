@@ -48,6 +48,8 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
 
     override fun setUp() {
         super.setUp()
+        mainThread { activity.currentFocus?.clearFocus() }
+        dismissIme()
         selection = null
     }
 
@@ -325,14 +327,17 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         awaitVisualIdle()
         fun pixels(verifyClock: Boolean = true): Int {
             val before = ui.mainClock.currentTime
-            val image = captureScreenNode(node("chat-composer-surface"), advanceAnimationClock = false).toPixelMap()
-            if (verifyClock) assertEquals(before, ui.mainClock.currentTime)
-            var count = 0
-            for (y in 0 until image.height) for (x in 0 until image.width) {
-                val c = image[x, y]
-                if (c.red > c.green + .15f && c.blue > c.green + .15f) count++
-            }
-            return count
+            val captured = captureScreenNode(node("chat-composer-surface"), advanceAnimationClock = false)
+            try {
+                val image = captured.toPixelMap()
+                if (verifyClock) assertEquals(before, ui.mainClock.currentTime)
+                var count = 0
+                for (y in 0 until image.height) for (x in 0 until image.width) {
+                    val c = image[x, y]
+                    if (c.red > c.green + .15f && c.blue > c.green + .15f) count++
+                }
+                return count
+            } finally { captured.asAndroidBitmap().recycle() }
         }
         var lastPixels = -1
         try {
@@ -362,7 +367,7 @@ class ImageAttachmentsUiTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             assertTrue(pixels() > 0)
-            mainThread {
+            instrumentation.runOnMainSync {
                 val submission = checkNotNull(holder.beginSubmission())
                 assertTrue(holder.finishSubmission(submission, ImageAttachmentAcceptance.Accepted))
             }

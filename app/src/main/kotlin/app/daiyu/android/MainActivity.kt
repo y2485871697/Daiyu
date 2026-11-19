@@ -2603,7 +2603,7 @@ class MainActivity : ComponentActivity() {
                             BoxWithConstraints(Modifier.fillMaxSize()) {
                                 val extrasMaxHeight = minOf(200.dp, maxHeight * 0.35f)
                                 Column(Modifier.fillMaxSize()) {
-                                    app.daiyu.android.ui.media.ChatMediaPreviewHost(gallery = mediaGallery) {
+                                    app.daiyu.android.ui.media.ChatMediaPreviewHost(gallery = mediaGallery, previewOwner = mediaLease) {
                                     DaiyuChatScreen(pageState, pageActions, modifier = Modifier.weight(1f), turnExtras = { turn ->
                                         if (routeActive && pageCurrent && presented && turn.segmentIndex == 0) {
                                             QuestionCleanup(turn.id)

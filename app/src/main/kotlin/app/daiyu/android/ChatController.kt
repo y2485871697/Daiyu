@@ -1649,11 +1649,22 @@ class ChatController internal constructor(private val application:Application,
         ControllerMessageMedia(database, videoAttachments.store).openOriginal(conversation, binding, cancelled)
     }
 
+    internal fun validateMessageVideo(conversation: ConversationId,
+        video: app.daiyu.android.ui.screens.chat.conversation.MessageVideoUi, cancelled: () -> Boolean) = imageRead {
+        ControllerMessageMedia(database, videoAttachments.store).openOriginal(conversation, video, cancelled).use { }
+    }
+
+    private val messageVideoCovers by lazy {
+        app.daiyu.android.media.video.VideoThumbnailCache(File(application.cacheDir, "message-video-covers-v1"))
+    }
+
     internal fun messageVideoThumbnail(conversation: ConversationId,
         video: app.daiyu.android.ui.screens.chat.conversation.MessageVideoUi, edge: Int,
         cancelled: () -> Boolean): android.graphics.Bitmap = imageRead {
         ControllerMessageMedia(database, videoAttachments.store).openOriginal(conversation, video, cancelled).use {
-            app.daiyu.android.media.video.decodeVideoThumbnail(it, video.reference, edge, cancelled)
+            messageVideoCovers.load(video.reference, edge, cancelled) {
+                app.daiyu.android.media.video.decodeVideoThumbnail(it, video.reference, edge, cancelled)
+            }
         }
     }
 

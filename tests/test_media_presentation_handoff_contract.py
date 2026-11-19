@@ -64,7 +64,8 @@ class MediaPresentationHandoffContract(unittest.TestCase):
         entrance = (SRC / 'ui/screens/chat/conversation/UserMessageEntrance.kt').read_text()
         self.assertIn('request.mediaReady && (!awaitPlacement || motion.positioned)', entrance)
         host = (SRC / 'ImageChatHost.kt').read_text()
-        self.assertIn('snapshot.displayVideos().filter', host)
+        self.assertIn('videos.filter { it.expectedOwner.messageId == messageId }', host)
+        self.assertIn('if (messageId == null) videos.takeLast(4)', host)
         self.assertIn('lease === target && target.isOpen()', host)
 
 
@@ -89,6 +90,32 @@ class MediaSubmissionHandoffContract(unittest.TestCase):
         video = main.split('private fun settleRetainedVideoReceipt()', 1)[1].split('// A mount', 1)[0]
         self.assertLess(video.index('controlOwner = controller.active?'), video.index('publishChat(); loadAcceptedHistory'))
 
+
+    def test_background_preview_uses_route_ownership_and_video_cover_keeps_validation(self):
+        host = (ROOT / "app/src/main/kotlin/app/daiyu/android/ui/media/ChatMediaPreviewHost.kt").read_text()
+        self.assertIn("LocalPageInputOwned.current", host)
+        self.assertIn("remember(previewOwner)", host)
+        self.assertNotIn("LaunchedEffect(pageActive) { if (!pageActive)", host)
+        self.assertNotIn("selection?.takeIf { pageActive }", host)
+        controller = (ROOT / "app/src/main/kotlin/app/daiyu/android/ChatController.kt").read_text()
+        section = controller[controller.index("internal fun messageVideoThumbnail"):controller.index("private fun <T> imageRead")]
+        self.assertLess(section.index(".openOriginal("), section.index("messageVideoCovers.load("))
+        self.assertIn("validateMessageVideo", controller)
+        cache = (ROOT / "app/src/main/kotlin/app/daiyu/android/media/video/VideoThumbnailCache.kt").read_text()
+        self.assertIn("32L * 1024 * 1024", cache)
+        self.assertIn("videoDigest(it) != digest", cache)
+
+    def test_video_prefetch_matches_list_resolution_and_keeps_window_intersections(self):
+        host = (SRC / 'ImageChatHost.kt').read_text()
+        self.assertIn('loader.loadVideo(video.expectedOwner, video.reference, 1024)', host)
+        conversation = SRC / 'ui/screens/chat/conversation'
+        listing = (conversation / 'ChatMessageList.kt').read_text()
+        self.assertIn('loadMessageVideo(video, loader, 1024)', listing)
+        self.assertIn('prefetch.update(videos)', listing)
+        scheduler = (conversation / 'MessageVideoThumbnailPrefetch.kt').read_text()
+        self.assertIn('videos.distinct().take(4).toSet()', scheduler)
+        self.assertIn('jobs.keys.filter { it !in wanted }', scheduler)
+        self.assertIn('jobs.getOrPut(video)', scheduler)
 
 if __name__ == '__main__':
     unittest.main()

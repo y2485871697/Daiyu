@@ -92,6 +92,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.domain.BottomFollowMotion
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
@@ -1003,6 +1004,43 @@ internal fun ChatMessageList(
             layout.visibleItemsInfo.take(app.daiyu.android.diagnostics.ChatRecoveryRecorder.MAX_ITEMS).map {
                 app.daiyu.android.diagnostics.ChatRecoveryGeometry.Item(it.index, it.offset, it.size)
             })
+    }
+    LaunchedEffect(listState, imageLoader, pageActive, scrollResumed) {
+        val loader = imageLoader ?: return@LaunchedEffect
+        val prefetch = MessageVideoThumbnailPrefetch(this) { video ->
+            if (loader.cachedVideo(video.expectedOwner, video.reference, 1024) == null) {
+                withContext(Dispatchers.IO) { loadMessageVideo(video, loader, 1024) }
+            }
+        }
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            val current = currentTurns
+            val visibleBottom = layout.viewportEndOffset - currentOcclusionPx
+            val visible = if (!pageActive || !scrollResumed || currentRetainingRows) emptyList() else
+                layout.visibleItemsInfo.filter { item ->
+                    val turn = current.getOrNull(item.index)
+                    turn != null && turn.listKey == item.key && item.size > 0 &&
+                        item.offset < visibleBottom && item.offset + item.size > layout.viewportStartOffset
+                }
+            val first = visible.minOfOrNull { it.index }
+            val last = visible.maxOfOrNull { it.index }
+            if (first == null || last == null) emptyList() else buildList {
+                val indexes = visible.map { it.index } + (1..2).flatMap { distance ->
+                    listOf(first - distance, last + distance)
+                }
+                for (index in indexes) {
+                    val turn = current.getOrNull(index) ?: continue
+                    val blocks = when (turn) {
+                        is ChatTurnUi.User -> turn.content
+                        is ChatTurnUi.Assistant -> turn.content
+                    }
+                    for (block in blocks) {
+                        if (size >= 4) break
+                        if (block is MessageContentUi.Video) add(block.video)
+                    }
+                }
+            }
+        }.collect { videos -> prefetch.update(videos) }
     }
     // Read confirmation observes existing measured layout only; it never changes follow/scroll.
     LaunchedEffect(listState) {

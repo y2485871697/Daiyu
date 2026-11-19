@@ -125,6 +125,7 @@ internal class StreamingTextClearance {
         val clearance: Int, val height: Int, val clampToViewport: Boolean,
         val listHeight: Int, val viewportTop: Float, val viewportHeight: Int)
     private var geometry by mutableStateOf<Geometry?>(null)
+    private var viewportGeometry by mutableStateOf<Geometry?>(null)
     private var positioned by mutableStateOf(false)
     private val typingOwners = mutableStateMapOf<Any, Unit>()
     val typingPending: Boolean get() = typingOwners.isNotEmpty()
@@ -147,10 +148,12 @@ internal class StreamingTextClearance {
     fun update(list: LayoutCoordinates?, viewport: LayoutCoordinates?, offset: Int, clearance: Int,
         height: Int, protect: Boolean, clampToViewport: Boolean) {
         val attached = list?.isAttached == true && viewport?.isAttached == true
-        geometry = if (protect) Geometry(list, viewport, offset, clearance, height, clampToViewport,
+        val placed = Geometry(list, viewport, offset, clearance, height, clampToViewport,
             if (attached) list!!.size.height else 0,
             if (attached) list!!.localPositionOf(viewport!!, Offset.Zero).y else 0f,
-            if (attached) viewport!!.size.height else 0) else null
+            if (attached) viewport!!.size.height else 0)
+        viewportGeometry = placed.takeIf { attached }
+        geometry = if (protect) placed else null
         positioned = true
     }
 
@@ -164,6 +167,15 @@ internal class StreamingTextClearance {
         val bottom = if (current.clampToViewport)
             minOf(safeBottom, current.viewportTop + current.viewportHeight) else safeBottom
         return (bottom - list.localPositionOf(leaf, Offset.Zero).y).coerceAtLeast(0f)
+    }
+
+    fun whollyAboveViewport(coordinates: LayoutCoordinates?, height: Int): Boolean {
+        if (!positioned || height <= 0) return false
+        val current = viewportGeometry ?: return false
+        val list = current.list?.takeIf { it.isAttached } ?: return false
+        current.viewport?.takeIf { it.isAttached } ?: return false
+        val leaf = coordinates?.takeIf { it.isAttached } ?: return false
+        return list.localPositionOf(leaf, Offset.Zero).y + height <= maxOf(0f, current.viewportTop)
     }
 
     fun fits(coordinates: LayoutCoordinates?, height: Int): Boolean =

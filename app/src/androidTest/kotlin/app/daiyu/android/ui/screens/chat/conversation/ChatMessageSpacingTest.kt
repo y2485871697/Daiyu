@@ -286,7 +286,9 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                 assertTrue("Unreceived text must never be shown: received=$received shown=$shown", received.startsWith(shown))
                 if (batchReached) assertEquals("No new delta may change the displayed frontier", received, shown)
                 if (shown == received) batchReached = true
-                if (frame % 30 == 29) assertEquals("Every received batch must finish within its original frame budget", received, shown)
+                if (frame % 30 == 29) assertEquals("Every received batch must finish within its original frame budget: " +
+                    "frame=$frame clock=${ui.mainClock.currentTime} lengths=$lengths received=${received.length} " +
+                    "shown=${shown.length} geometry=${liveGeometry()}", received, shown)
                 if (shown.length in batchStart + 1 until received.length) batchTyped = true
                 lengths += shown.length
                 if (frame % 10 == 0 || frame == 89) geometryFrames += "frame=$frame ${liveGeometry()}"

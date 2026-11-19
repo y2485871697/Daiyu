@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
@@ -226,7 +227,10 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     val displayed = if (playback?.paused == true) frame.drawn else frame.committed
     val candidateText = if (playback?.paused == true) displayed?.layoutInput?.text ?: AnnotatedString("") else text
     val owner = remember(frame) { Any() }
-    fun published(): Boolean = text.isEmpty() || frame.drawn?.let { actual ->
+    fun published(): Boolean = text.isEmpty() || frame.layout?.let { candidate ->
+        candidate.layoutInput.text == text && clearance.whollyAboveViewport(frame.coordinates,
+            maxOf(candidate.size.height, frame.coordinates?.size?.height ?: 0))
+    } == true || frame.drawn?.let { actual ->
         actual.layoutInput.text == text && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
             clearance.fits(frame.coordinates, actual.size.height)
     } == true
@@ -245,6 +249,10 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                 frame.committed = accepted
         }
         publication?.setPending(owner, !published())
+    }
+    val publicationCheck by rememberUpdatedState { published() }
+    LaunchedEffect(clearance, publication, owner) {
+        snapshotFlow { publicationCheck() }.collect { publication?.setPending(owner, !it) }
     }
     SideEffect { publication?.setPending(owner, !published()) }
     DisposableEffect(publication, owner) { onDispose { publication?.setPending(owner, false) } }

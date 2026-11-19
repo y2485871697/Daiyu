@@ -269,6 +269,54 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         ui.onNodeWithTag("fixed-prefix-text").assertTextEquals(text)
     }
 
+    fun testUnpaintedLeafAboveViewportReleasesOnlyItsPendingReceipt() {
+        val state = StreamingTailViewport(initiallyBounded = false)
+        val publication = MarkdownPaintPublication().apply { active = true }
+        val text = "HHHH\nHHHHHH"
+        var hostCoordinates: LayoutCoordinates? = null
+        var origin by mutableStateOf(240.dp)
+        var hostPx = 0
+        var clearancePx = 0
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val d = LocalDensity.current
+                hostPx = with(d) { 360.dp.roundToPx() }
+                clearancePx = with(d) { (96.dp + ChatTailClearance).roundToPx() }
+                Box(Modifier.size(320.dp, 360.dp).clipToBounds().onPlaced { hostCoordinates = it }) {
+                    Box(Modifier.offset(y = origin)) {
+                        StreamingTailContainer(state, { hostCoordinates }, "above-prefix",
+                            userScrollEnabled = false, follows = { true }, clearance = { clearancePx },
+                            viewportHeight = { hostPx - clearancePx }, listViewportHeight = { hostPx },
+                            preserveTextClearance = true) {
+                            androidx.compose.runtime.CompositionLocalProvider(LocalMarkdownPaintPublication provides publication) {
+                                ClearanceText(androidx.compose.ui.text.AnnotatedString(text), 0,
+                                    Modifier.fillMaxWidth().testTag("above-prefix-text"),
+                                    TextStyle(color = Color.Black, fontFamily = FontFamily.Monospace,
+                                        fontSize = 20.sp, lineHeight = 28.sp))
+                            }
+                        }
+                    }
+                }
+            }
+        } }
+        ui.waitForIdle()
+        assertFalse("A bottom-obscured unpainted candidate must remain pending", publication.ready)
+        val otherOwner = Any()
+        mainThread {
+            publication.setPending(otherOwner, true)
+            origin = (-120).dp
+        }
+        ui.waitForIdle()
+        assertFalse("Moving one leaf above the viewport must not release another owner's receipt", publication.ready)
+        mainThread { publication.setPending(otherOwner, false) }
+        ui.waitUntil(5_000) { publication.ready }
+        mainThread { origin = 240.dp }
+        ui.waitUntil(5_000) { !publication.ready }
+        mainThread { origin = 0.dp }
+        ui.waitUntil(5_000) { publication.ready }
+        ui.onNodeWithTag("above-prefix-text").assertTextEquals(text)
+    }
+
     fun testProtectedCodeViewportKeepsInkAndPublishesAfterReturningToTop() {
         val state = StreamingTailViewport(initiallyBounded = false)
         val publication = MarkdownPaintPublication().apply { active = true }
@@ -798,7 +846,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     }
 
     fun testNewToolHeaderHasNoPartialInkAtTheOriginalSafetyEdge() {
-        data class Sample(val pixels: IntArray, val width: Int, val height: Int, val top: Float, val safe: Float)
+        data class Sample(val pixels: IntArray, val width: Int, val height: Int, val top: Float, val safe: Float, val y0: Int)
         var count by mutableStateOf(1)
         val tail = shortWorkflow(1)
         val hostTag = "atomic-tool-header"
@@ -854,7 +902,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                         val y = y0 + index / w
                         if (x in 0 until shot.width && y in 0 until shot.height) shot[x, y].toArgb() else Color.White.toArgb()
                     }
-                    samples += Sample(pixels, w, h, at.y, safe)
+                    samples += Sample(pixels, w, h, at.y, safe, y0)
                 }
                 assertTrue(samples.isNotEmpty())
                 val reference = samples.last()
@@ -874,7 +922,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     val alpha = ink.maxOf { (contrast(sample.pixels, it) / contrast(reference.pixels, it)).coerceIn(0f, 1f) }
                     if (alpha <= .06f) continue
                     painted = true
-                    assertTrue("Any painted header must fit whole, not just its first glyph row", sample.top + sample.height <= sample.safe + 1f)
+                    assertTrue("Any painted header must fit its complete reference ink, not just its first glyph row: " +
+                    "top=${sample.top} height=${sample.height} y0=${sample.y0} lastY=$lastY safe=${sample.safe}",
+                    sample.y0 + lastY + 1f <= sample.safe + 1f)
                     // Normalize the existing uniform fade; missing lower glyphs cannot hide behind it.
                     for (i in ink) assertTrue("Header ink must be complete at the same fade opacity",
                         contrast(sample.pixels, i) >= contrast(reference.pixels, i) * alpha - .05f)
@@ -1103,15 +1153,15 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 markdownProjectionCache.put(MarkdownProjection(listOf(text), mapOf(text to parser(text)), parser))
             }
         }
-        fun turnFor(text: String, complete: Boolean, toolCount: Int = 2): ChatTurnUi.Assistant {
+        fun turnFor(text: String, complete: Boolean, toolCount: Int = 2, forceLive: Boolean = false): ChatTurnUi.Assistant {
             if (!withTools) return ChatTurnUi.Assistant("paced-tail", finalText = text,
-                status = if (complete) RunStatus.COMPLETED else RunStatus.RUNNING, isStreaming = !complete)
+                status = if (complete) RunStatus.COMPLETED else RunStatus.RUNNING, isStreaming = forceLive || !complete)
             val blocks = listOf(MessageBlock.Text("paced-preface", preface)) + List(toolCount) { index ->
                 MessageBlock.Tool(ToolInvocation(ToolCallId("paced-tool-$index"), "lookup", "{}"), "done")
             } + if (text.isEmpty()) emptyList() else listOf(MessageBlock.Text("paced-answer", text))
             val message = Message(MessageId("paced-tail"), ConversationId("paced-conversation"), RunId("paced-run"),
                 "assistant", blocks, if (complete) RunStatus.COMPLETED else RunStatus.RUNNING)
-            return (ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant).copy(isStreaming = !complete)
+            return (ChatTurnMapper.map(listOf(message)).single() as ChatTurnUi.Assistant).copy(isStreaming = forceLive || !complete)
         }
         var turn by mutableStateOf(turnFor(if (withTools) "" else seed, complete = false, toolCount = 0))
         val fixedRequest = ChatScrollRequest(1)
@@ -1189,10 +1239,11 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     "position=${node.positionInRoot} size=${node.size} bounds=${node.boundsInRoot} " +
                         "lines=${result.lineCount} lineBottom=${result.getLineBottom(result.lineCount - 1)}"
                 }
-        fun pixels(layouts: List<Pair<SemanticsNode, androidx.compose.ui.text.TextLayoutResult>> = emptyList()): IntArray {
+        fun pixels(layouts: List<Pair<SemanticsNode, androidx.compose.ui.text.TextLayoutResult>> = emptyList(),
+            sample: androidx.compose.ui.graphics.ImageBitmap? = null): IntArray {
             val host = ui.onNodeWithTag("paced-host")
             val bounds = host.fetchSemanticsNode().boundsInRoot
-            val bitmap = host.captureToImage()
+            val bitmap = sample ?: captureScreenNode(host, advanceAnimationClock = false)
             val image = bitmap.toPixelMap()
             val lastLine = layouts.mapNotNull { (node, result) ->
                 (0 until result.lineCount).lastOrNull { line ->
@@ -1234,7 +1285,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             if (slowReceipts) {
                 val primer = full.take(seed.length + 1)
                 val expectedPrimer = markdownBlocksDisplayText(defaultMarkdownParser(primer))
-                ui.runOnUiThread { turn = turnFor(primer, complete = false) }
+                ui.runOnUiThread { turn = turnFor(primer, complete = withTools, forceLive = true) }
                 var primerSettled = false
                 for (index in 0 until 90) {
                     frame()
@@ -1268,6 +1319,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     resumed = true
                 }
                 frame()
+                val sampleClock = ui.mainClock.currentTime
+                val sampleImage = captureScreenNode(ui.onNodeWithTag("paced-host"), advanceAnimationClock = false)
+                assertEquals("Drawing a sample must not advance typing", sampleClock, ui.mainClock.currentTime)
                 val layouts = textLayouts()
                 val displayed = displayed(layouts)
                 val height = layouts.sumOf { it.second.size.height }
@@ -1279,7 +1333,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 }
                 if (displayed.length > previousText.length) growthFrames++
                 if (height > previousHeight) heightGrowth++
-                val measuredBottom = layouts.mapNotNull { (node, result) -> paintedBottom(node, result) }.maxOrNull()
+                val measuredBottom = layouts.filter { (_, result) -> result.layoutInput.text.text.isNotBlank() }
+                    .mapNotNull { (node, result) -> paintedBottom(node, result) }.maxOrNull()
                 val bottom = measuredBottom ?: continue
                 val composerTop = ui.onNodeWithTag("paced-composer").fetchSemanticsNode().boundsInRoot.top
                 val gap = (composerTop - bottom) / density
@@ -1293,12 +1348,12 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 firstGapFrame?.let { first ->
                     if (index == first || index == first + 16 || index == first + 60 ||
                         index == resumeAtFrame?.plus(1) || settled) {
-                        saveDiagnostic(ui.onNodeWithTag("paced-host").captureToImage(), "frame-$index",
+                        saveDiagnostic(sampleImage, "frame-$index",
                             frameDiagnostic(index, gap, layouts))
                     }
                 }
                 if (displayed.length >= capturedLength + 30) {
-                    val nextPixels = pixels(layouts)
+                    val nextPixels = pixels(layouts, sampleImage)
                     assertFalse("Text grew but the displayed page froze at frame=$index", previousPixels.contentEquals(nextPixels))
                     previousPixels = nextPixels
                     capturedLength = displayed.length

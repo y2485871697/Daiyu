@@ -152,7 +152,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         } finally { ui.mainClock.autoAdvance = true }
     }
 
-    fun testNewLiveNarrationAndToolAdmissionFinishBeforeAutomaticAnswerHandoff() {
+    fun testReceivedToolDoesNotWaitForNewLiveNarrationBeforeAutomaticAnswerHandoff() {
         val narration = "NARRATION " + "字".repeat(180)
         val answer = "FINAL AFTER ADMISSION"
         runBlocking {
@@ -163,11 +163,13 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         }
         val scope = WorkflowVisualScope(false)
         var complete by mutableStateOf(false)
+        var received by mutableStateOf(false)
         val advances = java.util.concurrent.atomic.AtomicInteger()
         ui.mainClock.autoAdvance = false
         try {
             mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                val blocks = listOf(tool("start"), MessageBlock.Text("narration", narration), tool("admission")) +
+                val blocks = listOf(tool("start")) +
+                    (if (received) listOf(MessageBlock.Text("narration", narration), tool("admission")) else emptyList()) +
                     if (complete) listOf(MessageBlock.Text("answer", answer)) else emptyList()
                 val turn = mapped(message(blocks, emptyList()).copy(
                     status = if (complete) RunStatus.COMPLETED else RunStatus.RUNNING)).copy(isStreaming = !complete)
@@ -176,25 +178,40 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 }
             } } }
             ui.mainClock.advanceTimeBy(64)
-            mainThread { complete = true }
-            ui.mainClock.advanceTimeBy(64)
-            assertDisclosure("work-process-header", expanded = true)
-            ui.onNodeWithText(answer, useUnmergedTree = true).assertDoesNotExist()
-            ui.onNodeWithTag("tool-step:admission").assertDoesNotExist()
+            val narrationMatcher = hasTestTag("message-content-text:1") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Text)
+            val bodyMatcher = hasTestTag("message-content-text:0") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Text)
+            fun shown(matcher: SemanticsMatcher) = ui.onAllNodes(matcher, useUnmergedTree = true)
+                .fetchSemanticsNodes().flatMap { it.config[SemanticsProperties.Text] }.joinToString("") { it.text }
+            mainThread { received = true }
+            var typedNarration = false
             ui.waitUntil(10_000) {
                 ui.mainClock.advanceTimeByFrame()
-                val toolVisible = ui.onAllNodesWithTag("tool-step:admission").fetchSemanticsNodes().isNotEmpty()
-                if (!toolVisible) {
-                    assertDisclosure("work-process-header", expanded = true)
-                    ui.onNodeWithText(answer, useUnmergedTree = true).assertDoesNotExist()
-                }
-                toolVisible
+                val current = shown(narrationMatcher)
+                typedNarration = current.isNotEmpty() && current.length < narration.length && narration.startsWith(current)
+                assertTrue("No answer prefix may overlap received narration", shown(bodyMatcher).isEmpty())
+                typedNarration && ui.onAllNodesWithTag("tool-step:admission").fetchSemanticsNodes().isNotEmpty()
             }
+            assertTrue("Newly received narration must expose a strict typed prefix", typedNarration)
+            mainThread { complete = true }
+            assertDisclosure("work-process-header", expanded = true)
+            ui.onNodeWithText(answer, useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithTag("tool-step:admission").assertExists()
             assertTrue("The first live narration must actually advance", advances.get() > 0)
+            var narrationCompleted = false
             ui.waitUntil(10_000) {
-                ui.mainClock.advanceTimeBy(32)
-                ui.onAllNodesWithText(answer, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+                ui.mainClock.advanceTimeByFrame()
+                val current = shown(narrationMatcher)
+                if (current == narration) narrationCompleted = true
+                val toolExists = ui.onAllNodesWithTag("tool-step:admission").fetchSemanticsNodes().isNotEmpty()
+                val body = shown(bodyMatcher)
+                if (current.isNotEmpty() && current.length < narration.length) {
+                    assertDisclosure("work-process-header", expanded = true)
+                    assertTrue("The answer must wait until narration finishes", body.isEmpty())
+                }
+                if (toolExists) assertTrue("No answer prefix may overlap a closing tool", body.isEmpty())
+                body == answer
             }
+            assertTrue("The complete narration must be shown before answer handoff", narrationCompleted)
             ui.onNodeWithTag("tool-step:admission").assertDoesNotExist()
             ui.onNodeWithText(answer, useUnmergedTree = true).assertIsDisplayed()
         } finally { ui.mainClock.autoAdvance = true }
@@ -266,7 +283,12 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             if (history) {
                 ui.onNodeWithText(answer, useUnmergedTree = true).assertIsDisplayed()
                 assertEquals(0, advances.get())
-                assertTrue(settled.get())
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.onNodeWithText(answer, useUnmergedTree = true).assertIsDisplayed()
+                    assertEquals("History must remain a silent baseline until its completion callback", 0, advances.get())
+                    settled.get()
+                }
                 return
             }
             if (workflow) ui.onNodeWithTag("tool-step:t1").assertIsDisplayed()
@@ -280,18 +302,24 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             }
             val textMatcher = hasTestTag("message-content-text:0") and SemanticsMatcher.keyIsDefined(SemanticsProperties.Text)
             var firstVisible: String? = null
+            val admissionFrames = ArrayDeque<String>()
             ui.waitUntil(5_000) {
                 ui.mainClock.advanceTimeByFrame()
                 val bodies = ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
                 val currentText = bodies.firstOrNull()?.config?.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }
-                if (ui.onAllNodesWithTag("tool-step:t1").fetchSemanticsNodes().isNotEmpty()) {
+                val workflowExists = ui.onAllNodesWithTag("tool-step:t1").fetchSemanticsNodes().isNotEmpty()
+                admissionFrames.addLast("clock=${ui.mainClock.currentTime} workflow=$workflowExists " +
+                    "shown=${currentText?.length} feedback=${advances.get()} settled=${settled.get()}")
+                if (admissionFrames.size > 24) admissionFrames.removeFirst()
+                if (workflowExists) {
                     assertTrue("No answer text may overlap the closing workflow", currentText.isNullOrEmpty())
                     assertEquals("No body feedback during workflow exit", 0, advances.get())
                     assertFalse("Hidden body is not fully revealed", settled.get())
                 } else if (!currentText.isNullOrEmpty()) firstVisible = currentText
                 firstVisible != null
             }
-            assertTrue("The first received chunk must actually type after workflow disposal", firstVisible!!.length in 1 until firstChunk.length)
+            assertTrue("The first received chunk must actually type after workflow disposal: first=$firstVisible trace=$admissionFrames",
+                firstVisible!!.length in 1 until firstChunk.length)
             assertTrue(firstChunk.startsWith(firstVisible!!))
             assertTrue(advances.get() > 0)
             ui.waitUntil(5_000) {

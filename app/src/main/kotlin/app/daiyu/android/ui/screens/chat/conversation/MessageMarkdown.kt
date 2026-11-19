@@ -37,6 +37,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
@@ -50,6 +51,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -256,35 +258,39 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     }
     SideEffect { publication?.setPending(owner, !published()) }
     DisposableEffect(publication, owner) { onDispose { publication?.setPending(owner, false) } }
-    BasicText(displayed?.layoutInput?.text ?: AnnotatedString(""), modifier.layout { measurable, constraints ->
-        val candidate = measurer.measure(candidateText, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
-        frame.layout = candidate
-        val committed = measurable.measure(constraints.copy(minHeight = 0))
-        layout(constraints.constrainWidth(maxOf(candidate.size.width, committed.width)),
-            constraints.constrainHeight(maxOf(candidate.size.height, committed.height))) {
-            androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
-                frame.coordinates?.let(::placed)
+    val density = LocalDensity.current
+    val direction = LocalLayoutDirection.current
+    key(style, softWrap, density.density, density.fontScale, direction) {
+        BasicText(displayed?.layoutInput?.text ?: AnnotatedString(""), modifier.layout { measurable, constraints ->
+            val candidate = measurer.measure(candidateText, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
+            frame.layout = candidate
+            val committed = measurable.measure(constraints.copy(minHeight = 0))
+            layout(constraints.constrainWidth(maxOf(candidate.size.width, committed.width)),
+                constraints.constrainHeight(maxOf(candidate.size.height, committed.height))) {
+                androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
+                    frame.coordinates?.let(::placed)
+                }
+                committed.placeRelative(0, 0)
             }
-            committed.placeRelative(0, 0)
-        }
-    }.onPlaced(::placed).onGloballyPositioned(::placed).drawWithContent {
-        val available = minOf(frame.availableHeight, clearance.availableHeight(frame.coordinates))
-        val frozen = playback?.paused == true
-        val selected = if (frozen) frame.drawn else frame.committed
-        val actual = frame.rendered?.takeIf { result ->
-            result.layoutInput.text == selected?.layoutInput?.text ||
-                (!frozen && selected?.let { result.canPaintPrefixOf(it) } == true)
-        }
-        if (actual != null && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
-            actual.size.height <= available + .01f && (!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text)) {
-            drawContent()
-            frame.drawn = actual
-            if (paintOffset != null) painted[paintOffset] = actual
-        }
-        publication?.setPending(owner, !published())
-    }, style, softWrap = softWrap, onTextLayout = {
-        frame.rendered = it
-    })
+        }.onPlaced(::placed).onGloballyPositioned(::placed).drawWithContent {
+            val available = minOf(frame.availableHeight, clearance.availableHeight(frame.coordinates))
+            val frozen = playback?.paused == true
+            val selected = if (frozen) frame.drawn else frame.committed
+            val actual = frame.rendered?.takeIf { result ->
+                result.layoutInput.text == selected?.layoutInput?.text ||
+                    (!frozen && selected?.let { result.canPaintPrefixOf(it) } == true)
+            }
+            if (actual != null && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
+                actual.size.height <= available + .01f && (!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text)) {
+                drawContent()
+                frame.drawn = actual
+                if (paintOffset != null) painted[paintOffset] = actual
+            }
+            publication?.setPending(owner, !published())
+        }, style, softWrap = softWrap, onTextLayout = {
+            frame.rendered = it
+        })
+    }
 }
 
 internal fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boolean {
@@ -292,6 +298,7 @@ internal fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boo
     val current = candidate.layoutInput
     if (!current.text.text.startsWith(previous.text.text) ||
         previous.constraints.maxWidth != current.constraints.maxWidth || previous.style != current.style ||
+        previous.softWrap != current.softWrap ||
         previous.density.density != current.density.density ||
         previous.density.fontScale != current.density.fontScale || previous.layoutDirection != current.layoutDirection) return false
     val prefix = current.text.subSequence(0, previous.text.length)

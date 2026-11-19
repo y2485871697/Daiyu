@@ -15,6 +15,15 @@ import java.util.IdentityHashMap
 
 @OptIn(InternalComposeApi::class)
 internal class MarkdownPaintSlotsProbe {
+    internal data class PaintSample(
+        val frame: Any,
+        val candidate: TextLayoutResult?,
+        val rendered: TextLayoutResult?,
+        val drawn: TextLayoutResult?,
+        val fits: Boolean?,
+        val above: Boolean?,
+    )
+
     private val compositions = linkedMapOf<String, CompositionData>()
     private val capturedClearances = linkedMapOf<String, StreamingTextClearance?>()
 
@@ -28,7 +37,7 @@ internal class MarkdownPaintSlotsProbe {
         }
     }
 
-    fun sample(key: String): String = Snapshot.withoutReadObservation {
+    fun sample(key: String, onPaint: ((PaintSample) -> Unit)? = null): String = Snapshot.withoutReadObservation {
         val paths = IdentityHashMap<Any, String>()
         val errors = linkedSetOf<String>()
         var groups = 0
@@ -84,7 +93,10 @@ internal class MarkdownPaintSlotsProbe {
         fun location(value: Any?) = "${id(value)}@${paths[value] ?: "not-in-slots"}"
         fun layout(frame: Any, name: String) = field(frame, name) as? TextLayoutResult
         fun describe(result: TextLayoutResult?): String = result?.let {
-            "${it.layoutInput.text.length}/${it.size.width}x${it.size.height}/w${it.layoutInput.constraints.maxWidth}"
+            "${it.layoutInput.text.length}/${it.size.width}x${it.size.height}/w${it.layoutInput.constraints.maxWidth}" +
+                "/style#${it.layoutInput.style.hashCode()}/wrap=${it.layoutInput.softWrap}" +
+                "/density=${it.layoutInput.density.density}:${it.layoutInput.density.fontScale}" +
+                "/direction=${it.layoutInput.layoutDirection}"
         } ?: "null"
         val clearances = (listOfNotNull(capturedClearances[key]) +
             values.filterIsInstance<StreamingTailViewport>().map { it.textClearance })
@@ -131,6 +143,11 @@ internal class MarkdownPaintSlotsProbe {
                 val coordinates = field(paint, "coordinates") as? LayoutCoordinates
                 val attached = coordinates?.isAttached == true
                 val height = maxOf(candidate?.size?.height ?: 0, if (attached) coordinates!!.size.height else 0)
+                val rendered = layout(paint, "rendered")
+                val clearance = clearances.firstOrNull()
+                onPaint?.invoke(PaintSample(paint, candidate, rendered, drawn,
+                    candidate?.let { clearance?.fits(coordinates, it.size.height) },
+                    clearance?.whollyAboveViewport(coordinates, height)))
                 appendLine("PAINT ${location(paint)} candidate=${describe(candidate)} " +
                     "committed=${describe(layout(paint, "committed"))} rendered=${describe(layout(paint, "rendered"))} " +
                     "drawn=${describe(drawn)} attached=$attached height=$height cachedAvailable=${field(paint, "availableHeight")} " +
@@ -152,6 +169,15 @@ internal class MarkdownPaintSlotsProbe {
                     appendLine(" PREFIX width=${a.constraints.maxWidth == b.constraints.maxWidth} style=${a.style == b.style} " +
                         "density=${a.density.density == b.density.density} fontScale=${a.density.fontScale == b.density.fontScale} " +
                         "direction=${a.layoutDirection == b.layoutDirection}")
+                }
+                if (rendered != null && candidate != null) {
+                    val a = rendered.layoutInput
+                    val b = candidate.layoutInput
+                    appendLine(" RENDERED_TO_CANDIDATE text=${a.text == b.text} " +
+                        "width=${a.constraints.maxWidth == b.constraints.maxWidth} style=${a.style == b.style} " +
+                        "wrap=${a.softWrap == b.softWrap} density=${a.density.density == b.density.density} " +
+                        "fontScale=${a.density.fontScale == b.density.fontScale} " +
+                        "direction=${a.layoutDirection == b.layoutDirection} prefix=${rendered.canPaintPrefixOf(candidate)}")
                 }
             }
             appendLine("schemaErrors=$errors")

@@ -220,6 +220,7 @@ class MarkdownRevealTest {
         val budget = markdownBlocksLength(parsedPrefix)
         assertEquals(budget, markdownTypingBaselineLength(projection, listOf(latest), allowPrefix = true))
         val state = MarkdownTypingState(listOf(source(latest)))
+        state.receive(listOf(source(latest)), 1_000_000_000L)
         val prefixPart = MarkdownTypingPart(source(prefix), budget, markdownBlocksDisplayText(parsedPrefix))
         val target = state.update(listOf(prefixPart),
             markdownTypingBaselineLength(projection, listOf(latest), allowPrefix = true), true, false)!!
@@ -232,6 +233,9 @@ class MarkdownRevealTest {
             markdownTypingBaselineLength(latestProjection, listOf(latest), allowPrefix = true), true, false)!!
         assertEquals(budget, next.start)
         assertTrue(next.start < next.total)
+        state.receive(listOf(source(latest)), 30_000_000_000L)
+        assertEquals(budget + 1, state.advance(next, 31_000_000_000L))
+        assertEquals(next.total, drain(state, next, 31_016_000_000L))
     }
 
     @Test fun completedPrefixCannotReplaceAnOlderFrozenBaselineOrUnrelatedText() {
@@ -493,4 +497,99 @@ class MarkdownRevealTest {
         assertTrue(publication.ready)
     }
 
+
+    @Test fun rawReceiptRateSurvivesMergedAndDelayedParsing() {
+        fun reveal(parseDelay: Long, repeatReceipt: Boolean): List<Int> {
+            val state = MarkdownTypingState(emptyList())
+            state.update(emptyList(), 0, true, false)
+            for (count in 1..3) state.receive(listOf(source("字".repeat(count * 100))), count * 1_000_000_000L)
+            if (repeatReceipt) state.receive(listOf(source("字".repeat(300))), 90_000_000_000L)
+            val target = state.update(listOf(part("字".repeat(300))), 0, true, false)!!
+            val time = 10_000_000_000L + parseDelay
+            return (0..10).map { frame -> state.advance(target, time + frame * 16_000_000L) }
+        }
+        val immediate = reveal(0L, false)
+        assertEquals(1, immediate.first())
+        assertTrue("Merged backlog must still type at the 100 characters/second receipt rate", immediate.last() in 15..20)
+        assertEquals(immediate, reveal(30_000_000_000L, true))
+    }
+
+    @Test fun rawReceiptIntervalsChangeThePaceWithoutRevealingTheWholeBatch() {
+        fun frontier(interval: Long): Int {
+            val state = MarkdownTypingState(emptyList())
+            state.update(emptyList(), 0, true, false)
+            state.receive(listOf(source("字".repeat(100))), 1_000_000_000L)
+            state.receive(listOf(source("字".repeat(200))), 1_000_000_000L + interval)
+            val target = state.update(listOf(part("字".repeat(200))), 0, true, false)!!
+            assertEquals(1, state.advance(target, 10_000_000_000L))
+            return state.advance(target, 10_016_000_000L)
+        }
+        val slow = frontier(1_000_000_000L)
+        val fast = frontier(10_000_000L)
+        assertTrue(slow in 1..3)
+        assertTrue("New receipt rate must affect the actual frame frontier", fast > slow)
+        assertTrue("A received batch must not jump straight to its end", fast < 200)
+    }
+
+    @Test fun rawReceiptPauseFreezesSamplingAndDoesNotChargePausedTime() {
+        fun resumed(delay: Long): List<Int> {
+            val state = MarkdownTypingState(emptyList())
+            state.update(emptyList(), 0, true, false)
+            state.receive(listOf(source("字".repeat(100))), 1_000_000_000L)
+            state.receive(listOf(source("字".repeat(200))), 2_000_000_000L)
+            val target = state.update(listOf(part("字".repeat(200))), 0, true, false)!!
+            state.advance(target, 3_000_000_000L)
+            state.advance(target, 3_016_000_000L)
+            state.pause(target)
+            val before = state.visible(target)
+            state.receive(listOf(source("字".repeat(300))), 4_000_000_000L + delay, paused = true)
+            state.receive(listOf(source("字".repeat(300))), 5_000_000_000L + delay)
+            val next = state.update(listOf(part("字".repeat(300))), 0, true, false)!!
+            assertEquals(before, next.start)
+            return (0..10).map { frame -> state.advance(next, 6_000_000_000L + delay + frame * 16_000_000L) - before }
+        }
+        val normal = resumed(0)
+        assertEquals(1, normal.first())
+        assertTrue(normal.last() in 15..20)
+        assertEquals(normal, resumed(60_000_000_000L))
+    }
+
+    @Test fun aSingleRawTerminalBatchBootstrapsAndDrains() {
+        val state = MarkdownTypingState(emptyList())
+        state.update(emptyList(), 0, false, false, live = true)
+        state.receive(listOf(source("字".repeat(500))), 1_000_000_000L)
+        val target = state.update(listOf(part("字".repeat(500))), 0, false, true, paceTerminal = true)!!
+        assertEquals(1, state.advance(target, 2_000_000_000L))
+        assertTrue(state.advance(target, 2_016_000_000L) in 2 until 500)
+        assertEquals(500, drain(state, target, 2_032_000_000L))
+    }
+
+    @Test fun layoutPauseDoesNotResetRawReceiptIntervals() {
+        fun reveal(blocked: Boolean): List<Int> {
+            val state = MarkdownTypingState(emptyList())
+            state.update(emptyList(), 0, true, false)
+            state.receive(listOf(source("字".repeat(100))), 1_000_000_000L)
+            state.receive(listOf(source("字".repeat(200))), 2_000_000_000L)
+            val old = state.update(listOf(part("字".repeat(200))), 0, true, false)!!
+            if (blocked) state.pause(old)
+            state.receive(listOf(source("字".repeat(400))), 6_000_000_000L)
+            val next = state.update(listOf(part("字".repeat(400))), 0, true, false)!!
+            return (0..10).map { state.advance(next, 7_000_000_000L + it * 16_000_000L) }
+        }
+        assertEquals(reveal(false), reveal(true))
+    }
+
+    @Test fun firstRawBatchReceivedWhilePausedCanStillDrainAfterResume() {
+        val state = MarkdownTypingState(emptyList())
+        state.update(emptyList(), 0, false, false, live = true)
+        val sources = listOf(source("字".repeat(500)))
+        state.receive(sources, 1_000_000_000L, paused = true)
+        val paused = state.update(listOf(part(sources.single().text)), 0, false, true, paceTerminal = true)!!
+        state.pause(paused)
+        assertEquals(0, state.visible(paused))
+        state.receive(sources, 61_000_000_000L)
+        assertEquals(1, state.advance(paused, 62_000_000_000L))
+        assertTrue(state.advance(paused, 62_016_000_000L) in 2 until 500)
+        assertEquals(500, drain(state, paused, 62_032_000_000L))
+    }
 }

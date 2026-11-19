@@ -179,11 +179,42 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
     private var receivedEnd = 0
     private var arrivalFrame = 0L
     private var arrivalSeconds = .12
+    private var receivedSources = baseline.toList()
+    private var receiptNanos = 0L
+    private var receiptRate = baseline.sumOf { it.text.length.toLong() } / .12
+    private var observesReceipts = false
+    private var receiptPaused = false
     private var rate = 0.0
     private var desiredRate = 0.0
     private var resuming = false
     private var seenLive = false
     private var closed = false
+
+    fun receive(sources: List<MarkdownTypingSource>, nowNanos: Long, paused: Boolean = false) {
+        observesReceipts = true
+        val previous = receivedSources
+        receivedSources = sources.toList()
+        if (!markdownTypingAppends(previous, sources)) {
+            receiptNanos = 0L
+            receiptRate = sources.sumOf { it.text.length.toLong() } / .12
+            receiptPaused = paused
+            return
+        }
+        val added = sources.sumOf { it.text.length.toLong() } - previous.sumOf { it.text.length.toLong() }
+        if (paused) {
+            receiptPaused = true
+            receiptNanos = 0L
+            if (rate > 0.0) receiptRate = rate
+            else if (receiptRate == 0.0 && added > 0) receiptRate = added / .12
+            return
+        }
+        if (receiptPaused) { receiptPaused = false; receiptNanos = 0L }
+        if (added <= 0) return
+        val seconds = if (receiptNanos != 0L && nowNanos > receiptNanos)
+            ((nowNanos - receiptNanos) / 1_000_000_000.0).coerceAtLeast(.001) else .12
+        if (receiptNanos != 0L || receiptRate == 0.0) receiptRate = added / seconds
+        receiptNanos = nowNanos
+    }
 
     fun update(parts: List<MarkdownTypingPart>?, baselineLength: Int?, streaming: Boolean, terminal: Boolean,
         live: Boolean = streaming, paceTerminal: Boolean = false): MarkdownTypingTarget? {
@@ -249,8 +280,9 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
                 val interval = ((frameNanos - arrivalFrame) / 1_000_000_000.0).coerceIn(.03, .3)
                 arrivalSeconds += (interval - arrivalSeconds) * .25
             }
-            // Projection admission supplies the local arrival clock, not a fixed character rate.
-            if (!resuming || rate == 0.0) desiredRate = (end - position) / arrivalSeconds
+            // Parsing can merge arrivals; its backlog must not become a new speed sample.
+            if (observesReceipts) desiredRate = receiptRate.takeIf { it > 0.0 } ?: rate
+            else if (!resuming || rate == 0.0) desiredRate = arrived / arrivalSeconds
             if (rate == 0.0 || lastFrame == 0L && !resuming) rate = desiredRate
             receivedEnd = end
             arrivalFrame = frameNanos

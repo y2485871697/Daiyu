@@ -133,7 +133,10 @@ class ToolDispatcher(
             if (entry.state == LedgerState.NOT_EXECUTED) return@mapIndexed ToolDispatchResult(call.id,
                 DispatchOutcome.NotExecuted(entry.code))
             val receipt = if (stop || cancelled()) ExecutionReceipt.NotExecuted("batch_stopped_before_execution") else if (plans[index].isUserBarrier) {
-                val denial = admitStart(index)
+                val denial = try { admitStart(index) } catch (failure: Exception) {
+                    if (failure is InterruptedException) Thread.currentThread().interrupt()
+                    ExecutionReceipt.NotExecuted(toolFailureCode(ToolFailureStage.ADMISSION, failure))
+                }
                 if (denial != null) {
                     ledger.finish(entry, denial)
                     return@mapIndexed ToolDispatchResult(call.id, DispatchOutcome.NotExecuted(denial.code))

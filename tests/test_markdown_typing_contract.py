@@ -216,5 +216,15 @@ class MarkdownTypingContract(unittest.TestCase):
             self.assertIn(name, unit)
 
 
+    def test_raw_receipts_drive_rate_before_parser_admission(self):
+        self.assertIn("remember(motion, sources, playback?.paused)", self.typing)
+        self.assertIn("motion.receive(sources, System.nanoTime(), paused = playback?.paused == true)", self.typing)
+        self.assertLess(self.typing.index("motion.receive(sources,"), self.typing.index("motion.update(parts,"))
+        self.assertIn("receiptRate = added / seconds", self.reveal)
+        self.assertIn("if (observesReceipts) desiredRate = receiptRate.takeIf { it > 0.0 } ?: rate", self.reveal)
+        self.assertIn("desiredRate = arrived / arrivalSeconds", self.reveal)
+        self.assertNotIn("desiredRate = (end - position)", self.reveal)
+
+
 if __name__ == "__main__":
     unittest.main()

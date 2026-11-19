@@ -587,4 +587,37 @@ class ToolDispatcherTest {
             } finally { runner.stop(); worker.join(5000); assertFalse(worker.isAlive) }
         }
     }
+
+    @Test fun barrierStartAdmissionExceptionPersistsNotExecutedAndDoesNotReenterGate() {
+        val store = InMemoryToolLedgerStore()
+        val initial = Message(MessageId("barrier"), ConversationId("c"), RunId("task"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
+        var starts = 0
+        val owner = RunExecutionOwner.issue(initial, {}, app.daiyu.android.domain.runtime.ToolStartControl {
+            starts++
+            assertEquals(LedgerState.UNKNOWN, store.transaction { rows -> rows.single().state })
+            throw java.io.IOException("private-admission-secret")
+        })
+        val ask = object : RegisteredTool {
+            override val definition = ToolDefinition("ask_user", 1, "Ask the user", "notes.read", ToolEffect.USER_BARRIER, ToolSchema())
+            override fun prepare(arguments: ToolArguments) = PreparedTool.userBarrier()
+        }
+        val actual = dispatcher(store, ask)
+        val invocation = call("ask", "ask_user", "{}")
+        val authorization = task(emptySet())
+        val first = actual.start(authorization, listOf(invocation), owner)
+        assertTrue(first is ReceiptBatchStart.Completed)
+        val receipt = (first as ReceiptBatchStart.Completed).receipts.single()
+        assertEquals(invocation.id, receipt.callId)
+        assertEquals(DispatchOutcome.NotExecuted("context_admission_failed_io"), receipt.outcome)
+        assertFalse(receipt.toString().contains("private-admission-secret"))
+        val persisted = store.transaction { rows -> rows.single() }
+        assertEquals(LedgerState.NOT_EXECUTED, persisted.state)
+        assertEquals("context_admission_failed_io", persisted.code)
+        val repeated = actual.start(authorization, listOf(invocation), owner)
+        assertEquals(listOf(receipt), (repeated as ReceiptBatchStart.Completed).receipts)
+        assertEquals(1, starts)
+        assertEquals(listOf(persisted), store.transaction { rows -> rows.toList() })
+    }
+
 }

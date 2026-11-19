@@ -276,4 +276,34 @@ class WorkflowDisclosureMotionTest {
         assertEquals(-10f, maxOf(-10f, workflowDisclosureTopClearance(-12f, 280f, 305f)), 0f)
     }
 
+
+    @Test fun toolOutputFingerprintObservesMixedResultsAndLegacyProjection() {
+        val step = WorkStepUi("tool", "fixture", "same", WorkStepState.OK, renderKey = "fixture:tool:0")
+        val mixed = ChatTurnUi.Assistant("turn", content = listOf(MessageContentUi.Tool(step, result = "ab")))
+        assertEquals(mixed.workflowDisclosureToolOutput(), mixed.copy(content = listOf(
+            MessageContentUi.Tool(step.copy(), result = "ab"))).workflowDisclosureToolOutput())
+        assertNotEquals("Equal-length new results must not be missed", mixed.workflowDisclosureToolOutput(),
+            mixed.copy(content = listOf(MessageContentUi.Tool(step, result = "cd"))).workflowDisclosureToolOutput())
+        assertNotEquals(mixed.copy(content = listOf(MessageContentUi.Tool(step, result = null))).workflowDisclosureToolOutput(),
+            mixed.copy(content = listOf(MessageContentUi.Tool(step, result = ""))).workflowDisclosureToolOutput())
+        val work = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), "进行中", running = true)
+        val legacy = ChatTurnUi.Assistant("turn", workProcess = work)
+        val projected = step.copy(categoryDetails = ToolCategoryDetailsUi(heading = "fixture", notice = "",
+            rich = ToolRichDetailsUi(prose = ToolDisclosureUi("结果", "new tool text"))))
+        assertNotEquals("Legacy results need not populate Tool.result", legacy.workflowDisclosureToolOutput(),
+            legacy.copy(workProcess = work.copy(segments = listOf(WorkSegmentUi(steps = listOf(projected)))))
+                .workflowDisclosureToolOutput())
+    }
+
+    @Test fun toolOutputFingerprintIgnoresControlOnlyUpdates() {
+        val step = WorkStepUi("tool", "fixture", "same", WorkStepState.PENDING, activity = ToolActivityUi.RUNNING)
+        val work = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(step))), "执行中", running = true)
+        val before = ChatTurnUi.Assistant("turn", workProcess = work, content = listOf(MessageContentUi.Tool(step)))
+        val paused = step.copy(activity = ToolActivityUi.PAUSED)
+        val after = before.copy(workProcess = work.copy(segments = listOf(WorkSegmentUi(steps = listOf(paused))),
+            summary = "已暂停", running = false, controlActivity = ToolActivityUi.PAUSED),
+            content = listOf(MessageContentUi.Tool(paused)))
+        assertEquals(before.workflowDisclosureToolOutput(), after.workflowDisclosureToolOutput())
+    }
+
 }

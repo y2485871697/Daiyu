@@ -515,7 +515,8 @@ internal fun ChatMessageList(
             output = { itemKey ->
                 currentAssistants[itemKey]?.let { turn ->
                     listOf(currentTailKey, turn.status, turn.finalText,
-                        turn.content.filterIsInstance<MessageContentUi.Text>(), turn.finalContent, turn.leadingContent)
+                        turn.content.filterIsInstance<MessageContentUi.Text>(), turn.finalContent, turn.leadingContent,
+                        turn.workflowDisclosureToolOutput())
                 }
             },
             outputPending = { itemKey -> nestedStates[itemKey]?.textClearance?.typingPending == true },
@@ -1544,4 +1545,12 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
                     }, textBody = textBody)
             }
         }, toolContent = toolContent)
+}
+
+internal fun ChatTurnUi.Assistant.workflowDisclosureToolOutput(): List<Any?> {
+    fun stepOutput(step: WorkStepUi): List<Any?> = listOf(step.renderKey, step.detail, step.sections, step.categoryDetails)
+    return listOf(
+        content.filterIsInstance<MessageContentUi.Tool>().map { listOf(it.result, stepOutput(it.step)) },
+        workProcess?.segments.orEmpty().flatMap { it.steps }.map { stepOutput(it) },
+    )
 }

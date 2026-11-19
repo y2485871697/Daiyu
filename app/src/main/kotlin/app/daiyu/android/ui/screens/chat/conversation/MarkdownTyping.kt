@@ -156,6 +156,9 @@ internal fun rememberMarkdownReveal(
         } }
     }
     val motion = remember(identity, resetEpoch, retainedLane) { retainedLane?.motion ?: MarkdownTypingState(baseline) }
+    remember(motion, sources, playback?.paused) {
+        motion.receive(sources, System.nanoTime(), paused = playback?.paused == true)
+    }
     val exactProjection = projection?.sources == sources.map { it.text } &&
         projection?.windows.orEmpty() == sources.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty()
     val targetTerminal = terminal && exactProjection

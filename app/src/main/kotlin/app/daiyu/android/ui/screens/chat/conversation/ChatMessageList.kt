@@ -512,6 +512,13 @@ internal fun ChatMessageList(
                 else list.localPositionOf(placed, Offset.Zero).y + viewport.contentHeight - viewport.scrollOffset.roundToInt() -
                     (list.size.height - currentOcclusionPx - currentFollowClearancePx)
             },
+            output = { itemKey ->
+                currentAssistants[itemKey]?.let { turn ->
+                    listOf(currentTailKey, turn.status, turn.finalText,
+                        turn.content.filterIsInstance<MessageContentUi.Text>(), turn.finalContent, turn.leadingContent)
+                }
+            },
+            outputPending = { itemKey -> nestedStates[itemKey]?.textClearance?.typingPending == true },
             correctAnchor = { itemKey, remaining ->
                 var consumed = 0f
                 if (clearanceLayout.active && !clearanceLayout.correcting && nestedStates[itemKey]?.migrating != true) {
@@ -532,6 +539,10 @@ internal fun ChatMessageList(
                 consumed
             },
         )
+    }
+    LaunchedEffect(disclosureViewport) {
+        snapshotFlow { disclosureViewport.active?.let { it to it.outputChanged() } }
+            .collect { state -> if (state?.second == true) state.first.releaseForOutput() }
     }
     fun canFollowBottom(): Boolean =
         !currentRetainingRows && !initialPositionPending && pageActive && scrollResumed && followBottom && !currentDragging && currentTailIndex >= 0 &&

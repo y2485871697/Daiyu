@@ -244,6 +244,22 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertIn('animateNested(header, opening = false, frames = 3)', source)
         self.assertIn('animateNested("work-process-header", opening = false)', source)
 
+    def test_settled_upper_reading_anchor_yields_only_to_output_or_interaction(self):
+        motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
+        for token in ('anchoredOutput = viewport.output(context.itemKey)',
+                      'expanded && anchorAtTop && borrowedBoundary == null && !outputChanged()',
+                      'context.viewport.outputPending(context.itemKey)',
+                      'context.viewport.output(context.itemKey) != anchoredOutput',
+                      'fun releaseForOutput()', 'releaseAnchor(force = false)'):
+            self.assertIn(token, motion)
+        chat = (CHAT / 'ChatMessageList.kt').read_text()
+        for token in ('turn.content.filterIsInstance<MessageContentUi.Text>(), turn.finalContent, turn.leadingContent',
+                      'nestedStates[itemKey]?.textClearance?.typingPending == true',
+                      'disclosureViewport.active?.let { it to it.outputChanged() }',
+                      'state.first.releaseForOutput()'):
+            self.assertIn(token, chat)
+
+
 
 if __name__ == '__main__':
     unittest.main()

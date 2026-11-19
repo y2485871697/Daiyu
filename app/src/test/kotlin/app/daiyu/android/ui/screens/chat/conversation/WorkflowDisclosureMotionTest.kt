@@ -242,6 +242,22 @@ class WorkflowDisclosureMotionTest {
         assertEquals("Closing before the effect uses the last placed pixels", 580, extent.measure(false, 580))
     }
 
+    @Test fun upperAnchorYieldsToReceivedSourcesAndAlreadyPendingTyping() {
+        var received: String? = null
+        var pending = false
+        val viewportState = WorkflowDisclosureViewport({ true }, { viewport }, {}, { true }, { _, _ -> 0f },
+            output = { received }, outputPending = { pending })
+        val motion = WorkflowDisclosureMotion(WorkflowDisclosureContext(viewportState, "turn") { true })
+        assertFalse(motion.outputChanged())
+        received = "new"
+        assertTrue("A new source must be observed before its first visible frame", motion.outputChanged())
+        received = null
+        pending = true
+        assertTrue("Existing backlog must not need another network delta", motion.outputChanged())
+        pending = false
+        assertFalse(motion.outputChanged())
+    }
+
     @Test fun downwardDisclosureDoesNotFollowOverflowFromLaterTurnContent() {
         val clearance = workflowDisclosureTopClearance(4f, 136f, 305f)
         assertEquals(0f, maxOf(0f, clearance), 0f)

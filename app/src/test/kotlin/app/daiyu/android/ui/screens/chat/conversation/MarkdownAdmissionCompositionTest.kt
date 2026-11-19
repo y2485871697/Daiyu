@@ -260,7 +260,7 @@ class MarkdownAdmissionCompositionTest {
             assertFalse(reveal!!.settled)
             admitted.value = true
             repeat(5) { frame() }
-            assertEquals("Admission exposes the complete received body", text.length, reveal!!.limit("answer"))
+            assertTrue("Admission must type a strict received prefix", reveal!!.limit("answer") in 1 until text.length)
             assertTrue(advances > 0)
             complete.value = true
             repeat(25) { frame() }

@@ -51,6 +51,8 @@ internal class WorkflowDisclosureViewport(
     val canAnchor: () -> Boolean,
     val correctAnchor: (String, () -> Float) -> Float,
     val anchorClearance: (String) -> Float? = { null },
+    val output: (String) -> Any? = { null },
+    val outputPending: (String) -> Boolean = { false },
 ) {
     var followingOnPress = false
     var diagnostics: () -> String = { "" }
@@ -114,6 +116,7 @@ internal class WorkflowDisclosureMotion(
     private var anchorRequester: WorkflowDisclosureMotion? = null
     private var borrowedBoundary: WorkflowDisclosureMotion? = null
     private var finishPending = false
+    private var anchoredOutput: Any? = null
     var animationIdle = true
 
     val headerModifier: Modifier get() = Modifier.onGloballyPositioned {
@@ -257,6 +260,7 @@ internal class WorkflowDisclosureMotion(
         anchorRequester = requester.takeIf { it !== this }
         anchorAtTop = top
         anchorGesture = viewport.gesture
+        anchoredOutput = viewport.output(context.itemKey)
         container?.takeIf { it.isAttached }?.let {
             anchorTop = it.positionInWindow().y
             anchorBottom = anchorTop + it.size.height
@@ -286,10 +290,28 @@ internal class WorkflowDisclosureMotion(
 
     private fun finishIfSettled() {
         if (!finishPending || !animationIdle) return
+        if (expanded && anchorAtTop && borrowedBoundary == null && outputChanged()) {
+            finishPending = false
+            releaseAnchor(force = false)
+            return
+        }
         val boundary = borrowedBoundary ?: this
         if (!boundary.correctAnchor(settling = true)) return
         finishPending = false
+        if (expanded && anchorAtTop && borrowedBoundary == null && !outputChanged()) return
         releaseAnchor(force = false)
+    }
+
+    fun outputChanged(): Boolean {
+        val context = context ?: return false
+        return context.viewport.outputPending(context.itemKey) ||
+            context.viewport.output(context.itemKey) != anchoredOutput
+    }
+
+    fun releaseForOutput() {
+        if (animationIdle && !finishPending && expanded && anchorAtTop && borrowedBoundary == null && outputChanged()) {
+            releaseAnchor(force = false)
+        }
     }
 
     fun dispose() { releaseAnchor(force = true) }

@@ -543,8 +543,8 @@ class MarkdownRevealTest {
             state.pause(target)
             val before = state.visible(target)
             state.receive(listOf(source("字".repeat(300))), 4_000_000_000L + delay, paused = true)
-            state.receive(listOf(source("字".repeat(300))), 5_000_000_000L + delay)
-            val next = state.update(listOf(part("字".repeat(300))), 0, true, false)!!
+            state.receive(listOf(source("字".repeat(400))), 5_000_000_000L + delay)
+            val next = state.update(listOf(part("字".repeat(400))), 0, true, false)!!
             assertEquals(before, next.start)
             return (0..10).map { frame -> state.advance(next, 6_000_000_000L + delay + frame * 16_000_000L) - before }
         }
@@ -605,5 +605,48 @@ class MarkdownRevealTest {
         assertEquals(prefix.length + 1, state.advance(next, 3_000_000_000L))
         assertTrue(state.advance(next, 3_016_000_000L) in prefix.length + 20 until text.length)
         assertEquals(text.length, drain(state, next, 3_032_000_000L))
+    }
+
+    @Test fun firstLiveAppendAroundPauseBootstrapsFromTheBatchNotTheHistoricalPrefix() {
+        fun resumed(prefixLength: Int, receivedWhilePaused: Boolean, delay: Long): List<Int> {
+            val prefix = "旧".repeat(prefixLength)
+            val state = MarkdownTypingState(listOf(source(prefix)))
+            state.receive(listOf(source(prefix)), 1_000_000_000L)
+            val initial = state.update(listOf(part(prefix)), prefix.length, true, false)!!
+            state.receive(listOf(source(prefix)), 2_000_000_000L, paused = true)
+            state.pause(initial)
+            val text = prefix + "字".repeat(500)
+            if (receivedWhilePaused) state.receive(listOf(source(text)), 3_000_000_000L + delay, paused = true)
+            val paused = state.update(listOf(part(if (receivedWhilePaused) text else prefix)), prefix.length,
+                false, receivedWhilePaused, paceTerminal = true)!!
+            assertEquals("Receiving while paused cannot move the visible frontier", prefix.length, state.visible(paused))
+            state.pause(paused)
+            state.receive(listOf(source(text)), 4_000_000_000L + delay)
+            val next = state.update(listOf(part(text)), prefix.length, false, true, paceTerminal = true)!!
+            assertEquals(prefix.length, next.start)
+            val frames = (0..2).map { state.advance(next, 5_000_000_000L + delay + it * 16_000_000L) - prefix.length }
+            assertEquals(1, frames.first())
+            assertTrue("The first live batch must retain a real typed intermediate frame", frames[1] in 20 until 500)
+            assertEquals(text.length, drain(state, next, 5_048_000_000L + delay))
+            return frames
+        }
+        val ordinary = resumed(7, false, 0)
+        for (prefix in listOf(7, 5_000)) for (duringPause in listOf(false, true)) {
+            assertEquals("Historical prefix size must not set the first live rate", ordinary, resumed(prefix, duringPause, 0))
+            assertEquals("Paused time must not buy catch-up", ordinary, resumed(prefix, duringPause, 60_000_000_000L))
+        }
+    }
+
+    @Test fun pauseBeforeParsingPreservesAnAlreadyMeasuredRawReceiptRate() {
+        val prefix = "prefix "
+        val state = MarkdownTypingState(listOf(source(prefix)))
+        state.receive(listOf(source(prefix + "字".repeat(100))), 1_000_000_000L)
+        state.receive(listOf(source(prefix + "字".repeat(200))), 2_000_000_000L)
+        state.receive(listOf(source(prefix + "字".repeat(300))), 3_000_000_000L, paused = true)
+        state.receive(listOf(source(prefix + "字".repeat(400))), 64_000_000_000L)
+        val next = state.update(listOf(part(prefix + "字".repeat(400))), prefix.length, true, false)!!
+        val frames = (0..10).map { state.advance(next, 65_000_000_000L + it * 16_000_000L) - prefix.length }
+        assertEquals(1, frames.first())
+        assertTrue("A sampled raw rate is real even before its first parsed frame", frames.last() in 15..20)
     }
 }

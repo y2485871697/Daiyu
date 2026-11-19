@@ -533,7 +533,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 compactingRuntime = selectedRuntime
                 if (cancelled()) return false
                 selectedRuntime.beginCompaction(compactionBoundary)
-                val before = effectiveHistory()
+                val before = meterHistory()
                 val historyLocal = selectedRuntime.localTokens(before, (tool as? CatalogTool)?.definitions.orEmpty())
                 val anchor = contextState?.calibration ?: contextState?.input
                 val local = anchor?.let { (it.localTokens + historyLocal - it.historyTokens).coerceAtLeast(0) } ?: historyLocal

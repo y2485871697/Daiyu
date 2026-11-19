@@ -113,6 +113,56 @@ class RunnerCompressionRefreshTest {
         }
     }
 
+    @Test fun initialOverflowDoesNotRetainAnEmptyAssistantInTheCompactedHistory() {
+        for (atOpen in listOf(false, true)) {
+            val store = Store()
+            val tail = user("tail")
+            var opens = 0
+            var summaries = 0
+            val runtime = object : RunContextRuntime {
+                override val automatic = true
+                override val windowTokens = 1000L
+                override val pressureThresholdTokens = 800L
+                override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L
+                override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
+                    request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
+                    admit: () -> Unit, cancelled: () -> Boolean): List<Message> {
+                    assertEquals(listOf(user("source"), tail), history)
+                    summaries++
+                    admit()
+                    return listOf(user("summary"), history.last())
+                }
+            }
+            val model = ModelPort {
+                opens++
+                if (opens == 1 && atOpen) throw ModelRequestException(ModelFailure.CONTEXT_LIMIT)
+                if (opens == 2) assertEquals(listOf(user("summary"), tail), it)
+                object : ModelSession {
+                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        assertTrue(outputs.isEmpty())
+                        if (opens == 1) throw ModelRequestException(ModelFailure.CONTEXT_LIMIT)
+                        sink(ModelEvent.TextFinal("answer", "done"))
+                    }
+                    override fun cancel() {}
+                }
+            }
+            val result = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+                BatteryTool { error("overflow recovery cannot execute tools") },
+                RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}
+                .run(initial, listOf(user("source"), tail))
+            assertEquals(result.error, RunStatus.COMPLETED, result.status)
+            assertEquals(2, opens)
+            assertEquals(1, summaries)
+            val terminal = store.checkpoints.last()
+            assertEquals(ExecutionPhase.TERMINAL, terminal.phase)
+            assertEquals(1, terminal.context!!.compactions)
+            assertEquals(listOf(user("summary"), tail), terminal.history.dropLast(1))
+            val replies = terminal.history.filter { it.id == initial.id }
+            assertEquals(1, replies.size)
+            assertEquals(listOf(MessageBlock.Text("answer", "done")), replies.single().blocks)
+        }
+    }
+
     @Test fun manualCompressionReceivesNewConfigurationWhileAutomaticIsOff() {
         var saved = Choice(false, "old")
         val runtime = Runtime(saved, { saved })

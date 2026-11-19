@@ -55,7 +55,20 @@ class WorkflowNarrationContract(unittest.TestCase):
         self.assertIn('precedingReady && entryVisible(block.workflowKey(index))', content)
         self.assertIn('entry.precedingText.all { currentReveal.ready(it.id, it.text, it.window) }', narration)
         self.assertEqual(2, narration.count('withFrameNanos { }'))
-        self.assertIn('LaunchedEffect(admission, baselineOnly, paused, revealResetEpoch)', narration)
+        self.assertIn('val playback = LocalReplyPlayback.current', narration)
+        self.assertIn('val displayPaused = paused || playback?.paused == true', narration)
+        self.assertIn(
+            'rememberMarkdownReveal(sources, projection, streaming = running && !displayPaused,',
+            narration,
+        )
+        self.assertIn(
+            'LaunchedEffect(admission, baselineOnly, displayPaused, revealResetEpoch) {\n'
+            '            val gate = admission ?: return@LaunchedEffect\n'
+            '            if (baselineOnly || displayPaused) return@LaunchedEffect\n'
+            '            var presentedText: List<MarkdownTypingSource>? = null\n'
+            '            snapshotFlow {',
+            narration,
+        )
         self.assertIn('val currentPlan by rememberUpdatedState(plan)', narration)
         self.assertIn('currentPlan.firstOrNull { !gate.contains(it.key) }', narration)
         self.assertIn('gate.admit(listOf(candidate))', narration)

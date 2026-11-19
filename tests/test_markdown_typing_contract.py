@@ -45,9 +45,27 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("while (shown < end)", self.typing)
 
     def test_mount_baseline_and_part_identity_are_not_text_guesses(self):
-        for token in ["remember(identity, resetEpoch) { (initialBaseline ?: sources).toList() }", "MarkdownTypingSource(it.itemId, it.text, it.markdownWindow)",
-                      "rememberMarkdownProjection(baseline.map { it.text },", "remember(identity, resetEpoch) { MarkdownTypingState(baseline) }"]:
+        for token in [
+            "val retainedLane = remember(playback?.control, presentationLane, identity, resetEpoch) {\n"
+            "        presentationLane?.let { slot -> playback?.control?.lane(slot, identity, resetEpoch) { initialBaseline ?: sources } }\n"
+            "    }",
+            "val baseline = remember(identity, resetEpoch, retainedLane) { retainedLane?.baseline ?: (initialBaseline ?: sources).toList() }",
+            "MarkdownTypingSource(it.itemId, it.text, it.markdownWindow)",
+            "rememberMarkdownProjection(baseline.map { it.text },",
+            "val motion = remember(identity, resetEpoch, retainedLane) { retainedLane?.motion ?: MarkdownTypingState(baseline) }",
+        ]:
             self.assertIn(token, self.typing)
+        control = (BASE / "ReplyPresentationControl.kt").read_text()
+        for token in [
+            "private data class LaneKey(val slot: Any, val parser: MarkdownParserIdentity, val epoch: Long)",
+            "private val lanes = mutableMapOf<LaneKey, ReplyTypingLane>()",
+            "fun lane(slot: Any, parser: MarkdownParserIdentity, epoch: Long, baseline: () -> List<MarkdownTypingSource>): ReplyTypingLane =\n"
+            "        lanes.getOrPut(LaneKey(slot, parser, epoch)) { ReplyTypingLane(baseline().toList()) }",
+            "internal class ReplyTypingLane(val baseline: List<MarkdownTypingSource>) {\n"
+            "    val motion = MarkdownTypingState(baseline)\n"
+            "}",
+        ]:
+            self.assertIn(token, control)
         workflow = (BASE / "AssistantWorkflowContent.kt").read_text()
         fallback = workflow.split('    val narration = mutableSetOf<String>()', 1)[1].split(
             '\ninternal fun MessageContentUi.workflowKey', 1)[0]

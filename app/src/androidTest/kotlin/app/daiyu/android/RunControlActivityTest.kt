@@ -119,11 +119,13 @@ class RunControlActivityTest : WiredActivityTestCase() {
         try {
             target.performTouchInput { down(center) }
             first.release.countDown(); awaitControl("old owner completed") { fixture.controller.active == null }
-            val second = fixture.session(holdSeconds = 120); val conversation = fixture.database.conversations().single()
+            val second = fixture.session("乙".repeat(400), holdSeconds = 120); val conversation = fixture.database.conversations().single()
             assertNotNull(fixture.controller.send(conversation, "next user"))
             val next = checkNotNull(fixture.controller.active); assertTrue(second.entered.await(5, TimeUnit.SECONDS))
             ui.mainClock.advanceTimeBy(32)
             controlMain { oldLong() }
+            ui.mainClock.advanceTimeBy(android.view.ViewConfiguration.getLongPressTimeout().toLong() + 200L)
+            ui.waitForIdle()
             controlMain {
                 assertFalse(checkNotNull(fixture.controller.runState(next)) { "next run disappeared before release" }.pauseRequested)
                 assertEquals(1L, second.cancelled.count)
@@ -135,15 +137,20 @@ class RunControlActivityTest : WiredActivityTestCase() {
                 assertEquals(1L, second.cancelled.count)
             }
             second.release.countDown(); awaitControl("next run unaffected") { fixture.controller.active == null }
+            ui.waitUntil(10_000) {
+                ui.mainClock.advanceTimeBy(32)
+                visibleTailCharacters('乙') in 1 until 400
+            }
+            node("chat-control").assertContentDescriptionEquals("暂停")
             assertEquals(RunStatus.COMPLETED, fixture.database.messages(old.conversationId).last().second.status)
             assertEquals(2, fixture.opens.get())
         } finally { ui.mainClock.autoAdvance = true }
     }
 
-    private fun visibleTailCharacters(): Int = ui.onAllNodes(
+    private fun visibleTailCharacters(character: Char = '甲'): Int = ui.onAllNodes(
         SemanticsMatcher.keyIsDefined(SemanticsProperties.Text), useUnmergedTree = true)
         .fetchSemanticsNodes().flatMap { it.config[SemanticsProperties.Text] }
-        .sumOf { text -> text.text.count { it == '甲' } }
+        .sumOf { text -> text.text.count { it == character } }
 
     private fun completedTail(): Message {
         val session = fixture.session("终态输出" + "甲".repeat(400))
@@ -159,6 +166,47 @@ class RunControlActivityTest : WiredActivityTestCase() {
         node("chat-control").assertIsEnabled().assertContentDescriptionEquals("暂停")
         assertEquals(RunStatus.COMPLETED, fixture.database.messages(owner.conversationId).last().second.status)
         return owner
+    }
+
+    fun testPresentationGestureCannotRetargetNextRunBeforeRelease() = presentationGestureCannotRetargetNextRun(false)
+
+    fun testPresentationLongPressCannotFinishTheNextReply() = presentationGestureCannotRetargetNextRun(true)
+
+    private fun presentationGestureCannotRetargetNextRun(longPress: Boolean) {
+        try {
+            val old = completedTail()
+            val root = ui.onNode(isRoot() and hasAnyDescendant(hasTestTag("chat-draft")))
+            node("chat-control").performTouchInput { down(center) }
+            val nextSession = fixture.session("乙".repeat(400), holdSeconds = 120)
+            val conversation = fixture.database.conversations().single()
+            assertNotNull(fixture.controller.send(conversation, "next user"))
+            val next = checkNotNull(fixture.controller.active)
+            assertTrue(nextSession.entered.await(5, TimeUnit.SECONDS))
+            ui.mainClock.advanceTimeBy(32)
+            if (longPress) {
+                ui.mainClock.advanceTimeBy(android.view.ViewConfiguration.getLongPressTimeout().toLong() + 200L)
+                ui.waitForIdle()
+            }
+            controlMain {
+                assertFalse(checkNotNull(fixture.controller.runState(next)).pauseRequested)
+            }
+            root.performTouchInput { up() }
+            ui.mainClock.advanceTimeBy(32)
+            controlMain {
+                assertFalse(checkNotNull(fixture.controller.runState(next)).pauseRequested)
+                assertEquals(1L, nextSession.cancelled.count)
+            }
+            nextSession.release.countDown()
+            awaitControl("next run survives the presentation gesture") { fixture.controller.active == null }
+            ui.waitUntil(10_000) {
+                ui.mainClock.advanceTimeBy(32)
+                visibleTailCharacters('乙') in 1 until 400
+            }
+            node("chat-control").assertContentDescriptionEquals("暂停")
+            assertEquals(2, fixture.opens.get())
+            assertEquals(RunStatus.COMPLETED,
+                fixture.database.messages(old.conversationId).first { it.second.id == old.id }.second.status)
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
     fun testCompletedRunKeepsRealPresentationPauseAndResumeUntilTheLastCharacter() {

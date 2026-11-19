@@ -201,8 +201,6 @@ internal fun DaiyuChatScreen(
             presentation.finish()
             if (runtimePhase != ComposerPhase.IDLE) actions.onPrimaryLongPress()
         },
-        onControlPress = { if (!presentationOnly) actions.onControlPress() },
-        onControlRelease = { if (!presentationOnly) actions.onControlRelease() },
         onSend = { text -> presentation.finish(); actions.onSend(text) },
     )
     val userMessageEntrance = suppliedUserMessageEntrance ?:

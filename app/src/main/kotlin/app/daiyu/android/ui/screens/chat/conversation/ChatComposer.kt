@@ -325,6 +325,8 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             }
                         }
                         val primaryMotion = rememberChatActionMotion()
+                        val pressedControlActions = remember { mutableStateOf<ComposerControlPress?>(null) }
+                        val controlActions = pressedControlActions.value?.actions ?: actions
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(15.dp)) {
                             app.daiyu.android.balance.ui.ProviderBalanceIndicator(
                                 state = balanceState, modifier = Modifier.testTag("chat-composer-provider-balance")
@@ -333,7 +335,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                             ChatIconButton(primaryIcon, primaryLabel, {
                                 if (preparingSend) actions.onCancelSend()
                                 else if (compressionBlocked) actions.onCompressionSendBlocked()
-                                else if (!textAction) actions.onPrimaryTap()
+                                else if (!textAction) controlActions.onPrimaryTap()
                                 else {
                                     lifecycleDismissInProgress = true
                                     try { hideChatInputIme(focus, keyboard, view) }
@@ -345,8 +347,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 preparingSend -> "text-send-cancel"
                                 textAction || state.phase == ComposerPhase.IDLE -> "chat-send"
                                 else -> "chat-control"
-                            }).then(if (preparingSend) Modifier else Modifier.controlGesture(actions, pageActive && primaryEnabled,
-                                state.controlOwnerKey)),
+                            }).then(if (preparingSend) Modifier else Modifier.controlGesture(actions, pageActive && primaryEnabled, pressedControlActions)),
                                 containerColor = if (compressionBlocked) MiuixTheme.colorScheme.onSurface.copy(alpha = .12f)
                                     else (if (preparingSend || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContainer else appearance.sendContainer)
                                         .copy(alpha = if (primaryVisualEnabled || (!dark && state.phase == ComposerPhase.IDLE)) 1f else .4f),
@@ -354,7 +355,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
                                 tint = if (compressionBlocked) MiuixTheme.colorScheme.onSurface
                                     else if (preparingSend || textAction || state.phase != ComposerPhase.IDLE) appearance.appendContent else appearance.sendContent,
                                 iconSize = if (preparingSend || !textAction && state.phase != ComposerPhase.IDLE) 14.dp else 16.dp,
-                                onLongClick = if (preparingSend) actions.onCancelSend else if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE) actions.onPrimaryLongPress else null)
+                                onLongClick = if (preparingSend) actions.onCancelSend else if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE) controlActions.onPrimaryLongPress else null)
                         }
                     }
                     Box {
@@ -390,18 +391,28 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
     ChatVoiceModeMenu(pageActive && voiceModes && voiceMenuEnabled && callUi == null, { voiceModes = false }, actions.onMenuAction, state.voiceMode, state.voiceModes)
 }
 
+private class ComposerControlPress(val actions: ChatScreenActions)
+
 @Composable
-private fun Modifier.controlGesture(actions: ChatScreenActions, enabled: Boolean, owner: String?): Modifier {
+private fun Modifier.controlGesture(actions: ChatScreenActions, enabled: Boolean,
+    pressed: androidx.compose.runtime.MutableState<ComposerControlPress?>): Modifier {
+    val view = LocalView.current
     val latest by rememberUpdatedState(actions)
-    return pointerInput(enabled, owner) {
-        if (!enabled) return@pointerInput
+    val enabledAtDown by rememberUpdatedState(enabled)
+    return pointerInput(Unit) {
         awaitEachGesture {
             awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
-            val pressedActions = latest
+            if (!enabledAtDown) return@awaitEachGesture
+            val press = ComposerControlPress(latest)
+            val pressedActions = press.actions
+            pressed.value = press
             pressedActions.onControlPress()
             try {
                 do { val event = awaitPointerEvent(PointerEventPass.Initial) } while (event.changes.any { it.pressed })
-            } finally { pressedActions.onControlRelease() }
+            } finally {
+                pressedActions.onControlRelease()
+                view.post { if (pressed.value === press) pressed.value = null }
+            }
         }
     }
 }

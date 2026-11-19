@@ -14,11 +14,31 @@ class RunControlsContractTest(unittest.TestCase):
         model = (APP / 'ui/screens/chat/conversation/ChatScreenModels.kt').read_text()
         self.assertIn('val textAction = hasText', composer)
         self.assertIn('else actions.onSupplement(state.text)', composer)
-        self.assertIn('onLongClick = if (preparingSend) actions.onCancelSend else if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE)', composer)
+        self.assertIn('onLongClick = if (preparingSend) actions.onCancelSend else if (textAction) ({}) else if (state.phase != ComposerPhase.IDLE) controlActions.onPrimaryLongPress', composer)
         self.assertIn('phase == ComposerPhase.IDLE || presentationOnly -> text.isNotBlank() || editingMessageCanSubmit || imageSendAvailable || videoSendAvailable', model)
         self.assertIn('else -> text.isNotBlank() && supplementAvailable', model)
         self.assertIn('if (state.phase == ComposerPhase.IDLE || state.presentationOnly) actions.onSend(state.text)', composer)
         self.assertIn('textAction && state.phase != ComposerPhase.IDLE && !state.presentationOnly -> ChatPreviewIcons.Append', composer)
+
+    def test_control_press_keeps_its_owner_until_physical_release(self):
+        composer = (APP / 'ui/screens/chat/conversation/ChatComposer.kt').read_text()
+        screen = (APP / 'ui/screens/chat/conversation/ChatScreen.kt').read_text()
+        gesture = composer.split('private fun Modifier.controlGesture(', 1)[1].split('@OptIn(', 1)[0]
+        self.assertIn('val enabledAtDown by rememberUpdatedState(enabled)', gesture)
+        self.assertIn('return pointerInput(Unit)', gesture)
+        self.assertNotIn('pointerInput(enabled', gesture)
+        self.assertIn('if (!enabledAtDown) return@awaitEachGesture', gesture)
+        self.assertLess(gesture.index('awaitFirstDown('), gesture.index('val press = ComposerControlPress(latest)'))
+        self.assertIn('pressedActions.onControlPress()', gesture)
+        self.assertIn('pressedActions.onControlRelease()', gesture)
+        self.assertIn('val pressedActions = press.actions', gesture)
+        self.assertIn('pressed.value = press', gesture)
+        self.assertIn('view.post { if (pressed.value === press) pressed.value = null }', gesture)
+        self.assertIn('val controlActions = pressedControlActions.value?.actions ?: actions', composer)
+        self.assertIn('else if (!textAction) controlActions.onPrimaryTap()', composer)
+        self.assertIn('else if (state.phase != ComposerPhase.IDLE) controlActions.onPrimaryLongPress else null)', composer)
+        self.assertNotIn('onControlPress = { if (!presentationOnly)', screen)
+        self.assertNotIn('onControlRelease = { if (!presentationOnly)', screen)
 
     def test_append_outline_ink_center_and_stroke_stay_inside_viewport(self):
         icons = (APP / 'ui/icons/ChatPreviewIcons.kt').read_text()

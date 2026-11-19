@@ -28,7 +28,7 @@ class ChatImeMotionContractTest(unittest.TestCase):
     def test_send_and_append_dismiss_before_original_actions_not_pause(self):
         composer = (CHAT / 'ChatComposer.kt').read_text()
         click = composer.split('ChatIconButton(primaryIcon, primaryLabel, {', 1)[1].split('}, Modifier.size(32.dp)', 1)[0]
-        self.assertIn('if (!textAction) actions.onPrimaryTap()', click)
+        self.assertIn('if (!textAction) controlActions.onPrimaryTap()', click)
         self.assertIn('finally { lifecycleDismissInProgress = false }', click)
         for call in ('actions.onSend(state.text)', 'actions.onSupplement(state.text)'):
             self.assertLess(click.index('hideChatInputIme(focus, keyboard, view)'), click.index(call))

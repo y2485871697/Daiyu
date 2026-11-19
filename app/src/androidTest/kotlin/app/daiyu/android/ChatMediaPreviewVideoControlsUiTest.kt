@@ -260,9 +260,10 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
         val original = file.readBytes()
         val accent = Color(0xFF58C9D4)
         var opened by mutableStateOf(true)
+        val releaseOriginal = kotlinx.coroutines.CompletableDeferred<Unit>()
         val item = app.daiyu.android.ui.media.ChatMediaPreviewItem(
             "real-video-preview", "video/mp4", file.name, { null },
-            { app.daiyu.android.ui.media.ChatMediaPreviewOriginal(file.inputStream(), "video/mp4", file.name) })
+            { releaseOriginal.await(); app.daiyu.android.ui.media.ChatMediaPreviewOriginal(file.inputStream(), "video/mp4", file.name) })
         try {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -289,14 +290,26 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
                 viewport.right - downloadBounds.right >= minimumInset - 1.5f)
             assertTrue("download=$downloadBounds viewport=$viewport",
                 downloadBounds.top - viewport.top >= minimumInset - 1.5f)
-            node("chat-media-video-surface").performClick()
-            ui.waitUntil(20_000) {
-                ui.onAllNodes(hasTestTag("chat-media-video-play-pause") and hasClickAction() and isEnabled())
-                    .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1 &&
-                    ui.onAllNodes(hasTestTag("chat-media-video-progress") and isEnabled())
+            val autoAdvance = ui.mainClock.autoAdvance
+            try {
+                ui.mainClock.autoAdvance = false
+                node("chat-media-video-surface").performClick()
+                releaseOriginal.complete(Unit)
+                ui.waitUntil(20_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.onAllNodes(hasTestTag("chat-media-video-play-pause") and hasClickAction() and isEnabled())
+                        .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1 &&
+                        ui.onAllNodes(hasTestTag("chat-media-video-progress") and isEnabled())
+                            .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
+                }
+                ui.onNode(hasTestTag("chat-media-video-play-pause") and hasContentDescription("暂停") and
+                    isEnabled() and hasClickAction()).assertIsDisplayed().performClick()
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.onAllNodesWithContentDescription("播放")
                         .fetchSemanticsNodes(atLeastOneRootRequired = false).size == 1
-            }
-            node("chat-media-video-play-pause").assertIsEnabled().assertHasClickAction().performClick()
+                }
+            } finally { ui.mainClock.autoAdvance = autoAdvance }
             ui.onNodeWithContentDescription("播放").assertIsDisplayed()
             assertAccentInk(node("chat-media-video-play-pause"), accent)
             assertAccentInk(node("chat-media-video-orientation"), accent)
@@ -312,17 +325,26 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
             assertTrue("native seek must reach the requested region", pausedNativePosition in 10_000..17_000)
             val pausedTime = node("chat-media-video-time").fetchSemanticsNode().config[
                 androidx.compose.ui.semantics.SemanticsProperties.Text].toString()
-            instrumentation.runOnMainSync {
-                instrumentation.callActivityOnPause(activity)
-                instrumentation.callActivityOnStop(activity)
+            val host = activity
+            mainThread { assertTrue("preview host task must enter background", host.moveTaskToBack(true)) }
+            ui.waitUntil(5_000) {
+                var stopped = false
+                instrumentation.runOnMainSync {
+                    assertFalse(host.isDestroyed)
+                    assertFalse(host.isFinishing)
+                    stopped = host.lifecycle.currentState == androidx.lifecycle.Lifecycle.State.CREATED
+                }
+                stopped
             }
-            awaitVisualIdle()
-            instrumentation.runOnMainSync {
-                instrumentation.callActivityOnRestart(activity)
-                instrumentation.callActivityOnStart(activity)
-                instrumentation.callActivityOnResume(activity)
+            awaitHomeWindowSettled()
+            mainThread {
+                host.startActivity(android.content.Intent(host, MainActivity::class.java).addFlags(
+                    android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                        android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
             }
-            awaitVisualIdle()
+            awaitHostWindowFocus(host)
+            mainThread { assertSame(host, activity); assertFalse(host.isDestroyed); assertFalse(host.isFinishing) }
+            awaitUniqueTag("chat-media-preview-viewport")
             node("chat-media-preview-viewport").assertIsDisplayed()
             node("chat-media-video-surface").performClick()
             ui.waitUntil(20_000) {
@@ -527,40 +549,55 @@ class ChatMediaPreviewVideoControlsUiTest : WiredActivityTestCase(object : Motio
 
     private fun assertProgressHandle(fraction: Float, accent: Color) {
         val track = ui.onNodeWithTag("chat-media-video-progress-track", useUnmergedTree = true).assertExists()
-        val bounds = track.fetchSemanticsNode().boundsInRoot
-        val image = try {
-            assertTrue("progress track must have positive bounds: $bounds", bounds.width > 0f && bounds.height > 0f)
-            track.captureToImage()
-        } catch (failure: AssertionError) {
-            val directory = java.io.File(activity.getExternalFilesDir(null),
-                "visual-diagnostics/video-progress-track").apply { mkdirs() }
-            java.io.File(directory, "state.txt").writeText("fraction=$fraction bounds=$bounds " +
-                "clock=${ui.mainClock.currentTime} autoAdvance=${ui.mainClock.autoAdvance}\n" +
-                ui.onRoot(useUnmergedTree = true).printToString())
-            instrumentation.uiAutomation.takeScreenshot()?.let { screen ->
-                try {
-                    java.io.File(directory, "screen.png").outputStream().use {
-                        screen.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
-                    }
-                } finally { screen.recycle() }
-            }
-            throw failure
-        }
+        val semantics = track.fetchSemanticsNode()
+        val bounds = semantics.boundsInRoot
+        val screenPosition = semantics.positionOnScreen
+        var image: androidx.compose.ui.graphics.ImageBitmap? = null
+        var sample = "not sampled"
         try {
-            val pixels = image.toPixelMap()
-            val expected = (fraction * (pixels.width - 1)).toInt()
-            val y = pixels.height / 2
-            val radius = with(ui.density) { 1.dp.toPx() }.toInt().coerceAtLeast(1)
-            val handleY = y - with(ui.density) { 6.dp.toPx() }.toInt()
-            var ink = 0
-            for (xx in (expected - radius).coerceAtLeast(0)..(expected + radius).coerceAtMost(pixels.width - 1)) {
-                val color = pixels[xx, handleY]
-                if (kotlin.math.abs(color.red - accent.red) < 0.08f &&
+            assertTrue("progress track must have positive bounds: $bounds", bounds.width > 0f && bounds.height > 0f)
+            val captured = track.captureToImage().also { image = it }
+            val pixels = captured.toPixelMap()
+            val stroke = with(ui.density) { 5.dp.toPx() }
+            // Outside the wave and start dot, inside the handle's straight segment.
+            val handleY = kotlin.math.floor(pixels.height / 2f - (6f + stroke * 0.75f)).toInt()
+            assertTrue("invalid handle sample row=$handleY", handleY in 0 until pixels.height)
+            val expectedX = fraction * pixels.width
+            val tolerance = stroke / 2f + 1f
+            val inkXs = (0 until pixels.width).filter { x ->
+                val color = pixels[x, handleY]
+                kotlin.math.abs(color.red - accent.red) < 0.08f &&
                     kotlin.math.abs(color.green - accent.green) < 0.08f &&
-                    kotlin.math.abs(color.blue - accent.blue) < 0.08f) ink++
+                    kotlin.math.abs(color.blue - accent.blue) < 0.08f
             }
-            assertTrue("handle must reach fraction=$fraction at x=$expected", ink > 0)
-        } finally { image.asAndroidBitmap().recycle() }
+            sample = "size=${pixels.width}x${pixels.height} density=${ui.density.density} " +
+                "expectedX=$expectedX row=$handleY inkXs=$inkXs"
+            assertTrue("handle absent: fraction=$fraction $sample",
+                inkXs.any { kotlin.math.abs(it + 0.5f - expectedX) <= tolerance })
+            assertTrue("residual handle ink: fraction=$fraction $sample",
+                inkXs.all { kotlin.math.abs(it + 0.5f - expectedX) <= tolerance })
+        } catch (failure: Throwable) {
+            runCatching {
+                val directory = java.io.File(activity.getExternalFilesDir(null),
+                    "visual-diagnostics/video-progress-track").apply { mkdirs() }
+                java.io.File(directory, "state.txt").writeText("fraction=$fraction bounds=$bounds " +
+                    "screenPosition=$screenPosition $sample " +
+                    "clock=${ui.mainClock.currentTime} autoAdvance=${ui.mainClock.autoAdvance}\n")
+                image?.asAndroidBitmap()?.let { bitmap ->
+                    java.io.File(directory, "track.png").outputStream().use {
+                        bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                    }
+                }
+                instrumentation.uiAutomation.takeScreenshot()?.let { screen ->
+                    try {
+                        java.io.File(directory, "screen.png").outputStream().use {
+                            screen.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+                        }
+                    } finally { screen.recycle() }
+                }
+            }.onFailure { failure.addSuppressed(it) }
+            throw failure
+        } finally { image?.asAndroidBitmap()?.recycle() }
     }
 
     private fun assertAccentInk(target: SemanticsNodeInteraction, accent: Color) {

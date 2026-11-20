@@ -85,7 +85,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn('val candidateText = if (playback?.paused == true) displayedText else text', leaf)
         self.assertIn("measurer.measure(candidateText, style", leaf)
         self.assertIn("}, style, softWrap = softWrap, onTextLayout", leaf)
-        publication = leaf.split("fun published(): Boolean =", 1)[1].split("fun placed(", 1)[0]
+        publication = leaf.split("fun published(): Boolean =", 1)[1].split("fun prepareNextLine(", 1)[0]
         self.assertEqual(" ".join(publication.split()),
                          "latestCandidateText.isEmpty() || frame.layout?.let { candidate -> "
                          "candidate.layoutInput.text == latestCandidateText && clearance.whollyAboveViewport(frame.coordinates, "

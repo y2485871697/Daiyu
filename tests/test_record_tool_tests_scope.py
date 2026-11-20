@@ -790,8 +790,8 @@ class ChildTaskCardScopeTest(unittest.TestCase):
         smoke = workflow.split("  smoke:", 1)[1]
         counts = [line.strip() for line in smoke.splitlines()
                   if line.strip().startswith("SMOKE_SHARD_COUNT:")]
-        expected = "SMOKE_SHARD_COUNT: ${{ (inputs.smoke_classes == 'app.daiyu.android.ChatMediaPreviewVideoControlsUiTest' || inputs.smoke_classes == 'app.daiyu.android.VoiceCallFloatingWindowTest' || (inputs.smoke_classes == 'app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest' && inputs.smoke_shard == '0')) && '1' || '4' }}"
-        self.assertEqual([expected], counts)
+        expected = "SMOKE_SHARD_COUNT: ${{ inputs.test_method != '' && '1' || (inputs.smoke_classes == 'app.daiyu.android.ChatMediaPreviewVideoControlsUiTest' || inputs.smoke_classes == 'app.daiyu.android.VoiceCallFloatingWindowTest' || (inputs.smoke_classes == 'app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest' && inputs.smoke_shard == '0')) && '1' || '4' }}"
+        self.assertEqual(["SMOKE_SHARD_COUNT: '1'", expected], counts)
 
     def test_only_tool_operation_card_keeps_exact_targeted_command(self):
         classes = "app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest"

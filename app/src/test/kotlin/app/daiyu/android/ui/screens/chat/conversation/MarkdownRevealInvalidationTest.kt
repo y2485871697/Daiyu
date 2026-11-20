@@ -7,6 +7,60 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownRevealInvalidationTest {
+    @Test fun paintPublicationCommandsDoNotSubscribeTheDrawCallerToOtherOwners() {
+        val publication = MarkdownPaintPublication()
+        val target = MarkdownTypingTarget(listOf(
+            MarkdownTypingPart(MarkdownTypingSource("body", "ab"), 2),
+        ), 0, streaming = true, terminal = false)
+        publication.active = true
+        publication.start(target)
+        val drawOwner = Any()
+        val otherOwner = Any()
+        val observer = SnapshotStateObserver { it() }
+        var drawInvalidations = 0
+        var readinessInvalidations = 0
+        var observedReady = false
+        val onReadinessChanged: (String) -> Unit = { readinessInvalidations++ }
+        fun observeReadiness() = observer.observeReads("readiness", onReadinessChanged) {
+            observedReady = publication.ready
+        }
+        Snapshot.sendApplyNotifications()
+        observer.start()
+        try {
+            observer.observeReads("draw", { _: String -> drawInvalidations++ }) {
+                publication.setPending(drawOwner, false)
+            }
+            observeReadiness()
+            assertTrue(observedReady)
+            publication.setPending(otherOwner, true)
+            Snapshot.sendApplyNotifications()
+            assertEquals(0, drawInvalidations)
+            assertEquals(1, readinessInvalidations)
+            assertFalse(publication.readySignal.value)
+            observeReadiness()
+            assertFalse(observedReady)
+            publication.setPending(otherOwner, false)
+            Snapshot.sendApplyNotifications()
+            assertEquals(0, drawInvalidations)
+            assertEquals(2, readinessInvalidations)
+            assertTrue(publication.readySignal.value)
+            observeReadiness()
+            publication.reserve(target, 0, 1)
+            Snapshot.sendApplyNotifications()
+            assertEquals(0, drawInvalidations)
+            assertEquals(3, readinessInvalidations)
+            assertFalse(publication.readySignal.value)
+            observeReadiness()
+            publication.applied(target, "body", 1)
+            Snapshot.sendApplyNotifications()
+            assertEquals(0, drawInvalidations)
+            assertEquals(4, readinessInvalidations)
+            assertTrue(publication.readySignal.value)
+            observeReadiness()
+            assertTrue(observedReady)
+        } finally { observer.stop(); observer.clear() }
+    }
+
     @Test fun longWorkflowAnimationFramesDoNotRescanCompletedSources() {
         val count = 256
         val length = 256

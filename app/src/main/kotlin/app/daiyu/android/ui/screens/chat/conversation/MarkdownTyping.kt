@@ -99,8 +99,10 @@ internal class MarkdownPaintPublication {
         readyState.value = ready
     }
     fun setPending(owner: Any, value: Boolean) {
-        if (value) pending[owner] = Unit else pending.remove(owner)
-        readyState.value = ready
+        androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
+            if (value) pending[owner] = Unit else pending.remove(owner)
+            readyState.value = ready
+        }
     }
     fun presented(id: String, source: MarkdownTypingSource) { published[id] = source }
     fun settled(target: MarkdownTypingTarget?): Boolean = !active || target != null &&

@@ -1463,6 +1463,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 ui.mainClock.advanceTimeBy(4_000)
                 ui.waitForIdle()
                 assertEquals("An idle interval cannot fabricate new input", expectedPrimer, displayed(textLayouts()))
+                if (withTools) ui.onNodeWithContentDescription("复制回答").assertExists()
             }
             ui.runOnUiThread {
                 turn = turnFor(full, complete = true)

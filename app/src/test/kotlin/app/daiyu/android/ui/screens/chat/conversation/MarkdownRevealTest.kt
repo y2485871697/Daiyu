@@ -6,6 +6,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownRevealTest {
+    @Test fun onlyStrictBodyAppendInvalidatesMeasuredActionSlot() {
+        val before = listOf(MarkdownTypingSource("preface", "Searching"), MarkdownTypingSource("answer", "A"))
+        assertFalse(assistantActionSlotAppended(before, before))
+        assertTrue(assistantActionSlotAppended(before, before.dropLast(1) + MarkdownTypingSource("answer", "An answer")))
+        assertTrue(assistantActionSlotAppended(before, before + MarkdownTypingSource("next", "More")))
+        assertFalse(assistantActionSlotAppended(before, before + MarkdownTypingSource("next", "")))
+        assertFalse(assistantActionSlotAppended(before, before.dropLast(1) + MarkdownTypingSource("answer", "Replacement")))
+        assertFalse(assistantActionSlotAppended(before, before.dropLast(1) + MarkdownTypingSource("other", "An answer")))
+        assertFalse(assistantActionSlotAppended(before, listOf(MarkdownTypingSource("preface", "Searching more"), before.last())))
+        assertFalse(assistantActionSlotAppended(before, before.dropLast(1)))
+    }
     private fun drain(state: MarkdownTypingState, target: MarkdownTypingTarget, time: Long = 1_000_000_000L,
         limit: Int = target.total, onAdvance: () -> Unit = {}): Int {
         var previous = state.visible(target)

@@ -162,6 +162,15 @@ class StreamingOcclusionContract(unittest.TestCase):
         assistant = source.split('internal fun AssistantTurn(', 1)[1].split('private fun AssistantTextContent', 1)[0]
         self.assertIn('remember(actionTurn.actionKey, actionTurn.status == RunStatus.RUNNING, actionSlotOwner)', assistant)
         self.assertIn('mutableStateOf(0)', assistant)
+        self.assertIn('val workflow = actionTurn.workflowContent()', assistant)
+        self.assertIn('(workflow.leading + workflow.body + workflow.pending)', assistant)
+        self.assertIn('.map { MarkdownTypingSource(it.itemId, it.text) }', assistant)
+        self.assertIn('mutableStateOf(actionSlotSources)', assistant)
+        self.assertIn('if (assistantActionSlotAppended(previousActionSlotSources, actionSlotSources)) actionSlotHeightPx = 0', assistant)
+        self.assertIn('previousActionSlotSources = actionSlotSources', assistant)
+        helper = source.split('internal fun assistantActionSlotAppended(', 1)[1].split('@Composable', 1)[0]
+        self.assertIn('markdownTypingAppends(previous, next) &&', helper)
+        self.assertIn('next.sumOf { it.text.length.toLong() } > previous.sumOf { it.text.length.toLong() }', helper)
         self.assertIn('actionSlotOwner && actionTurn.status != RunStatus.RUNNING && actionSlotHeightPx > 0', assistant)
         self.assertIn('(!generationComplete || !revealSettled || !showActions)', assistant)
         self.assertIn('Modifier.onSizeChanged { actionSlotHeightPx = it.height }', assistant)

@@ -1396,6 +1396,10 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
     }
 }
 
+internal fun assistantActionSlotAppended(previous: List<MarkdownTypingSource>, next: List<MarkdownTypingSource>): Boolean =
+    markdownTypingAppends(previous, next) &&
+        next.sumOf { it.text.length.toLong() } > previous.sumOf { it.text.length.toLong() }
+
 @Composable
 internal fun AssistantTurn(
     turn: ChatTurnUi.Assistant,
@@ -1460,8 +1464,20 @@ internal fun AssistantTurn(
     val revealSettled = reveal.settled && reasoningReady && (bodyVisible || ordered.body.isEmpty())
     SideEffect { onRevealSettled(revealSettled) }
     DisposableEffect(turn.listKey) { onDispose { onContentReady(false); onRevealSettled(false); onContentDisplayed(false) } }
+    val actionSlotSources = remember(actionTurn) {
+        val workflow = actionTurn.workflowContent()
+        (workflow.leading + workflow.body + workflow.pending).filterIsInstance<MessageContentUi.Text>()
+            .map { MarkdownTypingSource(it.itemId, it.text) }
+    }
     var actionSlotHeightPx by remember(actionTurn.actionKey, actionTurn.status == RunStatus.RUNNING, actionSlotOwner) {
         mutableStateOf(0)
+    }
+    var previousActionSlotSources by remember(actionTurn.actionKey, actionTurn.status == RunStatus.RUNNING, actionSlotOwner) {
+        mutableStateOf(actionSlotSources)
+    }
+    if (previousActionSlotSources != actionSlotSources) {
+        if (assistantActionSlotAppended(previousActionSlotSources, actionSlotSources)) actionSlotHeightPx = 0
+        previousActionSlotSources = actionSlotSources
     }
     val holdActionSlot = actionSlotOwner && actionTurn.status != RunStatus.RUNNING && actionSlotHeightPx > 0 &&
         (!generationComplete || !revealSettled || !showActions)

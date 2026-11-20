@@ -71,7 +71,18 @@ class ReasoningStreamCostContract(unittest.TestCase):
         source = (SRC / 'ui/screens/chat/conversation/MarkdownReveal.kt').read_text()
         target = source.split('internal class MarkdownTypingTarget(', 1)[1].split('internal class MarkdownTypingState', 1)[0]
         lookup = target.split('fun limit(id: String, visible: Int): Int {', 1)[1]
-        self.assertIn('putIfAbsent(part.source.id, PartRange(offset, part.length))', target)
+        precomputed = target.split('private val orderedRanges = buildList {', 1)[1].split('private fun rangeAt(', 1)[0]
+        frame_methods = target.split('private fun rangeAt(', 1)[1]
+        self.assertIn('add(PartRange(offset, part.length, MarkdownTextBoundaries(part.displayed)))', precomputed)
+        self.assertIn('offset += part.length', precomputed)
+        self.assertIn('putIfAbsent(part.source.id, orderedRanges[index])', precomputed)
+        self.assertNotIn('MarkdownTextBoundaries(', frame_methods)
+        self.assertNotIn('parts.', frame_methods)
+        self.assertNotIn('for (', frame_methods)
+        self.assertNotIn('.forEach', frame_methods)
+        self.assertIn('if (range.start + range.length <= position.toLong()) low = middle + 1 else high = middle', frame_methods)
+        self.assertIn('range.boundaries.floor((end.toLong() - range.start).toInt())', frame_methods)
+        self.assertIn('range.boundaries.next(local)', frame_methods)
         self.assertIn('var offset = 0L', target)
         self.assertIn('val range = ranges[id] ?: return 0', lookup)
         self.assertNotIn('for (', lookup)

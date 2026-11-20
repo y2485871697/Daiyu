@@ -226,10 +226,11 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     val playback = LocalReplyPlayback.current
     val measurer = rememberTextMeasurer(cacheSize = 1)
     val publication = LocalMarkdownPaintPublication.current
+    val latestCandidateText by rememberUpdatedState(text)
     val displayedText by remember(frame, playback) {
         derivedStateOf {
             (if (playback?.paused == true) frame.drawn else frame.committed)
-                ?.layoutInput?.text ?: AnnotatedString("")
+                ?.layoutInput?.text ?: if (playback?.paused == true) AnnotatedString("") else latestCandidateText
         }
     }
     val candidateText = if (playback?.paused == true) displayedText else text

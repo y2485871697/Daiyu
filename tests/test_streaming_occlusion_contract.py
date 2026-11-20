@@ -68,7 +68,8 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("var availableHeight by mutableStateOf(0f)", frame)
         self.assertNotIn("neverEqualPolicy", frame)
         leaf = markdown.split("internal fun ClearanceText", 1)[1].split("internal fun TextLayoutResult.canPaintPrefixOf", 1)[0]
-        self.assertIn('val displayedText by remember(frame, playback) {\n        derivedStateOf {\n            (if (playback?.paused == true) frame.drawn else frame.committed)\n                ?.layoutInput?.text ?: AnnotatedString("")\n        }\n    }', leaf)
+        self.assertIn("val latestCandidateText by rememberUpdatedState(text)", leaf)
+        self.assertIn('val displayedText by remember(frame, playback) {\n        derivedStateOf {\n            (if (playback?.paused == true) frame.drawn else frame.committed)\n                ?.layoutInput?.text ?: if (playback?.paused == true) AnnotatedString("") else latestCandidateText\n        }\n    }', leaf)
         self.assertIn("playback?.paused == true -> frame.drawn", leaf)
         self.assertIn('val candidateText = if (playback?.paused == true) displayedText else text', leaf)
         self.assertIn("measurer.measure(candidateText, style", leaf)

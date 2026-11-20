@@ -1384,7 +1384,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         assertEquals(expectedSeed, displayed(textLayouts()))
         fun saveDiagnostic(image: androidx.compose.ui.graphics.ImageBitmap, name: String, detail: String) {
             val directory = java.io.File(activity.getExternalFilesDir(null),
-                "visual-diagnostics/streaming-blank/${if (withTools) "tool" else "plain"}-${resumeAtFrame ?: -1}-${full.hashCode()}")
+                "visual-diagnostics/streaming-blank/${if (withTools) "tool" else "plain"}-${resumeAtFrame ?: -1}-${full.hashCode()}-slow-$slowReceipts")
                 .apply { mkdirs() }
             java.io.File(directory, "$name.png").outputStream().use {
                 image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
@@ -1528,7 +1528,14 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             }
             assertTrue("Exercise terminal formatting before reveal is settled", reports.contains(false))
             if (slowReceipts) {
-                assertTrue("Keep several seconds of terminal-paced output", unreadyFrames > 120 && growthFrames > 120)
+                assertTrue("Keep several seconds of terminal-paced output" +
+                    if (unreadyFrames <= 120 || growthFrames <= 120) {
+                        ": slow=$slowReceipts resume=$resumeAtFrame unready=$unreadyFrames growth=$growthFrames " +
+                            "heightGrowth=$heightGrowth paintedGrowth=$paintedGrowth finished=$finished resumed=$resumed " +
+                            "budget=$terminalFrames seed=${expectedSeed.length} full=${expectedFull.length}\n" +
+                            finalSamples.joinToString("\n") + "\n" + paintDump("paced-tail") +
+                            "\ngaps=" + gapProblems.joinToString(" ; ")
+                    } else "", unreadyFrames > 120 && growthFrames > 120)
             } else {
                 assertTrue("A bootstrap terminal batch must still draw real intermediate frames", unreadyFrames > 1 && growthFrames > 1)
             }

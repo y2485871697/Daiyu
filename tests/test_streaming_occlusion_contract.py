@@ -82,10 +82,12 @@ class StreamingOcclusionContract(unittest.TestCase):
                       'if (playback?.paused == true) frame.drawn?.layoutInput?.text ?: AnnotatedString("")',
                       'frame.coordinates?.takeIf { it.isAttached }',
                       'measurer.measure(latestCandidateText, style, softWrap = softWrap,',
-                      'constraints = previous.layoutInput.constraints.copy(minHeight = 0)',
+                      'frame.measureConstraints?.let { constraints ->',
+                      'constraints = constraints.copy(minHeight = 0)',
                       'clearance.fits(coordinates, prepared.size.height)',
                       'else frame.committed?.layoutInput?.text ?: latestCandidateText'):
             self.assertIn(token, native_input)
+        self.assertNotIn('frame.layout', native_input)
         for forbidden in ('frame.committed =', 'frame.drawn =', 'frame.rendered =',
                           'publication?.setPending', 'painted[paintOffset] ='):
             self.assertNotIn(forbidden, native_input)

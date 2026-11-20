@@ -93,7 +93,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     choreographer.removeFrameCallback(callback)
                     if (original != null) {
                         sample("failure", null)
-                        dump = frames.joinToString("\n---\n")
+                        dump = frames.toList().asReversed().joinToString("\n---\n")
                     }
                 }
                 original?.addSuppressed(AssertionError(

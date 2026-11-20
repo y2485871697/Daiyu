@@ -89,6 +89,19 @@ class MarkdownPreparationCompositionTest {
         assertEquals(0f, clearance.availableHeight(null), 0f)
     }
 
+    @Test fun nextLineReserveDoesNotSpendNativeBottomPaddingAsTrailingSpace() {
+        val clearance = StreamingTextClearance()
+        val owner = Any()
+        assertEquals("The last line bottom would spend two pixels of native layout", 14,
+            markdownLineSpace(26, 31f, 19f))
+        clearance.prepareLine(owner, markdownLineSpace(26, 31f, 21f))
+        assertEquals("Only space after the full native layout can consume the reserve", 16,
+            clearance.reservedHeight(193, 400, true))
+        clearance.prepareLine(owner, markdownLineSpace(26, 57f, 21f))
+        assertEquals("Body growth consumes the prepared next line", 0,
+            clearance.reservedHeight(219, 400, true))
+    }
+
     @Test fun nextLineSpaceNeedsCurrentGeometryAndACompatibleDrawnBaseline() {
         assertEquals(0, markdownLineSpace(26, 19f, null))
         assertEquals(0, markdownLineSpace(26, null, 19f))

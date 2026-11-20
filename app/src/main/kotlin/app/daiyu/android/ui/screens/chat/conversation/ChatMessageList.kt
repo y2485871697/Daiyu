@@ -97,6 +97,8 @@ import kotlinx.coroutines.flow.collectLatest
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
+internal val LocalChatBottomFollowIntent = staticCompositionLocalOf { true }
+
 internal val ChatTailClearance = 8.dp
 private val ChatTurnSpacing = 26.dp
 
@@ -1248,6 +1250,7 @@ internal fun ChatMessageList(
                             val playback = visualScope.replyPlayback(replyPlayback?.takeIf { it.control.matches(turn) })
                             androidx.compose.runtime.CompositionLocalProvider(
                             LocalReplyPlayback provides playback,
+                            LocalChatBottomFollowIntent provides followBottom,
                             LocalChatPresentationActive provides (presentationActive && pageActive && scrollResumed),
                             LocalWorkflowVisualScope provides visualScope,
                             LocalWorkflowDisclosureContext provides remember(turn.listKey, disclosureViewport) {
@@ -1475,9 +1478,14 @@ internal fun AssistantTurn(
     var previousActionSlotSources by remember(actionTurn.actionKey, actionTurn.status == RunStatus.RUNNING, actionSlotOwner) {
         mutableStateOf(actionSlotSources)
     }
+    val followIntent = LocalChatBottomFollowIntent.current
+    val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && generationComplete && revealSettled
     if (previousActionSlotSources != actionSlotSources) {
-        if (assistantActionSlotAppended(previousActionSlotSources, actionSlotSources)) actionSlotHeightPx = 0
-        previousActionSlotSources = actionSlotSources
+        val appended = assistantActionSlotAppended(previousActionSlotSources, actionSlotSources)
+        val retainDetachedSlot = appended && actionSlotOwner && !followIntent && actionSlotHeightPx > 0
+        if (appended && !retainDetachedSlot) actionSlotHeightPx = 0
+        // Preserve the reading extent until the new footer is ready or follow intent returns.
+        if (!retainDetachedSlot || actionsVisible) previousActionSlotSources = actionSlotSources
     }
     val holdActionSlot = actionSlotOwner && actionTurn.status != RunStatus.RUNNING && actionSlotHeightPx > 0 &&
         (!generationComplete || !revealSettled || !showActions)
@@ -1499,7 +1507,7 @@ internal fun AssistantTurn(
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 14.sp, lineHeight = 22.sp),
                 maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
-        if (showActions && actionTurn.status != RunStatus.RUNNING && generationComplete && revealSettled) {
+        if (actionsVisible) {
             val hasTextActions = actionTurn.hasBodyTextActions()
             MessageActionBar(actionTurn.actionKey, actions, timestamp = actionTurn.timestamp,
                 modifier = Modifier.onSizeChanged { actionSlotHeightPx = it.height },

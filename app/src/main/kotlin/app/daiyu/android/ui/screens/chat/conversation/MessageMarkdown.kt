@@ -270,7 +270,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             candidate != null && it.canPaintPrefixOf(candidate) && it.layoutInput.text.isNotEmpty()
         }
         clearance.prepareLine(owner, markdownLineSpace(frame.nextAdvance,
-            clearance.bodyEndInLeaf(frame.coordinates), drawn?.getLineBottom(drawn.lineCount - 1)))
+            clearance.bodyEndInLeaf(frame.coordinates), drawn?.size?.height?.toFloat()))
     }
     fun placed(coordinates: LayoutCoordinates) {
         frame.coordinates = coordinates
@@ -403,7 +403,7 @@ private fun MarkdownInlineText(
             if (end >= body.length) body else body.subSequence(0, end)
         }
         val nextLineText = remember(body, end) {
-            if (end < body.length) body.subSequence(0, boundaries.next(end)) else null
+            if (end < body.length) body else null
         }
         ClearanceText(visible, paintOffset, modifier, style, nextLineText = nextLineText)
     }

@@ -100,10 +100,11 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('frame.nextAdvance = future?.takeIf { it.lineCount > candidate.lineCount }', clearance)
         self.assertIn('(frame.nextAdvance == 0 || drawn == null || candidate.size.height > drawn.size.height)', clearance)
         self.assertIn('fun prepareNextLine()', clearance)
-        self.assertIn('clearance.bodyEndInLeaf(frame.coordinates), drawn?.getLineBottom(drawn.lineCount - 1)', clearance)
+        self.assertIn('clearance.bodyEndInLeaf(frame.coordinates), drawn?.size?.height?.toFloat()', clearance)
         prepare = clearance.split('fun prepareNextLine()', 1)[1].split('fun placed(', 1)[0]
         self.assertIn('if (playback?.paused == true) return', prepare)
         self.assertIn('it.canPaintPrefixOf(candidate)', prepare)
+        self.assertNotIn('drawn?.getLineBottom(', prepare)
         placed = clearance.split('fun placed(', 1)[1].split('val refreshAdmission', 1)[0]
         self.assertIn('prepareNextLine()', placed)
         draw = clearance.split('.drawWithContent {', 1)[1]
@@ -126,7 +127,8 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('visibility = budget, paintOffset = paintOffset + offsets[column])', row)
         inline = ui.split('private fun MarkdownInlineText(', 1)[1].split('private fun MarkdownBlocks(', 1)[0]
         self.assertIn('ClearanceText(visible, paintOffset, modifier, style,', inline)
-        self.assertIn('body.subSequence(0, boundaries.next(end))', inline)
+        self.assertIn('if (end < body.length) body else null', inline)
+        self.assertNotIn('body.subSequence(0, boundaries.next(end))', inline)
         self.assertIn('nextLineText = nextLineText', inline)
         self.assertNotIn('nextLineText = body.takeIf', inline)
         self.assertIn('if (limit <= 0) { Box(modifier); return }', inline)

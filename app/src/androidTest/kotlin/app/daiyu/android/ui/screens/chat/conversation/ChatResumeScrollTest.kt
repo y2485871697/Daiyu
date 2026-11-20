@@ -52,11 +52,11 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
                     CompositionLocalProvider(LocalMarkdownParser provides parser, LocalLifecycleOwner provides owner,
                         app.daiyu.android.ui.navigation.LocalPageContentActive provides contentActive) {
                         Box(Modifier.size(320.dp, viewport)) {
-                            paintProbe?.Capture("background-resume")
                             ChatMessageList(
                                 List(6) { ChatTurnUi.User("u$it", "history $it") } +
                                     ChatTurnUi.Assistant("tail", status = RunStatus.COMPLETED, finalText = body),
-                                ChatScreenActions(), scrollRequest = request, turnExtras = {
+                                ChatScreenActions(), scrollRequest = request, turnExtras = { turn ->
+                                    if (turn.listKey == "tail") paintProbe?.Capture("background-resume")
                                     Box(Modifier.height(height))
                                     Text("resume tail marker")
                                 },
@@ -304,9 +304,21 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
         val appended = formattedBody + "\n\n后台新增正文乙，这段内容在返回前已经收到。"
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
+        val parseCalls = java.util.concurrent.atomic.AtomicInteger()
+        val parseReturns = java.util.concurrent.atomic.AtomicInteger()
+        val parseFailure = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
         val parser: (String) -> List<MarkdownBlock> = { text ->
-            if (text == appended) { entered.countDown(); release.await() }
-            MarkdownParser.parse(text)
+            if (text == appended) {
+                parseCalls.incrementAndGet()
+                entered.countDown()
+                release.await()
+                try {
+                    MarkdownParser.parse(text).also { parseReturns.incrementAndGet() }
+                } catch (failure: Throwable) {
+                    parseFailure.compareAndSet(null, failure)
+                    throw failure
+                }
+            } else MarkdownParser.parse(text)
         }
         val paintProbe = MarkdownPaintSlotsProbe()
         try {
@@ -322,12 +334,21 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             assertEquals("Pending append must retain the occupied action slot", before, top("chat-turn:tail"), 1f)
             ui.mainClock.autoAdvance = false
             release.countDown()
+            val samples = java.util.ArrayDeque<String>()
+            val startedAt = ui.mainClock.currentTime
+            var frames = 0
             try {
                 ui.waitUntil(5_000) {
                     ui.mainClock.advanceTimeByFrame()
-                    ui.onAllNodesWithText("后台新增正文乙，这段内容在返回前已经收到。", useUnmergedTree = true)
-                        .fetchSemanticsNodes().isNotEmpty() &&
-                        ui.onAllNodesWithContentDescription("复制回答", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+                    frames++
+                    val hasText = ui.onAllNodesWithText("后台新增正文乙，这段内容在返回前已经收到。", useUnmergedTree = true)
+                        .fetchSemanticsNodes().isNotEmpty()
+                    val hasActions = hasText && ui.onAllNodesWithContentDescription("复制回答", useUnmergedTree = true)
+                        .fetchSemanticsNodes().isNotEmpty()
+                    samples.addLast("frame=$frames virtualMs=${ui.mainClock.currentTime - startedAt} " +
+                        "parsed=${parseReturns.get()}/${parseCalls.get()} text=$hasText actions=${if (hasText) hasActions else "not-sampled"}")
+                    if (samples.size > 8) samples.removeFirst()
+                    hasText && hasActions
                 }
             } catch (failure: Throwable) {
                 var paintDump = "<not sampled>"
@@ -335,7 +356,10 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
                     paintDump = runCatching { paintProbe.sample("background-resume") }
                         .getOrElse { "probe failed: $it" }
                 }
-                failure.addSuppressed(AssertionError("Background parse publication before resume:\n$paintDump"))
+                failure.addSuppressed(AssertionError("Background parse publication before resume: " +
+                    "entered=${entered.count == 0L} released=${release.count == 0L} " +
+                    "calls=${parseCalls.get()} returns=${parseReturns.get()} parserFailure=${parseFailure.get()}\n" +
+                    samples.joinToString("\n") + "\n$paintDump"))
                 throw failure
             }
             ui.waitForIdle()

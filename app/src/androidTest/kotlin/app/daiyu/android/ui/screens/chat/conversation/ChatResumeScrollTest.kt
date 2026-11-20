@@ -594,8 +594,10 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             }
             fun tick(count: Int = 1) { repeat(count) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() } }
             fun visible(): Int {
+                val beforeRead = ui.mainClock.currentTime
                 var shown = 0
-                mainThread { lane.motion.target?.let { shown = lane.motion.visible(it) } }
+                instrumentation.runOnMainSync { lane.motion.target?.let { shown = lane.motion.visible(it) } }
+                assertEquals("Reading the saved frontier must not advance the animation clock", beforeRead, ui.mainClock.currentTime)
                 return shown
             }
             for (frame in 0 until 120) {
@@ -632,15 +634,17 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             if (partial) {
                 assertEquals("Offscreen time buys no catch-up", frozen + 1, visible())
                 var previous = visible()
+                val suffixFrames = mutableListOf(previous)
                 var continued = false
                 repeat(12) {
                     tick(); val shown = visible()
-                    assertTrue(shown >= previous)
+                    suffixFrames += shown
+                    assertTrue("The saved frontier cannot rewind: $suffixFrames", shown >= previous)
                     if (shown > previous && shown < latest.length) continued = true
                     previous = shown
                 }
-                assertTrue("Only the undisplayed suffix must actually type", continued)
-                assertTrue(visible() < latest.length)
+                assertTrue("Only the undisplayed suffix must actually type: $suffixFrames", continued)
+                assertTrue("Twelve frames must not flush the suffix: $suffixFrames", previous < latest.length)
             } else {
                 tick(12)
                 assertEquals(first.length, visible())

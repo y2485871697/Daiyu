@@ -463,6 +463,11 @@ internal fun ChatMessageList(
     val currentAssistants by rememberUpdatedState(assistantTurns)
     val workflowAdmissions = remember(revealResetEpoch) { WorkflowVisualAdmissions(assistantTurns.keys) }
     assistantTurns.keys.forEach { workflowAdmissions.scope(it, initialPositionPending) }
+    replyPlayback?.let { playback ->
+        assistantTurns.values.firstOrNull(playback.control::matches)?.let { turn ->
+            workflowAdmissions.scope(turn.listKey, initialPositionPending).retainReplyControl(playback.control)
+        }
+    }
     SideEffect { workflowAdmissions.retain(assistantTurns.keys) }
     val readyTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
     val displayedTurns = remember { mutableStateMapOf<String, ChatTurnUi.Assistant>() }
@@ -1215,10 +1220,11 @@ internal fun ChatMessageList(
                     when (turn) {
                         is ChatTurnUi.User -> UserTurn(turn, actions, imageLoader, userMessageEntrance)
                         is ChatTurnUi.Assistant -> {
-                            val playback = replyPlayback?.takeIf { it.control.matches(turn) }
+                            val visualScope = workflowAdmissions.scope(turn.listKey, initialPositionPending)
+                            val playback = visualScope.replyPlayback(replyPlayback?.takeIf { it.control.matches(turn) })
                             androidx.compose.runtime.CompositionLocalProvider(
                             LocalReplyPlayback provides playback,
-                            LocalWorkflowVisualScope provides workflowAdmissions.scope(turn.listKey, initialPositionPending),
+                            LocalWorkflowVisualScope provides visualScope,
                             LocalWorkflowDisclosureContext provides remember(turn.listKey, disclosureViewport) {
                                 WorkflowDisclosureContext(disclosureViewport, turn.listKey) {
                                     !currentRetainingRows && currentAssistants[turn.listKey]?.let { it.status == RunStatus.RUNNING && it.isStreaming } == true

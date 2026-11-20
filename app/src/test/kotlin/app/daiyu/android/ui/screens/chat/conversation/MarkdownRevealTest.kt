@@ -693,4 +693,80 @@ class MarkdownRevealTest {
         assertTrue(fast.last() < 200)
     }
 
+
+    @Test fun historicalRowRetainsItsActualBodyAndReasoningLanes() {
+        val admissions = WorkflowVisualAdmissions(emptySet())
+        val scope = admissions.scope("old-reply", baseline = false)
+        val old = ReplyPresentationControl("old-reply", initiallyLive = true)
+        val current = ReplyPlayback(old, runtimePaused = false)
+        scope.retainReplyControl(old)
+        assertSame(current, scope.replyPlayback(current))
+        val parser = MarkdownParserIdentity(defaultMarkdownParser)
+        for (slot in listOf<Any>("body:old-reply", listOf("reasoning", "old-reply", "reasoning-item"))) {
+            val lane = old.lane(slot, parser, 0L) { emptyList() }
+            val target = lane.motion.update(listOf(part("已经显示的历史正文")), 0, true, false)!!
+            drain(lane.motion, target)
+            lane.motion.pause(target)
+            val retained = scope.replyPlayback(null)!!
+            assertSame(old, retained.control)
+            assertFalse(retained.paused)
+            val remounted = retained.control.lane(slot, parser, 0L) { error("Remount must not replace the original baseline") }
+            assertSame(lane, remounted)
+            assertEquals(target.total, remounted.motion.visible(target))
+            var advances = 0
+            assertEquals(target.total, remounted.motion.advance(target, 90_000_000_000L) { advances++ })
+            assertEquals("Completed history must not replay", 0, advances)
+        }
+        admissions.retain(setOf("old-reply", "new-reply"))
+        val next = ReplyPlayback(ReplyPresentationControl("new-reply", true), runtimePaused = true)
+        admissions.scope("new-reply", false).retainReplyControl(next.control)
+        assertSame(next, admissions.scope("new-reply", false).replyPlayback(next))
+        assertFalse("Another row's runtime pause must not propagate", scope.replyPlayback(null)!!.paused)
+        admissions.retain(setOf("new-reply"))
+        assertNull("Only data removal releases the owner", admissions.scope("old-reply", false).replyPlayback(null))
+    }
+
+    @Test fun historicalRemountKeepsTheFrontierAndTypesOnlyTheOffscreenSuffix() {
+        val scope = WorkflowVisualScope(false)
+        assertNull("Cold history must not acquire a live control", scope.replyPlayback(null))
+        val control = ReplyPresentationControl("old-reply", true)
+        scope.retainReplyControl(control)
+        val parser = MarkdownParserIdentity(defaultMarkdownParser)
+        val lane = control.lane("body:old-reply", parser, 0L) { emptyList() }
+        val first = lane.motion.update(listOf(part("字".repeat(30))), 0, true, false)!!
+        lane.motion.advance(first, 1_000_000_000L)
+        lane.motion.advance(first, 1_016_000_000L)
+        val frontier = lane.motion.visible(first)
+        assertTrue(frontier in 1 until first.total)
+        lane.motion.pause(first)
+        val restored = scope.replyPlayback(null)!!.control.lane("body:old-reply", parser, 0L) {
+            listOf(MarkdownTypingSource("wrong-baseline", "字".repeat(90)))
+        }
+        assertSame(lane, restored)
+        val next = restored.motion.update(listOf(part("字".repeat(90))), 0, false, true, live = false, paceTerminal = true)!!
+        assertEquals(frontier, restored.motion.visible(next))
+        assertEquals("Offscreen time buys no catch-up", frontier + 1, restored.motion.advance(next, 90_000_000_000L))
+        assertTrue(restored.motion.visible(next) < next.total)
+        assertEquals(next.total, drain(restored.motion, next, time = 90_016_000_000L))
+    }
+
+
+    @Test fun missingRemountProjectionDoesNotMakeTheSavedTargetStartTheActualFrontier() {
+        val motion = MarkdownTypingState(emptyList())
+        val target = motion.update(listOf(part("字".repeat(80))), 0, true, false)!!
+        motion.advance(target, 1_000_000_000L)
+        motion.advance(target, 1_016_000_000L)
+        val frontier = motion.visible(target)
+        assertTrue(frontier > target.start)
+        motion.pause(target)
+        val retained = motion.update(null, null, true, false)!!
+        assertSame(target, retained)
+        assertEquals(frontier, motion.visible(retained))
+        assertTrue("The original start is not a remount frontier", retained.start < frontier)
+        val frame = mutableStateOf(motion.frame(retained))
+        val budgets = MarkdownRevealBudgets(mutableStateOf<MarkdownTypingTarget?>(retained), frame)
+        assertEquals(frontier, frame.value.visible)
+        assertEquals(frontier, budgets.visibility(retained.parts.single().source.id).value)
+    }
+
 }

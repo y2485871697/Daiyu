@@ -82,6 +82,9 @@ private val hiddenMarkdownVisibility: State<Int> = derivedStateOf { 0 }
 
 internal data class MarkdownTypingFrame(val target: MarkdownTypingTarget?, val visible: Int)
 
+internal fun MarkdownTypingState.frame(target: MarkdownTypingTarget?): MarkdownTypingFrame =
+    MarkdownTypingFrame(target, target?.let(::visible) ?: 0)
+
 internal fun markdownTypingCanAdvance(canAdvance: Boolean, playback: ReplyPlayback?): Boolean =
     canAdvance && playback?.paused != true
 
@@ -183,7 +186,7 @@ internal fun rememberMarkdownReveal(
     val clearance = LocalStreamingTextClearance.current
     val textClearance by rememberUpdatedState(clearance)
     val publication = remember(identity, resetEpoch, motion) { MarkdownPaintPublication() }
-    val frame = produceState(MarkdownTypingFrame(target, target?.start ?: 0), target, canAdvance, advanceLimit, finishImmediately) {
+    val frame = produceState(motion.frame(target), target, canAdvance, advanceLimit, finishImmediately) {
         val current = target ?: return@produceState
         var shown = motion.visible(current)
         value = MarkdownTypingFrame(current, shown)

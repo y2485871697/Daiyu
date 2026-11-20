@@ -380,4 +380,130 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
         assertEquals("Layout-only end-of-list must not rearm a finished drag", before, top("chat-turn:tail"), 1f)
         assertEquals(0, fixture.opens.get())
     }
+
+    fun testCompletedReplyDoesNotReplayAfterLazyDisposalAndTailReplacement() {
+        exerciseReplyHistoryRemount(partial = false)
+    }
+
+    fun testPartialReplyKeepsItsFrontierAndPacesOffscreenSuffixAfterLazyDisposal() {
+        exerciseReplyHistoryRemount(partial = true)
+    }
+
+    private fun exerciseReplyHistoryRemount(partial: Boolean) {
+        val replyId = "scroll-retained-reply"
+        val text = if (partial) "字".repeat(80) else "已经显示的正文不能因为滑动聊天记录而再次播放。"
+        val oldControl = ReplyPresentationControl(replyId, initiallyLive = true)
+        var turns by mutableStateOf<List<ChatTurnUi>>(listOf(ChatTurnUi.User("scroll-question", "question")))
+        var playback by mutableStateOf<ReplyPlayback?>(null)
+        var navigation by mutableStateOf(ChatScrollRequest(1))
+        val mounted = java.util.concurrent.atomic.AtomicBoolean(false)
+        val mounts = java.util.concurrent.atomic.AtomicInteger()
+        val advances = java.util.concurrent.atomic.AtomicInteger()
+        var suppliedControl: ReplyPresentationControl? = null
+        mainThread {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    Box(Modifier.size(320.dp, 240.dp)) {
+                        ChatMessageList(turns, ChatScreenActions(onVisibleTextAdvance = {
+                            if (it == replyId) advances.incrementAndGet()
+                        }), scrollRequest = navigation, replyPlayback = playback, turnExtras = { turn ->
+                            if (turn.listKey == replyId) {
+                                val supplied = LocalReplyPlayback.current?.control
+                                androidx.compose.runtime.SideEffect { suppliedControl = supplied }
+                                androidx.compose.runtime.DisposableEffect(Unit) {
+                                    mounts.incrementAndGet()
+                                    mounted.set(true)
+                                    onDispose { mounted.set(false) }
+                                }
+                            }
+                        })
+                    }
+                }
+            }
+        }
+        ui.waitForIdle()
+        ui.mainClock.autoAdvance = false
+        fun tick(count: Int = 1) { repeat(count) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() } }
+        try {
+            mainThread {
+                playback = ReplyPlayback(oldControl, runtimePaused = false)
+                turns = turns + ChatTurnUi.Assistant(replyId, status = RunStatus.RUNNING, isStreaming = true)
+            }
+            tick(8)
+            mainThread {
+                turns = turns.dropLast(1) + ChatTurnUi.Assistant(replyId, finalText = text,
+                    status = RunStatus.RUNNING, isStreaming = true)
+            }
+            val parser = MarkdownParserIdentity(defaultMarkdownParser)
+            lateinit var lane: ReplyTypingLane
+            var frontier = 0
+            var sawPartial = false
+            for (frame in 0 until 120) {
+                tick()
+                mainThread {
+                    lane = oldControl.lane("body:$replyId", parser, 0L) { error("Production body lane must exist") }
+                    lane.motion.target?.let { target ->
+                        frontier = lane.motion.visible(target)
+                        if (frontier in 1 until target.total) sawPartial = true
+                    }
+                }
+                if (partial && sawPartial || !partial && frontier == text.length) break
+            }
+            assertTrue("The live reply must really type before disposal", sawPartial)
+            if (partial) assertTrue(frontier in 1 until text.length) else assertEquals(text.length, frontier)
+            assertSame(oldControl, suppliedControl)
+            ui.onNodeWithTag("chat-messages").performTouchInput { click(center) }
+            val beforeDisposal = advances.get()
+            mainThread {
+                turns = turns.map { turn -> if (turn is ChatTurnUi.Assistant && turn.listKey == replyId)
+                    turn.copy(status = RunStatus.COMPLETED, isStreaming = false) else turn } +
+                    List(48) { ChatTurnUi.User("scroll-history-$it", "history row $it") } +
+                    ChatTurnUi.Assistant("scroll-new-reply", status = RunStatus.RUNNING, isStreaming = true)
+                playback = ReplyPlayback(ReplyPresentationControl("scroll-new-reply", true), runtimePaused = true)
+                navigation = ChatScrollRequest(2)
+            }
+            tick(24)
+            assertFalse("The old lazy item must actually be disposed", mounted.get())
+            val suffix = if (partial) "后".repeat(80) else ""
+            mainThread {
+                turns = turns.map { turn -> if (turn is ChatTurnUi.Assistant && turn.listKey == replyId)
+                    turn.copy(finalText = text + suffix) else turn }
+            }
+            ui.mainClock.advanceTimeBy(10_000L)
+            ui.waitForIdle()
+            val frozen = lane.motion.target!!.let(lane.motion::visible)
+            assertTrue("Disposal must preserve the already shown prefix", frozen >= frontier)
+            ui.onNodeWithTag("chat-messages").performTouchInput { click(center) }
+            ui.onNodeWithTag("chat-messages").performScrollToIndex(1)
+            tick()
+            assertTrue(mounted.get())
+            assertTrue("Must remount rather than only recompose", mounts.get() >= 2)
+            assertSame("History must reconnect its actual former control", oldControl, suppliedControl)
+            val restored = oldControl.lane("body:$replyId", parser, 0L) { error("No new history lane") }
+            assertSame(lane, restored)
+            val remounted = restored.motion.target!!.let(restored.motion::visible)
+            assertTrue("The shown prefix must never rewind", remounted >= frozen)
+            if (partial) {
+                assertTrue("Ten seconds offscreen must not flush the suffix", remounted <= frozen + 1)
+                assertTrue(remounted < text.length + suffix.length)
+                var continued = false
+                repeat(180) {
+                    tick()
+                    val shown = restored.motion.target!!.let(restored.motion::visible)
+                    if (shown > remounted && shown < text.length + suffix.length) continued = true
+                }
+                assertTrue("Only new output must continue typing", continued)
+                assertEquals("The offscreen suffix must enter the production target", text.length + suffix.length,
+                    restored.motion.target!!.total)
+                val shown = restored.motion.target!!.let(restored.motion::visible)
+                ui.onNodeWithText((text + suffix).take(shown)).assertExists()
+            } else {
+                tick(8)
+                assertEquals("Historical characters must not emit fresh advances", beforeDisposal, advances.get())
+                ui.onNodeWithText(text).assertExists()
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+        assertEquals(0, fixture.opens.get())
+    }
+
 }

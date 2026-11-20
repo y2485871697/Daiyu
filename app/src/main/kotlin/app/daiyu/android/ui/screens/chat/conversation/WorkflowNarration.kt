@@ -22,6 +22,10 @@ internal class WorkflowVisualAdmissions(initialOwners: Set<String>) {
 internal val LocalReasoningPaused = staticCompositionLocalOf { false }
 
 internal class WorkflowVisualScope(private val baseline: Boolean) {
+    private var replyControl: ReplyPresentationControl? = null
+    fun retainReplyControl(control: ReplyPresentationControl) { replyControl = control }
+    fun replyPlayback(current: ReplyPlayback?): ReplyPlayback? =
+        current ?: replyControl?.let { ReplyPlayback(it, runtimePaused = false) }
     private val reasoningClaims = mutableSetOf<Pair<String, String>>()
     private val handoffs = mutableMapOf<String, ReasoningHandoff>()
     fun claimReasoning(owner: String, itemId: String): Boolean = reasoningClaims.add(owner to itemId) && !baseline

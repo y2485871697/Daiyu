@@ -42,7 +42,7 @@ class TestRefreshContract(unittest.TestCase):
         source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatResumeScrollTest.kt').read_text()
         method = source.split('fun testInactiveTerminalAppendIsPresentationReadyBeforeReveal()', 1)[1].split('\n    fun ', 1)[0]
         self.assertEqual(4, method.count('ui.waitUntil(5_000)'))
-        self.assertEqual(1, method.count('ui.mainClock.advanceTimeByFrame()'))
+        self.assertEqual(2, method.count('ui.mainClock.advanceTimeByFrame()'))
         self.assertIn('val appended = first + "后".repeat(80)', method)
         self.assertIn('paintProbe.Capture(replyId)', method)
         self.assertIn('ticksStarted - startTicks', method)
@@ -60,6 +60,26 @@ class TestRefreshContract(unittest.TestCase):
         self.assertIn('ui.waitForIdle()', method.split('fun tick()', 1)[1].split('fun hasActions()', 1)[0])
         self.assertIn('assertNotCompleted(sample)', method)
         self.assertIn('sample.hasAppended', method)
+        tick = method.split('fun tick()', 1)[1].split('fun hasActions()', 1)[0]
+        self.assertEqual(1, tick.count('ui.mainClock.advanceTimeByFrame()'))
+        sampled = method.split('fun sampledTick(): PresentationSample {', 1)[1].split('fun assertNotCompleted', 1)[0]
+        self.assertEqual(1, sampled.count('ui.mainClock.advanceTimeByFrame()'))
+        self.assertEqual(1, sampled.count('presentationSample()'))
+        self.assertNotIn('waitForIdle', sampled)
+        order = [sampled.index(value) for value in ('ticksStarted++', 'advanceTimeByFrame()',
+                 'val sample = presentationSample()', 'ticksFinished++', 'return sample')]
+        self.assertEqual(sorted(order), order)
+        before_w3 = method.split('val startTicks = ticksStarted', 1)[0].split('        try {', 1)[1]
+        self.assertEqual(3, before_w3.count('tick()'))
+        self.assertNotIn('sampledTick()', before_w3)
+        w3 = method.split('val startTicks = ticksStarted', 1)[1].split('} catch (failure:', 1)[0]
+        self.assertEqual(1, w3.count('sampledTick()'))
+        self.assertNotIn('tick()', w3)
+        self.assertNotIn('presentationSample()', w3)
+        self.assertIn('onPresentationReady = { presentationReady = it }', method)
+        self.assertIn('!awaitingAppend || releaseReady && presentationReady', method)
+        self.assertIn('ui.onNodeWithText(appended).assertExists()', method)
+
 
     def test_video_picker_failed_shards_have_independent_non_cancelling_queues(self):
         workflow = (ROOT / '.github/workflows/test-refresh-regression.yml').read_text()

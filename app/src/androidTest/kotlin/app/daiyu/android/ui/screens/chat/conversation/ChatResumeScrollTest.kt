@@ -444,6 +444,14 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
                 .map { it.text }.filter { it.startsWith(first) }.maxOf { it.length }
             return PresentationSample(length, nodes.any(copyMatcher::matches), nodes.any(appendedMatcher::matches))
         }
+        fun sampledTick(): PresentationSample {
+            ticksStarted++
+            ui.mainClock.advanceTimeByFrame()
+            // Fetch performs the idle/draw synchronization for this observation.
+            val sample = presentationSample()
+            ticksFinished++
+            return sample
+        }
         fun assertNotCompleted(sample: PresentationSample? = null) {
             assertEquals("Unread suffix must not acknowledge completion", 0, completed.get())
             if (sample == null) ui.onNodeWithContentDescription("复制回答").assertDoesNotExist()
@@ -538,8 +546,7 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             val startWall = System.nanoTime()
             try {
                 ui.waitUntil(5_000) {
-                    tick()
-                    val sample = presentationSample()
+                    val sample = sampledTick()
                     val current = sample.visibleLength
                     assertTrue("Each released frame advances at most one character",
                         current in previous..minOf(previous + 1, appended.length))

@@ -205,6 +205,7 @@ private val LocalMarkdownPaintedText = staticCompositionLocalOf<MutableMap<Int, 
 private class MarkdownTextFrame {
     var coordinates by mutableStateOf<LayoutCoordinates?>(null)
     var availableHeight by mutableStateOf(0f)
+    var nextAdvance = 0
     var layout by mutableStateOf<TextLayoutResult?>(null)
     var rendered by mutableStateOf<TextLayoutResult?>(null)
     var drawn by mutableStateOf<TextLayoutResult?>(null)
@@ -262,6 +263,15 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
         actual.layoutInput.text == latestCandidateText && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
             clearance.fits(frame.coordinates, actual.size.height)
     } == true
+    fun prepareNextLine() {
+        if (playback?.paused == true) return
+        val candidate = frame.layout
+        val drawn = frame.drawn?.takeIf {
+            candidate != null && it.canPaintPrefixOf(candidate) && it.layoutInput.text.isNotEmpty()
+        }
+        clearance.prepareLine(owner, markdownLineSpace(frame.nextAdvance,
+            clearance.bodyEndInLeaf(frame.coordinates), drawn?.getLineBottom(drawn.lineCount - 1)))
+    }
     fun placed(coordinates: LayoutCoordinates) {
         frame.coordinates = coordinates
         frame.availableHeight = clearance.availableHeight(coordinates)
@@ -276,6 +286,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             if (frame.committed?.layoutInput != accepted?.layoutInput || frame.committed?.size != accepted?.size)
                 frame.committed = accepted
         }
+        prepareNextLine()
         publication?.setPending(owner, !published())
     }
     val refreshAdmission by rememberUpdatedState {
@@ -302,13 +313,14 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             val future = nextLineText?.let {
                 lineMeasurer.measure(it, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
             }
-            val nextAdvance = future?.takeIf { it.lineCount > candidate.lineCount }?.let {
+            frame.nextAdvance = future?.takeIf { it.lineCount > candidate.lineCount }?.let {
                 kotlin.math.ceil(it.getLineBottom(candidate.lineCount) -
                     it.getLineBottom(candidate.lineCount - 1)).toInt()
             } ?: 0
             val drawn = frame.drawn?.takeIf { it.canPaintPrefixOf(candidate) && it.layoutInput.text.isNotEmpty() }
-            if (playback?.paused != true)
-                clearance.prepareLine(owner, markdownLineSpace(nextAdvance, candidate.size.height, drawn?.size?.height))
+            if (playback?.paused != true &&
+                (frame.nextAdvance == 0 || drawn == null || candidate.size.height > drawn.size.height))
+                clearance.prepareLine(owner, 0)
             val committed = measurable.measure(constraints.copy(minHeight = 0))
             layout(constraints.constrainWidth(maxOf(candidate.size.width, committed.width)),
                 constraints.constrainHeight(maxOf(candidate.size.height, committed.height))) {
@@ -329,6 +341,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                 actual.size.height <= available + .01f && (!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text)) {
                 drawContent()
                 frame.drawn = actual
+                prepareNextLine()
                 if (paintOffset != null) painted[paintOffset] = actual
             }
             publication?.setPending(owner, !published())
@@ -338,9 +351,9 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     }
 }
 
-internal fun markdownLineSpace(nextAdvance: Int, candidateHeight: Int, drawnHeight: Int?): Int =
-    if (drawnHeight == null) 0 else
-        (nextAdvance - (candidateHeight - drawnHeight).coerceAtLeast(0)).coerceAtLeast(0)
+internal fun markdownLineSpace(nextAdvance: Int, bodyEnd: Float?, drawnBottom: Float?): Int =
+    if (bodyEnd == null || drawnBottom == null) 0 else
+        kotlin.math.floor((nextAdvance - (bodyEnd - drawnBottom).coerceAtLeast(0f)).coerceAtLeast(0f)).toInt()
 
 internal fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boolean {
     val previous = layoutInput
@@ -384,15 +397,15 @@ private fun MarkdownInlineText(
         }
     }
     CompositionLocalProvider(LocalViewConfiguration provides preciseLinkConfiguration) {
-        val end = if (limit >= body.length) body.length else {
-            val boundaries = remember(body.text) { MarkdownTextBoundaries(body.text) }
-            boundaries.end(limit)
-        }
+        val boundaries = remember(body.text) { MarkdownTextBoundaries(body.text) }
+        val end = if (limit >= body.length) body.length else boundaries.end(limit)
         val visible = remember(body, end) {
             if (end >= body.length) body else body.subSequence(0, end)
         }
-        ClearanceText(visible, paintOffset, modifier, style,
-            nextLineText = body.takeIf { end < body.length })
+        val nextLineText = remember(body, end) {
+            if (end < body.length) body.subSequence(0, boundaries.next(end)) else null
+        }
+        ClearanceText(visible, paintOffset, modifier, style, nextLineText = nextLineText)
     }
 }
 

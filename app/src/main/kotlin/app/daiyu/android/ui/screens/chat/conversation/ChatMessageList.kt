@@ -180,6 +180,15 @@ internal class StreamingTextClearance {
         return (bottom - list.localPositionOf(leaf, Offset.Zero).y).coerceAtLeast(0f)
     }
 
+    fun bodyEndInLeaf(coordinates: LayoutCoordinates?): Float? {
+        val current = viewportGeometry ?: return null
+        val list = current.list?.takeIf { it.isAttached } ?: return null
+        val viewport = current.viewport?.takeIf { it.isAttached } ?: return null
+        val leaf = coordinates?.takeIf { it.isAttached } ?: return null
+        return list.localPositionOf(viewport, Offset.Zero).y - current.offset + current.height -
+            list.localPositionOf(leaf, Offset.Zero).y
+    }
+
     fun whollyAboveViewport(coordinates: LayoutCoordinates?, height: Int): Boolean {
         if (!positioned || height <= 0) return false
         val current = viewportGeometry ?: return false

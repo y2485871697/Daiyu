@@ -83,7 +83,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         for token in ('val candidateText = if (playback?.paused == true) displayedText else text',
                       'frame.layout = candidate', 'val future = nextLineText?.let {',
                       'it.lineCount > candidate.lineCount', 'it.getLineBottom(candidate.lineCount)',
-                      'if (playback?.paused != true)', 'clearance.prepareLine(owner, 0)',
+                      'if (playback?.paused != true &&', 'clearance.prepareLine(owner, 0)',
                       'BasicText(displayedText, modifier.layout',
                       'actual.size.height <= available + .01f',
                       'actual.layoutInput.text == latestCandidateText'):
@@ -97,10 +97,25 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('it.getLineBottom(candidate.lineCount - 1)', clearance)
         self.assertNotIn('val bottomPadding =', clearance)
         self.assertIn('val drawn = frame.drawn?.takeIf { it.canPaintPrefixOf(candidate)', clearance)
-        self.assertIn('markdownLineSpace(nextAdvance, candidate.size.height, drawn?.size?.height)', clearance)
+        self.assertIn('frame.nextAdvance = future?.takeIf { it.lineCount > candidate.lineCount }', clearance)
+        self.assertIn('(frame.nextAdvance == 0 || drawn == null || candidate.size.height > drawn.size.height)', clearance)
+        self.assertIn('fun prepareNextLine()', clearance)
+        self.assertIn('clearance.bodyEndInLeaf(frame.coordinates), drawn?.getLineBottom(drawn.lineCount - 1)', clearance)
+        prepare = clearance.split('fun prepareNextLine()', 1)[1].split('fun placed(', 1)[0]
+        self.assertIn('if (playback?.paused == true) return', prepare)
+        self.assertIn('it.canPaintPrefixOf(candidate)', prepare)
+        placed = clearance.split('fun placed(', 1)[1].split('val refreshAdmission', 1)[0]
+        self.assertIn('prepareNextLine()', placed)
+        draw = clearance.split('.drawWithContent {', 1)[1]
+        self.assertLess(draw.index('frame.drawn = actual'), draw.index('prepareNextLine()'))
+        tail = (BASE / 'ChatMessageList.kt').read_text()
+        body_end = tail.split('fun bodyEndInLeaf(', 1)[1].split('fun whollyAboveViewport', 1)[0]
+        self.assertIn('val current = viewportGeometry ?: return null', body_end)
+        self.assertIn('- current.offset + current.height -', body_end)
+        self.assertNotIn('contentHeight', body_end)
         line_space = ui.split('internal fun markdownLineSpace(', 1)[1].split('internal fun TextLayoutResult.canPaintPrefixOf', 1)[0]
-        self.assertIn('if (drawnHeight == null) 0', line_space)
-        self.assertIn('(nextAdvance - (candidateHeight - drawnHeight).coerceAtLeast(0)).coerceAtLeast(0)', line_space)
+        self.assertIn('if (bodyEnd == null || drawnBottom == null) 0', line_space)
+        self.assertIn('kotlin.math.floor((nextAdvance - (bodyEnd - drawnBottom).coerceAtLeast(0f)).coerceAtLeast(0f)).toInt()', line_space)
 
 
     def test_table_cell_budget_and_visible_semantics_are_preserved(self):
@@ -111,7 +126,9 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('visibility = budget, paintOffset = paintOffset + offsets[column])', row)
         inline = ui.split('private fun MarkdownInlineText(', 1)[1].split('private fun MarkdownBlocks(', 1)[0]
         self.assertIn('ClearanceText(visible, paintOffset, modifier, style,', inline)
-        self.assertIn('nextLineText = body.takeIf { end < body.length }', inline)
+        self.assertIn('body.subSequence(0, boundaries.next(end))', inline)
+        self.assertIn('nextLineText = nextLineText', inline)
+        self.assertNotIn('nextLineText = body.takeIf', inline)
         self.assertIn('if (limit <= 0) { Box(modifier); return }', inline)
         clearance = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun TextLayoutResult.canPaintPrefixOf', 1)[0]
         self.assertIn("val latestCandidateText by rememberUpdatedState(text)", clearance)

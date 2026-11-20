@@ -70,29 +70,33 @@ class MarkdownPreparationCompositionTest {
             clearance.reservedHeight(83, 120, true))
     }
 
-    @Test fun nextLineSpaceConsumesCandidateGrowthBeforePreparingAnotherLine() {
+    @Test fun nextLineSpaceConsumesBodyGrowthAndExistingTrailingSpace() {
         val clearance = StreamingTextClearance()
         val owner = Any()
-        clearance.prepareLine(owner, markdownLineSpace(26, 19, 19))
-        assertEquals(26, clearance.reservedHeight(193, 400, true))
-        clearance.prepareLine(owner, markdownLineSpace(26, 45, 19))
+        clearance.prepareLine(owner, markdownLineSpace(26, 31f, 19f))
+        assertEquals("Existing parent trailing space shares the next-line budget", 14,
+            clearance.reservedHeight(193, 400, true))
+        clearance.prepareLine(owner, markdownLineSpace(26, 57f, 19f))
         assertEquals("The pending candidate consumes the already prepared line", 0,
             clearance.reservedHeight(219, 400, true))
-        clearance.prepareLine(owner, markdownLineSpace(26, 45, 45))
-        assertEquals("The next line is prepared only after the current line really draws", 26,
+        clearance.prepareLine(owner, markdownLineSpace(26, 57f, 45f))
+        assertEquals("Drawn candidate still leaves its parent trailing space", 14,
             clearance.reservedHeight(219, 400, true))
-        clearance.prepareLine(owner, markdownLineSpace(26, 71, 71))
-        assertEquals(26, clearance.reservedHeight(245, 400, true))
+        clearance.prepareLine(owner, markdownLineSpace(0, 57f, 45f))
+        assertEquals("No imminent wrap leaves no next-line reserve", 0,
+            clearance.reservedHeight(219, 400, true))
         assertTrue(clearance.held)
         assertEquals(0f, clearance.availableHeight(null), 0f)
     }
 
-    @Test fun nextLineSpaceNeedsACompatibleDrawnBaselineAndClearsTheLastLine() {
-        assertEquals(0, markdownLineSpace(26, 19, null))
-        assertEquals(8, markdownLineSpace(26, 37, 19))
-        assertEquals(0, markdownLineSpace(26, 71, 19))
-        assertEquals(0, markdownLineSpace(0, 71, 71))
-        assertEquals(26, markdownLineSpace(26, 19, 45))
+    @Test fun nextLineSpaceNeedsCurrentGeometryAndACompatibleDrawnBaseline() {
+        assertEquals(0, markdownLineSpace(26, 19f, null))
+        assertEquals(0, markdownLineSpace(26, null, 19f))
+        assertEquals(8, markdownLineSpace(26, 37f, 19f))
+        assertEquals(0, markdownLineSpace(26, 71f, 19f))
+        assertEquals(26, markdownLineSpace(26, 19f, 45f))
+        assertEquals("Fractional existing space cannot round the budget upward", 13,
+            markdownLineSpace(26, 31.25f, 19f))
     }
 
     @Test fun pendingAppendsDoNotPrepareTheSameDisplayedAstAgain() = verifyPendingAppends(false)

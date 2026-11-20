@@ -70,6 +70,31 @@ class MarkdownPreparationCompositionTest {
             clearance.reservedHeight(83, 120, true))
     }
 
+    @Test fun nextLineSpaceConsumesCandidateGrowthBeforePreparingAnotherLine() {
+        val clearance = StreamingTextClearance()
+        val owner = Any()
+        clearance.prepareLine(owner, markdownLineSpace(26, 19, 19))
+        assertEquals(26, clearance.reservedHeight(193, 400, true))
+        clearance.prepareLine(owner, markdownLineSpace(26, 45, 19))
+        assertEquals("The pending candidate consumes the already prepared line", 0,
+            clearance.reservedHeight(219, 400, true))
+        clearance.prepareLine(owner, markdownLineSpace(26, 45, 45))
+        assertEquals("The next line is prepared only after the current line really draws", 26,
+            clearance.reservedHeight(219, 400, true))
+        clearance.prepareLine(owner, markdownLineSpace(26, 71, 71))
+        assertEquals(26, clearance.reservedHeight(245, 400, true))
+        assertTrue(clearance.held)
+        assertEquals(0f, clearance.availableHeight(null), 0f)
+    }
+
+    @Test fun nextLineSpaceNeedsACompatibleDrawnBaselineAndClearsTheLastLine() {
+        assertEquals(0, markdownLineSpace(26, 19, null))
+        assertEquals(8, markdownLineSpace(26, 37, 19))
+        assertEquals(0, markdownLineSpace(26, 71, 19))
+        assertEquals(0, markdownLineSpace(0, 71, 71))
+        assertEquals(26, markdownLineSpace(26, 19, 45))
+    }
+
     @Test fun pendingAppendsDoNotPrepareTheSameDisplayedAstAgain() = verifyPendingAppends(false)
     @Test fun turnEntryAlsoReusesTheDisplayedAstWhileAppendsArePending() = verifyPendingAppends(true)
 

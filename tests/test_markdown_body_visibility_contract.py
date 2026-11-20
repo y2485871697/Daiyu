@@ -94,6 +94,14 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertNotIn('== text', publication)
         self.assertNotIn('frame.layout = future', clearance)
         self.assertNotIn('BasicText(nextLineText', clearance)
+        self.assertIn('it.getLineBottom(candidate.lineCount - 1)', clearance)
+        self.assertNotIn('val bottomPadding =', clearance)
+        self.assertIn('val drawn = frame.drawn?.takeIf { it.canPaintPrefixOf(candidate)', clearance)
+        self.assertIn('markdownLineSpace(nextAdvance, candidate.size.height, drawn?.size?.height)', clearance)
+        line_space = ui.split('internal fun markdownLineSpace(', 1)[1].split('internal fun TextLayoutResult.canPaintPrefixOf', 1)[0]
+        self.assertIn('if (drawnHeight == null) 0', line_space)
+        self.assertIn('(nextAdvance - (candidateHeight - drawnHeight).coerceAtLeast(0)).coerceAtLeast(0)', line_space)
+
 
     def test_table_cell_budget_and_visible_semantics_are_preserved(self):
         ui = (BASE / 'MessageMarkdown.kt').read_text()

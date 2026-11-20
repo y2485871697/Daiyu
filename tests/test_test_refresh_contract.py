@@ -50,7 +50,16 @@ class TestRefreshContract(unittest.TestCase):
         self.assertIn('failure.addSuppressed(AssertionError("W3 original wait failed:', method)
         self.assertIn('throw failure', method)
         self.assertIn('current in previous..minOf(previous + 1, appended.length)', method)
-        self.assertIn('current == appended.length && hasActions() && completed.get() > 0', method)
+        self.assertIn('current == appended.length && sample.hasCopy && completed.get() > 0', method)
+        sample = method.split('fun presentationSample(): PresentationSample {', 1)[1].split('fun assertNotCompleted', 1)[0]
+        self.assertEqual(1, sample.count('.fetchSemanticsNodes()'))
+        self.assertIn('useUnmergedTree = true', sample)
+        self.assertIn('.maxOf { it.length }', sample)
+        self.assertIn('nodes.any(copyMatcher::matches)', sample)
+        self.assertIn('nodes.any(appendedMatcher::matches)', sample)
+        self.assertIn('ui.waitForIdle()', method.split('fun tick()', 1)[1].split('fun hasActions()', 1)[0])
+        self.assertIn('assertNotCompleted(sample)', method)
+        self.assertIn('sample.hasAppended', method)
 
     def test_video_picker_failed_shards_have_independent_non_cancelling_queues(self):
         workflow = (ROOT / '.github/workflows/test-refresh-regression.yml').read_text()

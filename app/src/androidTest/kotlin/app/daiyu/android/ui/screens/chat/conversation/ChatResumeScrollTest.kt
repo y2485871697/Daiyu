@@ -432,9 +432,22 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
                 .map { it.text }
                 .filter { it.startsWith(first) }
                 .maxOf { it.length }
-        fun assertNotCompleted() {
+        data class PresentationSample(val visibleLength: Int, val hasCopy: Boolean, val hasAppended: Boolean)
+        val prefixMatcher = hasText(first, substring = true)
+        val copyMatcher = hasContentDescription("复制回答")
+        val appendedMatcher = hasText(appended)
+        fun presentationSample(): PresentationSample {
+            val nodes = ui.onAllNodes(SemanticsMatcher("all presentation nodes") { true },
+                useUnmergedTree = true).fetchSemanticsNodes()
+            val length = nodes.filter(prefixMatcher::matches)
+                .flatMap { it.config[androidx.compose.ui.semantics.SemanticsProperties.Text] }
+                .map { it.text }.filter { it.startsWith(first) }.maxOf { it.length }
+            return PresentationSample(length, nodes.any(copyMatcher::matches), nodes.any(appendedMatcher::matches))
+        }
+        fun assertNotCompleted(sample: PresentationSample? = null) {
             assertEquals("Unread suffix must not acknowledge completion", 0, completed.get())
-            ui.onNodeWithContentDescription("复制回答").assertDoesNotExist()
+            if (sample == null) ui.onNodeWithContentDescription("复制回答").assertDoesNotExist()
+            else assertFalse("Unread suffix cannot expose copy actions", sample.hasCopy)
         }
         try {
             mainThread {
@@ -510,10 +523,11 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             repeat(12) {
                 tick()
                 assertTrue(presentationReady)
-                assertEquals("Inactive append must retain its displayed prefix", first.length, visible())
+                val sample = presentationSample()
+                assertEquals("Inactive append must retain its displayed prefix", first.length, sample.visibleLength)
                 assertEquals("Inactive append cannot emit typing advances", 0, advances.get())
-                ui.onNodeWithText(appended).assertDoesNotExist()
-                assertNotCompleted()
+                assertFalse("Inactive append cannot expose its full suffix", sample.hasAppended)
+                assertNotCompleted(sample)
             }
             instrumentation.runOnMainSync { releaseReady = true }
             var previous = first.length
@@ -525,13 +539,14 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             try {
                 ui.waitUntil(5_000) {
                     tick()
-                    val current = visible()
+                    val sample = presentationSample()
+                    val current = sample.visibleLength
                     assertTrue("Each released frame advances at most one character",
                         current in previous..minOf(previous + 1, appended.length))
                     if (current > previous && current < appended.length) sawPartial = true
-                    if (current < appended.length) assertNotCompleted()
+                    if (current < appended.length) assertNotCompleted(sample)
                     previous = current
-                    current == appended.length && hasActions() && completed.get() > 0
+                    current == appended.length && sample.hasCopy && completed.get() > 0
                 }
             } catch (failure: Throwable) {
                 val endClock = ui.mainClock.currentTime

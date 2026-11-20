@@ -302,12 +302,13 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             val future = nextLineText?.let {
                 lineMeasurer.measure(it, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
             }
-            val nextHeight = future?.takeIf { it.lineCount > candidate.lineCount }?.let {
-                val bottomPadding = it.size.height - it.getLineBottom(it.lineCount - 1)
-                kotlin.math.ceil(it.getLineBottom(candidate.lineCount) + bottomPadding).toInt()
-            } ?: candidate.size.height
+            val nextAdvance = future?.takeIf { it.lineCount > candidate.lineCount }?.let {
+                kotlin.math.ceil(it.getLineBottom(candidate.lineCount) -
+                    it.getLineBottom(candidate.lineCount - 1)).toInt()
+            } ?: 0
+            val drawn = frame.drawn?.takeIf { it.canPaintPrefixOf(candidate) && it.layoutInput.text.isNotEmpty() }
             if (playback?.paused != true)
-                clearance.prepareLine(owner, (nextHeight - candidate.size.height).coerceAtLeast(0))
+                clearance.prepareLine(owner, markdownLineSpace(nextAdvance, candidate.size.height, drawn?.size?.height))
             val committed = measurable.measure(constraints.copy(minHeight = 0))
             layout(constraints.constrainWidth(maxOf(candidate.size.width, committed.width)),
                 constraints.constrainHeight(maxOf(candidate.size.height, committed.height))) {
@@ -336,6 +337,10 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
         })
     }
 }
+
+internal fun markdownLineSpace(nextAdvance: Int, candidateHeight: Int, drawnHeight: Int?): Int =
+    if (drawnHeight == null) 0 else
+        (nextAdvance - (candidateHeight - drawnHeight).coerceAtLeast(0)).coerceAtLeast(0)
 
 internal fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boolean {
     val previous = layoutInput

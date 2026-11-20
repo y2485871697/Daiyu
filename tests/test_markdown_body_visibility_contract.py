@@ -6,6 +6,26 @@ BASE = Path(__file__).resolve().parents[1] / 'app/src/main/kotlin/app/daiyu/andr
 
 
 class MarkdownBodyVisibilityContract(unittest.TestCase):
+    def test_native_input_observes_constraints_not_candidate_and_hint_reads_do_not_subscribe_measure(self):
+        ui = (BASE / 'MessageMarkdown.kt').read_text()
+        leaf = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun markdownLineSpace', 1)[0]
+        frame = ui.split('private class MarkdownTextFrame {', 1)[1].split('@Composable', 1)[0]
+        self.assertIn('var measureConstraints by mutableStateOf<Constraints?>(null)', frame)
+        native = leaf.split('val displayedText by remember(', 1)[1].split('val candidateText =', 1)[0]
+        self.assertIn('frame.measureConstraints?.let { constraints ->', native)
+        self.assertIn('constraints = constraints.copy(minHeight = 0)', native)
+        self.assertNotIn('frame.layout', native)
+        self.assertIn('if (prepared != null && clearance.fits(coordinates, prepared.size.height)) latestCandidateText', native)
+        self.assertIn('else frame.committed?.layoutInput?.text ?: latestCandidateText', native)
+        self.assertIn('frame.drawn?.layoutInput?.text ?: AnnotatedString("")', native)
+        measure = leaf.split('BasicText(displayedText, modifier.layout { measurable, constraints ->', 1)[1].split('.onPlaced(::placed)', 1)[0]
+        self.assertIn('frame.layout = candidate\n            frame.measureConstraints = candidate.layoutInput.constraints', measure)
+        self.assertIn('val drawn = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.drawn }', measure)
+        draw = leaf.split('.drawWithContent {', 1)[1]
+        self.assertIn('drawContent()\n                frame.drawn = actual\n                prepareNextLine()', draw)
+        self.assertIn('actual.size.height <= available + .01f', draw)
+        self.assertIn('publication?.setPending(owner, !published())', draw)
+
     def test_body_and_thought_both_defer_frame_reads_to_markdown_leaves(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()
         reasoning = (BASE / 'ReportedReasoningCard.kt').read_text()
@@ -100,12 +120,12 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertNotIn('BasicText(nextLineText', clearance)
         self.assertIn('maxLines = candidate.lineCount + 1', clearance)
         self.assertNotIn('getLineBottom(', clearance)
-        future = clearance.split('val future = nextLineText?.let {', 1)[1].split('val drawn = frame.drawn?.takeIf', 1)[0]
+        future = clearance.split('val future = nextLineText?.let {', 1)[1].split('val drawn = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.drawn }', 1)[0]
         self.assertIn('lineMeasurer.measure(it, style, softWrap = softWrap, maxLines = candidate.lineCount + 1,', future)
         self.assertIn('constraints = constraints.copy(minHeight = 0)', future)
         self.assertIn('(it.size.height - candidate.size.height).coerceAtLeast(0)', future)
         self.assertNotIn('val bottomPadding =', clearance)
-        self.assertIn('val drawn = frame.drawn?.takeIf { it.canPaintPrefixOf(candidate)', clearance)
+        self.assertIn('val drawn = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.drawn }\n                ?.takeIf { it.canPaintPrefixOf(candidate) && it.layoutInput.text.isNotEmpty() }', clearance)
         self.assertIn('frame.nextAdvance = future?.takeIf { it.lineCount > candidate.lineCount }', clearance)
         self.assertIn('(frame.nextAdvance == 0 || drawn == null || candidate.size.height > drawn.size.height)', clearance)
         self.assertIn('fun prepareNextLine()', clearance)
@@ -148,7 +168,8 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
                       'if (playback?.paused == true) frame.drawn?.layoutInput?.text ?: AnnotatedString("")',
                       'frame.coordinates?.takeIf { it.isAttached }',
                       'measurer.measure(latestCandidateText, style, softWrap = softWrap,',
-                      'constraints = previous.layoutInput.constraints.copy(minHeight = 0)',
+                      'frame.measureConstraints?.let { constraints ->',
+                      'constraints = constraints.copy(minHeight = 0)',
                       'clearance.fits(coordinates, prepared.size.height)',
                       'else frame.committed?.layoutInput?.text ?: latestCandidateText'):
             self.assertIn(token, native_input)

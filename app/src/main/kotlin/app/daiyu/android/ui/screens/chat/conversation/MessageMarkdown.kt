@@ -31,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.constrainWidth
 import androidx.compose.ui.unit.constrainHeight
 import androidx.compose.runtime.CompositionLocalProvider
@@ -216,6 +217,7 @@ private class MarkdownTextFrame {
     var coordinates by mutableStateOf<LayoutCoordinates?>(null)
     var availableHeight by mutableStateOf(0f)
     var nextAdvance = 0
+    var measureConstraints by mutableStateOf<Constraints?>(null)
     var layout by mutableStateOf<TextLayoutResult?>(null)
     var rendered by mutableStateOf<TextLayoutResult?>(null)
     var drawn by mutableStateOf<TextLayoutResult?>(null)
@@ -254,9 +256,9 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             if (playback?.paused == true) frame.drawn?.layoutInput?.text ?: AnnotatedString("")
             else {
                 val coordinates = frame.coordinates?.takeIf { it.isAttached }
-                val prepared = if (coordinates != null) frame.layout?.let { previous ->
+                val prepared = if (coordinates != null) frame.measureConstraints?.let { constraints ->
                     measurer.measure(latestCandidateText, style, softWrap = softWrap,
-                        constraints = previous.layoutInput.constraints.copy(minHeight = 0))
+                        constraints = constraints.copy(minHeight = 0))
                 } else null
                 // Prepare the native input before placement; only the real layout and draw publish it.
                 if (prepared != null && clearance.fits(coordinates, prepared.size.height)) latestCandidateText
@@ -320,6 +322,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
         BasicText(displayedText, modifier.layout { measurable, constraints ->
             val candidate = measurer.measure(candidateText, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
             frame.layout = candidate
+            frame.measureConstraints = candidate.layoutInput.constraints
             val future = nextLineText?.let {
                 lineMeasurer.measure(it, style, softWrap = softWrap, maxLines = candidate.lineCount + 1,
                     constraints = constraints.copy(minHeight = 0))
@@ -327,7 +330,8 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             frame.nextAdvance = future?.takeIf { it.lineCount > candidate.lineCount }?.let {
                 (it.size.height - candidate.size.height).coerceAtLeast(0)
             } ?: 0
-            val drawn = frame.drawn?.takeIf { it.canPaintPrefixOf(candidate) && it.layoutInput.text.isNotEmpty() }
+            val drawn = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.drawn }
+                ?.takeIf { it.canPaintPrefixOf(candidate) && it.layoutInput.text.isNotEmpty() }
             if (playback?.paused != true &&
                 (frame.nextAdvance == 0 || drawn == null || candidate.size.height > drawn.size.height))
                 clearance.prepareLine(owner, 0)

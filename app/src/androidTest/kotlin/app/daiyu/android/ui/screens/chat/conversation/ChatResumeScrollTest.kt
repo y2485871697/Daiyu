@@ -412,9 +412,15 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             }
             MarkdownParser.parse(source)
         }
+        val paintProbe = MarkdownPaintSlotsProbe()
+        var geometry: () -> String = { "not captured" }
+        var ticksStarted = 0
+        var ticksFinished = 0
         fun tick() {
+            ticksStarted++
             ui.mainClock.advanceTimeByFrame()
             ui.waitForIdle()
+            ticksFinished++
         }
         fun hasActions(): Boolean =
             ui.onAllNodesWithContentDescription("复制回答", useUnmergedTree = true)
@@ -457,6 +463,21 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
                                         },
                                     ),
                                     scrollRequest = ChatScrollRequest(1),
+                                    turnExtras = { turn ->
+                                        if (turn.id == replyId) {
+                                            paintProbe.Capture(replyId)
+                                            val viewport = LocalWorkflowDisclosureContext.current?.viewport
+                                            val clearance = LocalStreamingTextClearance.current
+                                            val playback = LocalReplyPlayback.current
+                                            val active = LocalChatPresentationActive.current
+                                            androidx.compose.runtime.SideEffect {
+                                                geometry = {
+                                                    "paused=${playback?.paused} observedActive=$active " +
+                                                        "held=${clearance?.held} ${viewport?.diagnostics?.invoke()}"
+                                                }
+                                            }
+                                        }
+                                    },
                                     onPresentationReady = { presentationReady = it },
                                 )
                             }
@@ -497,15 +518,43 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             instrumentation.runOnMainSync { releaseReady = true }
             var previous = first.length
             var sawPartial = false
-            ui.waitUntil(5_000) {
-                tick()
-                val current = visible()
-                assertTrue("Each released frame advances at most one character",
-                    current in previous..minOf(previous + 1, appended.length))
-                if (current > previous && current < appended.length) sawPartial = true
-                if (current < appended.length) assertNotCompleted()
-                previous = current
-                current == appended.length && hasActions() && completed.get() > 0
+            val startTicks = ticksStarted
+            val finishTicks = ticksFinished
+            val startClock = ui.mainClock.currentTime
+            val startWall = System.nanoTime()
+            try {
+                ui.waitUntil(5_000) {
+                    tick()
+                    val current = visible()
+                    assertTrue("Each released frame advances at most one character",
+                        current in previous..minOf(previous + 1, appended.length))
+                    if (current > previous && current < appended.length) sawPartial = true
+                    if (current < appended.length) assertNotCompleted()
+                    previous = current
+                    current == appended.length && hasActions() && completed.get() > 0
+                }
+            } catch (failure: Throwable) {
+                val endClock = ui.mainClock.currentTime
+                val wallMs = (System.nanoTime() - startWall) / 1_000_000L
+                val semantics = runCatching { "visible=${visible()} actions=${hasActions()}" }
+                    .getOrElse { "semanticsFailure=${it.javaClass.simpleName}" }
+                var paint = "not sampled"
+                var viewport = "not sampled"
+                runCatching {
+                    instrumentation.runOnMainSync {
+                        paint = runCatching { paintProbe.sample(replyId) }
+                            .getOrElse { "probeFailure=${it.javaClass.simpleName}" }
+                        viewport = runCatching { androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { geometry() } }
+                            .getOrElse { "geometryFailure=${it.javaClass.simpleName}" }
+                    }
+                }.onFailure { failure.addSuppressed(it) }
+                failure.addSuppressed(AssertionError("W3 original wait failed: " +
+                    "ticksStarted=${ticksStarted - startTicks} ticksFinished=${ticksFinished - finishTicks} " +
+                    "clock=$startClock..$endClock wallMs=$wallMs previous=$previous sawPartial=$sawPartial " +
+                    "advances=${advances.get()} completed=${completed.get()} ready=$presentationReady " +
+                    "requestedPresentationActive=${!awaitingAppend || releaseReady && presentationReady} " +
+                    "postFailure $semantics geometry=$viewport\n$paint"))
+                throw failure
             }
             assertTrue("The suffix must type, not flush when readiness opens", sawPartial)
             assertTrue("Released presentation must emit visible advances", advances.get() > 0)

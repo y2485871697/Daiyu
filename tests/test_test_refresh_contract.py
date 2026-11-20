@@ -14,6 +14,44 @@ from verify_test_refresh import validate_changes, validate_graph, verify_archive
 
 
 class TestRefreshContract(unittest.TestCase):
+    def test_single_method_refresh_reuses_diagnostic_selector_and_exact_runner(self):
+        workflow = (ROOT / '.github/workflows/test-refresh-regression.yml').read_text()
+        self.assertIn("      test_method:\n", workflow)
+        self.assertIn("  SMOKE_TEST_METHOD: ${{ inputs.test_method }}", workflow)
+        self.assertIn("  SMOKE_DIAGNOSTIC: ${{ inputs.test_method != '' && 'true' || '' }}", workflow)
+        self.assertIn("shard: ${{ fromJSON(inputs.test_method != '' && '[0]' ||", workflow)
+        self.assertIn("SMOKE_SHARD_COUNT: ${{ inputs.test_method != '' && '1' ||", workflow)
+        self.assertEqual(2, workflow.count('test "$SELECTED_API" = 26 || test "$SELECTED_API" = 37.2'))
+        self.assertEqual(2, workflow.count('test "$SELECTED_SHARD" = all || test "$SELECTED_SHARD" = 0'))
+        self.assertEqual(2, workflow.count("selected = diagnostic_selection(Path('.'), os.environ)"))
+        self.assertEqual(2, workflow.count("assert selected and selected['method'] and selected['expected_tests'] == 1"))
+        self.assertIn("formal_acceptance=False, full_regression_passed=False", workflow)
+        self.assertIn("if: always() && inputs.test_method != ''", workflow)
+        self.assertEqual(2, workflow.count("if: always() && inputs.test_method != ''"))
+        self.assertIn("phase='test-package'", workflow)
+        self.assertIn("shutil.copy2(selection, root / selection.name)", workflow)
+        self.assertIn("SMOKE_TEST_METHOD: ''", workflow.split('  test-package:', 1)[0])
+        script = (ROOT / 'scripts/smoke_boot.sh').read_text()
+        self.assertIn('diagnostic_selection(Path("."), os.environ)', script)
+        self.assertIn('result_options=(--expected-target "$test_classes")', script)
+        self.assertIn("python3 scripts/verify_test_refresh.py", workflow)
+        self.assertIn(":app:assembleReleaseAndroidTest", workflow)
+        self.assertNotIn(":app:assembleRelease\n", workflow)
+
+    def test_inactive_append_failure_probe_preserves_original_wait_and_tick(self):
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatResumeScrollTest.kt').read_text()
+        method = source.split('fun testInactiveTerminalAppendIsPresentationReadyBeforeReveal()', 1)[1].split('\n    fun ', 1)[0]
+        self.assertEqual(4, method.count('ui.waitUntil(5_000)'))
+        self.assertEqual(1, method.count('ui.mainClock.advanceTimeByFrame()'))
+        self.assertIn('val appended = first + "后".repeat(80)', method)
+        self.assertIn('paintProbe.Capture(replyId)', method)
+        self.assertIn('ticksStarted - startTicks', method)
+        self.assertIn('ticksFinished - finishTicks', method)
+        self.assertIn('failure.addSuppressed(AssertionError("W3 original wait failed:', method)
+        self.assertIn('throw failure', method)
+        self.assertIn('current in previous..minOf(previous + 1, appended.length)', method)
+        self.assertIn('current == appended.length && hasActions() && completed.get() > 0', method)
+
     def test_video_picker_failed_shards_have_independent_non_cancelling_queues(self):
         workflow = (ROOT / '.github/workflows/test-refresh-regression.yml').read_text()
         concurrency = workflow.split('\nconcurrency:\n', 1)[1].split('\nenv:', 1)[0]
@@ -83,7 +121,7 @@ class TestRefreshContract(unittest.TestCase):
         smoke = workflow.split('\n  smoke:\n', 1)[1]
         matrix = smoke.split('\n      matrix:\n', 1)[1].split('\n    steps:\n', 1)[0]
         self.assertIn(
-            "        shard: ${{ fromJSON(inputs.smoke_classes == "
+            "        shard: ${{ fromJSON(inputs.test_method != '' && '[0]' || inputs.smoke_classes == "
             "'app.daiyu.android.ChatMediaPreviewVideoControlsUiTest' && '[0]' || "
             "inputs.smoke_shard != 'all' && format('[{0}]', inputs.smoke_shard) || "
             "'[0,1,2,3]') }}",
@@ -92,10 +130,11 @@ class TestRefreshContract(unittest.TestCase):
             "        api: ${{ fromJSON(inputs.smoke_api == '26' && '[\"26\"]' || "
             "inputs.smoke_api == '37.2' && '[\"37.2\"]' || '[\"26\",\"37.2\"]') }}",
             matrix)
-        count = next(line.strip() for line in smoke.splitlines()
-                     if line.strip().startswith('SMOKE_SHARD_COUNT:'))
+        emulator = smoke.split('      - name: 安装并检查启动\n', 1)[1]
+        count = next(line.strip() for line in emulator.splitlines()
+                     if line.strip().startswith('SMOKE_SHARD_COUNT: ${{'))
         self.assertTrue(count.startswith(
-            "SMOKE_SHARD_COUNT: ${{ (inputs.smoke_classes == "
+            "SMOKE_SHARD_COUNT: ${{ inputs.test_method != '' && '1' || (inputs.smoke_classes == "
             "'app.daiyu.android.ChatMediaPreviewVideoControlsUiTest' || "))
         self.assertTrue(count.endswith("&& '1' || '4' }}"))
 
@@ -343,7 +382,7 @@ class TestRefreshContract(unittest.TestCase):
         self.assertIn('verify_test_refresh.py bind', workflow)
         self.assertIn("subprocess.check_call(['python3', 'scripts/verify_test_refresh.py', 'check'], env=env)", workflow)
         self.assertIn('source-delivery', workflow)
-        self.assertIn("SMOKE_SHARD_COUNT: ${{ (inputs.smoke_classes == "
+        self.assertIn("SMOKE_SHARD_COUNT: ${{ inputs.test_method != '' && '1' || (inputs.smoke_classes == "
                       "'app.daiyu.android.ChatMediaPreviewVideoControlsUiTest' || inputs.smoke_classes == "
                       "'app.daiyu.android.VoiceCallFloatingWindowTest' || "
                       "(inputs.smoke_classes == 'app.daiyu.android.ui.screens.chat.conversation.ToolOperationCardTest' "

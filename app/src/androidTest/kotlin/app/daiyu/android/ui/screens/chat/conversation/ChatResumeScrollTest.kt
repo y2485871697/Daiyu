@@ -437,12 +437,22 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
         val copyMatcher = hasContentDescription("复制回答")
         val appendedMatcher = hasText(appended)
         fun presentationSample(): PresentationSample {
-            val nodes = ui.onAllNodes(SemanticsMatcher("all presentation nodes") { true },
+            val nodes = ui.onAllNodes(prefixMatcher or copyMatcher,
                 useUnmergedTree = true).fetchSemanticsNodes()
-            val length = nodes.filter(prefixMatcher::matches)
-                .flatMap { it.config[androidx.compose.ui.semantics.SemanticsProperties.Text] }
-                .map { it.text }.filter { it.startsWith(first) }.maxOf { it.length }
-            return PresentationSample(length, nodes.any(copyMatcher::matches), nodes.any(appendedMatcher::matches))
+            var length = -1
+            var hasCopy = false
+            var hasAppended = false
+            for (node in nodes) {
+                if (prefixMatcher.matches(node)) {
+                    for (text in node.config[androidx.compose.ui.semantics.SemanticsProperties.Text]) {
+                        if (text.text.startsWith(first)) length = maxOf(length, text.text.length)
+                    }
+                }
+                hasCopy = hasCopy || copyMatcher.matches(node)
+                hasAppended = hasAppended || appendedMatcher.matches(node)
+            }
+            check(length >= 0) { "The presented prefix disappeared" }
+            return PresentationSample(length, hasCopy, hasAppended)
         }
         fun sampledTick(): PresentationSample {
             ticksStarted++
@@ -545,7 +555,11 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             val startClock = ui.mainClock.currentTime
             val startWall = System.nanoTime()
             try {
-                ui.waitUntil(5_000) {
+                fun checkDeadline() {
+                    assertTrue("W3 timed out after 5000 ms", System.nanoTime() - startWall <= 5_000_000_000L)
+                }
+                while (true) {
+                    checkDeadline()
                     val sample = sampledTick()
                     val current = sample.visibleLength
                     assertTrue("Each released frame advances at most one character",
@@ -553,7 +567,8 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
                     if (current > previous && current < appended.length) sawPartial = true
                     if (current < appended.length) assertNotCompleted(sample)
                     previous = current
-                    current == appended.length && sample.hasCopy && completed.get() > 0
+                    checkDeadline()
+                    if (current == appended.length && sample.hasCopy && completed.get() > 0) break
                 }
             } catch (failure: Throwable) {
                 val endClock = ui.mainClock.currentTime

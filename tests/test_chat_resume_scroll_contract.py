@@ -156,6 +156,26 @@ class ChatResumeScrollContract(unittest.TestCase):
             self.assertIn(token, device)
 
 
+    def test_inactive_release_keeps_wall_deadline_and_single_draw_sample(self):
+        device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatResumeScrollTest.kt').read_text()
+        method = device.split('fun testInactiveTerminalAppendIsPresentationReadyBeforeReveal()', 1)[1].split('\n    fun ', 1)[0]
+        sample = method.split('fun presentationSample(): PresentationSample {', 1)[1].split('fun sampledTick()', 1)[0]
+        self.assertIn('ui.onAllNodes(prefixMatcher or copyMatcher,', sample)
+        self.assertEqual(1, sample.count('.fetchSemanticsNodes()'))
+        self.assertIn('check(length >= 0)', sample)
+        tick = method.split('fun sampledTick(): PresentationSample {', 1)[1].split('fun assertNotCompleted', 1)[0]
+        self.assertEqual(1, tick.count('ui.mainClock.advanceTimeByFrame()'))
+        self.assertEqual(1, tick.count('presentationSample()'))
+        self.assertNotIn('waitForIdle', tick)
+        release = method.split('val startWall = System.nanoTime()', 1)[1].split('} catch (failure: Throwable)', 1)[0]
+        self.assertIn('System.nanoTime() - startWall <= 5_000_000_000L', release)
+        self.assertEqual(3, release.count('checkDeadline()'))
+        self.assertIn('current in previous..minOf(previous + 1, appended.length)', release)
+        self.assertIn('if (current < appended.length) assertNotCompleted(sample)', release)
+        self.assertIn('if (current == appended.length && sample.hasCopy && completed.get() > 0) break', release)
+        self.assertNotIn('waitUntil', release)
+        self.assertNotIn('Thread.sleep', release)
+
     def test_page_readiness_does_not_wait_for_inactive_terminal_typing(self):
         callback = self.chat.split(
             'SideEffect { onViewportReady(!initialPositionPending && incomingTurns.isNotEmpty()) }', 1

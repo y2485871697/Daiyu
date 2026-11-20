@@ -14,6 +14,8 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.runtime.SideEffect
@@ -400,7 +402,9 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         }
         assertTrue("The actual native draw must contain $color pixels, found $ink; " +
             "capture=${pixels.width}x${pixels.height}; " +
-            "bounds=${ui.onNodeWithTag("native-text").fetchSemanticsNode().boundsInRoot}\n" +
+            "bounds=${ui.onNodeWithTag("native-text").fetchSemanticsNode().boundsInRoot}; " +
+            "screen=${ui.onNodeWithTag("native-text").fetchSemanticsNode().positionOnScreen}; " +
+            "decor=${activity.window.decorView.width}x${activity.window.decorView.height}\n" +
             paintDump("native-environment"), ink > 0)
     }
 
@@ -422,14 +426,16 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                         constraints = Constraints(maxWidth = with(density) { 240.dp.roundToPx() }))
                     val fullHeight = heightPx().takeIf { it > 0 } ?: measured.size.height
                     paintSlots.Capture("native-environment")
-                    Box(Modifier.requiredWidth(240.dp).height(with(density) { fullHeight.toDp() })
-                        .background(Color.Magenta).onGloballyPositioned {
-                            nativeHostCoordinates = it
-                            clearance.update(it, it, 0, 0, 0, protect = true, clampToViewport = true)
-                        }.testTag("native-host")) {
-                        ClearanceText(AnnotatedString(text), 0,
-                            Modifier.requiredWidth(240.dp).wrapContentHeight(Alignment.Top, unbounded = true)
-                                .testTag("native-text"), style)
+                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                        Box(Modifier.requiredWidth(240.dp).height(with(density) { fullHeight.toDp() })
+                            .background(Color.Magenta).onGloballyPositioned {
+                                nativeHostCoordinates = it
+                                clearance.update(it, it, 0, 0, 0, protect = true, clampToViewport = true)
+                            }.testTag("native-host")) {
+                            ClearanceText(AnnotatedString(text), 0,
+                                Modifier.requiredWidth(240.dp).wrapContentHeight(Alignment.Top, unbounded = true)
+                                    .testTag("native-text"), style)
+                        }
                     }
                 }
             }

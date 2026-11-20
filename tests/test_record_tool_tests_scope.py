@@ -1392,6 +1392,26 @@ class ReturnChatHandoffScopeTest(unittest.TestCase):
                 os.chdir(old)
 
 class TaskScrollFrozenCheckToolsTest(unittest.TestCase):
+    def test_spacing_single_class_keeps_the_complete_task_scroll_scope(self):
+        target = 'app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest'
+        for python in ('python', 'python3'):
+            with self.subTest(python=python):
+                self.assertEqual(
+                    ([python, '-B', '-m', 'unittest', *recorder.TASK_SCROLL_MODULES, '-v'],
+                     'task-scroll-targeted'),
+                    recorder.command_for(python, dict(SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=target,
+                        SMOKE_TEST_METHOD='', SMOKE_DIAGNOSTIC='')))
+        full = (['python3', '-B', '-m', 'unittest', 'discover', '-s', 'tests', '-v'], 'full')
+        for selected in ('', 'unknown', ' ' + target, target + ' ', target + ',',
+                         target + ',' + target, target + ',app.daiyu.android.OtherTest',
+                         target + 'Extra',
+                         'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest'):
+            self.assertEqual(full, recorder.command_for('python3', dict(
+                SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=selected)))
+        for mode in ('', 'compile', 'build', 'checks', 'candidate', 'daily', 'release'):
+            self.assertEqual(full, recorder.command_for('python3', dict(
+                SMOKE_MODE=mode, SMOKE_TEST_CLASSES=target)))
+
     def test_exact_scope_uses_current_tools_and_preserves_raw_failure_and_both_shas(self):
         classes = recorder.TASK_SCROLL_PLATFORM_CLASSES
         raw = b"synthetic frozen-check failure\r\nraw stderr\x00\n"
@@ -1404,7 +1424,8 @@ class TaskScrollFrozenCheckToolsTest(unittest.TestCase):
                 for python in ("python", "python3"):
                     for selected in (classes, tuple(reversed(classes)),
                                      recorder.TASK_SCROLL_NATIVE_LAYOUT_CLASSES,
-                                     tuple(reversed(recorder.TASK_SCROLL_NATIVE_LAYOUT_CLASSES))):
+                                     tuple(reversed(recorder.TASK_SCROLL_NATIVE_LAYOUT_CLASSES)),
+                                     ('app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',)):
                         for code in (0, 9):
                             env = dict(GITHUB_SHA="b" * 40, EXPECTED_SHA="a" * 40,
                                        GITHUB_RUN_ID="42", GITHUB_RUN_ATTEMPT="1",

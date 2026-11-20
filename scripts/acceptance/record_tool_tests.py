@@ -1244,6 +1244,7 @@ def command_for(python, env):
                 sorted(TASK_SCROLL_PLATFORM_CLASSES), sorted(TASK_SCROLL_NATIVE_LAYOUT_CLASSES),
                 sorted(TASK_SCROLL_OCCLUSION_MARKDOWN_CLASSES),
                 sorted(TASK_SCROLL_COMPLEMENT_CLASSES),
+                ['app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest'],
                 ['app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest'],
                 sorted(('app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',
                         'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest')),

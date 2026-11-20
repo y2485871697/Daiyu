@@ -425,7 +425,8 @@ internal fun ChatMessageList(
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     var scrollResumed by remember(lifecycle) { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var resumeFollowPending by remember { mutableStateOf(false) }
-    var revealResetEpoch by remember { mutableStateOf(0L) }
+    val revealResetEpoch = 0L
+    var resumeFollowEpoch by remember { mutableStateOf(0L) }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
             synchronousTrace("daiyu.chat.restore-lifecycle") {
@@ -436,7 +437,7 @@ internal fun ChatMessageList(
                         wasDragged = false
                     }
                     Lifecycle.Event.ON_RESUME -> {
-                        if (resumeFollowPending) revealResetEpoch++
+                        if (resumeFollowPending) resumeFollowEpoch++
                         scrollResumed = true
                     }
                     else -> Unit
@@ -450,7 +451,7 @@ internal fun ChatMessageList(
         if (!pageActive) {
             resumeFollowPending = true
             wasDragged = false
-        } else if (resumeFollowPending) revealResetEpoch++
+        } else if (resumeFollowPending) resumeFollowEpoch++
         onDispose { }
     }
     val density = LocalDensity.current
@@ -886,7 +887,7 @@ internal fun ChatMessageList(
             }
     }
     // Keep a single motion across target-height updates instead of snapping each new line.
-    LaunchedEffect(listState, revealResetEpoch) {
+    LaunchedEffect(listState, resumeFollowEpoch) {
         clearanceLayout.followViewport = null
         clearanceLayout.viewportLoss.reset()
         val motion = BottomFollowMotion()
@@ -1068,7 +1069,7 @@ internal fun ChatMessageList(
             layout.viewportSize.width, layout.viewportSize.height,
             origin?.x?.roundToInt() ?: Int.MIN_VALUE, origin?.y?.roundToInt() ?: Int.MIN_VALUE,
             coordinates != null, listState.firstVisibleItemIndex, listState.firstVisibleItemScrollOffset,
-            layout.totalItemsCount, revealResetEpoch, initialPositionPending, resumeFollowPending,
+            layout.totalItemsCount, resumeFollowEpoch, initialPositionPending, resumeFollowPending,
             followBottom, listState.isScrollInProgress,
             currentNestedTail.viewportOffset, currentNestedTail.scrollOffset.roundToInt(), currentNestedTail.contentHeight,
             layout.visibleItemsInfo.take(app.daiyu.android.diagnostics.ChatRecoveryRecorder.MAX_ITEMS).map {
@@ -1227,6 +1228,7 @@ internal fun ChatMessageList(
                             val playback = visualScope.replyPlayback(replyPlayback?.takeIf { it.control.matches(turn) })
                             androidx.compose.runtime.CompositionLocalProvider(
                             LocalReplyPlayback provides playback,
+                            LocalChatPresentationActive provides (presentationActive && pageActive && scrollResumed),
                             LocalWorkflowVisualScope provides visualScope,
                             LocalWorkflowDisclosureContext provides remember(turn.listKey, disclosureViewport) {
                                 WorkflowDisclosureContext(disclosureViewport, turn.listKey) {

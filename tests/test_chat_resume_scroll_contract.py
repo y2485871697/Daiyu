@@ -36,7 +36,7 @@ class ChatResumeScrollContract(unittest.TestCase):
 
     def test_geometry_correction_is_separate_from_foreground_stream_motion(self):
         follow = self.chat.split('// Keep a single motion', 1)[1].split('// Read confirmation', 1)[0]
-        self.assertIn('LaunchedEffect(listState, revealResetEpoch)', follow)
+        self.assertIn('LaunchedEffect(listState, resumeFollowEpoch)', follow)
         guard = self.chat.split('fun canFollowBottom(): Boolean =', 1)[1].split('\n\n', 1)[0]
         self.assertIn('scrollResumed && followBottom && !currentDragging', guard)
         self.assertNotIn('while (true)', follow)
@@ -89,7 +89,11 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertLess(settle.index('wasDragged = false'), settle.index('followBottom = !listState.canScrollForward'))
 
     def test_resume_preserves_body_reveal_lane_and_formatted_body(self):
-        self.assertIn('if (resumeFollowPending) revealResetEpoch++', self.chat)
+        self.assertIn('val revealResetEpoch = 0L', self.chat)
+        self.assertIn('var resumeFollowEpoch by remember { mutableStateOf(0L) }', self.chat)
+        self.assertEqual(2, self.chat.count('if (resumeFollowPending) resumeFollowEpoch++'))
+        self.assertNotIn('revealResetEpoch++', self.chat)
+        self.assertIn('LocalChatPresentationActive provides (presentationActive && pageActive && scrollResumed)', self.chat)
         self.assertIn('revealResetEpoch = revealResetEpoch', self.chat)
         self.assertIn(
             'rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming, '

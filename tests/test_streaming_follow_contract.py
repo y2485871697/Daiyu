@@ -16,7 +16,7 @@ class StreamingFollowContract(unittest.TestCase):
             "    app.daiyu.android.diagnostics.ObserveChatRecovery(", 1)[0]
 
     def test_height_updates_do_not_restart_the_motion_collector(self):
-        self.assertIn("LaunchedEffect(listState, revealResetEpoch)", self.follow)
+        self.assertIn("LaunchedEffect(listState, resumeFollowEpoch)", self.follow)
         self.assertIn("snapshotFlow {", self.follow)
         self.assertIn("Triple(canFollowBottom(),", self.follow)
         self.assertIn("val motion = BottomFollowMotion()", self.follow)
@@ -37,7 +37,7 @@ class StreamingFollowContract(unittest.TestCase):
         disabled = self.follow.split("if (target == null) {", 1)[1].split("return@collect", 1)[0]
         self.assertIn("motion.reset()", disabled)
         self.assertIn("clearanceLayout.viewportLoss.reset()", disabled)
-        self.assertIn("LaunchedEffect(listState, revealResetEpoch)", self.follow)
+        self.assertIn("LaunchedEffect(listState, resumeFollowEpoch)", self.follow)
         self.assertIn("while (canFollowBottom())", self.follow)
         for dependency in ("!initialPositionPending", "pageActive", "scrollResumed", "followBottom",
                            "!currentDragging", "currentTailIndex >= 0", "consumedScrollSerial",

@@ -1888,6 +1888,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             markdownProjectionCache.put(MarkdownProjection(listOf(text), mapOf(text to parser(text)), parser))
         }
         var text by mutableStateOf("")
+        var presentationActive by mutableStateOf(true)
         val control = ReplyPresentationControl("bounded-paint", initiallyLive = true)
         val probe = MarkdownPaintSlotsProbe()
         val clearance = StreamingTextClearance()
@@ -1898,6 +1899,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                     protect = true, clampToViewport = true)
             }) {
                 CompositionLocalProvider(LocalMarkdownParser provides parser,
+                    LocalChatPresentationActive provides presentationActive,
                     LocalStreamingTextClearance provides clearance,
                     LocalReplyPlayback provides ReplyPlayback(control, runtimePaused = false)) {
                     probe.Capture("bounded-paint")
@@ -1945,7 +1947,12 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                 frozen in 1 until initial.length)
             ui.runOnUiThread { control.pause(true); text = full }
             repeat(8) { assertEquals("Pause must freeze actual paint", frozen, sampleFrame()) }
-            ui.runOnUiThread { control.pause(false) }
+            ui.runOnUiThread { control.pause(false); presentationActive = false }
+            repeat(8) { assertEquals("An inactive presentation must retain its actual drawn frontier", frozen, sampleFrame()) }
+            ui.mainClock.advanceTimeBy(60_000)
+            ui.waitForIdle()
+            assertEquals("Inactive time cannot pay the pending typing debt", frozen, painted())
+            ui.runOnUiThread { presentationActive = true }
             repeat(full.length * 4 + 12) { sampleFrame() }
             assertEquals(full.length, previous)
         } finally { ui.mainClock.autoAdvance = true }

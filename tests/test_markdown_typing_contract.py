@@ -233,10 +233,13 @@ class MarkdownTypingContract(unittest.TestCase):
 
 
     def test_raw_receipts_drive_rate_before_parser_admission(self):
-        self.assertIn("remember(motion, sources, playback?.paused)", self.typing)
+        self.assertIn("remember(motion, sources, typingPaused)", self.typing)
+        self.assertIn("val presentationActive = LocalChatPresentationActive.current", self.typing)
+        self.assertIn("val typingPaused = playback?.paused == true || !presentationActive", self.typing)
+        self.assertIn("val canAdvance = enabled && sourcesCompatible && !typingPaused", self.typing)
         self.assertIn("staticCompositionLocalOf<() -> Long> { System::nanoTime }", self.typing)
         self.assertIn("val receiptClock = LocalMarkdownReceiptClock.current", self.typing)
-        self.assertIn("motion.receive(sources, receiptClock(), paused = playback?.paused == true)", self.typing)
+        self.assertIn("motion.receive(sources, receiptClock(), paused = typingPaused)", self.typing)
         self.assertLess(self.typing.index("motion.receive(sources,"), self.typing.index("motion.update(parts,"))
         self.assertIn("receiptRate = added / seconds", self.reveal)
         self.assertIn("if (observesReceipts) desiredRate = receiptRate.takeIf { it > 0.0 } ?: rate", self.reveal)

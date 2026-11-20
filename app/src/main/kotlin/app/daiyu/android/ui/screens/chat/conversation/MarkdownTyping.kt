@@ -141,6 +141,8 @@ internal fun rememberMarkdownReveal(
     val parser = LocalMarkdownParser.current
     val identity = MarkdownParserIdentity(parser)
     val playback = LocalReplyPlayback.current
+    val presentationActive = LocalChatPresentationActive.current
+    val typingPaused = playback?.paused == true || !presentationActive
     val retainedLane = remember(playback?.control, presentationLane, identity, resetEpoch) {
         presentationLane?.let { slot -> playback?.control?.lane(slot, identity, resetEpoch) { initialBaseline ?: sources } }
     }
@@ -163,8 +165,8 @@ internal fun rememberMarkdownReveal(
     }
     val motion = remember(identity, resetEpoch, retainedLane) { retainedLane?.motion ?: MarkdownTypingState(baseline) }
     val receiptClock = LocalMarkdownReceiptClock.current
-    remember(motion, sources, playback?.paused) {
-        motion.receive(sources, receiptClock(), paused = playback?.paused == true)
+    remember(motion, sources, typingPaused) {
+        motion.receive(sources, receiptClock(), paused = typingPaused)
     }
     val exactProjection = projection?.sources == sources.map { it.text } &&
         projection?.windows.orEmpty() == sources.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty()
@@ -180,7 +182,7 @@ internal fun rememberMarkdownReveal(
         target?.let { markdownTypingAppends(it.parts.map { part -> part.source }, sources) } == true
     }
     val finishImmediately = playback?.control?.finished == true
-    val canAdvance = enabled && sourcesCompatible && playback?.paused != true
+    val canAdvance = enabled && sourcesCompatible && !typingPaused
     val currentCanAdvance by rememberUpdatedState(canAdvance)
     val currentPlayback by rememberUpdatedState(playback)
     val clearance = LocalStreamingTextClearance.current

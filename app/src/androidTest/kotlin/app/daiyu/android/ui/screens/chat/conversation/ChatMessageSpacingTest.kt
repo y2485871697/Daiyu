@@ -42,6 +42,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
     private var attachmentHeight by mutableStateOf(0.dp)
     private var density = 1f
     private var liveGeometry: () -> String = { "not sampled" }
+    private var tailGeometry: () -> String = { "not sampled" }
     private val paintSlots = MarkdownPaintSlotsProbe()
     private var nativeHostCoordinates: androidx.compose.ui.layout.LayoutCoordinates? = null
 
@@ -53,6 +54,57 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         return result
     }
 
+    private fun traceFirstGrowth(label: String, block: () -> Unit) {
+        // Main-thread-owned diagnostics only; this does not publish Compose state.
+        val frames = java.util.ArrayDeque<String>(32)
+        var remaining = 31
+        lateinit var choreographer: android.view.Choreographer
+        fun sample(stage: String, frameNanos: Long?) {
+            val entry = runCatching {
+                androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
+                    "$stage frameNanos=$frameNanos monoNanos=${System.nanoTime()} " +
+                        "${tailGeometry()}\n${paintSlots.sample("tail")}"
+                }
+            }.getOrElse { "$stage probeFailure=${it.javaClass.name}: ${it.message}" }
+            if (frames.size == 32) frames.removeFirst()
+            frames.addLast(entry)
+        }
+        val callback = object : android.view.Choreographer.FrameCallback {
+            override fun doFrame(frameTimeNanos: Long) {
+                // Entry sample, not an assertion that this frame has drawn.
+                sample("preTraversal", frameTimeNanos)
+                if (--remaining > 0) choreographer.postFrameCallback(this)
+            }
+        }
+        instrumentation.runOnMainSync {
+            choreographer = android.view.Choreographer.getInstance()
+            choreographer.postFrameCallback(callback)
+        }
+        var original: Throwable? = null
+        try {
+            block()
+        } catch (failure: Throwable) {
+            original = failure
+            throw failure
+        } finally {
+            try {
+                var dump = ""
+                instrumentation.runOnMainSync {
+                    choreographer.removeFrameCallback(callback)
+                    if (original != null) {
+                        sample("failure", null)
+                        dump = frames.joinToString("\n---\n")
+                    }
+                }
+                original?.addSuppressed(AssertionError(
+                    "First same-item append diagnostics ($label; max 32 samples)\n$dump"))
+            } catch (diagnosticFailure: Throwable) {
+                val failure = original
+                if (failure != null) failure.addSuppressed(diagnosticFailure) else throw diagnosticFailure
+            }
+        }
+    }
+
     private fun answer(marker: String, lines: Int = 60) =
         List(lines) { "正文第${it + 1}行，检查长回复末尾与输入区的间距。" }.joinToString("\n") + "\n\n$marker"
 
@@ -60,6 +112,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         mainThread {
             attachmentHeight = 0.dp
             liveGeometry = { "not sampled" }
+            tailGeometry = { "not sampled" }
             screen = ChatScreenState("间距回归", turns = listOf(
                 ChatTurnUi.User("question", "请写一篇长回复"),
                 ChatTurnUi.Assistant("tail", finalText = answer("初始末尾"),
@@ -74,10 +127,18 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     Box(Modifier.requiredWidth(320.dp).fillMaxHeight().testTag("spacing-host")) {
                         DaiyuChatScreen(screen, ChatScreenActions(), hasTurnExtras = { !plainText }, turnExtras = { turn ->
                             if (turn.id == "tail" || turn.id == "start-reply") paintSlots.Capture(turn.id)
-                            if (turn.id == "start-reply") {
+                            if (turn.id == "start-reply" || turn.id == "tail") {
                                 val viewport = LocalWorkflowDisclosureContext.current?.viewport
                                 val clearance = LocalStreamingTextClearance.current
-                                SideEffect { liveGeometry = { "held=${clearance?.held} ${viewport?.diagnostics()}" } }
+                                val playback = LocalReplyPlayback.current
+                                val presentationActive = LocalChatPresentationActive.current
+                                SideEffect {
+                                    val geometry = {
+                                        "paused=${playback?.paused} presentationActive=$presentationActive " +
+                                            "held=${clearance?.held} ${viewport?.diagnostics()}"
+                                    }
+                                    if (turn.id == "start-reply") liveGeometry = geometry else tailGeometry = geometry
+                                }
                             }
                         }, composerAttachments = {
                             if (attachmentHeight > 0.dp) Box(Modifier.height(attachmentHeight).testTag("spacing-attachment"))
@@ -175,10 +236,12 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
     fun testSameItemStreamingGrowthFollowsUntilTouchAndExplicitBottomRestoresIt() {
         for (scale in listOf(1f, .8f)) {
             show(scale, running = true)
-            val first = screen.turns.last() as ChatTurnUi.Assistant
-            mainThread { screen = screen.copy(turns = listOf(screen.turns.first(),
-                first.copy(finalText = first.finalText + "\n\n" + answer("流式增高末尾", 30)))) }
-            assertCompactTail("流式增高末尾")
+            traceFirstGrowth("scale=$scale") {
+                val first = screen.turns.last() as ChatTurnUi.Assistant
+                mainThread { screen = screen.copy(turns = listOf(screen.turns.first(),
+                    first.copy(finalText = first.finalText + "\n\n" + answer("流式增高末尾", 30)))) }
+                assertCompactTail("流式增高末尾")
+            }
             ui.onNodeWithTag("chat-messages").performTouchInput { click(center) }
             val grown = screen.turns.last() as ChatTurnUi.Assistant
             mainThread { screen = screen.copy(turns = listOf(screen.turns.first(),
@@ -287,6 +350,17 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                 screen = screen.copy(turns = history + pending.copy(pending = false) +
                     ChatTurnUi.Assistant("start-reply", finalText = received, status = RunStatus.RUNNING, isStreaming = true))
             }
+            fun sampleTypingFrame(frame: Int, phase: String) {
+                if (frame !in 28..34) return
+                var geometry = "not sampled"
+                instrumentation.runOnMainSync {
+                    geometry = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { liveGeometry() }
+                }
+                android.util.Log.i("SpacingRetryA", "frame=$frame phase=$phase clock=${ui.mainClock.currentTime} $geometry")
+                paintDump("start-reply").chunked(3_000).forEachIndexed { part, text ->
+                    android.util.Log.i("SpacingRetryA", "frame=$frame phase=$phase part=$part\n$text")
+                }
+            }
             repeat(90) { frame ->
                 if (frame == 30 || frame == 60) {
                     received = if (frame == 30) first.take(13) else first
@@ -299,8 +373,11 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                             ChatTurnUi.Assistant("start-reply", finalText = received, status = RunStatus.RUNNING, isStreaming = true))
                     }
                 }
+                sampleTypingFrame(frame, "before-advance")
                 ui.mainClock.advanceTimeByFrame()
+                sampleTypingFrame(frame, "before-idle")
                 ui.waitForIdle()
+                sampleTypingFrame(frame, "after-idle")
                 users += top("start-user")
                 histories += top("tail")
                 val textNodes = ui.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text) and

@@ -38,6 +38,40 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         projectMarkdown(sources, parser = streamingMarkdownParser)
     }
     private fun awaitHeader() = ui.waitUntil(5_000) { ui.onAllNodesWithTag("work-process-header").fetchSemanticsNodes().size == 1 }
+    // Only active plain-BMP fixture tails use frame budgets; admission and control waits keep their bounds.
+    private fun awaitActiveDrain(
+        expected: String,
+        shown: () -> String,
+        feedback: () -> Int,
+        checkFrame: (String) -> Boolean,
+    ) {
+        check(!ui.mainClock.autoAdvance)
+        var previous = shown()
+        var previousFeedback = feedback()
+        assertTrue("Drain must start from a received prefix", expected.startsWith(previous))
+        val remaining = expected.length - previous.length
+        val maxFrames = remaining * 4 + 24
+        val clockAtStart = ui.mainClock.currentTime
+        repeat(maxFrames) {
+            ui.mainClock.advanceTimeByFrame()
+            val current = shown()
+            val currentFeedback = feedback()
+            assertTrue("Only received text may be revealed", expected.startsWith(current))
+            assertTrue("Drain cannot retract its prefix", current.startsWith(previous))
+            assertTrue("At most one fixture grapheme may become visible per frame: ${previous.length}->${current.length}",
+                current.length - previous.length in 0..1)
+            assertTrue("Visible feedback must be monotonic and at most once per frame: $previousFeedback->$currentFeedback",
+                currentFeedback - previousFeedback in 0..1)
+            val complete = checkFrame(current)
+            previous = current
+            previousFeedback = currentFeedback
+            if (complete) return
+        }
+        throw ComposeTimeoutException("Active drain exhausted $maxFrames frames; remainingAtStart=$remaining, " +
+            "shown=${previous.length}/${expected.length}, feedback=$previousFeedback, " +
+            "virtualMs=${ui.mainClock.currentTime - clockAtStart}")
+    }
+
     private fun assertDisclosure(tag: String, expanded: Boolean) {
         ui.onNodeWithTag(tag).assert(SemanticsMatcher.expectValue(
             SemanticsProperties.StateDescription, if (expanded) "已展开" else "已折叠"))
@@ -85,9 +119,11 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             (hasTestTag(bodyTag) or hasAnyAncestor(hasTestTag(bodyTag))), useUnmergedTree = true)
             .fetchSemanticsNodes().flatMap { it.config[SemanticsProperties.Text] }.joinToString("") { it.text }
         fun completed() {
-            ui.onNodeWithText("正在思考…").assertDoesNotExist()
+            ui.onAllNodesWithText("正在思考", substring = true, useUnmergedTree = true).assertCountEquals(0)
+            ui.onAllNodesWithText("正在显示", substring = true, useUnmergedTree = true).assertCountEquals(0)
             ui.onAllNodesWithTag("reasoning-step-state:first-final", useUnmergedTree = true).fetchSemanticsNodes().forEach {
-                assertTrue(it.config[SemanticsProperties.StateDescription] in listOf("已思考", "正在显示"))
+                assertEquals("Completed reasoning must keep its completed state during reveal",
+                    "已思考", it.config[SemanticsProperties.StateDescription])
             }
         }
         mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
@@ -104,17 +140,25 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         try {
             mainThread { source = finalMessage }
             var partialFrames = 0
-            ui.waitUntil(5_000) {
-                ui.mainClock.advanceTimeByFrame()
-                completed()
-                val shown = body()
-                assertTrue("Only received terminal text may be revealed", text.startsWith(shown))
-                if (shown.length in 1 until text.length) {
-                    partialFrames++
-                    assertDisclosure("work-process-header", true)
-                    assertDisclosure(inner, true)
+            val terminalFrames = ArrayDeque<String>()
+            try {
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    completed()
+                    val shown = body()
+                    terminalFrames.addLast("clock=${ui.mainClock.currentTime} shown=${shown.length}/${text.length} " +
+                        "feedback=${advances.get()} partialFrames=$partialFrames")
+                    if (terminalFrames.size > 8) terminalFrames.removeFirst()
+                    assertTrue("Only received terminal text may be revealed", text.startsWith(shown))
+                    if (shown.length in 1 until text.length) {
+                        partialFrames++
+                        assertDisclosure("work-process-header", true)
+                        assertDisclosure(inner, true)
+                    }
+                    shown == text
                 }
-                shown == text
+            } catch (timeout: ComposeTimeoutException) {
+                throw AssertionError("New terminal reasoning drain timed out: frames=$terminalFrames", timeout)
             }
             assertTrue("New terminal output must actually reveal a prefix", partialFrames > 0)
             assertTrue(advances.get() > 0)
@@ -198,18 +242,27 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             ui.onNodeWithTag("tool-step:admission").assertExists()
             assertTrue("The first live narration must actually advance", advances.get() > 0)
             var narrationCompleted = false
-            ui.waitUntil(10_000) {
-                ui.mainClock.advanceTimeByFrame()
-                val current = shown(narrationMatcher)
-                if (current == narration) narrationCompleted = true
-                val toolExists = ui.onAllNodesWithTag("tool-step:admission").fetchSemanticsNodes().isNotEmpty()
-                val body = shown(bodyMatcher)
-                if (current.isNotEmpty() && current.length < narration.length) {
-                    assertDisclosure("work-process-header", expanded = true)
-                    assertTrue("The answer must wait until narration finishes", body.isEmpty())
+            val handoffFrames = ArrayDeque<String>()
+            try {
+                ui.waitUntil(10_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    val current = shown(narrationMatcher)
+                    if (current == narration) narrationCompleted = true
+                    val toolExists = ui.onAllNodesWithTag("tool-step:admission").fetchSemanticsNodes().isNotEmpty()
+                    val body = shown(bodyMatcher)
+                    handoffFrames.addLast("clock=${ui.mainClock.currentTime} narration=${current.length}/${narration.length} " +
+                        "narrationCompleted=$narrationCompleted tool=$toolExists body=${body.length}/${answer.length} " +
+                        "feedback=${advances.get()}")
+                    if (handoffFrames.size > 8) handoffFrames.removeFirst()
+                    if (current.isNotEmpty() && current.length < narration.length) {
+                        assertDisclosure("work-process-header", expanded = true)
+                        assertTrue("The answer must wait until narration finishes", body.isEmpty())
+                    }
+                    if (toolExists) assertTrue("No answer prefix may overlap a closing tool", body.isEmpty())
+                    body == answer
                 }
-                if (toolExists) assertTrue("No answer prefix may overlap a closing tool", body.isEmpty())
-                body == answer
+            } catch (timeout: ComposeTimeoutException) {
+                throw AssertionError("Narration/tool/answer handoff timed out: frames=$handoffFrames", timeout)
             }
             assertTrue("The complete narration must be shown before answer handoff", narrationCompleted)
             ui.onNodeWithTag("tool-step:admission").assertDoesNotExist()
@@ -361,10 +414,11 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             var suffixTyped = false
             val drainFrames = ArrayDeque<String>()
             try {
-                ui.waitUntil(5_000) {
-                    ui.mainClock.advanceTimeByFrame()
-                    val shown = ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
+                val readShown: () -> String = {
+                    ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
                         .firstOrNull()?.config?.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }.orEmpty()
+                }
+                awaitActiveDrain(answer, readShown, { advances.get() }) { shown ->
                     assertTrue(answer.startsWith(shown))
                     if (shown.length in firstChunk.length + 1 until answer.length) suffixTyped = true
                     drainFrames.addLast("clock=${ui.mainClock.currentTime} shown=${shown.length}/${answer.length} feedback=${advances.get()}" + " settled=${settled.get()}")
@@ -417,10 +471,11 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             assertTrue(text.startsWith(first!!))
             val drainFrames = ArrayDeque<String>()
             try {
-                ui.waitUntil(5_000) {
-                    ui.mainClock.advanceTimeByFrame()
-                    val shown = ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes()
+                val readShown: () -> String = {
+                    ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes()
                         .firstOrNull()?.config?.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }.orEmpty()
+                }
+                awaitActiveDrain(text, readShown, { advances.get() }) { shown ->
                     assertTrue(text.startsWith(shown))
                     drainFrames.addLast("clock=${ui.mainClock.currentTime} shown=${shown.length}/${text.length} feedback=${advances.get()}")
                     if (drainFrames.size > 8) drainFrames.removeFirst()

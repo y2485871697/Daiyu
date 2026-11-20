@@ -35,6 +35,57 @@ class MarkdownAdmissionCompositionTest {
         override fun onClear() = Unit
     }
 
+    @Test fun paintOnlyDebtPreservesActiveReceiptFraction() = runBlocking {
+        val clock = BroadcastFrameClock()
+        val recomposer = Recomposer(coroutineContext + clock)
+        val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
+        val composition = Composition(NoNodes(), recomposer)
+        val sources = mutableStateOf(emptyList<MarkdownTypingSource>())
+        val parsed = mutableStateOf(projectMarkdown(emptyList()))
+        val owner = Any()
+        var receiptTime = 1_000_000_000L
+        var reveal: MarkdownReveal? = null
+        var callbacks = 0
+        suspend fun frame(time: Long) {
+            Snapshot.sendApplyNotifications()
+            repeat(12) { yield() }
+            if (clock.hasAwaiters) clock.sendFrame(time)
+            repeat(12) { yield() }
+        }
+        try {
+            composition.setContent {
+                CompositionLocalProvider(LocalMarkdownReceiptClock provides { receiptTime }) {
+                    reveal = rememberMarkdownReveal(sources.value, parsed.value, streaming = true, terminal = false,
+                        onVisibleAdvance = { callbacks++ }, awaitPaintAdmission = true)
+                }
+            }
+            frame(1_000_000_000L)
+            reveal!!.publication.setPending(owner, true)
+            sources.value = listOf(MarkdownTypingSource("answer", "xx"))
+            parsed.value = projectMarkdown(listOf("xx"))
+            frame(1_016_000_000L)
+            receiptTime = 1_200_000_000L
+            sources.value = listOf(MarkdownTypingSource("answer", "xxxx"))
+            parsed.value = projectMarkdown(listOf("xxxx"))
+            frame(1_216_000_000L)
+            frame(61_216_000_000L)
+            assertEquals(0, reveal!!.limit("answer"))
+            assertEquals(0, callbacks)
+            reveal!!.publication.setPending(owner, false)
+            frame(61_217_000_000L)
+            assertEquals(1, reveal!!.limit("answer"))
+            assertEquals(1, callbacks)
+            frame(61_267_000_000L)
+            assertEquals(2, reveal!!.limit("answer"))
+            assertEquals(2, callbacks)
+            frame(61_317_000_000L)
+            assertEquals(2, reveal!!.limit("answer"))
+            frame(61_367_000_000L)
+            assertEquals(3, reveal!!.limit("answer"))
+            assertEquals(3, callbacks)
+        } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
+    }
+
     @Test fun protectedBodyDoesNotConsumeItsFirstChunkBeforeContainerPlacement() = runBlocking {
         val clock = BroadcastFrameClock()
         val recomposer = Recomposer(coroutineContext + clock)

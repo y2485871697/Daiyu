@@ -19,6 +19,115 @@ class MarkdownRevealTest {
         return previous
     }
 
+    private fun receiptPhaseFixture(): Pair<MarkdownTypingState, MarkdownTypingTarget> {
+        val state = MarkdownTypingState(emptyList())
+        state.update(emptyList(), 0, true, false)
+        state.receive(listOf(source("x".repeat(5))), 1_697_000_000L)
+        val first = state.update(listOf(part("x".repeat(5))), 0, true, false)!!
+        assertEquals(5, drain(state, first, 1_800_000_000L))
+        state.receive(listOf(source("x".repeat(13))), 2_177_000_000L)
+        val next = state.update(listOf(part("x".repeat(13))), 0, true, false)!!
+        assertEquals(5, next.start)
+        return state to next
+    }
+
+    @Test fun completedTargetReceiptRetainsOnlyItsFirstActiveFraction() {
+        for (repeatUpdate in listOf(false, true)) {
+            val (state, initial) = receiptPhaseFixture()
+            var target = initial
+            if (repeatUpdate) {
+                state.receive(listOf(source("x".repeat(13))), 2_200_000_000L)
+                assertSame(target, state.update(null, null, true, false))
+                target = state.update(listOf(part("x".repeat(13))), 0, false, true)!!
+            }
+            var callbacks = 0
+            val shown = (32..59).map { frame ->
+                val time = 2_208_000_000L + (frame - 32) * 16_000_000L
+                val value = state.advance(target, time) { callbacks++ }
+                val before = callbacks
+                assertEquals(value, state.advance(target, time) { callbacks++ })
+                assertEquals(before, callbacks)
+                value
+            }
+            assertEquals(6, shown[0])
+            assertEquals(6, shown[1])
+            assertEquals(7, shown[2])
+            assertEquals(12, shown[56 - 32])
+            assertEquals(13, shown[57 - 32])
+            assertEquals(13, shown.last())
+            assertTrue(shown.zipWithNext().all { (a, b) -> b - a in 0..1 })
+            assertEquals(8, callbacks)
+        }
+    }
+
+    @Test fun holdingAnUnstartedReceiptNeverAccumulatesHeldTime() {
+        fun trace(wait: Long): List<Int> {
+            val (state, target) = receiptPhaseFixture()
+            state.hold(target, 2_180_000_000L)
+            state.hold(target, 2_180_000_000L + wait)
+            assertEquals(5, state.visible(target))
+            return (0..4).map { state.advance(target, 2_181_000_000L + wait + it * 16_000_000L) }
+        }
+        val expected = listOf(6, 6, 6, 6, 7)
+        assertEquals(expected, trace(16_000_000L))
+        assertEquals(expected, trace(60_000_000_000L))
+    }
+
+    @Test fun pauseAndPausedReceiptDiscardThePendingReceiptPhase() {
+        for (pauseViaReceipt in listOf(false, true)) for (wait in listOf(1_000_000L, 60_000_000_000L)) {
+            val (state, target) = receiptPhaseFixture()
+            val resumedAt = 2_190_000_000L + wait
+            if (pauseViaReceipt) {
+                state.receive(listOf(source("x".repeat(13))), 2_190_000_000L, paused = true)
+                state.receive(listOf(source("x".repeat(13))), resumedAt)
+            } else state.pause(target)
+            val shown = (0..4).map { state.advance(target, resumedAt + it * 16_000_000L) }
+            // Paused receipt retains the active rate; explicit pause keeps its existing rate smoothing.
+            val expected = if (pauseViaReceipt) listOf(6, 6, 7, 8, 8) else listOf(6, 6, 7, 7, 8)
+            assertEquals(expected, shown)
+            assertTrue(shown.zipWithNext().all { (a, b) -> b - a in 0..1 })
+        }
+    }
+
+    @Test fun receiptPhaseClampsAndDiscardsWholeGraphemeCredit() {
+        for (delay in listOf(0L, 60_000_000_000L)) {
+            val state = MarkdownTypingState(emptyList())
+            state.update(emptyList(), 0, true, false)
+            val cluster = "e\u0301"
+            state.receive(listOf(source(cluster.repeat(10))), 1_000_000_000L)
+            state.receive(listOf(source(cluster.repeat(20))), 1_200_000_000L)
+            val target = state.update(listOf(part(cluster.repeat(20))), 0, true, false)!!
+            val time = 2_000_000_000L + delay
+            assertEquals(2, state.advance(target, time))
+            assertEquals(2, state.advance(target, time + 5_000_000L))
+            assertEquals(4, state.advance(target, time + 10_000_000L))
+            assertEquals(40, drain(state, target, time + 26_000_000L))
+            val next = state.update(listOf(part(cluster.repeat(22))), 0, true, false)!!
+            assertEquals(42, state.advance(next, time + 10_000_000_000L))
+            assertEquals(42, state.advance(next, time + 10_005_000_000L))
+            assertEquals(44, state.advance(next, time + 10_020_000_000L))
+        }
+    }
+
+    @Test fun initialBaselineAndReplacementCannotBorrowAnOldReceiptPhase() {
+        val cold = MarkdownTypingState(listOf(source("xxxxx")))
+        cold.receive(listOf(source("x".repeat(13))), 1_000_000_000L)
+        val first = cold.update(listOf(part("x".repeat(13))), 5, true, false)!!
+        assertEquals(5, first.start)
+        assertEquals(6, cold.advance(first, 2_000_000_000L))
+        assertEquals(6, cold.advance(first, 2_011_000_000L))
+        val (state, _) = receiptPhaseFixture()
+        val replacement = "replacement"
+        state.receive(listOf(source(replacement)), 2_190_000_000L)
+        val replaced = state.update(listOf(part(replacement)), 0, true, false)!!
+        assertEquals(replacement.length, state.visible(replaced))
+        state.receive(listOf(source(replacement + "xx")), 2_200_000_000L)
+        val next = state.update(listOf(part(replacement + "xx")), 0, true, false)!!
+        assertEquals(replacement.length + 1, state.advance(next, 2_210_000_000L))
+        assertEquals(replacement.length + 1, state.advance(next, 2_240_000_000L))
+        assertEquals(replacement.length + 2, state.advance(next, 2_270_000_000L))
+    }
+
     @Test fun streamingTypesInsideEveryReceivedChunkWithoutInventingOutput() {
         for (frameMillis in listOf(8L, 16L)) for (length in listOf(500, 5_000)) {
             val state = MarkdownTypingState(emptyList())
@@ -581,6 +690,7 @@ class MarkdownRevealTest {
             if (blocked) state.pause(old)
             state.receive(listOf(source("字".repeat(400))), 6_000_000_000L)
             val next = state.update(listOf(part("字".repeat(400))), 0, true, false)!!
+            state.pause(next) // Compare rates from the same restart phase.
             return (0..10).map { state.advance(next, 7_000_000_000L + it * 16_000_000L) }
         }
         assertEquals(reveal(false), reveal(true))
@@ -664,6 +774,7 @@ class MarkdownRevealTest {
             state.receive(listOf(source(prefix + "字".repeat(100))), 1_000_000_000L)
             state.receive(listOf(source(prefix + "字".repeat(200))), 1_000_000_000L + interval)
             val target = state.update(listOf(part(prefix + "字".repeat(200))), prefix.length, true, false)!!
+            state.pause(target) // Start equally before comparing later holds.
             var time = 10_000_000_000L
             if (wait > 0) {
                 state.hold(target, time - 16_000_000L)

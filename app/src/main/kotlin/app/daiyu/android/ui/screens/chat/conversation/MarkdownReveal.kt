@@ -215,6 +215,7 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
     private var arrivalSeconds = .12
     private var receivedSources = baseline.toList()
     private var receiptNanos = 0L
+    private var activeReceiptNanos: Long? = null
     private var receiptRate = baseline.sumOf { it.text.length.toLong() } / .12
     private var observesReceipts = false
     private var receiptPaused = false
@@ -229,6 +230,7 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         val previous = receivedSources
         receivedSources = sources.toList()
         if (!markdownTypingAppends(previous, sources)) {
+            activeReceiptNanos = null
             receiptNanos = 0L
             receiptRate = sources.sumOf { it.text.length.toLong() } / .12
             receiptPaused = paused
@@ -238,6 +240,7 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         }
         val added = sources.sumOf { it.text.length.toLong() } - previous.sumOf { it.text.length.toLong() }
         if (paused) {
+            activeReceiptNanos = null
             receiptPaused = true
             receiptNanos = 0L
             if (rate > 0.0) {
@@ -251,6 +254,8 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         }
         if (receiptPaused) { receiptPaused = false; receiptNanos = 0L; receiptReanchoring = receiptHasLiveRate }
         if (added <= 0) return
+        if (activeReceiptNanos == null && target?.let { position >= it.total } == true)
+            activeReceiptNanos = nowNanos
         val seconds = if (receiptNanos != 0L && nowNanos > receiptNanos)
             ((nowNanos - receiptNanos) / 1_000_000_000.0).coerceAtLeast(.001) else .12
         if (!receiptReanchoring || receiptRate == 0.0) receiptRate = added / seconds
@@ -283,6 +288,7 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
             mappedMarkdownPosition(previous, parts, receivedEnd.toDouble()).toInt().coerceIn(start, total)
         } else start
         if (!appending) {
+            activeReceiptNanos = null
             rate = 0.0
             desiredRate = 0.0
             arrivalFrame = 0L
@@ -298,12 +304,14 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
     fun hold(expected: MarkdownTypingTarget, frameNanos: Long) {
         if (target !== expected) return
         // Backpressure freezes elapsed time, not the active rate or fractional frontier.
+        if (activeReceiptNanos != null) activeReceiptNanos = frameNanos
         if (lastFrame != 0L) lastFrame = frameNanos
         arrivalFrame = 0L
     }
 
     fun pause(expected: MarkdownTypingTarget) {
         if (target !== expected) return
+        activeReceiptNanos = null
         lastFrame = 0L
         arrivalFrame = 0L
         desiredRate = rate
@@ -323,6 +331,7 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         if (lastAdvanceFrame == frameNanos) return previous
         val end = maxOf(previous, expected.boundary(limit))
         if (end <= previous) {
+            activeReceiptNanos = null
             lastFrame = 0L
             return previous
         }
@@ -343,13 +352,17 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         val width = next - previous
         check(width > 0 && next <= end)
         val step = if (lastFrame == 0L) {
-            // Idle, pause and layout-blocked time buy no catch-up.
-            1.0
+            // Only active receipt time contributes a fractional first-step phase.
+            val seconds = activeReceiptNanos?.let {
+                (frameNanos - it).coerceIn(0L, 50_000_000L) / 1_000_000_000.0
+            } ?: 0.0
+            1.0 + (seconds * rate / width) % 1.0
         } else {
             val seconds = ((frameNanos - lastFrame).coerceIn(0L, 50_000_000L)) / 1_000_000_000.0
             rate += (desiredRate - rate) * (1.0 - exp(-seconds / .12))
             (rate * seconds / width).coerceIn(0.0, 1.0)
         }
+        activeReceiptNanos = null
         // Keep subcharacter phase, never whole-character catch-up credit.
         val phase = position % 1.0 + step
         position = if (phase >= 1.0) {

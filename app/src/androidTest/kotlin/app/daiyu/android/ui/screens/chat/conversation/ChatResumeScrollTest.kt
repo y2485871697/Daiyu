@@ -416,6 +416,15 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
         var geometry: () -> String = { "not captured" }
         var ticksStarted = 0
         var ticksFinished = 0
+        var advanceNanos = 0L
+        var maximumAdvanceNanos = 0L
+        var fetchNanos = 0L
+        var maximumFetchNanos = 0L
+        var scanNanos = 0L
+        fun timingSummary() = "advanceMs=${advanceNanos / 1_000_000L} " +
+            "maxAdvanceMs=${maximumAdvanceNanos / 1_000_000L} " +
+            "fetchMs=${fetchNanos / 1_000_000L} maxFetchMs=${maximumFetchNanos / 1_000_000L} " +
+            "scanMs=${scanNanos / 1_000_000L}"
         fun tick() {
             ticksStarted++
             ui.mainClock.advanceTimeByFrame()
@@ -437,8 +446,13 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
         val copyMatcher = hasContentDescription("复制回答")
         val appendedMatcher = hasText(appended)
         fun presentationSample(): PresentationSample {
+            val fetchStart = System.nanoTime()
             val nodes = ui.onAllNodes(prefixMatcher or copyMatcher,
                 useUnmergedTree = true).fetchSemanticsNodes()
+            val scanStart = System.nanoTime()
+            val fetchElapsed = scanStart - fetchStart
+            fetchNanos += fetchElapsed
+            maximumFetchNanos = maxOf(maximumFetchNanos, fetchElapsed)
             var length = -1
             var hasCopy = false
             var hasAppended = false
@@ -452,11 +466,16 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
                 hasAppended = hasAppended || appendedMatcher.matches(node)
             }
             check(length >= 0) { "The presented prefix disappeared" }
+            scanNanos += System.nanoTime() - scanStart
             return PresentationSample(length, hasCopy, hasAppended)
         }
         fun sampledTick(): PresentationSample {
             ticksStarted++
+            val advanceStart = System.nanoTime()
             ui.mainClock.advanceTimeByFrame()
+            val advanceElapsed = System.nanoTime() - advanceStart
+            advanceNanos += advanceElapsed
+            maximumAdvanceNanos = maxOf(maximumAdvanceNanos, advanceElapsed)
             // Fetch performs the idle/draw synchronization for this observation.
             val sample = presentationSample()
             ticksFinished++
@@ -553,6 +572,11 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             val startTicks = ticksStarted
             val finishTicks = ticksFinished
             val startClock = ui.mainClock.currentTime
+            advanceNanos = 0L
+            maximumAdvanceNanos = 0L
+            fetchNanos = 0L
+            maximumFetchNanos = 0L
+            scanNanos = 0L
             val startWall = System.nanoTime()
             try {
                 fun checkDeadline() {
@@ -588,6 +612,7 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
                 failure.addSuppressed(AssertionError("W3 original wait failed: " +
                     "ticksStarted=${ticksStarted - startTicks} ticksFinished=${ticksFinished - finishTicks} " +
                     "clock=$startClock..$endClock wallMs=$wallMs previous=$previous sawPartial=$sawPartial " +
+                    "${timingSummary()} " +
                     "advances=${advances.get()} completed=${completed.get()} ready=$presentationReady " +
                     "requestedPresentationActive=${!awaitingAppend || releaseReady && presentationReady} " +
                     "postFailure $semantics geometry=$viewport\n$paint"))

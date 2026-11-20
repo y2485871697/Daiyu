@@ -197,5 +197,24 @@ class ChatResumeScrollContract(unittest.TestCase):
 
 
 
+class InactiveTickTimingContract(unittest.TestCase):
+    def test_timing_diagnostics_do_not_add_a_wait_or_a_draw_sample(self):
+        device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatResumeScrollTest.kt').read_text()
+        method = device.split('fun testInactiveTerminalAppendIsPresentationReadyBeforeReveal()', 1)[1].split('\n    fun ', 1)[0]
+        sampled = method.split('fun sampledTick(): PresentationSample {', 1)[1].split('fun assertNotCompleted', 1)[0]
+        self.assertEqual(1, sampled.count('ui.mainClock.advanceTimeByFrame()'))
+        self.assertEqual(1, sampled.count('presentationSample()'))
+        self.assertIn('advanceNanos += advanceElapsed', sampled)
+        self.assertNotIn('waitForIdle', sampled)
+        self.assertNotIn('runOnMainSync', sampled)
+        self.assertNotIn('println', sampled)
+        sample = method.split('fun presentationSample(): PresentationSample {', 1)[1].split('fun sampledTick()', 1)[0]
+        self.assertEqual(1, sample.count('.fetchSemanticsNodes()'))
+        self.assertIn('fetchNanos += fetchElapsed', sample)
+        self.assertIn('scanNanos += System.nanoTime() - scanStart', sample)
+        self.assertIn('"${timingSummary()} " +', method.split('} catch (failure:', 1)[1])
+        self.assertIn('scanNanos = 0L\n            val startWall = System.nanoTime()', method)
+
+
 if __name__ == '__main__':
     unittest.main()

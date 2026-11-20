@@ -8,6 +8,14 @@ DEVICE = ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/co
 
 
 class StreamingOcclusionContract(unittest.TestCase):
+    def test_terminal_primer_copy_belongs_to_the_current_reply(self):
+        source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatStreamingOcclusionTest.kt').read_text()
+        method = source.split('private fun verifyTerminalPacedText(', 1)[1]
+        primer = method.split('if (slowReceipts) {', 1)[1].split('val terminalFrames =', 1)[0]
+        self.assertIn('hasContentDescription("复制回答") and hasAnyAncestor(hasTestTag("chat-turn:paced-tail"))', primer)
+        self.assertIn(').assertExists()', primer)
+        self.assertNotIn('onNodeWithContentDescription("复制回答")', primer)
+
     def test_plain_text_reserves_height_without_lowering_the_original_safety_edge(self):
         source = CHAT.read_text()
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]

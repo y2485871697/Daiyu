@@ -1463,7 +1463,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 ui.mainClock.advanceTimeBy(4_000)
                 ui.waitForIdle()
                 assertEquals("An idle interval cannot fabricate new input", expectedPrimer, displayed(textLayouts()))
-                if (withTools) ui.onNodeWithContentDescription("复制回答").assertExists()
+                if (withTools) ui.onNode(
+                    hasContentDescription("复制回答") and hasAnyAncestor(hasTestTag("chat-turn:paced-tail")),
+                ).assertExists()
             }
             ui.runOnUiThread {
                 turn = turnFor(full, complete = true)

@@ -155,5 +155,26 @@ class ChatResumeScrollContract(unittest.TestCase):
             self.assertIn(token, device)
 
 
+    def test_page_readiness_does_not_wait_for_inactive_terminal_typing(self):
+        callback = self.chat.split(
+            'SideEffect { onViewportReady(!initialPositionPending && incomingTurns.isNotEmpty()) }', 1
+        )[1].split('DisposableEffect(userMessageEntrance, listState)', 1)[0]
+        formatted = callback.split('val formatted =', 1)[1].split('val confirmedEmpty =', 1)[0]
+        self.assertEqual('currentAssistants.values.none { turn -> '
+                         'turn.listKey in visibleKeys && readyTurns[turn.listKey] != turn }',
+                         ' '.join(formatted.split()))
+        self.assertNotIn('revealedTurns', callback)
+        for token in ('currentHistoryReady && !currentRetainingRows',
+                      'layout.viewportSize.width > 0 && layout.viewportSize.height > 0',
+                      '!initialPositionPending && layout.visibleItemsInfo.isNotEmpty()',
+                      'currentScrollSerial == consumedScrollSerial',
+                      'currentPresentationReady(ready)'):
+            self.assertIn(token, callback)
+        receipts = self.chat.split('// Read confirmation', 1)[1].split('SideEffect { onViewportReady(', 1)[0]
+        self.assertIn('completedVisibleTurns(visibleKeys, currentAssistants, readyTurns, revealedTurns)', receipts)
+        self.assertIn('revealedTurns[it.listKey] == it', receipts)
+
+
+
 if __name__ == '__main__':
     unittest.main()

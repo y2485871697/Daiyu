@@ -1148,8 +1148,7 @@ internal fun ChatMessageList(
             val layout = listState.layoutInfo
             val visibleKeys = layout.visibleItemsInfo.map { it.key }.toSet()
             val formatted = currentAssistants.values.none { turn ->
-                turn.listKey in visibleKeys && (readyTurns[turn.listKey] != turn ||
-                    turn.status != RunStatus.RUNNING && revealedTurns[turn.listKey] != turn)
+                turn.listKey in visibleKeys && readyTurns[turn.listKey] != turn
             }
             val confirmedEmpty = currentHistoryReady && currentTurns.isEmpty() && currentTailIndex < 0
             currentHistoryReady && !currentRetainingRows &&

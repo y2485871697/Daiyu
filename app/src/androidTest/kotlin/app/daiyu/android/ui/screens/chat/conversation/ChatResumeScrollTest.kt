@@ -301,14 +301,19 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
     }
 
     fun testBackgroundMarkdownReplacementIsCompleteBeforeResumeAlignment() {
-        val appended = formattedBody + "\n\n后台新增正文乙，这段内容在返回前已经收到。"
+        val replacement = "## 后台替换后的完整标题\n\n" +
+            "中文正文丙，包含 **粗体** 与一段完整替换的消息。\n\n" +
+            "- 替换第一项\n- 替换第二项\n\n" +
+            "后台新增正文乙，这段内容在返回前已经收到。"
+        assertFalse("This case must replace complete Markdown, not append to its old prefix",
+            replacement.startsWith(formattedBody))
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
         val parseCalls = java.util.concurrent.atomic.AtomicInteger()
         val parseReturns = java.util.concurrent.atomic.AtomicInteger()
         val parseFailure = java.util.concurrent.atomic.AtomicReference<Throwable?>(null)
         val parser: (String) -> List<MarkdownBlock> = { text ->
-            if (text == appended) {
+            if (text == replacement) {
                 parseCalls.incrementAndGet()
                 entered.countDown()
                 release.await()
@@ -328,10 +333,10 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             }
             mainThread { owner.registry.currentState = Lifecycle.State.CREATED }
             val before = top("chat-turn:tail")
-            mainThread { body = appended }
+            mainThread { body = replacement }
             ui.waitUntil(5_000) { entered.count == 0L }
             ui.waitForIdle()
-            assertEquals("Pending append must retain the occupied action slot", before, top("chat-turn:tail"), 1f)
+            assertEquals("Pending replacement must retain the occupied action slot", before, top("chat-turn:tail"), 1f)
             ui.mainClock.autoAdvance = false
             release.countDown()
             val samples = java.util.ArrayDeque<String>()
@@ -382,6 +387,131 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             ui.mainClock.autoAdvance = true
         }
         ui.onNodeWithText("resume tail marker").assertIsDisplayed()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testInactiveTerminalAppendIsPresentationReadyBeforeReveal() {
+        val replyId = "inactive-terminal-append"
+        val first = "已经显示的正文甲。"
+        val appended = first + "后".repeat(80)
+        assertTrue(appended.startsWith(first))
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val advances = java.util.concurrent.atomic.AtomicInteger()
+        val completed = java.util.concurrent.atomic.AtomicInteger()
+        var text by mutableStateOf(first)
+        var awaitingAppend by mutableStateOf(false)
+        var releaseReady by mutableStateOf(false)
+        var presentationReady by mutableStateOf(false)
+        val parser: (String) -> List<MarkdownBlock> = { source ->
+            if (source == appended) {
+                entered.countDown()
+                release.await()
+            }
+            MarkdownParser.parse(source)
+        }
+        fun tick() {
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+        }
+        fun hasActions(): Boolean =
+            ui.onAllNodesWithContentDescription("复制回答", useUnmergedTree = true)
+                .fetchSemanticsNodes().isNotEmpty()
+        fun visible(): Int =
+            ui.onAllNodes(hasText(first, substring = true), useUnmergedTree = true)
+                .fetchSemanticsNodes()
+                .flatMap { it.config[androidx.compose.ui.semantics.SemanticsProperties.Text] }
+                .map { it.text }
+                .filter { it.startsWith(first) }
+                .maxOf { it.length }
+        fun assertNotCompleted() {
+            assertEquals("Unread suffix must not acknowledge completion", 0, completed.get())
+            ui.onNodeWithContentDescription("复制回答").assertDoesNotExist()
+        }
+        try {
+            mainThread {
+                owner = Owner().apply { registry.currentState = Lifecycle.State.RESUMED }
+                activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                        CompositionLocalProvider(
+                            LocalLifecycleOwner provides owner,
+                            LocalMarkdownParser provides parser,
+                            LocalChatPresentationActive provides
+                                (!awaitingAppend || releaseReady && presentationReady),
+                        ) {
+                            Box(Modifier.size(320.dp, 240.dp)) {
+                                ChatMessageList(
+                                    listOf(ChatTurnUi.Assistant(
+                                        replyId,
+                                        status = RunStatus.COMPLETED,
+                                        finalText = text,
+                                    )),
+                                    ChatScreenActions(
+                                        onVisibleTextAdvance = {
+                                            if (it == replyId) advances.incrementAndGet()
+                                        },
+                                        onVisibleCompleted = {
+                                            if (replyId in it) completed.incrementAndGet()
+                                        },
+                                    ),
+                                    scrollRequest = ChatScrollRequest(1),
+                                    onPresentationReady = { presentationReady = it },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+            ui.waitUntil(5_000) {
+                hasActions() && presentationReady && completed.get() > 0
+            }
+            ui.onNodeWithText(first).assertExists()
+            ui.mainClock.autoAdvance = false
+            mainThread {
+                awaitingAppend = true
+                text = appended
+                advances.set(0)
+                completed.set(0)
+            }
+            ui.waitUntil(5_000) {
+                tick()
+                entered.count == 0L && !presentationReady
+            }
+            assertNotCompleted()
+            release.countDown()
+            ui.waitUntil(5_000) {
+                tick()
+                presentationReady
+            }
+            assertFalse(releaseReady)
+            repeat(12) {
+                tick()
+                assertTrue(presentationReady)
+                assertEquals("Inactive append must retain its displayed prefix", first.length, visible())
+                assertEquals("Inactive append cannot emit typing advances", 0, advances.get())
+                ui.onNodeWithText(appended).assertDoesNotExist()
+                assertNotCompleted()
+            }
+            instrumentation.runOnMainSync { releaseReady = true }
+            var previous = first.length
+            var sawPartial = false
+            ui.waitUntil(5_000) {
+                tick()
+                val current = visible()
+                assertTrue("Each released frame advances at most one character",
+                    current in previous..minOf(previous + 1, appended.length))
+                if (current > previous && current < appended.length) sawPartial = true
+                if (current < appended.length) assertNotCompleted()
+                previous = current
+                current == appended.length && hasActions() && completed.get() > 0
+            }
+            assertTrue("The suffix must type, not flush when readiness opens", sawPartial)
+            assertTrue("Released presentation must emit visible advances", advances.get() > 0)
+            ui.onNodeWithText(appended).assertExists()
+        } finally {
+            release.countDown()
+            ui.mainClock.autoAdvance = true
+        }
         assertEquals(0, fixture.opens.get())
     }
 

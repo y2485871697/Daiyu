@@ -31,7 +31,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: daiyu-smoke-diagnostic-${{ github.ref }}-${{ inputs.api }}
+  group: daiyu-smoke-diagnostic-${{ github.ref }}-${{ inputs.api }}-${{ inputs.test_class }}-${{ inputs.test_method }}
   cancel-in-progress: false
 env:
   EXPECTED_SHA: ${{ inputs.source_sha }}

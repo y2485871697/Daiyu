@@ -190,3 +190,12 @@ class SmokeMethodTests(unittest.TestCase):
         smoke = (ROOT / 'scripts/smoke_boot.sh').read_text()
         self.assertIn('result_options=(--expected-target "$test_classes")', smoke)
         self.assertIn('"${result_options[@]}"', smoke)
+
+
+    def test_different_method_diagnostics_have_independent_lanes(self):
+        text = (ROOT / '.github/workflows/smoke-diagnostic.yml').read_text()
+        concurrency = text.split('concurrency:\n', 1)[1].split('env:\n', 1)[0]
+        self.assertIn('group: daiyu-smoke-diagnostic-${{ github.ref }}-${{ inputs.api }}-${{ inputs.test_class }}-${{ inputs.test_method }}', concurrency)
+        self.assertIn('cancel-in-progress: false', concurrency)
+        self.assertNotIn('inputs.check_id', concurrency)
+        self.assertNotIn('github.run_id', concurrency)

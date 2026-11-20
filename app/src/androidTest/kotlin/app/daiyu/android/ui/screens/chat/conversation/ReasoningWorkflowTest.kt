@@ -359,13 +359,20 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             assertEquals("No fabricated visible feedback between received chunks", beforeFeedback, advances.get())
             mainThread { delivered = answer; done = true }
             var suffixTyped = false
-            ui.waitUntil(5_000) {
-                ui.mainClock.advanceTimeByFrame()
-                val shown = ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
-                    .firstOrNull()?.config?.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }.orEmpty()
-                assertTrue(answer.startsWith(shown))
-                if (shown.length in firstChunk.length + 1 until answer.length) suffixTyped = true
-                shown == answer && settled.get()
+            val drainFrames = ArrayDeque<String>()
+            try {
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    val shown = ui.onAllNodes(textMatcher, useUnmergedTree = true).fetchSemanticsNodes()
+                        .firstOrNull()?.config?.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }.orEmpty()
+                    assertTrue(answer.startsWith(shown))
+                    if (shown.length in firstChunk.length + 1 until answer.length) suffixTyped = true
+                    drainFrames.addLast("clock=${ui.mainClock.currentTime} shown=${shown.length}/${answer.length} feedback=${advances.get()}" + " settled=${settled.get()}")
+                    if (drainFrames.size > 8) drainFrames.removeFirst()
+                    shown == answer && settled.get()
+                }
+            } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+                throw AssertionError("answer suffix drain timed out: frames=$drainFrames" + "\n${paintDump()}", timeout)
             }
             assertTrue("Appended received text must also type", suffixTyped)
             ui.onNodeWithText(answer, useUnmergedTree = true).assertIsDisplayed()
@@ -408,12 +415,19 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             }
             assertTrue("Confirmed narration must actually type", first!!.length in 1 until text.length)
             assertTrue(text.startsWith(first!!))
-            ui.waitUntil(5_000) {
-                ui.mainClock.advanceTimeByFrame()
-                val shown = ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes()
-                    .firstOrNull()?.config?.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }.orEmpty()
-                assertTrue(text.startsWith(shown))
-                shown == text
+            val drainFrames = ArrayDeque<String>()
+            try {
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    val shown = ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes()
+                        .firstOrNull()?.config?.getOrNull(SemanticsProperties.Text)?.joinToString("") { it.text }.orEmpty()
+                    assertTrue(text.startsWith(shown))
+                    drainFrames.addLast("clock=${ui.mainClock.currentTime} shown=${shown.length}/${text.length} feedback=${advances.get()}")
+                    if (drainFrames.size > 8) drainFrames.removeFirst()
+                    shown == text
+                }
+            } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
+                throw AssertionError("confirmed narration drain timed out: frames=$drainFrames", timeout)
             }
             assertTrue(advances.get() > 0)
             ui.onNodeWithTag("tool-step:t1").assertExists()

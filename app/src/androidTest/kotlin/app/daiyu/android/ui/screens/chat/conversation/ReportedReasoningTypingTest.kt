@@ -722,6 +722,23 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         val clearance = AtomicReference<StreamingTextClearance?>(null)
         private var scanGroups = 0
         private var scanTruncated = false
+        data class BaselinePaint(val frame: Any, val candidate: TextLayoutResult,
+            val committed: TextLayoutResult?, val drawn: TextLayoutResult?)
+
+        fun baselinePaint(text: String): BaselinePaint? = Snapshot.withoutReadObservation {
+            val values = rememberedValues()
+            check(!scanTruncated) { "Cannot identify baseline paint from a truncated scan" }
+            val matches = values.filter { it.javaClass.simpleName == "MarkdownTextFrame" }.mapNotNull { frame ->
+                val candidate = field(frame, "layout") as? TextLayoutResult ?: return@mapNotNull null
+                val coordinates = field(frame, "coordinates") as? LayoutCoordinates
+                if (coordinates?.isAttached != true || candidate.layoutInput.text.text != text) return@mapNotNull null
+                BaselinePaint(frame, candidate, field(frame, "committed") as? TextLayoutResult,
+                    field(frame, "drawn") as? TextLayoutResult)
+            }
+            check(matches.size <= 1) { "Ambiguous attached baseline frame: ${matches.size}" }
+            matches.singleOrNull()
+        }
+
         private fun rememberedValues(): List<Any> {
             val values = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Any, Boolean>())
             scanGroups = 0
@@ -911,7 +928,24 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                 }
             } }
             waiting("baseline") { visibleText().contains(baseline) }
-            captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
+            waiting("baseline-await-committed-drawn") {
+                val before = ui.runOnIdle { probe.baselinePaint(baseline) }
+                if (before == null) {
+                    probe.record("baseline-paint: no exact attached candidate")
+                    false
+                } else {
+                    captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
+                    val after = ui.runOnIdle { probe.baselinePaint(baseline) }
+                    val sameFrame = after != null && after.frame === before.frame
+                    val sameCandidate = after != null && after.candidate === before.candidate
+                    val committed = after != null && after.committed === after.candidate
+                    val drawn = after != null && after.drawn === after.candidate
+                    probe.record("baseline-paint: sameFrame=$sameFrame,sameCandidate=$sameCandidate," +
+                        "committed=$committed,drawn=$drawn")
+                    sameFrame && sameCandidate && committed && drawn
+                }
+            }
+            assertTrue(visibleText().contains(baseline))
             checkpoint("baseline-drawn")
             mainThread {
                 current = turn(path, pending, live = false)

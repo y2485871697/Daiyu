@@ -915,4 +915,97 @@ class MarkdownRevealTest {
         assertEquals(target.total, drain(state, target, 90_016_000_000L))
     }
 
+
+    @Test fun paintOnlyWaitingPreservesLowRateActiveTimeAt60And120Hz() {
+        for (hz in listOf(60, 120)) {
+            fun fixture(): Pair<MarkdownTypingState, MarkdownTypingTarget> {
+                val state = MarkdownTypingState(emptyList())
+                state.update(emptyList(), 0, true, false)
+                state.receive(listOf(source("字".repeat(100))), 1_000_000_000L)
+                state.receive(listOf(source("字".repeat(200))), 21_000_000_000L)
+                return state to state.update(listOf(part("字".repeat(200))), 0, true, false)!!
+            }
+            val (state, target) = fixture()
+            val (reference, referenceTarget) = fixture()
+            val start = 30_000_000_000L
+            var advances = 0
+            var pendingPaint = true
+            var waits = 0
+            assertEquals(1, state.advance(target, start) { advances++ })
+            assertEquals(1, reference.advance(referenceTarget, start))
+            repeat(hz * 10 + hz / 4) { index ->
+                val now = start + (index + 1L) * 1_000_000_000L / hz
+                val expected = reference.advance(referenceTarget, now)
+                val before = state.visible(target)
+                val callbacks = advances
+                // State-level simulation: a newly exposed character waits one frame for paint.
+                val shown = if (pendingPaint) {
+                    pendingPaint = false
+                    waits++
+                    state.visible(target).also { assertEquals(callbacks, advances) }
+                } else state.advance(target, now) { advances++ }.also {
+                    pendingPaint = it > before
+                }
+                assertTrue(shown - before in 0..1)
+                assertTrue("Paint-only waiting must not discard active time", expected - shown in 0..1)
+            }
+            assertTrue(waits > 40)
+            assertEquals(52, reference.visible(referenceTarget))
+            assertEquals(reference.visible(referenceTarget), state.visible(target))
+            assertEquals(state.visible(target), advances)
+        }
+    }
+
+    @Test fun longPaintWaitIsClampedAndNeverBuysWholeCharacterCredit() {
+        for (interval in listOf(20_000_000_000L, 10_000_000L)) {
+            fun fixture(): Pair<MarkdownTypingState, MarkdownTypingTarget> {
+                val state = MarkdownTypingState(emptyList())
+                state.update(emptyList(), 0, true, false)
+                state.receive(listOf(source("e\u0301".repeat(100))), 1_000_000_000L)
+                state.receive(listOf(source("e\u0301".repeat(200))), 1_000_000_000L + interval)
+                return state to state.update(listOf(part("e\u0301".repeat(200))), 0, true, false)!!
+            }
+            val (state, target) = fixture()
+            val (bounded, boundedTarget) = fixture()
+            val start = 30_000_000_000L
+            assertEquals(2, state.advance(target, start))
+            assertEquals(2, bounded.advance(boundedTarget, start))
+            repeat(60) { assertEquals(2, state.visible(target)) }
+            repeat(21) { frame ->
+                val before = state.visible(target)
+                val now = start + 60_000_000_000L + frame * 10_000_000L
+                val shown = state.advance(target, now)
+                assertEquals(bounded.advance(boundedTarget, start + 50_000_000L + frame * 10_000_000L), shown)
+                assertTrue(shown == before || shown == target.next(before))
+                assertEquals(0, shown % 2)
+                assertEquals(shown, state.advance(target, now))
+            }
+            assertTrue(state.visible(target) < target.total)
+        }
+    }
+
+    @Test fun pauseAndClearanceStillExcludeBlockedTimeBeforePaintRelease() {
+        fun trace(paused: Boolean, delay: Long): List<Int> {
+            val state = MarkdownTypingState(emptyList())
+            state.update(emptyList(), 0, true, false)
+            state.receive(listOf(source("字".repeat(100))), 1_000_000_000L)
+            state.receive(listOf(source("字".repeat(200))), 11_000_000_000L)
+            val target = state.update(listOf(part("字".repeat(200))), 0, true, false)!!
+            val start = 30_000_000_000L
+            assertEquals(1, state.advance(target, start))
+            assertEquals(1, state.advance(target, start + 37_000_000L))
+            for (now in listOf(start + 57_000_000L, start + 77_000_000L + delay)) {
+                if (paused) state.pause(target) else state.hold(target, now)
+                assertEquals(1, state.visible(target))
+            }
+            return (1..12).map { state.advance(target, start + 77_000_000L + delay + it * 9_000_000L) }
+        }
+        for (paused in listOf(false, true)) {
+            val short = trace(paused, 0L)
+            assertEquals(short, trace(paused, 60_000_000_000L))
+            assertEquals(if (paused) 2 else 1, short.first())
+            assertTrue(short.zipWithNext().all { (a, b) -> b - a in 0..1 })
+        }
+    }
+
 }

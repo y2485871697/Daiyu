@@ -43,10 +43,12 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources,", self.chat)
         self.assertIn("live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty()", self.chat)
         callback = self.typing.split("withFrameNanos { frameNanos ->", 1)[1].split("\n            }", 1)[0]
-        self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true || currentAwaitPaintAdmission && !publication.ready -> { motion.hold(current, frameNanos) motion.visible(current) } else -> motion.advance(current, frameNanos, end) { currentAdvance() } }', " ".join(callback.split()))
+        self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end) { currentAdvance() } }', " ".join(callback.split()))
         self.assertEqual(1, callback.count("motion.advance("))
         self.assertEqual(1, callback.count("motion.pause("))
         self.assertEqual(1, callback.count("motion.hold("))
+        paint_wait = callback.split("currentAwaitPaintAdmission && !publication.ready ->", 1)[1].split("else ->", 1)[0]
+        self.assertEqual("motion.visible(current)", paint_wait.strip())
         self.assertIn("value = MarkdownTypingFrame(current, shown)", callback)
         self.assertLess(callback.index("motion.advance("), callback.index("value = MarkdownTypingFrame("))
         self.assertNotIn("shown = withFrameNanos", self.typing)

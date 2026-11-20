@@ -205,10 +205,11 @@ internal fun rememberMarkdownReveal(
                         motion.pause(current)
                         motion.visible(current)
                     }
-                    textClearance?.held == true || currentAwaitPaintAdmission && !publication.ready -> {
+                    textClearance?.held == true -> {
                         motion.hold(current, frameNanos)
                         motion.visible(current)
                     }
+                    currentAwaitPaintAdmission && !publication.ready -> motion.visible(current)
                     else -> motion.advance(current, frameNanos, end) { currentAdvance() }
                 }
                 value = MarkdownTypingFrame(current, shown)

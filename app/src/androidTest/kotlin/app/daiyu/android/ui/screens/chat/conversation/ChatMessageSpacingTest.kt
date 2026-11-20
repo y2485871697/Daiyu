@@ -322,8 +322,43 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         }
     }
 
+    private fun awaitTypingDraw(view: android.view.View) {
+        val clock = ui.mainClock.currentTime
+        check(!ui.mainClock.autoAdvance)
+        val drawn = java.util.concurrent.CountDownLatch(1)
+        var observer: android.view.ViewTreeObserver? = null
+        val listener = object : android.view.ViewTreeObserver.OnDrawListener {
+            override fun onDraw() { view.post { drawn.countDown() } }
+        }
+        var failure: Throwable? = null
+        try {
+            instrumentation.runOnMainSync {
+                check(view.isAttachedToWindow)
+                observer = view.viewTreeObserver.also { it.addOnDrawListener(listener) }
+                view.invalidate()
+            }
+            check(drawn.await(2, java.util.concurrent.TimeUnit.SECONDS)) { "Typing tick did not draw its native window frame" }
+            ui.waitForIdle()
+            assertEquals("A native draw fence must not advance typing time", clock, ui.mainClock.currentTime)
+        } catch (error: Throwable) {
+            failure = error
+            throw error
+        } finally {
+            try {
+                instrumentation.runOnMainSync {
+                    (observer?.takeIf { it.isAlive } ?: view.viewTreeObserver).removeOnDrawListener(listener)
+                }
+            } catch (cleanup: Throwable) {
+                if (failure == null) throw cleanup else failure.addSuppressed(cleanup)
+            }
+        }
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testFirstLiveChunkTypesWithoutSnappingTheSentUserAndHistory() {
         show(1f, plainText = true)
+        val nativeView = (ui.onNodeWithTag("spacing-host").fetchSemanticsNode().root as
+            androidx.compose.ui.platform.ViewRootForTest).view
         val history = screen.turns
         val pending = ChatTurnUi.User("start-user", "检查首段逐字输出", pending = true)
         val first = "一二三四五六七八九十一二三四五六七八九十一二三"
@@ -342,6 +377,16 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             val lengths = mutableListOf<Int>()
             val geometryFrames = mutableListOf<String>()
             var paintedPartial = false
+            val trace = java.util.ArrayDeque<String>(32)
+            fun traceDraw(frame: Int, phase: String) {
+                val sample = paintDump("start-reply").lineSequence().filter {
+                    it.startsWith("REVEAL ") || it.startsWith("MOTION ") || it.startsWith("PAINT ") ||
+                        it.trimStart().startsWith("GEOMETRY ")
+                }.joinToString("\n") { it.replace(Regex("@/[^ ]+"), "") }
+                if (trace.size == 32) trace.removeFirst()
+                trace.addLast("frame=$frame phase=$phase clock=${ui.mainClock.currentTime} ${liveGeometry()}\n$sample")
+            }
+            val typingClockStart = ui.mainClock.currentTime
             var received = first.take(5)
             var batchReached = false
             var batchStart = 0
@@ -378,6 +423,15 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                 sampleTypingFrame(frame, "before-idle")
                 ui.waitForIdle()
                 sampleTypingFrame(frame, "after-idle")
+                traceDraw(frame, "before-draw")
+                try { awaitTypingDraw(nativeView) }
+                catch (failure: Throwable) {
+                    failure.addSuppressed(AssertionError(trace.joinToString("\n---\n")))
+                    throw failure
+                }
+                traceDraw(frame, "after-draw")
+                assertEquals("Each typing tick advances exactly one original frame", typingClockStart + (frame + 1) * 16L,
+                    ui.mainClock.currentTime)
                 users += top("start-user")
                 histories += top("tail")
                 val textNodes = ui.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text) and
@@ -391,7 +445,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                 if (frame % 30 == 29) assertEquals("Every received batch must finish within its original frame budget: " +
                     "frame=$frame clock=${ui.mainClock.currentTime} lengths=$lengths received=${received.length} " +
                     "shown=${shown.length} geometry=${liveGeometry()}" +
-                    if (received != shown) "\n${paintDump("start-reply")}" else "", received, shown)
+                    if (received != shown) "\n${paintDump("start-reply")}\n${trace.joinToString("\n---\n")}" else "", received, shown)
                 if (shown.length in batchStart + 1 until received.length) batchTyped = true
                 lengths += shown.length
                 if (frame % 10 == 0 || frame == 89) geometryFrames += "frame=$frame ${liveGeometry()}"

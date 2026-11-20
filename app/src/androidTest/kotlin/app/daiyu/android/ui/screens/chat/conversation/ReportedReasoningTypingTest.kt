@@ -75,6 +75,22 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         }
     }
 
+    private fun awaitTyped(text: String) {
+        check(!ui.mainClock.autoAdvance)
+        if (visibleText().contains(text)) return
+        val maxFrames = text.length * 4 + 24
+        val clockAtStart = ui.mainClock.currentTime
+        val startedAt = android.os.SystemClock.elapsedRealtime()
+        repeat(maxFrames) {
+            ui.mainClock.advanceTimeByFrame()
+            if (visibleText().contains(text)) return
+        }
+        fail("Typed text did not drain within $maxFrames frames: " +
+            "virtualMs=${ui.mainClock.currentTime - clockAtStart}, " +
+            "wallMs=${android.os.SystemClock.elapsedRealtime() - startedAt}, " +
+            "expected=<$text>, actual=<$lastObservedText>")
+    }
+
     private fun assertLivePath(path: Path) {
         val baseline = "首"
         val first = "首段思考" + "甲".repeat(180)
@@ -100,7 +116,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         await { advances > 0 }
         val intermediate = visibleText()
         assertTrue(intermediate.contains("首"))
-        await { visibleText().contains(first) }
+        awaitTyped(first)
         val settled = advances
         ui.mainClock.advanceTimeBy(160)
         assertEquals(settled, advances)
@@ -110,7 +126,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         assertEquals(settled, advances)
         mainThread { value = turn(path, afterResume) }
         await { advances > settled }
-        await { visibleText().contains(afterResume) }
+        awaitTyped(afterResume)
         ui.mainClock.autoAdvance = true
     }
 
@@ -163,7 +179,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                 SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
             release.countDown()
             await { advances > 0 }
-            await { visibleText().contains(pending) }
+            awaitTyped(pending)
             ui.onNodeWithText("正在显示…").assertDoesNotExist()
             ui.onNodeWithText("已思考").assertExists()
             ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)
@@ -380,7 +396,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             assertEquals(0, advances)
             mainThread { text = next }
             await { advances > 0 }
-            await { visibleText().contains(next) }
+            awaitTyped(next)
         } finally {
             firstRelease.countDown(); hiddenRelease.countDown()
             ui.mainClock.autoAdvance = true
@@ -427,7 +443,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             assertEquals(0, advances)
             appendedRelease.countDown()
             await { advances > 0 }
-            await { visibleText().contains(appended) }
+            awaitTyped(appended)
         } finally {
             firstRelease.countDown(); appendedRelease.countDown()
             ui.mainClock.autoAdvance = true
@@ -475,7 +491,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                 else -> mainThread { text = first; appearance.arrived = true; appearance.settled = true }
             }
             await { advances > 0 }
-            await { visibleText().contains(first) }
+            awaitTyped(first)
             ui.onNodeWithTag("reported-reasoning-header:queued-cold").performClick()
             await { ui.onAllNodesWithTag("reported-reasoning-content:queued-cold").fetchSemanticsNodes().isEmpty() }
             val paused = advances
@@ -488,7 +504,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             assertEquals(paused, advances)
             mainThread { text = next }
             await { advances > paused }
-            await { visibleText().contains(next) }
+            awaitTyped(next)
         } finally { ui.mainClock.autoAdvance = true }
     }
 
@@ -521,7 +537,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             assertEquals(0, advances)
             mainThread { text = next }
             await { advances > 0 }
-            await { visibleText().contains(next) }
+            awaitTyped(next)
         } finally { ui.mainClock.autoAdvance = true }
     }
 
@@ -543,7 +559,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         assertEquals(0, advances)
         mainThread { value = turn(path, inFlight) }
         await { advances > 0 }
-        await { visibleText().contains(inFlight) }
+        awaitTyped(inFlight)
         val owner = "assistant:reasoning:r"
         ui.onNodeWithTag("reported-reasoning-header:$owner").performClick()
         await {
@@ -570,7 +586,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         assertEquals(paused, advances)
         mainThread { value = turn(path, next) }
         await { advances > paused }
-        await { visibleText().contains(next) }
+        awaitTyped(next)
         ui.mainClock.autoAdvance = true
     }
 
@@ -604,7 +620,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         assertEquals(0, advances)
         mainThread { value = turn(path, next) }
         await { advances > 0 }
-        await { visibleText().contains(next) }
+        awaitTyped(next)
         ui.mainClock.autoAdvance = true
     }
 
@@ -643,7 +659,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         await { assertEquals(0, advances); visibleText().contains(hidden) }
         mainThread { value = turn(Path.MIXED, next) }
         await { advances > 0 }
-        await { visibleText().contains(next) }
+        awaitTyped(next)
         ui.mainClock.autoAdvance = true
     }
 
@@ -688,7 +704,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         await { visibleText().contains(first) }
         mainThread { value = turn(Path.STANDALONE, pending) }
         await { advances > 0 }
-        await { visibleText().contains(pending) }
+        awaitTyped(pending)
         mainThread { value = turn(Path.STANDALONE, replacement) }
         val replaced = advances
         await { visibleText().contains(replacement) }
@@ -696,7 +712,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         assertEquals(replaced, advances)
         mainThread { value = turn(Path.STANDALONE, next) }
         await { advances > replaced }
-        await { visibleText().contains(next) }
+        awaitTyped(next)
         ui.mainClock.autoAdvance = true
     }
 
@@ -935,7 +951,8 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             assertEquals(paused, count())
             assertTrue(visibleText().contains(baseline))
             node("chat-control").assertContentDescriptionEquals("继续").performClick()
-            waiting("resumed-await-240") { visibleText().contains(pending) }
+            probe.stage = "resumed-await-240"
+            awaitTyped(pending)
             captureScreenNode(node("chat-messages"), advanceAnimationClock = false)
             assertEquals(240, count())
             checkpoint("resumed-240-drawn")

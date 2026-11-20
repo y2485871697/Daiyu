@@ -41,7 +41,8 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
     private var body by mutableStateOf("")
 
     private fun mount(formatted: Boolean = false, active: Boolean = true,
-        parser: (String) -> List<MarkdownBlock> = defaultMarkdownParser) {
+        parser: (String) -> List<MarkdownBlock> = defaultMarkdownParser,
+        paintProbe: MarkdownPaintSlotsProbe? = null) {
         mainThread {
             contentActive = active
             if (formatted) body = formattedBody
@@ -51,6 +52,7 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
                     CompositionLocalProvider(LocalMarkdownParser provides parser, LocalLifecycleOwner provides owner,
                         app.daiyu.android.ui.navigation.LocalPageContentActive provides contentActive) {
                         Box(Modifier.size(320.dp, viewport)) {
+                            paintProbe?.Capture("background-resume")
                             ChatMessageList(
                                 List(6) { ChatTurnUi.User("u$it", "history $it") } +
                                     ChatTurnUi.Assistant("tail", status = RunStatus.COMPLETED, finalText = body),
@@ -306,8 +308,9 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             if (text == appended) { entered.countDown(); release.await() }
             MarkdownParser.parse(text)
         }
+        val paintProbe = MarkdownPaintSlotsProbe()
         try {
-            mount(formatted = true, parser = parser)
+            mount(formatted = true, parser = parser, paintProbe = paintProbe)
             ui.waitUntil(5_000) {
                 ui.onAllNodesWithContentDescription("复制回答", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
             }
@@ -317,11 +320,23 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             ui.waitUntil(5_000) { entered.count == 0L }
             ui.waitForIdle()
             assertEquals("Pending append must retain the occupied action slot", before, top("chat-turn:tail"), 1f)
+            ui.mainClock.autoAdvance = false
             release.countDown()
-            ui.waitUntil(5_000) {
-                ui.onAllNodesWithText("后台新增正文乙，这段内容在返回前已经收到。", useUnmergedTree = true)
-                    .fetchSemanticsNodes().isNotEmpty() &&
-                    ui.onAllNodesWithContentDescription("复制回答", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            try {
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.onAllNodesWithText("后台新增正文乙，这段内容在返回前已经收到。", useUnmergedTree = true)
+                        .fetchSemanticsNodes().isNotEmpty() &&
+                        ui.onAllNodesWithContentDescription("复制回答", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+                }
+            } catch (failure: Throwable) {
+                var paintDump = "<not sampled>"
+                instrumentation.runOnMainSync {
+                    paintDump = runCatching { paintProbe.sample("background-resume") }
+                        .getOrElse { "probe failed: $it" }
+                }
+                failure.addSuppressed(AssertionError("Background parse publication before resume:\n$paintDump"))
+                throw failure
             }
             ui.waitForIdle()
             assertEquals(before, top("chat-turn:tail"), 1f)
@@ -600,7 +615,8 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
                 assertEquals("Reading the saved frontier must not advance the animation clock", beforeRead, ui.mainClock.currentTime)
                 return shown
             }
-            for (frame in 0 until 120) {
+            val initialFrames = if (partial) 120 else first.length
+            for (frame in 0 until initialFrames) {
                 tick()
                 val shown = visible()
                 if (partial && shown > 0 || !partial && shown == first.length) break

@@ -3,7 +3,10 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.ui.unit.dp
@@ -15,6 +18,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
@@ -1886,27 +1890,38 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         var text by mutableStateOf("")
         val control = ReplyPresentationControl("bounded-paint", initiallyLive = true)
         val probe = MarkdownPaintSlotsProbe()
+        val clearance = StreamingTextClearance()
         show {
-            CompositionLocalProvider(LocalMarkdownParser provides parser,
-                LocalReplyPlayback provides ReplyPlayback(control, runtimePaused = false)) {
-                probe.Capture("bounded-paint")
-                val projection = rememberMarkdownProjection(listOf(text))
-                val reveal = rememberMarkdownReveal(listOf(MarkdownTypingSource("final", text)), projection,
-                    streaming = true, terminal = false, initialBaseline = emptyList(),
-                    presentationLane = "bounded-paint", awaitPaintAdmission = true)
-                Column(Modifier.width(320.dp).testTag("bounded-paint")) {
-                    RevealedMessageMarkdown(text, projection?.blocks?.get(text), reveal, "final")
+            val bottomClearance = with(LocalDensity.current) { ChatTailClearance.roundToPx() }
+            Box(Modifier.fillMaxSize().safeDrawingPadding().onGloballyPositioned { coordinates ->
+                clearance.update(coordinates, coordinates, 0, bottomClearance, 0,
+                    protect = true, clampToViewport = true)
+            }) {
+                CompositionLocalProvider(LocalMarkdownParser provides parser,
+                    LocalStreamingTextClearance provides clearance,
+                    LocalReplyPlayback provides ReplyPlayback(control, runtimePaused = false)) {
+                    probe.Capture("bounded-paint")
+                    val projection = rememberMarkdownProjection(listOf(text))
+                    val reveal = rememberMarkdownReveal(listOf(MarkdownTypingSource("final", text)), projection,
+                        streaming = true, terminal = false, initialBaseline = emptyList(),
+                        presentationLane = "bounded-paint", awaitPaintAdmission = true)
+                    Column(Modifier.width(320.dp).testTag("bounded-paint")) {
+                        RevealedMessageMarkdown(text, projection?.blocks?.get(text), reveal, "final")
+                    }
                 }
             }
         }
         ui.mainClock.autoAdvance = false
         try {
             var previous = 0
+            var paintDump = ""
+            var sawPaintFrame = false
             fun painted(): Int {
                 var length = 0
                 val clock = ui.mainClock.currentTime
                 instrumentation.runOnMainSync {
-                    probe.sample("bounded-paint") { sample ->
+                    paintDump = probe.sample("bounded-paint") { sample ->
+                        sawPaintFrame = true
                         length = maxOf(length, sample.drawn?.layoutInput?.text?.length ?: 0)
                     }
                 }
@@ -1925,7 +1940,9 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             ui.runOnUiThread { text = initial }
             repeat(24) { sampleFrame() }
             val frozen = previous
-            assertTrue("The received chunk must have real intermediate painted frames", frozen in 1 until initial.length)
+            assertTrue("The fixture must mount the real clearance paint path: $paintDump", sawPaintFrame)
+            assertTrue("The received chunk must have real intermediate painted frames: frozen=$frozen\n$paintDump",
+                frozen in 1 until initial.length)
             ui.runOnUiThread { control.pause(true); text = full }
             repeat(8) { assertEquals("Pause must freeze actual paint", frozen, sampleFrame()) }
             ui.runOnUiThread { control.pause(false) }

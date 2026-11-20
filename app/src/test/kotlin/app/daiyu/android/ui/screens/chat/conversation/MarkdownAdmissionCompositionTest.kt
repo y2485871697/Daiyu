@@ -117,6 +117,7 @@ class MarkdownAdmissionCompositionTest {
             repeat(4) { frame() }
             body!!.publication.setPending(owner, true)
             val first = "一二三四五六七八"
+            val firstReceiptTime = time
             sources.value = listOf(MarkdownTypingSource("answer", first))
             parsed.value = projectMarkdown(listOf(first))
             repeat(120) { frame() }
@@ -129,6 +130,7 @@ class MarkdownAdmissionCompositionTest {
             assertEquals("The first pending prefix must be published in its own frame", 1, body!!.limit("answer"))
             val feedback = bodyFeedback
             val appended = first + "九十十一十二"
+            val appendReceiptInterval = time - firstReceiptTime
             sources.value = listOf(MarkdownTypingSource("answer", appended))
             parsed.value = projectMarkdown(listOf(appended))
             terminal.value = true
@@ -140,7 +142,17 @@ class MarkdownAdmissionCompositionTest {
             body!!.publication.setPending(owner, false)
             frame()
             assertTrue("Waiting must not buy a catchup chunk", body!!.limit("answer") in 1..2)
-            repeat(120) { frame() }
+            val releaseFrames = kotlin.math.ceil((appended.length - 1).toDouble() * appendReceiptInterval /
+                ((appended.length - first.length) * 16_000_000.0)).toInt()
+            repeat(maxOf(120, releaseFrames)) {
+                val before = body!!.limit("answer")
+                val beforeFeedback = bodyFeedback
+                if (before < appended.length) frame()
+                val shown = body!!.limit("answer")
+                assertTrue("Paint release must keep typing one character at a time", shown in before..minOf(before + 1, appended.length))
+                assertEquals(shown - before, bodyFeedback - beforeFeedback)
+                assertEquals(appended.length, narration!!.limit("answer"))
+            }
             assertEquals(appended.length, body!!.limit("answer"))
         } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
     }

@@ -938,8 +938,15 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                     val after = ui.runOnIdle { probe.baselinePaint(baseline) }
                     val sameFrame = after != null && after.frame === before.frame
                     val sameCandidate = after != null && after.candidate === before.candidate
-                    val committed = after != null && after.committed === after.candidate
-                    val drawn = after != null && after.drawn === after.candidate
+                    fun matchesCandidate(actual: TextLayoutResult?): Boolean =
+                        after?.candidate?.let { candidate ->
+                            actual != null &&
+                                actual.layoutInput.text == candidate.layoutInput.text &&
+                                actual.size == candidate.size &&
+                                actual.canPaintPrefixOf(candidate)
+                        } == true
+                    val committed = matchesCandidate(after?.committed)
+                    val drawn = matchesCandidate(after?.drawn)
                     probe.record("baseline-paint: sameFrame=$sameFrame,sameCandidate=$sameCandidate," +
                         "committed=$committed,drawn=$drawn")
                     sameFrame && sameCandidate && committed && drawn

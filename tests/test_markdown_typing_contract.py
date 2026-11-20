@@ -151,9 +151,14 @@ class MarkdownTypingContract(unittest.TestCase):
     def test_message_actions_wait_for_the_exact_body_and_all_reconnect_reveals(self):
         assistant = self.chat.split("internal fun AssistantTurn(", 1)[1].split(
             "private fun AssistantTextContent(", 1)[0]
-        gate = assistant.split("if (showActions &&", 1)[1].split("{", 1)[0]
-        for condition in ("actionTurn.status != RunStatus.RUNNING", "generationComplete", "revealSettled"):
-            self.assertIn(condition, gate)
+        self.assertIn(
+            "    val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && generationComplete && revealSettled\n",
+            assistant)
+        self.assertIn(
+            "        if (actionsVisible) {\n"
+            "            val hasTextActions = actionTurn.hasBodyTextActions()\n"
+            "            MessageActionBar(actionTurn.actionKey, actions, timestamp = actionTurn.timestamp,\n",
+            assistant)
         reconnect = (BASE / "ReconnectedAssistantTurn.kt").read_text()
         self.assertIn("val actionsReady = parts.parts.all { ready[it.turn.listKey] == it && settled[it.turn.listKey] == it }", reconnect)
         self.assertIn("showActions = index == parts.parts.lastIndex && actionsReady, actionTurn = turn", reconnect)

@@ -32,7 +32,14 @@ class MessageTimestampStyleContractTest(unittest.TestCase):
         self.assertNotIn('endAligned = true', assistant)
         self.assertIn('val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true', assistant)
         self.assertIn('val generationComplete = turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady', assistant)
-        self.assertIn('if (showActions && actionTurn.status != RunStatus.RUNNING && generationComplete && revealSettled)', assistant)
+        self.assertIn(
+            '    val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && generationComplete && revealSettled\n',
+            assistant)
+        self.assertIn(
+            '        if (actionsVisible) {\n'
+            '            val hasTextActions = actionTurn.hasBodyTextActions()\n'
+            '            MessageActionBar(actionTurn.actionKey, actions, timestamp = actionTurn.timestamp,\n',
+            assistant)
         self.assertIn('allowSpeech = hasTextActions, showCopyAction = hasTextActions', turns)
 
     def test_production_user_hides_timestamp_without_changing_actions_or_assistant(self):

@@ -462,7 +462,9 @@ internal fun ChatMessageList(
     val assistantTurns = remember(turns) { turns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey } }
     val currentAssistants by rememberUpdatedState(assistantTurns)
     val workflowAdmissions = remember(revealResetEpoch) { WorkflowVisualAdmissions(assistantTurns.keys) }
-    assistantTurns.keys.forEach { workflowAdmissions.scope(it, initialPositionPending) }
+    assistantTurns.values.forEach { turn ->
+        workflowAdmissions.scope(turn.listKey, initialPositionPending, live = turn.status == RunStatus.RUNNING)
+    }
     replyPlayback?.let { playback ->
         assistantTurns.values.firstOrNull(playback.control::matches)?.let { turn ->
             workflowAdmissions.scope(turn.listKey, initialPositionPending).retainReplyControl(playback.control)

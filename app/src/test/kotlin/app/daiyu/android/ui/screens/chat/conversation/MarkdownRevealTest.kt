@@ -769,4 +769,72 @@ class MarkdownRevealTest {
         assertEquals(frontier, budgets.visibility(retained.parts.single().source.id).value)
     }
 
+
+    @Test fun retainedTargetsIgnoreColdEmptyAndPrefixProjectionsWithoutReplaying() {
+        val text = "字".repeat(500)
+        for (partial in listOf(false, true)) for (coldParts in listOf(
+            emptyList<MarkdownTypingPart>(), listOf(part("")), listOf(part(text.take(7))))) {
+            val motion = MarkdownTypingState(emptyList())
+            motion.update(emptyList(), 0, true, false)
+            motion.receive(listOf(source(text.take(100))), 1_000_000_000L)
+            motion.receive(listOf(source(text)), 5_000_000_000L)
+            val running = motion.update(listOf(part(text)), 0, true, false)!!
+            val frontier = drain(motion, running, 6_000_000_000L, limit = if (partial) 67 else text.length)
+            motion.pause(running)
+            val latest = text + if (partial) "后".repeat(500) else ""
+            motion.receive(listOf(source(latest)), 60_000_000_000L, paused = true)
+            val cold = motion.update(coldParts, 0, false, false, live = false, paceTerminal = true)!!
+            assertSame("A stale projection must retain the accepted target", running, cold)
+            assertEquals(frontier, motion.visible(cold))
+            assertEquals(frontier, motion.frame(cold).visible)
+            motion.pause(cold)
+            motion.receive(listOf(source(latest)), 61_000_000_000L)
+            val full = motion.update(listOf(part(latest)), 0, false, true, live = false, paceTerminal = true)!!
+            assertEquals(frontier, motion.visible(full))
+            var advances = 0
+            val resumed = motion.advance(full, 62_000_000_000L) { advances++ }
+            if (partial) {
+                assertEquals("Offscreen and paused time buy no catch-up", frontier + 1, resumed)
+                assertTrue(motion.advance(full, 62_016_000_000L) in resumed until full.total)
+                assertEquals(full.total, drain(motion, full, 62_032_000_000L))
+            } else {
+                assertEquals(text.length, resumed)
+                assertEquals("History must emit no replay advances", 0, advances)
+            }
+        }
+    }
+
+    @Test fun authoritativeSourceReplacementIsNotMistakenForAStaleProjection() {
+        val full = "already displayed source"
+        val replacements = listOf(listOf(source(full.take(7))), listOf(source("different")),
+            listOf(MarkdownTypingSource("different-id", full)), emptyList())
+        for (replacement in replacements) {
+            val motion = MarkdownTypingState(emptyList())
+            motion.receive(listOf(source(full)), 1_000_000_000L)
+            val original = motion.update(listOf(part(full)), 0, true, false)!!
+            drain(motion, original)
+            motion.receive(replacement, 2_000_000_000L)
+            val parts = replacement.map { MarkdownTypingPart(it, it.text.length, it.text) }
+            val next = motion.update(parts, 0, false, true, live = false, paceTerminal = true)!!
+            assertEquals(parts, next.parts)
+            assertEquals(parts.sumOf { it.length }, motion.visible(next))
+        }
+    }
+
+    @Test fun pagedTerminalHistoryHasASilentScopeWithoutResettingAnExistingLiveOwner() {
+        val admissions = WorkflowVisualAdmissions(emptySet())
+        val history = admissions.scope("paged-history", baseline = false, live = false)
+        assertFalse("A paged completed thought is not a first live presentation",
+            history.claimReasoning("paged-history", "thought"))
+        val sources = listOf(source("already received"))
+        assertEquals(sources, history.bodyBaseline("paged-history", sources, live = true))
+        assertSame(history, admissions.scope("paged-history", baseline = false))
+        val active = admissions.scope("active", baseline = false, live = true)
+        assertSame("Terminal transition must retain the existing live scope",
+            active, admissions.scope("active", baseline = false, live = false))
+        assertTrue("A genuinely new live thought still receives its typewriter ticket",
+            active.claimReasoning("active", "thought"))
+        assertEquals(emptyList<MarkdownTypingSource>(), active.bodyBaseline("active", sources, live = true))
+    }
+
 }

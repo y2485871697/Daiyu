@@ -506,4 +506,148 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+
+    fun testPagedCompletedHistoryGetsASilentProductionScope() {
+        var turns by mutableStateOf<List<ChatTurnUi>>(listOf(ChatTurnUi.User("initial", "initial")))
+        var navigation by mutableStateOf(ChatScrollRequest(1))
+        var checked = false
+        var animated = true
+        mainThread {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    Box(Modifier.size(320.dp, 240.dp)) {
+                        ChatMessageList(turns, ChatScreenActions(), scrollRequest = navigation, turnExtras = { turn ->
+                            if (turn.listKey == "paged-completed") {
+                                val scope = LocalWorkflowVisualScope.current!!
+                                androidx.compose.runtime.SideEffect {
+                                    if (!checked) {
+                                        animated = scope.claimReasoning("paged-completed", "test-only-claim")
+                                        checked = true
+                                    }
+                                }
+                            }
+                        })
+                    }
+                }
+            }
+        }
+        ui.waitForIdle()
+        mainThread {
+            turns = listOf(ChatTurnUi.Assistant("paged-completed", finalText = "已完成的历史正文",
+                status = RunStatus.COMPLETED)) + turns
+            navigation = ChatScrollRequest(2, listKey = "paged-completed")
+        }
+        ui.waitForIdle()
+        ui.onNodeWithTag("chat-messages").performScrollToIndex(0)
+        ui.waitForIdle()
+        assertTrue("The actual paged history item must compose", checked)
+        assertFalse("Paging history must not grant a fresh typing ticket", animated)
+        ui.onNodeWithText("已完成的历史正文").assertExists()
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testCompletedLazyRemountRejectsColdEmptyProjection() {
+        exerciseColdProjectionRemount(partial = false)
+    }
+
+    fun testPartialLazyRemountRejectsColdPrefixAndPacesOnlyTheSuffix() {
+        exerciseColdProjectionRemount(partial = true)
+    }
+
+    private fun exerciseColdProjectionRemount(partial: Boolean) {
+        val first = "字".repeat(500)
+        val latest = first + if (partial) "后".repeat(500) else ""
+        val control = ReplyPresentationControl("cold-lazy", initiallyLive = true)
+        val playback = ReplyPlayback(control, runtimePaused = false)
+        val lane = control.lane("body:cold-lazy", MarkdownParserIdentity(defaultMarkdownParser), 0L) { emptyList() }
+        val mounted = java.util.concurrent.atomic.AtomicBoolean(false)
+        val mounts = java.util.concurrent.atomic.AtomicInteger()
+        val advances = java.util.concurrent.atomic.AtomicInteger()
+        fun projection(text: String) = MarkdownProjection(listOf(text), mapOf(text to MarkdownParser.parse(text)), defaultMarkdownParser)
+        var received by mutableStateOf(first)
+        var parsed by mutableStateOf(projection(first))
+        var streaming by mutableStateOf(true)
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread {
+                activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
+                    AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                        CompositionLocalProvider(LocalReplyPlayback provides playback) {
+                            androidx.compose.foundation.lazy.LazyColumn(Modifier.size(320.dp, 240.dp).testTag("cold-lazy-list")) {
+                                items(count = 64, key = { it }) { index ->
+                                    if (index == 0) {
+                                        val reveal = rememberMarkdownReveal(listOf(MarkdownTypingSource("final", received)), parsed,
+                                            streaming = streaming, terminal = !streaming, live = streaming, paceTerminal = true,
+                                            initialBaseline = emptyList(), presentationLane = "body:cold-lazy",
+                                            onVisibleAdvance = { advances.incrementAndGet() })
+                                        androidx.compose.runtime.DisposableEffect(Unit) {
+                                            mounts.incrementAndGet(); mounted.set(true)
+                                            onDispose { mounted.set(false) }
+                                        }
+                                        Text(received.take(reveal.limit("final")), Modifier.testTag("cold-lazy-body"))
+                                    } else Box(Modifier.height(100.dp)) { Text("cold filler $index") }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            fun tick(count: Int = 1) { repeat(count) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() } }
+            fun visible(): Int {
+                var shown = 0
+                mainThread { lane.motion.target?.let { shown = lane.motion.visible(it) } }
+                return shown
+            }
+            for (frame in 0 until 120) {
+                tick()
+                val shown = visible()
+                if (partial && shown > 0 || !partial && shown == first.length) break
+            }
+            if (partial) assertTrue(visible() in 1 until first.length) else assertEquals(first.length, visible())
+            mainThread { control.pause(true) }
+            tick()
+            val frozen = visible()
+            val before = advances.get()
+            ui.onNodeWithTag("cold-lazy-list").performScrollToIndex(63)
+            tick(24)
+            assertFalse("The real Lazy item must dispose", mounted.get())
+            mainThread {
+                received = latest; streaming = false
+                parsed = if (partial) projection(first.take(7)) else MarkdownProjection(emptyList(), emptyMap(), defaultMarkdownParser)
+            }
+            ui.mainClock.advanceTimeBy(10_000L); ui.waitForIdle()
+            ui.onNodeWithTag("cold-lazy-list").performScrollToIndex(0)
+            tick()
+            assertTrue(mounted.get()); assertTrue(mounts.get() >= 2)
+            assertEquals("A cold parse cannot rewind the saved frontier", frozen, visible())
+            ui.onNodeWithTag("cold-lazy-body").assertTextEquals(latest.take(frozen))
+            assertEquals(before, advances.get())
+            mainThread { parsed = projection(latest) }
+            tick(3)
+            assertEquals(frozen, visible()); assertEquals(before, advances.get())
+            ui.mainClock.advanceTimeBy(60_000L); ui.waitForIdle()
+            assertEquals("Pause must freeze every displayed character", frozen, visible())
+            mainThread { control.pause(false) }
+            tick()
+            if (partial) {
+                assertEquals("Offscreen time buys no catch-up", frozen + 1, visible())
+                var previous = visible()
+                var continued = false
+                repeat(12) {
+                    tick(); val shown = visible()
+                    assertTrue(shown >= previous)
+                    if (shown > previous && shown < latest.length) continued = true
+                    previous = shown
+                }
+                assertTrue("Only the undisplayed suffix must actually type", continued)
+                assertTrue(visible() < latest.length)
+            } else {
+                tick(12)
+                assertEquals(first.length, visible())
+                assertEquals("Completed history must not emit new typing advances", before, advances.get())
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+        assertEquals(0, fixture.opens.get())
+    }
+
 }

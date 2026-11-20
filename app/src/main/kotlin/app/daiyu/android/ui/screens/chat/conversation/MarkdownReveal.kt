@@ -234,7 +234,12 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         val previous = target
         val sources = parts.map { it.source }
         val total = parts.sumOf { it.length.toLong() }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-        val appending = markdownTypingAppends(previous?.parts?.map { it.source } ?: baseline, sources)
+        val previousSources = previous?.parts?.map { it.source }
+        // A lagging parse is not a rollback of the received source or its painted frontier.
+        if (previousSources != null && observesReceipts &&
+            markdownTypingAppends(previousSources, receivedSources) && !markdownTypingAppends(previousSources, sources) &&
+            markdownTypingAppends(sources, previousSources)) return previous
+        val appending = markdownTypingAppends(previousSources ?: baseline, sources)
         val mapped = if (previous != null && appending) mappedMarkdownPosition(previous, parts, position) else position
         val start = when {
             !seenLive || closed && !paceTerminal || !appending -> total

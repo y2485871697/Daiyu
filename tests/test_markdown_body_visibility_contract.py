@@ -77,6 +77,20 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('MarkdownBlocks(block.blocks, openLink, visibility, generationComplete, paintOffset)', leaf)
         self.assertIn('MarkdownInlineText(block.content, openLink, visibility = visibility, paintOffset = paintOffset)', leaf)
 
+    def test_next_received_line_is_only_a_space_hint_not_native_or_paint_input(self):
+        ui = (BASE / 'MessageMarkdown.kt').read_text()
+        clearance = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun TextLayoutResult.canPaintPrefixOf', 1)[0]
+        for token in ('val candidateText = if (playback?.paused == true) displayedText else text',
+                      'frame.layout = candidate', 'val future = nextLineText?.let {',
+                      'it.lineCount > candidate.lineCount', 'it.getLineBottom(candidate.lineCount)',
+                      'if (playback?.paused != true)', 'clearance.prepareLine(owner, 0)',
+                      'BasicText(displayedText, modifier.layout',
+                      'actual.size.height <= available + .01f',
+                      'actual.layoutInput.text == text'):
+            self.assertIn(token, clearance)
+        self.assertNotIn('frame.layout = future', clearance)
+        self.assertNotIn('BasicText(nextLineText', clearance)
+
     def test_table_cell_budget_and_visible_semantics_are_preserved(self):
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         row = ui.split('private fun MarkdownTableRow(', 1)[1].split('private fun headingSize', 1)[0]
@@ -84,7 +98,8 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('rememberMarkdownVisibility(visibility, offsets[column], lengths[column])', row)
         self.assertIn('visibility = budget, paintOffset = paintOffset + offsets[column])', row)
         inline = ui.split('private fun MarkdownInlineText(', 1)[1].split('private fun MarkdownBlocks(', 1)[0]
-        self.assertIn('ClearanceText(visible, paintOffset, modifier, style)', inline)
+        self.assertIn('ClearanceText(visible, paintOffset, modifier, style,', inline)
+        self.assertIn('nextLineText = body.takeIf { end < body.length }', inline)
         self.assertIn('if (limit <= 0) { Box(modifier); return }', inline)
         clearance = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun TextLayoutResult.canPaintPrefixOf', 1)[0]
         self.assertIn("val latestCandidateText by rememberUpdatedState(text)", clearance)

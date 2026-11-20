@@ -128,6 +128,17 @@ internal class StreamingTextClearance {
     private var viewportGeometry by mutableStateOf<Geometry?>(null)
     private var positioned by mutableStateOf(false)
     private val typingOwners = mutableStateMapOf<Any, Unit>()
+    private val lineSpace = mutableStateMapOf<Any, Int>()
+
+    fun prepareLine(owner: Any, extraHeight: Int) {
+        if (extraHeight > 0) lineSpace[owner] = extraHeight else lineSpace.remove(owner)
+    }
+
+    fun reservedHeight(contentHeight: Int, viewportHeight: Int, following: Boolean): Int {
+        if (!following) return 0
+        val extra = lineSpace.values.maxOrNull() ?: return 0
+        return extra.takeIf { contentHeight <= viewportHeight - it } ?: 0
+    }
     val typingPending: Boolean get() = typingOwners.isNotEmpty()
     var pacedFollowing by mutableStateOf(false)
         private set
@@ -190,6 +201,7 @@ internal class StreamingTailViewport(initiallyBounded: Boolean) {
     var scrollOffset by mutableStateOf(0f)
     var maxOffset by mutableStateOf(0)
     var contentHeight by androidx.compose.runtime.mutableIntStateOf(0)
+    var paintHeight by mutableIntStateOf(0)
     var boundaryDelta by mutableStateOf(0f)
     var followCatchup by mutableStateOf(false)
     var viewportOffset by mutableIntStateOf(0)
@@ -266,13 +278,13 @@ internal fun StreamingTailContainer(
                 state.viewportCoordinates = viewport
                 val followingCatchup = state.bounded && state.followCatchup && followIntent()
                 state.textClearance.update(listCoordinates(), viewport, state.scrollOffset.roundToInt(), drawClearance(),
-                    state.contentHeight, preserveTextClearance && protectClearance() && followIntent(), !followingCatchup)
+                    state.paintHeight, preserveTextClearance && protectClearance() && followIntent(), !followingCatchup)
             }
             .onGloballyPositioned { viewport ->
                 state.viewportCoordinates = viewport
                 val followingCatchup = state.bounded && state.followCatchup && followIntent()
                 state.textClearance.update(listCoordinates(), viewport, state.scrollOffset.roundToInt(), drawClearance(),
-                    state.contentHeight, preserveTextClearance && protectClearance() && followIntent(), !followingCatchup)
+                    state.paintHeight, preserveTextClearance && protectClearance() && followIntent(), !followingCatchup)
             }
             .drawWithContent {
                 // Following content stops at the safe edge; detached reading retains the editor backdrop.
@@ -297,9 +309,13 @@ internal fun StreamingTailContainer(
             val currentViewportHeight = viewportHeight().coerceAtLeast(1)
             val body = measurables.single().measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
             // Publish H without querying alignment lines: prefetch must measure, not place this subtree.
-            state.contentHeight = body.height
+            state.paintHeight = body.height
+            // A trailing blank line lets the ordinary follower prepare space before its first glyph.
+            val reserve = state.textClearance.reservedHeight(body.height, currentViewportHeight,
+                state.bounded && preserveTextClearance && follows() && protectClearance() && followIntent())
+            state.contentHeight = body.height + reserve
             // Position-dependent clipping is resolved after this item's current origin is placed.
-            val height = if (state.bounded) minOf(body.height, currentViewportHeight) else body.height
+            val height = if (state.bounded) minOf(state.contentHeight, currentViewportHeight) else body.height
             layout(body.width, height) {
                 body.placeRelative(0, -state.scrollOffset.roundToInt())
             }

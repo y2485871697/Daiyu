@@ -119,7 +119,9 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("geometry = if (protect) placed else null", source)
         markdown = (CHAT.parent / "MessageMarkdown.kt").read_text()
         self.assertIn("snapshotFlow { publicationCheck() }.collect { publication?.setPending(owner, !it) }", markdown)
-        self.assertIn("onDispose { publication?.setPending(owner, false) }", markdown)
+        dispose = markdown.split("DisposableEffect(clearance, publication, owner) { onDispose {", 1)[1].split("} }", 1)[0]
+        self.assertIn("clearance.prepareLine(owner, 0)", dispose)
+        self.assertIn("publication?.setPending(owner, false)", dispose)
         device = DEVICE.read_text().split("fun testUnpaintedLeafAboveViewportReleasesOnlyItsPendingReceipt()", 1)[1]
         device = device.split("fun testProtectedCodeViewport", 1)[0]
         for token in ("publication.setPending(otherOwner, true)", "publication.setPending(otherOwner, false)",
@@ -235,12 +237,27 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("withFrameNanos { frameTimeNanos ->", follow)
         self.assertIn("listState.scrollBy(delta)", follow)
 
+    def test_next_line_space_uses_real_paint_height_and_only_short_following_extent(self):
+        source = CHAT.read_text()
+        clearance = source.split('internal class StreamingTextClearance {', 1)[1].split('internal class StreamingTailViewport(', 1)[0]
+        for token in ('if (!following) return 0', 'lineSpace.values.maxOrNull()',
+                      'contentHeight <= viewportHeight - it',
+                      'it.height > availableHeight(it.viewport) + it.offset + .01f'):
+            self.assertIn(token, clearance)
+        self.assertNotIn('lineSpace.values.sum()', clearance)
+        viewport = source.split('internal fun StreamingTailContainer(', 1)[1].split('internal fun ChatMessageList(', 1)[0]
+        self.assertEqual(2, viewport.count('state.paintHeight, preserveTextClearance && protectClearance() && followIntent()'))
+        for token in ('state.paintHeight = body.height', 'state.contentHeight = body.height + reserve',
+                      'state.bounded && preserveTextClearance && follows() && protectClearance() && followIntent()',
+                      'body.placeRelative(0, -state.scrollOffset.roundToInt())'):
+            self.assertIn(token, viewport)
+
     def test_bounded_viewport_preserves_extent_and_aligns_real_content_same_measure(self):
         source = CHAT.read_text()
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
-        for token in ("maxHeight = Constraints.Infinity", "state.contentHeight = body.height",
+        for token in ("maxHeight = Constraints.Infinity", "state.paintHeight = body.height", "state.contentHeight = body.height + reserve",
                       "val contentHeight = state.contentHeight",
-                      "minOf(body.height, currentViewportHeight)", "state.contentHeight - visibleHeight",
+                      "minOf(state.contentHeight, currentViewportHeight)", "state.contentHeight - visibleHeight",
                       "state.bounded && following && !state.followCatchup", "state.maxOffset.toFloat()",
                       "body.placeRelative(0, -state.scrollOffset.roundToInt())",
                       "layout(viewport.width, contentHeight)", "Modifier.onPlaced",
@@ -269,7 +286,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         measure = viewport.split("onViewportMeasure?.invoke()", 1)[1].split("layout(body.width, height) {", 1)[0]
         self.assertEqual(1, measure.count("viewportHeight()"))
         self.assertIn("val currentViewportHeight = viewportHeight().coerceAtLeast(1)", measure)
-        self.assertIn("minOf(body.height, currentViewportHeight)", measure)
+        self.assertIn("minOf(state.contentHeight, currentViewportHeight)", measure)
         self.assertNotIn("state.itemOrigin", measure)
         self.assertNotIn("val followOffset = (body.height - viewportHeight()", viewport)
         placement = viewport.split("layout(viewport.width, contentHeight)", 1)[1]
@@ -412,7 +429,8 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_full_extent_invalidates_outer_measure_and_exact_ownership_survives_consumption(self):
         source = CHAT.read_text()
         self.assertIn("var contentHeight by androidx.compose.runtime.mutableIntStateOf(0)", source)
-        self.assertIn("state.contentHeight = body.height", source)
+        self.assertIn("state.paintHeight = body.height", source)
+        self.assertIn("state.contentHeight = body.height + reserve", source)
         self.assertIn("val contentHeight = state.contentHeight", source)
         self.assertNotIn("StreamingTailContentHeight", source)
         self.assertIn("layout(viewport.width, contentHeight)", source)

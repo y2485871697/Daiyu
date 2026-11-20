@@ -213,7 +213,7 @@ private class MarkdownTextFrame {
 
 @Composable
 internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: Modifier, style: TextStyle,
-    softWrap: Boolean = true) {
+    softWrap: Boolean = true, nextLineText: AnnotatedString? = null) {
     val clearance = LocalStreamingTextClearance.current
     val painted = LocalMarkdownPaintedText.current ?: remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }
     if (clearance == null) {
@@ -232,6 +232,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     }
     val playback = LocalReplyPlayback.current
     val measurer = rememberTextMeasurer(cacheSize = 1)
+    val lineMeasurer = rememberTextMeasurer(cacheSize = 1)
     val publication = LocalMarkdownPaintPublication.current
     val latestCandidateText by rememberUpdatedState(text)
     val density = LocalDensity.current
@@ -290,11 +291,23 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
         snapshotFlow { publicationCheck() }.collect { publication?.setPending(owner, !it) }
     }
     SideEffect { publication?.setPending(owner, !published()) }
-    DisposableEffect(publication, owner) { onDispose { publication?.setPending(owner, false) } }
+    DisposableEffect(clearance, publication, owner) { onDispose {
+        clearance.prepareLine(owner, 0)
+        publication?.setPending(owner, false)
+    } }
     key(style, softWrap, density.density, density.fontScale, direction) {
         BasicText(displayedText, modifier.layout { measurable, constraints ->
             val candidate = measurer.measure(candidateText, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
             frame.layout = candidate
+            val future = nextLineText?.let {
+                lineMeasurer.measure(it, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
+            }
+            val nextHeight = future?.takeIf { it.lineCount > candidate.lineCount }?.let {
+                val bottomPadding = it.size.height - it.getLineBottom(it.lineCount - 1)
+                kotlin.math.ceil(it.getLineBottom(candidate.lineCount) + bottomPadding).toInt()
+            } ?: candidate.size.height
+            if (playback?.paused != true)
+                clearance.prepareLine(owner, (nextHeight - candidate.size.height).coerceAtLeast(0))
             val committed = measurable.measure(constraints.copy(minHeight = 0))
             layout(constraints.constrainWidth(maxOf(candidate.size.width, committed.width)),
                 constraints.constrainHeight(maxOf(candidate.size.height, committed.height))) {
@@ -373,7 +386,8 @@ private fun MarkdownInlineText(
         val visible = remember(body, end) {
             if (end >= body.length) body else body.subSequence(0, end)
         }
-        ClearanceText(visible, paintOffset, modifier, style)
+        ClearanceText(visible, paintOffset, modifier, style,
+            nextLineText = body.takeIf { end < body.length })
     }
 }
 

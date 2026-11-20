@@ -33,6 +33,43 @@ class MarkdownPreparationCompositionTest {
         override fun onClear() = Unit
     }
 
+    @Test fun nextLineSpacePreparesOnlyAShortFollowingTail() {
+        val clearance = StreamingTextClearance()
+        val owner = Any()
+        assertEquals(0, clearance.reservedHeight(57, 120, true))
+        clearance.prepareLine(owner, 26)
+        assertEquals(26, clearance.reservedHeight(57, 120, true))
+        assertEquals(26, clearance.reservedHeight(94, 120, true))
+        assertEquals(0, clearance.reservedHeight(95, 120, true))
+        assertEquals(0, clearance.reservedHeight(121, 120, true))
+        assertEquals(0, clearance.reservedHeight(57, 120, false))
+        assertFalse("Preparing blank space is not a pending character", clearance.typingPending)
+        assertFalse("Preparing blank space cannot arm paced follow", clearance.pacedFollowing)
+        assertTrue("Prediction cannot bypass real placement", clearance.held)
+        assertEquals(0f, clearance.availableHeight(null), 0f)
+        clearance.prepareLine(owner, 0)
+        assertEquals(0, clearance.reservedHeight(57, 120, true))
+    }
+
+    @Test fun nextLineSpaceIsOneTrailingLineNotASumOfLeafHeights() {
+        val clearance = StreamingTextClearance()
+        val first = Any()
+        val second = Any()
+        clearance.prepareLine(first, 26)
+        clearance.prepareLine(second, 18)
+        assertEquals(26, clearance.reservedHeight(57, 120, true))
+        clearance.prepareLine(first, 26)
+        assertEquals(26, clearance.reservedHeight(57, 120, true))
+        clearance.prepareLine(first, 0)
+        assertEquals(18, clearance.reservedHeight(57, 120, true))
+        clearance.prepareLine(second, -1)
+        assertEquals(0, clearance.reservedHeight(57, 120, true))
+        clearance.prepareLine(second, 26)
+        clearance.prepareLine(second, 0)
+        assertEquals("A consumed or disposed next line leaves no tail gap", 0,
+            clearance.reservedHeight(83, 120, true))
+    }
+
     @Test fun pendingAppendsDoNotPrepareTheSameDisplayedAstAgain() = verifyPendingAppends(false)
     @Test fun turnEntryAlsoReusesTheDisplayedAstWhileAppendsArePending() = verifyPendingAppends(true)
 

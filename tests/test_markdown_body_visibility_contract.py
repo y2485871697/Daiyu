@@ -84,8 +84,8 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         inline = ui.split('private fun MarkdownInlineText(', 1)[1].split('private fun MarkdownBlocks(', 1)[0]
         self.assertIn('ClearanceText(visible, paintOffset, modifier, style)', inline)
         clearance = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun TextLayoutResult.canPaintPrefixOf', 1)[0]
-        self.assertIn('val displayed = if (playback?.paused == true) frame.drawn else frame.committed', clearance)
-        self.assertIn('BasicText(displayed?.layoutInput?.text ?: AnnotatedString("")', clearance)
+        self.assertIn('val displayedText by remember(frame, playback) {\n        derivedStateOf {\n            (if (playback?.paused == true) frame.drawn else frame.committed)\n                ?.layoutInput?.text ?: AnnotatedString("")\n        }\n    }', clearance)
+        self.assertIn('BasicText(displayedText', clearance)
         self.assertIn('clearance.fits(coordinates, candidate.size.height)', clearance)
         self.assertIn('clearance.fits(frame.coordinates, actual.size.height)', clearance)
         self.assertIn('publication?.setPending(owner, false)', clearance)

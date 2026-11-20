@@ -196,7 +196,7 @@ internal fun ParsedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, m
 
 private val LocalMarkdownPaintedText = staticCompositionLocalOf<MutableMap<Int, TextLayoutResult>?> { null }
 private class MarkdownTextFrame {
-    var coordinates: LayoutCoordinates? = null
+    var coordinates by mutableStateOf<LayoutCoordinates?>(null)
     var availableHeight by mutableStateOf(0f)
     var layout by mutableStateOf<TextLayoutResult?>(null)
     var rendered by mutableStateOf<TextLayoutResult?>(null)
@@ -226,8 +226,13 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     val playback = LocalReplyPlayback.current
     val measurer = rememberTextMeasurer(cacheSize = 1)
     val publication = LocalMarkdownPaintPublication.current
-    val displayed = if (playback?.paused == true) frame.drawn else frame.committed
-    val candidateText = if (playback?.paused == true) displayed?.layoutInput?.text ?: AnnotatedString("") else text
+    val displayedText by remember(frame, playback) {
+        derivedStateOf {
+            (if (playback?.paused == true) frame.drawn else frame.committed)
+                ?.layoutInput?.text ?: AnnotatedString("")
+        }
+    }
+    val candidateText = if (playback?.paused == true) displayedText else text
     val owner = remember(frame) { Any() }
     fun published(): Boolean = text.isEmpty() || frame.layout?.let { candidate ->
         candidate.layoutInput.text == text && clearance.whollyAboveViewport(frame.coordinates,
@@ -252,6 +257,14 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
         }
         publication?.setPending(owner, !published())
     }
+    val refreshAdmission by rememberUpdatedState {
+        frame.coordinates?.takeIf { it.isAttached }?.let(::placed)
+    }
+    LaunchedEffect(clearance, owner) {
+        snapshotFlow {
+            Triple(frame.layout, clearance.availableHeight(frame.coordinates), playback?.paused == true)
+        }.collect { refreshAdmission() }
+    }
     val publicationCheck by rememberUpdatedState { published() }
     LaunchedEffect(clearance, publication, owner) {
         snapshotFlow { publicationCheck() }.collect { publication?.setPending(owner, !it) }
@@ -261,7 +274,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     val density = LocalDensity.current
     val direction = LocalLayoutDirection.current
     key(style, softWrap, density.density, density.fontScale, direction) {
-        BasicText(displayed?.layoutInput?.text ?: AnnotatedString(""), modifier.layout { measurable, constraints ->
+        BasicText(displayedText, modifier.layout { measurable, constraints ->
             val candidate = measurer.measure(candidateText, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
             frame.layout = candidate
             val committed = measurable.measure(constraints.copy(minHeight = 0))

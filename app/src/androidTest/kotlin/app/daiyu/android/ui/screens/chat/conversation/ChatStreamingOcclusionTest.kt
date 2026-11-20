@@ -56,6 +56,14 @@ import kotlin.math.floor
 import top.yukonga.miuix.kmp.basic.Text
 
 class ChatStreamingOcclusionTest : WiredActivityTestCase() {
+    private val paintSlots = MarkdownPaintSlotsProbe()
+    private fun paintDump(key: String): String {
+        var result = "not sampled"
+        instrumentation.runOnMainSync {
+            result = runCatching { paintSlots.sample(key) }.getOrElse { "probeFailure=${it.javaClass.simpleName}" }
+        }
+        return result
+    }
     private val inkSurfaceColor = Color(0xFFE0E0E0)
     private var inkReference by mutableStateOf(false)
     private data class InkGlyph(val layout: TextLayoutResult, val at: Offset, val extent: Int = layout.size.height)
@@ -618,7 +626,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                                 ChatTurnUi.Assistant("ink-wire-tail", finalText = body,
                                     status = if (live) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = live),
                                 ChatScreenActions(), scrollRequest = ChatScrollRequest(1), composerBottomInset = inset,
-                                hasTurnExtras = { false })
+                                hasTurnExtras = { false }, turnExtras = { turn ->
+                                    if (turn.id == "ink-wire-tail") paintSlots.Capture(turn.id)
+                                })
                         }, composer = { InkEditor() })
                         InkReferenceLayer()
                     }
@@ -686,6 +696,12 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             assertNoSurfaceInk(host, shot)
             compared++
         }
+        fun diagnoseMissingText(assertion: () -> Unit) {
+            try { assertion() } catch (failure: AssertionError) {
+                throw AssertionError("Plain body received=${body.length} live=$live pendingLeaves=$pendingLeaves " +
+                    "clock=${ui.mainClock.currentTime}\n${paintDump("ink-wire-tail")}", failure)
+            }
+        }
         ui.onNodeWithTag("work-process-header").assertDoesNotExist()
         ui.mainClock.autoAdvance = false
         try {
@@ -714,7 +730,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                         completedWhileHeld = true
                     }
                 }
-                ui.onNodeWithText(next.substringAfterLast("\n\n").removePrefix("- "), substring = true).assertExists()
+                diagnoseMissingText {
+                    ui.onNodeWithText(next.substringAfterLast("\n\n").removePrefix("- "), substring = true).assertExists()
+                }
                 verify(force = true)
                 assertFalse("The complete candidate must eventually enter the safety edge and paint", pendingLeaves)
             }
@@ -745,7 +763,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     inkRect(host, "chat-turn:ink-wire-tail").top, 1f)
                 assertEquals("Detached append must preserve the same visible paragraph", readingTop,
                     ui.onNodeWithText(readingAnchor).assertIsDisplayed().fetchSemanticsNode().positionInRoot.y, 1f)
-                ui.onNodeWithText("手动阅读新增末行。", substring = true).assertExists()
+                diagnoseMissingText {
+                    ui.onNodeWithText("手动阅读新增末行。", substring = true).assertExists()
+                }
             }
         } finally { ui.mainClock.autoAdvance = true }
         assertEquals(0, fixture.opens.get())
@@ -935,12 +955,68 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 assertTrue("The reference must contain complete real header ink", ink.size > 10)
                 val firstY = ink.minOf { it / reference.width }
                 val lastY = ink.maxOf { it / reference.width }
+                val inkMask = BooleanArray(reference.pixels.size)
+                ink.forEach { inkMask[it] = true }
+                fun brightness(argb: Int): Float {
+                    val c = Color(argb)
+                    return (c.red + c.green + c.blue) / 3f
+                }
+                fun insideEditor(sample: Sample, index: Int): Boolean = sample.surface.contains(
+                    androidx.compose.ui.geometry.Offset(sample.x0 + index % sample.width + .5f,
+                        sample.y0 + index / sample.width + .5f))
+                fun inkContrast(sample: Sample): (Int) -> Float {
+                    val backgrounds = List(sample.height) { row ->
+                        val values = (0 until sample.width).mapNotNull { column ->
+                            val i = row * sample.width + column
+                            if (inkMask[i] || insideEditor(sample, i)) null else brightness(sample.pixels[i])
+                        }.sorted()
+                        values.takeIf { it.isNotEmpty() }?.let { it[it.size / 2] }
+                    }
+                    return { index ->
+                        val background = if (insideEditor(sample, index)) {
+                            brightness(inkSurfaceColor.toArgb())
+                        } else {
+                            checkNotNull(backgrounds[index / sample.width]) {
+                                "No independent background support for header ink row"
+                            }
+                        }
+                        background - brightness(sample.pixels[index])
+                    }
+                }
+                fun inkAlpha(sampleContrast: (Int) -> Float): Float = ink.maxOf {
+                    (sampleContrast(it) / contrast(reference, it)).coerceIn(0f, 1f)
+                }
+                val flatHeader = reference.copy(pixels = IntArray(reference.pixels.size) { reference.pixels[0] })
+                val borderOnly = flatHeader.copy(pixels = flatHeader.pixels.clone().apply {
+                    for (x in 0 until reference.width) this[firstY * reference.width + x] = Color(0xffece9ef).toArgb()
+                })
+                assertTrue("A full structural border crossing reference ink is not header paint",
+                    inkAlpha(inkContrast(borderOnly)) <= .06f)
+                val onePixel = flatHeader.copy(pixels = flatHeader.pixels.clone().apply {
+                    this[ink.first()] = reference.pixels[ink.first()]
+                })
+                val onePixelContrast = inkContrast(onePixel)
+                val onePixelAlpha = inkAlpha(onePixelContrast)
+                assertTrue("One real glyph pixel must still count as paint", onePixelAlpha > .06f)
+                assertTrue("One real glyph pixel cannot pass complete-ink admission",
+                    ink.any { onePixelContrast(it) < contrast(reference, it) * onePixelAlpha - .05f })
+                val oneRow = flatHeader.copy(pixels = flatHeader.pixels.clone().apply {
+                    ink.filter { it / reference.width == firstY }.forEach { this[it] = reference.pixels[it] }
+                })
+                val oneRowContrast = inkContrast(oneRow)
+                val oneRowAlpha = inkAlpha(oneRowContrast)
+                assertTrue("One real glyph scanline must still count as paint", oneRowAlpha > .06f)
+                assertTrue("One real glyph scanline cannot pass complete-ink admission",
+                    ink.any { oneRowContrast(it) < contrast(reference, it) * oneRowAlpha - .05f })
+                assertTrue("Real editor ink cannot be absorbed into a row background",
+                    inkContrast(editorWithInk)(0) > .22f)
                 var painted = false
                 for (sample in samples) {
                     assertEquals(reference.width, sample.width); assertEquals(reference.height, sample.height)
                     if (sample.top + firstY < sample.safe && sample.top + lastY >= sample.safe) crossedInk = true
-                    val hit = ink.maxBy { (contrast(sample, it) / contrast(reference, it)).coerceIn(0f, 1f) }
-                    val alpha = (contrast(sample, hit) / contrast(reference, hit)).coerceIn(0f, 1f)
+                    val sampleContrast = inkContrast(sample)
+                    val hit = ink.maxBy { (sampleContrast(it) / contrast(reference, it)).coerceIn(0f, 1f) }
+                    val alpha = (sampleContrast(hit) / contrast(reference, hit)).coerceIn(0f, 1f)
                     if (alpha <= .06f) continue
                     painted = true
                     val hitX = sample.x0 + hit % sample.width
@@ -985,7 +1061,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                         fail("Any painted header must fit its complete reference ink, not just its first glyph row: $detail $capture")
                     }
                     // Normalize the existing uniform fade; missing lower glyphs cannot hide behind it.
-                    for (i in ink) if (contrast(sample, i) < contrast(reference, i) * alpha - .05f) {
+                    for (i in ink) if (sampleContrast(i) < contrast(reference, i) * alpha - .05f) {
                         val capture = saveFailure()
                         fail("Header ink must be complete at the same fade opacity: index=$i $detail $capture")
                     }
@@ -1247,7 +1323,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                             ChatConversationLayers(Modifier.size(320.dp, 420.dp), messages = { inset ->
                                 ChatMessageList(List(6) { ChatTurnUi.User("paced-history-$it", "history $it") } + turn,
                                     ChatScreenActions(), scrollRequest = fixedRequest, composerBottomInset = inset,
-                                    turnExtras = {
+                                    turnExtras = { item ->
+                                        if (item.id == "paced-tail") paintSlots.Capture(item.id)
                                         LocalWorkflowDisclosureContext.current?.viewport?.let { viewport ->
                                             geometry = { viewport.diagnostics() }
                                         }
@@ -1292,7 +1369,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             java.io.File(directory, "$name.png").outputStream().use {
                 image.asAndroidBitmap().compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
             }
-            java.io.File(directory, "$name.txt").writeText(detail)
+            java.io.File(directory, "$name.txt").writeText(detail + "\n" + paintDump("paced-tail"))
         }
         fun frameDiagnostic(index: Int, gap: Float, layouts: List<Pair<SemanticsNode, androidx.compose.ui.text.TextLayoutResult>>) =
             "frame=$index clock=${ui.mainClock.currentTime} gap=$gap density=$density ready=${ready.get()} active=$contentActive " +

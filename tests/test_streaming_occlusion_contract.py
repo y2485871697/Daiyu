@@ -40,7 +40,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         for token in ("remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }",
                       "clearance.fits(coordinates, candidate.size.height)", "painted[paintOffset] = actual",
                       "actual.size.height <= available + .01f", "frame.committed",
-                      'BasicText(displayed?.layoutInput?.text ?: AnnotatedString("")',
+                      'BasicText(displayedText',
                       "paintOffset + offset", "paintOffset + offsets[column]",
                       "previous?.canPaintPrefixOf(candidate) == true", "current.text.text.startsWith(previous.text.text)",
                       "previous.constraints.maxWidth != current.constraints.maxWidth",
@@ -64,13 +64,13 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_leaf_pause_uses_drawn_prefix_and_layout_does_not_report_paint(self):
         markdown = (CHAT.parent / "MessageMarkdown.kt").read_text()
         frame = markdown.split("private class MarkdownTextFrame", 1)[1].split("@Composable", 1)[0]
-        self.assertIn("var coordinates: LayoutCoordinates? = null", frame)
+        self.assertIn("var coordinates by mutableStateOf<LayoutCoordinates?>(null)", frame)
         self.assertIn("var availableHeight by mutableStateOf(0f)", frame)
         self.assertNotIn("neverEqualPolicy", frame)
         leaf = markdown.split("internal fun ClearanceText", 1)[1].split("internal fun TextLayoutResult.canPaintPrefixOf", 1)[0]
-        self.assertIn("val displayed = if (playback?.paused == true) frame.drawn else frame.committed", leaf)
+        self.assertIn('val displayedText by remember(frame, playback) {\n        derivedStateOf {\n            (if (playback?.paused == true) frame.drawn else frame.committed)\n                ?.layoutInput?.text ?: AnnotatedString("")\n        }\n    }', leaf)
         self.assertIn("playback?.paused == true -> frame.drawn", leaf)
-        self.assertIn('val candidateText = if (playback?.paused == true) displayed?.layoutInput?.text ?: AnnotatedString("") else text', leaf)
+        self.assertIn('val candidateText = if (playback?.paused == true) displayedText else text', leaf)
         self.assertIn("measurer.measure(candidateText, style", leaf)
         self.assertIn("}, style, softWrap = softWrap, onTextLayout", leaf)
         publication = leaf.split("fun published(): Boolean =", 1)[1].split("fun placed(", 1)[0]
@@ -117,7 +117,7 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_code_and_workflow_placement_publish_only_changed_height_and_keep_full_border_geometry(self):
         code = (CHAT.parent / "MarkdownCodeReveal.kt").read_text()
         frame = code.split("private class MarkdownCodeViewportFrame", 1)[1].split("@Composable", 1)[0]
-        self.assertIn("var coordinates: LayoutCoordinates? = null", frame)
+        self.assertIn("var coordinates by mutableStateOf<LayoutCoordinates?>(null)", frame)
         self.assertIn("var availableHeight by mutableStateOf(0f)", frame)
         self.assertNotIn("neverEqualPolicy", frame)
         workflow = (CHAT.parent / "WorkflowTimelineLayout.kt").read_text()

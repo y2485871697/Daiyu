@@ -41,6 +41,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
     private var density = 1f
     private var liveGeometry: () -> String = { "not sampled" }
     private val paintSlots = MarkdownPaintSlotsProbe()
+    private var nativeHostCoordinates: androidx.compose.ui.layout.LayoutCoordinates? = null
 
     private fun paintDump(key: String): String {
         var result = "not sampled"
@@ -389,7 +390,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
     }
 
     private fun assertNativeInk(color: Color) {
-        val pixels = ui.onNodeWithTag("native-text").captureToImage().toPixelMap()
+        val pixels = captureScreenNode(ui.onNodeWithTag("native-text"), advanceAnimationClock = false).toPixelMap()
         var ink = 0
         for (y in 0 until pixels.height) for (x in 0 until pixels.width) {
             val pixel = pixels[x, y]
@@ -397,7 +398,10 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                 kotlin.math.abs(pixel.green - color.green) < .08f &&
                 kotlin.math.abs(pixel.blue - color.blue) < .08f) ink++
         }
-        assertTrue("The actual native draw must contain $color pixels, found $ink", ink > 0)
+        assertTrue("The actual native draw must contain $color pixels, found $ink; " +
+            "capture=${pixels.width}x${pixels.height}; " +
+            "bounds=${ui.onNodeWithTag("native-text").fetchSemanticsNode().boundsInRoot}\n" +
+            paintDump("native-environment"), ink > 0)
     }
 
     private fun showNativePaint(text: String, clearance: StreamingTextClearance,
@@ -420,6 +424,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     paintSlots.Capture("native-environment")
                     Box(Modifier.requiredWidth(240.dp).height(with(density) { fullHeight.toDp() })
                         .background(Color.Magenta).onGloballyPositioned {
+                            nativeHostCoordinates = it
                             clearance.update(it, it, 0, 0, 0, protect = true, clampToViewport = true)
                         }.testTag("native-host")) {
                         ClearanceText(AnnotatedString(text), 0,
@@ -497,6 +502,39 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             assertEquals(blocked.candidate.layoutInput.style, after.candidate.layoutInput.style)
             assertEquals(blocked.candidate.layoutInput.density.fontScale,
                 after.candidate.layoutInput.density.fontScale, 0f)
+            assertNativeInk(Color.Blue)
+        } finally {
+            ui.mainClock.autoAdvance = autoAdvance
+        }
+    }
+
+    fun testNativePaintDebtClearsWhenProtectionIsReleasedWithoutPlacementGrowth() {
+        val text = "Release one.\nRelease two.\nRelease three."
+        val clearance = StreamingTextClearance()
+        val publication = MarkdownPaintPublication()
+        val autoAdvance = ui.mainClock.autoAdvance
+        ui.mainClock.autoAdvance = false
+        try {
+            showNativePaint(text, clearance, publication, { Color.Blue }, { 1.6f }, { 1 })
+            val blocked = awaitNativePaint(text) {
+                it.candidate != null && it.fits == false && it.above == false && !publication.ready
+            }
+            val host = checkNotNull(nativeHostCoordinates)
+            val size = host.size
+            mainThread {
+                clearance.update(host, host, 0, 0, 0, protect = false, clampToViewport = true)
+            }
+            val after = awaitNativePaint(text) {
+                if (publication.ready) assertEquals(text, it.drawn?.layoutInput?.text?.text)
+                val candidate = it.candidate
+                candidate != null && it.fits == true &&
+                    it.drawn?.canPaintPrefixOf(candidate) == true && publication.ready
+            }
+            assertSame(blocked.frame, after.frame)
+            assertSame(host, nativeHostCoordinates)
+            assertEquals(size, host.size)
+            assertEquals(blocked.candidate!!.layoutInput.text, after.candidate!!.layoutInput.text)
+            assertEquals(blocked.candidate.layoutInput.style, after.candidate.layoutInput.style)
             assertNativeInk(Color.Blue)
         } finally {
             ui.mainClock.autoAdvance = autoAdvance

@@ -411,3 +411,68 @@ class TaskScrollNativeLayoutScopeTests(unittest.TestCase):
                 result = helper.select(root, classes=classes)
                 self.assertNotEqual(0, result.returncode)
                 self.assertIn('Ambiguous instrumentation test declaration', result.stderr)
+
+
+class ResumeScrollScopeTests(unittest.TestCase):
+    target = 'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest'
+    fixture = TaskScrollSmokeScopeTests.fixture
+
+    def test_exact_resume_class_keeps_existing_task_scroll_checks(self):
+        command, scope = recorder.command_for('python3', dict(
+            SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=self.target))
+        self.assertEqual('task-scroll-targeted', scope)
+        self.assertEqual(['python3', '-B', '-m', 'unittest', *recorder.TASK_SCROLL_MODULES, '-v'], command)
+        self.assertNotIn('discover', command)
+
+    def test_only_exact_resume_class_in_smoke_is_newly_approved(self):
+        target = self.target
+        for raw in ('', ' ', target + ',' + target, target + ',', ',' + target,
+                    ' ' + target, target + ' ', target + chr(9), chr(10) + target,
+                    target + ',app.daiyu.android.UnknownTest',
+                    target + ',app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest',
+                    'ChatResumeScrollTest', target + '#testPartialReplyKeepsItsFrontierAndPacesOffscreenSuffixAfterLazyDisposal'):
+            with self.subTest(raw=raw):
+                self.assertEqual('full', recorder.command_for('python3', dict(
+                    SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=raw))[1])
+        for mode in ('', 'compile', 'candidate', 'daily', 'release'):
+            self.assertEqual('full', recorder.command_for('python3', dict(
+                SMOKE_MODE=mode, SMOKE_TEST_CLASSES=target))[1])
+
+    def test_resume_inventory_runs_class_once_and_preserves_three_empty_shards(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            selected, empty = [], 0
+            for shard in range(4):
+                result = helper.select(root, shard, classes=self.target)
+                self.assertEqual(0, result.returncode, result.stderr)
+                selection = json.loads((root / 'smoke/selection.json').read_text())
+                inventory = json.loads((root / 'smoke/instrumentation-shards.json').read_text())
+                self.assertEqual('targeted', inventory['discovery_scope'])
+                self.assertEqual({self.target: 1}, inventory['all_classes'])
+                self.assertEqual(1, inventory['total_tests'])
+                selected.extend(selection['selected_classes'])
+                if not selection['selected_classes']:
+                    empty += 1
+                    self.assertEqual('filtered-empty-shard', selection['status'])
+                    self.assertEqual(0, selection['expected_tests'])
+                else:
+                    self.assertEqual(1, selection['expected_tests'])
+            self.assertEqual([self.target], selected)
+            self.assertEqual(3, empty)
+
+    def test_requested_resume_missing_or_ambiguous_stays_fail_closed(self):
+        for missing in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                helper = self.fixture(root)
+                path = root / 'app/src/androidTest/kotlin' / (self.target.replace('.', '/') + '.kt')
+                if missing:
+                    path.unlink()
+                else:
+                    with path.open('a') as output:
+                        output.write('class OtherTest : TestCase() {}' + chr(10))
+                result = helper.select(root, classes=self.target)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn('No instrumentation tests found' if missing else
+                              'Ambiguous instrumentation test declaration', result.stderr)

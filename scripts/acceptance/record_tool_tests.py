@@ -1237,6 +1237,7 @@ def command_for(python, env):
             and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) in (
                 sorted(TASK_SCROLL_PLATFORM_CLASSES), sorted(TASK_SCROLL_NATIVE_LAYOUT_CLASSES),
                 sorted(TASK_SCROLL_COMPLEMENT_CLASSES),
+                ['app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest'],
                 sorted(('app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',
                         'app.daiyu.android.ui.screens.chat.conversation.ReasoningWorkflowTest')),
                 sorted(('app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',

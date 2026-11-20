@@ -145,8 +145,11 @@ task_scroll_complement = {
     'app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest',
 }
 task_scroll_complement_only = mode == 'smoke' and sorted(raw_filter.split(',')) == sorted(task_scroll_complement)
+task_scroll_resume_only = (mode == 'smoke' and raw_filter ==
+    'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest')
 task_scroll_only = mode == 'smoke' and sorted(raw_filter.split(',')) in (
-    sorted(task_scroll_target), sorted(task_scroll_native_layout_target), sorted(task_scroll_complement))
+    sorted(task_scroll_target), sorted(task_scroll_native_layout_target), sorted(task_scroll_complement),
+    ['app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest'])
 task_scroll_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
                        for name in raw_filter.split(',')}
 page_performance_target = task_scroll_target | {
@@ -539,7 +542,7 @@ if terminal_command_pager_only and (os.environ.get("SMOKE_API") != "all" or shar
     raise ValueError("TerminalCommandPagerTest requires smoke_api=all and its sole shard")
 if mode == "candidate" and shards not in (1, 4):
     raise ValueError("Candidate mode requires one diagnostic or four parallel shards per API")
-if not 1 <= shards <= 16 or not 0 <= shard < shards or (not file_text_only and not voice_browser_only and not child_hot_configuration_only and not child_stop_only and not catalog_model_editor_only and not search_browser_only and not subagent_preset_only and not batch_delete_only and not conversation_date_only and not assistant_picker_only and not provider_catalog_only and not doubao_motion_only and not workflow_body_only and not workspace_import_only and not platform_only and not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pane_receipt_only and not pause_receipt_only and not linux_pin_only and not linux_settings_only and not chat_status_bar_only and not rename_presentation_only and not workspace_entry_only and not question_card_only and not child_task_card_read_only_only and not task_scroll_complement_only and not pane_question_core_only and len(classes) < shards):
+if not 1 <= shards <= 16 or not 0 <= shard < shards or (not file_text_only and not voice_browser_only and not child_hot_configuration_only and not child_stop_only and not catalog_model_editor_only and not search_browser_only and not subagent_preset_only and not batch_delete_only and not conversation_date_only and not assistant_picker_only and not provider_catalog_only and not doubao_motion_only and not workflow_body_only and not workspace_import_only and not platform_only and not speech_only and not gui_parser_only and not screen_history_only and not rootless_content_only and not sqlite_text_only and not runtime_screenshot_only and not rootless_commit_only and not screen_cleanup_only and not pane_receipt_only and not pause_receipt_only and not linux_pin_only and not linux_settings_only and not chat_status_bar_only and not rename_presentation_only and not workspace_entry_only and not question_card_only and not child_task_card_read_only_only and not task_scroll_complement_only and not task_scroll_resume_only and not pane_question_core_only and len(classes) < shards):
     raise ValueError("Invalid instrumentation shard")
 # Use one shared plan for both APIs, so allocation and completeness stay identical.
 import sys

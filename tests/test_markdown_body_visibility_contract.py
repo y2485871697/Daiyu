@@ -6,6 +6,30 @@ BASE = Path(__file__).resolve().parents[1] / 'app/src/main/kotlin/app/daiyu/andr
 
 
 class MarkdownBodyVisibilityContract(unittest.TestCase):
+    def test_draw_observes_render_inputs_but_not_post_draw_feedback(self):
+        ui = (BASE / 'MessageMarkdown.kt').read_text()
+        leaf = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun markdownLineSpace', 1)[0]
+        draw = leaf.split('.drawWithContent {', 1)[1].split('}, style, softWrap = softWrap, onTextLayout = {', 1)[0]
+        inputs, feedback = draw.split('drawContent()', 1)
+        self.assertNotIn('withoutReadObservation', inputs)
+        for token in ('minOf(frame.availableHeight, clearance.availableHeight(frame.coordinates))',
+                      'val frozen = playback?.paused == true',
+                      'val selected = if (frozen) frame.drawn else frame.committed',
+                      'val actual = frame.rendered?.takeIf',
+                      'frame.layout?.let { actual.canPaintPrefixOf(it) } == true',
+                      'actual.size.height <= available + .01f',
+                      '!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text'):
+            self.assertIn(token, inputs)
+        self.assertEqual(' '.join(feedback.split()),
+                         'androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { '
+                         'frame.drawn = actual prepareNextLine() '
+                         'if (paintOffset != null) painted[paintOffset] = actual } } '
+                         'androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { '
+                         'publication?.setPending(owner, !published()) }')
+        self.assertIn('snapshotFlow { publicationCheck() }.collect { publication?.setPending(owner, !it) }', leaf)
+        self.assertIn('SideEffect { publication?.setPending(owner, !published()) }', leaf)
+        self.assertIn('publication?.setPending(owner, false)', leaf)
+
     def test_native_input_observes_constraints_not_candidate_and_hint_reads_do_not_subscribe_measure(self):
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         leaf = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun markdownLineSpace', 1)[0]
@@ -22,7 +46,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('frame.layout = candidate\n            frame.measureConstraints = candidate.layoutInput.constraints', measure)
         self.assertIn('val drawn = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.drawn }', measure)
         draw = leaf.split('.drawWithContent {', 1)[1]
-        self.assertIn('drawContent()\n                frame.drawn = actual\n                prepareNextLine()', draw)
+        self.assertIn('drawContent()\n                androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {\n                    frame.drawn = actual\n                    prepareNextLine()', draw)
         self.assertIn('actual.size.height <= available + .01f', draw)
         self.assertIn('publication?.setPending(owner, !published())', draw)
 

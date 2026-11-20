@@ -354,11 +354,15 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             if (actual != null && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
                 actual.size.height <= available + .01f && (!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text)) {
                 drawContent()
-                frame.drawn = actual
-                prepareNextLine()
-                if (paintOffset != null) painted[paintOffset] = actual
+                androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
+                    frame.drawn = actual
+                    prepareNextLine()
+                    if (paintOffset != null) painted[paintOffset] = actual
+                }
             }
-            publication?.setPending(owner, !published())
+            androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
+                publication?.setPending(owner, !published())
+            }
         }, style, softWrap = softWrap, onTextLayout = {
             frame.rendered = it
         })

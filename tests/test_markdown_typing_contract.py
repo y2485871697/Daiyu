@@ -18,6 +18,33 @@ class MarkdownTypingContract(unittest.TestCase):
         cls.reveal = (BASE / "MarkdownReveal.kt").read_text()
         cls.chat = (BASE / "ChatMessageList.kt").read_text()
 
+    def test_admission_diagnostics_observe_without_advancing_or_relaxing_waits(self):
+        device = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation'
+        case = (device / 'ChatMessageSpacingTest.kt').read_text()
+        trace = case.split('private fun traceFirstGrowth(', 1)[1].split('    private fun ', 1)[0]
+        for token in ('java.util.ArrayDeque<String>(32)', 'var remaining = 31',
+                      'sample("preTraversal", frameTimeNanos)', 'if (--remaining > 0)',
+                      'sample("failure", null)', 'frames.toList().asReversed()',
+                      'paintSlots.traceAdmission { ui.mainClock.currentTime }',
+                      'admissionDump = admission.finish()', 'original?.addSuppressed(AssertionError('):
+            self.assertIn(token, trace)
+        probe = (device / 'MarkdownPaintSlotsProbe.kt').read_text()
+        observer = probe.split('internal inner class AdmissionTrace(', 1)[1].split('    private val compositions', 1)[0]
+        for token in ('LongArray(256 * 12)', 'Dispatchers.Main.immediate',
+                      'snapshotFlow { sample() }.collect { record(1, it) }',
+                      'publication.readySignal.collect', 'Snapshot.withoutReadObservation { sample() }',
+                      'pending.size', 'installing.size', 'publication.readySignal.value',
+                      'closed = true', 'scope.cancel()', 'count - 48'):
+            self.assertIn(token, observer)
+        for forbidden in ('advanceTime', 'waitForIdle', 'runOnIdle', 'Thread.sleep', '.setPending(',
+                          '.applied(', '.reserve(', 'mutableStateOf', 'mutableStateMapOf'):
+            self.assertNotIn(forbidden, observer)
+        original = case.split('fun testSameItemStreamingGrowthFollowsUntilTouchAndExplicitBottomRestoresIt()', 1)[1].split('    fun ', 1)[0]
+        for token in ('mainThread { screen = screen.copy', 'ui.waitUntil(5_000)',
+                      'assertCompactTail("流式增高末尾")', 'assertCompactTail("触摸后末尾")',
+                      'performTouchInput { click(center) }', 'ChatScrollRequest(2)'):
+            self.assertIn(token, original)
+
     def test_exact_runtime_phase_updates_even_when_rows_are_reused(self):
         host = (APP / "MainActivity.kt").read_text().split("private fun publishChat(rowsChanged: Boolean", 1)[1].split("private fun requestScroll", 1)[0]
         self.assertIn("ChatTurnMapper.withStreamingOwner(if (!remapTurns) chatState.turns.takeIf { chatState.conversationKey == selected?.id?.value }.orEmpty() else", host)

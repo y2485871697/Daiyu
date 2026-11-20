@@ -59,6 +59,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         val frames = java.util.ArrayDeque<String>(32)
         var remaining = 31
         lateinit var choreographer: android.view.Choreographer
+        lateinit var admission: MarkdownPaintSlotsProbe.AdmissionTrace
         fun sample(stage: String, frameNanos: Long?) {
             val entry = runCatching {
                 androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
@@ -77,6 +78,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             }
         }
         instrumentation.runOnMainSync {
+            admission = paintSlots.traceAdmission { ui.mainClock.currentTime }
             choreographer = android.view.Choreographer.getInstance()
             choreographer.postFrameCallback(callback)
         }
@@ -89,15 +91,17 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         } finally {
             try {
                 var dump = ""
+                var admissionDump = ""
                 instrumentation.runOnMainSync {
                     choreographer.removeFrameCallback(callback)
+                    admissionDump = admission.finish()
                     if (original != null) {
                         sample("failure", null)
                         dump = frames.toList().asReversed().joinToString("\n---\n")
                     }
                 }
                 original?.addSuppressed(AssertionError(
-                    "Same-item append diagnostics ($label; max 32 samples)\n$dump"))
+                    "Same-item append diagnostics ($label; max 32 samples)\n$admissionDump\n$dump"))
             } catch (diagnosticFailure: Throwable) {
                 val failure = original
                 if (failure != null) failure.addSuppressed(diagnosticFailure) else throw diagnosticFailure

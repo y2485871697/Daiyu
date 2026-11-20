@@ -5,6 +5,15 @@ import androidx.compose.runtime.InternalComposeApi
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.currentComposer
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.tooling.CompositionData
@@ -25,6 +34,100 @@ internal class MarkdownPaintSlotsProbe {
         val fits: Boolean?,
         val above: Boolean?,
     )
+
+    private var admissionTrace: AdmissionTrace? = null
+
+    fun traceAdmission(testMillis: () -> Long): AdmissionTrace = AdmissionTrace(testMillis).also {
+        check(admissionTrace == null)
+        admissionTrace = it
+    }
+
+    internal inner class AdmissionTrace(private val testMillis: () -> Long) {
+        private var observerFailure: Throwable? = null
+        private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate +
+            CoroutineExceptionHandler { _, failure -> observerFailure = failure })
+        private var observer: Job? = null
+        private var signalObserver: Job? = null
+        private var observedFrame: State<MarkdownTypingFrame>? = null
+        private var observedPaints = emptyList<Any>()
+        private val events = LongArray(256 * 12)
+        private var count = 0
+        private var mismatches = 0
+        private var captures = 0
+        private var closed = false
+
+        private fun raw(owner: Any, name: String): Any? {
+            val field = owner.javaClass.declaredFields.single { it.name == name || it.name == name + "\$delegate" }
+            field.isAccessible = true
+            return field.get(owner)
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        fun capture(reveals: List<MarkdownReveal>, paints: List<Any>) {
+            if (closed) return
+            val reveal = reveals.firstOrNull() ?: return
+            val frame = raw(reveal, "frame") as State<MarkdownTypingFrame>
+            if (observedFrame === frame && observedPaints.size == paints.size &&
+                observedPaints.indices.all { index -> observedPaints[index] === paints[index] }) return
+            observer?.cancel()
+            signalObserver?.cancel()
+            observedFrame = frame
+            observedPaints = paints.toList()
+            captures++
+            val publication = reveal.publication
+            val pending = raw(publication, "pending") as Map<Any, *>
+            val installing = raw(publication, "installing") as Map<String, Int>
+            val layouts = paints.map { raw(it, "layout") as State<TextLayoutResult?> }
+            val drawn = paints.map { raw(it, "drawn") as State<TextLayoutResult?> }
+            fun sample(): List<Int> {
+                val current = frame.value
+                return listOf(System.identityHashCode(current.target), current.visible, pending.size,
+                    installing.size, installing.values.maxOrNull() ?: -1,
+                    if (publication.ready) 1 else 0, if (publication.readySignal.value) 1 else 0,
+                    layouts.sumOf { it.value?.layoutInput?.text?.length ?: 0 },
+                    drawn.sumOf { it.value?.layoutInput?.text?.length ?: 0 })
+            }
+            fun record(kind: Int, values: List<Int>) {
+                if (closed) return
+                val offset = (count++ % 256) * 12
+                events[offset] = System.nanoTime()
+                events[offset + 1] = testMillis()
+                events[offset + 2] = kind.toLong()
+                for (index in values.indices) events[offset + 3 + index] = values[index].toLong()
+                if (values[5] != values[6]) mismatches++
+            }
+            observer = scope.launch {
+                snapshotFlow { sample() }.collect { record(1, it) }
+            }
+            signalObserver = scope.launch {
+                publication.readySignal.collect { ready ->
+                    record(if (ready) 3 else 2, Snapshot.withoutReadObservation { sample() })
+                }
+            }
+        }
+
+        fun finish(): String {
+            check(!closed)
+            closed = true
+            scope.cancel()
+            admissionTrace = null
+            observedFrame = null
+            observedPaints = emptyList()
+            return buildString {
+                appendLine("admissionEvents=$count retained=${minOf(count, 256)} captures=$captures readinessMismatches=$mismatches observerFailure=${observerFailure?.javaClass?.name} " +
+                    "kind=1:snapshotObserved,2:signalFalseObserved,3:signalTrueObserved")
+                appendLine("monoNanos testMillis kind target visible pending installing installLimit ready signal candidateChars drawnChars")
+                for (index in maxOf(0, count - 48) until count) {
+                    val offset = (index % 256) * 12
+                    for (column in 0 until 12) {
+                        if (column > 0) append(' ')
+                        append(events[offset + column])
+                    }
+                    appendLine()
+                }
+            }
+        }
+    }
 
     private val compositions = linkedMapOf<String, CompositionData>()
     private val capturedClearances = linkedMapOf<String, StreamingTextClearance?>()
@@ -113,6 +216,7 @@ internal class MarkdownPaintSlotsProbe {
         val motions = values.filterIsInstance<MarkdownTypingState>()
         val paints = values.filter { it.javaClass.simpleName == "MarkdownTextFrame" }
             .sortedByDescending { layout(it, "layout")?.layoutInput?.text?.length ?: -1 }
+        admissionTrace?.capture(reveals, paints)
         buildString {
             appendLine("scan key=$key captured=${compositions.containsKey(key)} groups=$groups slots=$slots truncated=$truncated values=${values.size} " +
                 "reveals=${reveals.size} motions=${motions.size} paints=${paints.size} clearances=${clearances.size}")

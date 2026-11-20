@@ -86,8 +86,12 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
                       'if (playback?.paused != true)', 'clearance.prepareLine(owner, 0)',
                       'BasicText(displayedText, modifier.layout',
                       'actual.size.height <= available + .01f',
-                      'actual.layoutInput.text == text'):
+                      'actual.layoutInput.text == latestCandidateText'):
             self.assertIn(token, clearance)
+        publication = clearance.split('fun published(): Boolean =', 1)[1].split('fun placed(', 1)[0]
+        self.assertIn('latestCandidateText.isEmpty()', publication)
+        self.assertNotIn('text.isEmpty()', publication)
+        self.assertNotIn('== text', publication)
         self.assertNotIn('frame.layout = future', clearance)
         self.assertNotIn('BasicText(nextLineText', clearance)
 

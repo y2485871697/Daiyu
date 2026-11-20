@@ -255,11 +255,11 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     }
     val candidateText = if (playback?.paused == true) displayedText else text
     val owner = remember(frame) { Any() }
-    fun published(): Boolean = text.isEmpty() || frame.layout?.let { candidate ->
-        candidate.layoutInput.text == text && clearance.whollyAboveViewport(frame.coordinates,
+    fun published(): Boolean = latestCandidateText.isEmpty() || frame.layout?.let { candidate ->
+        candidate.layoutInput.text == latestCandidateText && clearance.whollyAboveViewport(frame.coordinates,
             maxOf(candidate.size.height, frame.coordinates?.size?.height ?: 0))
     } == true || frame.drawn?.let { actual ->
-        actual.layoutInput.text == text && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
+        actual.layoutInput.text == latestCandidateText && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
             clearance.fits(frame.coordinates, actual.size.height)
     } == true
     fun placed(coordinates: LayoutCoordinates) {

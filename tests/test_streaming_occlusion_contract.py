@@ -46,7 +46,7 @@ class StreamingOcclusionContract(unittest.TestCase):
                       "previous.constraints.maxWidth != current.constraints.maxWidth",
                       "previous.text == prefix", "textClearance?.held != true",
                       "frame.rendered", "publication?.setPending(owner, !published())",
-                      "actual.layoutInput.text == text", "modifier.layout { measurable, constraints ->"):
+                      "actual.layoutInput.text == latestCandidateText", "modifier.layout { measurable, constraints ->"):
             self.assertIn(token, markdown)
         workflow = (CHAT.parent / "AssistantWorkflowContent.kt").read_text()
         classifier = workflow.split("internal fun ChatTurnUi.Assistant.hasPlainTextBody", 1)[1].split("internal fun MessageContentUi.workflowKey", 1)[0]
@@ -87,11 +87,11 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("}, style, softWrap = softWrap, onTextLayout", leaf)
         publication = leaf.split("fun published(): Boolean =", 1)[1].split("fun placed(", 1)[0]
         self.assertEqual(" ".join(publication.split()),
-                         "text.isEmpty() || frame.layout?.let { candidate -> "
-                         "candidate.layoutInput.text == text && clearance.whollyAboveViewport(frame.coordinates, "
+                         "latestCandidateText.isEmpty() || frame.layout?.let { candidate -> "
+                         "candidate.layoutInput.text == latestCandidateText && clearance.whollyAboveViewport(frame.coordinates, "
                          "maxOf(candidate.size.height, frame.coordinates?.size?.height ?: 0)) "
                          "} == true || frame.drawn?.let { actual -> "
-                         "actual.layoutInput.text == text && frame.layout?.let { actual.canPaintPrefixOf(it) } == true && "
+                         "actual.layoutInput.text == latestCandidateText && frame.layout?.let { actual.canPaintPrefixOf(it) } == true && "
                          "clearance.fits(frame.coordinates, actual.size.height) } == true")
         self.assertNotIn("frame.drawn =", publication)
         self.assertNotIn("painted[", publication)

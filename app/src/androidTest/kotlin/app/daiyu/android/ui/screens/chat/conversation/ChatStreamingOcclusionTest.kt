@@ -673,7 +673,11 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             }.filter { it.at.y >= viewportTop }
             val p = visible.maxWithOrNull(compareBy<InkGlyph> {
                 it.at.y + it.layout.getLineBottom(it.layout.lineCount - 1)
-            }.thenBy { it.at.x }) ?: return
+            }.thenBy { it.at.x })
+            if (p == null) {
+                assertFalse("A forced pixel sample requires a complete visible reference glyph", force)
+                return
+            }
             val signature = "${p.at}:${p.layout.layoutInput.text}:${glyphs.lastOrNull()?.layout?.layoutInput?.text}"
             if (!force && signature == lastProbe) return
             lastProbe = signature
@@ -701,6 +705,13 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             try { assertion() } catch (failure: AssertionError) {
                 throw AssertionError("Plain body received=${body.length} live=$live pendingLeaves=$pendingLeaves " +
                     "clock=${ui.mainClock.currentTime}\n${paintDump("ink-wire-tail")}", failure)
+            }
+        }
+        fun drainReceivedText(expected: String, inspect: () -> Unit) {
+            repeat(body.length * 4 + 120) {
+                if (ui.onAllNodesWithText(expected, substring = true).fetchSemanticsNodes().isNotEmpty()) return
+                frame()
+                inspect()
             }
         }
         ui.onNodeWithTag("work-process-header").assertDoesNotExist()
@@ -731,8 +742,10 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                         completedWhileHeld = true
                     }
                 }
+                val expectedTail = next.substringAfterLast("\n\n").removePrefix("- ")
+                drainReceivedText(expectedTail) { verify(force = true) }
                 diagnoseMissingText {
-                    ui.onNodeWithText(next.substringAfterLast("\n\n").removePrefix("- "), substring = true).assertExists()
+                    ui.onNodeWithText(expectedTail, substring = true).assertExists()
                 }
                 verify(force = true)
                 assertFalse("The complete candidate must eventually enter the safety edge and paint", pendingLeaves)
@@ -764,6 +777,12 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     inkRect(host, "chat-turn:ink-wire-tail").top, 1f)
                 assertEquals("Detached append must preserve the same visible paragraph", readingTop,
                     ui.onNodeWithText(readingAnchor).assertIsDisplayed().fetchSemanticsNode().positionInRoot.y, 1f)
+                drainReceivedText("手动阅读新增末行。") {
+                    assertEquals("Typing debt cannot pull the detached reader to the bottom", anchor,
+                        inkRect(host, "chat-turn:ink-wire-tail").top, 1f)
+                    assertEquals("Typing debt must preserve the same visible paragraph", readingTop,
+                        ui.onNodeWithText(readingAnchor).assertIsDisplayed().fetchSemanticsNode().positionInRoot.y, 1f)
+                }
                 diagnoseMissingText {
                     ui.onNodeWithText("手动阅读新增末行。", substring = true).assertExists()
                 }
@@ -1442,7 +1461,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 reports.clear()
                 turn = turnFor(full, complete = true)
             }
-            for (index in 0 until 640) {
+            val terminalFrames = maxOf(640, (expectedFull.length - expectedSeed.length) * 2 + 180)
+            val finalSamples = java.util.ArrayDeque<String>()
+            for (index in 0 until terminalFrames) {
                 if (index == resumeAtFrame) {
                     assertFalse("Resume must interrupt active terminal typing", ready.get())
                     assertTrue("Resume must preserve a partial answer", expectedFull != displayed(textLayouts()))
@@ -1463,6 +1484,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 assertEquals("Drawing a sample must not advance typing", sampleClock, ui.mainClock.currentTime)
                 val layouts = textLayouts()
                 val displayed = displayed(layouts)
+                finalSamples.addLast("frame=$index clock=$sampleClock length=${displayed.length} " +
+                    "expected=${expectedFull.length} ready=${ready.get()} viewport=${geometry()}")
+                if (finalSamples.size > 8) finalSamples.removeFirst()
                 val height = layouts.sumOf { it.second.size.height }
                 assertTrue("Revealed text must remain an append-only prefix", expectedFull.startsWith(displayed) && displayed.startsWith(previousText))
                 if (!ready.get()) unreadyFrames++
@@ -1511,7 +1535,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             assertTrue("Wrap across several real text lines", heightGrowth >= 5)
             assertTrue("Check actual painted growth repeatedly", paintedGrowth >= 5)
             assertTrue("Exercise the requested foreground recovery", resumeAtFrame == null || resumed)
-            assertTrue("Finish within the same visit without remounting", finished)
+            assertTrue("Finish within the same visit without remounting: budget=$terminalFrames\n" +
+                finalSamples.joinToString("\n") + "\n" + paintDump("paced-tail"), finished)
             assertEquals(expectedFull, displayed(textLayouts()))
             assertTrue("Every measured endpoint must retain the original composer gap; samples=" +
                 gapProblems.joinToString(" ; "), gapProblems.isEmpty())
@@ -2101,10 +2126,10 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     safePx = with(d) { 360.dp.roundToPx() } - bottom
                     admittedPx = safePx - with(d) { 24.dp.roundToPx() }
                     Box(Modifier.fillMaxSize().safeDrawingPadding()) {
-                        Box(Modifier.size(320.dp, 360.dp).background(Color.White).testTag("closed-frame-host")
+                        Box(Modifier.size(320.dp, 360.dp).background(Color.White).clipToBounds().testTag("closed-frame-host")
                             .onPlaced { clearance.update(it, it, 0, bottom, 0, true, false) }) {
                             androidx.compose.runtime.CompositionLocalProvider(LocalStreamingTextClearance provides clearance) {
-                                Box(Modifier.offset(x = 16.dp, y = 24.dp).wrapContentHeight(unbounded = true)) {
+                                Box(Modifier.offset(x = 16.dp, y = 24.dp).wrapContentHeight(align = Alignment.Top, unbounded = true)) {
                                     Box(Modifier.size(288.dp, fullHeight).testTag("closed-frame-surface")
                                         .streamingWorkflowSurface(Color.White, Color.Magenta, 16.dp)
                                         .drawWithContent {
@@ -2141,6 +2166,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             ui.runOnUiThread { fullHeight = with(d) { admittedPx.toDp() } }
             frame()
             val rect = inkRect("closed-frame-host", "closed-frame-surface")
+            val surfaceOrigin = surface.fetchSemanticsNode().layoutInfo.coordinates.positionInRoot()
             assertEquals(safePx.toFloat(), rect.bottom, 0f)
             val reference = shot()
             val left = rect.left.toInt()
@@ -2162,8 +2188,11 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 val targetPx = admittedPx + with(d) { growth.roundToPx() }
                 ui.runOnUiThread { fullHeight = with(d) { targetPx.toDp() } }
                 frame()
-                assertEquals("Full measured extent must not shrink to the admitted frame", targetPx,
-                    surface.fetchSemanticsNode().layoutInfo.coordinates.size.height)
+                val coordinates = surface.fetchSemanticsNode().layoutInfo.coordinates
+                assertEquals("Full measured extent must not shrink to the admitted frame", targetPx, coordinates.size.height)
+                assertEquals("Unbounded growth must not recenter the surface origin", surfaceOrigin, coordinates.positionInRoot())
+                assertEquals("Old glyphs keep the same geometry while the card grows", oldText,
+                    inkRect("closed-frame-host", "closed-frame-old-text"))
                 val actual = shot()
                 var changed = 0
                 var leaked = 0

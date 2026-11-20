@@ -23,6 +23,10 @@ rm -rf smoke/settings-ui smoke/visual-diagnostics
 target_spec=$(python3 - <<'PYCOUNT'
 from pathlib import Path
 import re, os, json, hashlib
+import sys
+sys.path.insert(0, str(Path(os.environ["SMOKE_SCRIPT_DIR"]) / "acceptance"))
+from smoke_method import diagnostic_selection
+diagnostic = diagnostic_selection(Path("."), os.environ)
 raw_filter = os.environ.get("SMOKE_TEST_CLASSES", "")
 mode = os.environ.get("SMOKE_MODE", "")
 if mode == "daily":
@@ -443,7 +447,7 @@ question_card_target = {
 question_card_only = mode == "smoke" and sorted(raw_filter.split(",")) == sorted(question_card_target)
 question_card_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
                          for name in question_card_target}
-classes = {}
+classes = {diagnostic["class_name"]: diagnostic["expected_tests"]} if diagnostic else {}
 pet_model_target = (
     "app.daiyu.android.pet.AndroidPetStoreCapacityTest",
     "app.daiyu.android.pet.AndroidPetStoreTest", "app.daiyu.android.pet.PetThinkingPickerActivityTest",
@@ -466,7 +470,7 @@ media_send_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/
 voice_browser_only = command_for("", os.environ)[1] == "voice-browser-targeted"
 voice_browser_sources = {Path("app/src/androidTest/kotlin") / (name.replace(".", "/") + ".kt")
                          for name in (requested or ())}
-for path in sorted(file_text_sources if file_text_only else error_details_sources if error_details_only else media_send_sources if media_send_only else voice_browser_sources if voice_browser_only else child_hot_configuration_sources if child_hot_configuration_only else task_scroll_sources if task_scroll_only else child_stop_sources if child_stop_only else pane_question_sources if pane_question_only or pane_question_core_only else question_card_sources if question_card_only else message_action_sources if message_action_only else generation_port_sources if generation_port_only else pet_model_sources if pet_model_only else pet_presentation_sources if pet_presentation_only else delete_confirm_sources if delete_confirm_only else subagent_preset_sources if subagent_preset_only else batch_delete_sources if batch_delete_only else ime_sources if ime_only else [conversation_date_source] if conversation_date_only else search_history_sources if search_history_only else [catalog_model_editor_source] if catalog_model_editor_only else search_browser_sources if search_browser_only else provider_catalog_sources if provider_catalog_only else doubao_motion_sources if doubao_motion_only else workspace_entry_sources if workspace_entry_only else workflow_body_sources if workflow_body_only else workspace_import_sources if workspace_import_only else scroll_popup_sources if scroll_popup_only else [platform_source] if platform_only else compression_dialog_sources if compression_dialog_only else [assistant_picker_source] if assistant_picker_only else popup_title_sources if popup_title_only else [rename_presentation_source] if rename_presentation_only else [chat_status_bar_source] if chat_status_bar_only else popup_scroll_sources if popup_scroll_only else rendering_sources if rendering_only else Path("app/src/androidTest").rglob("*")):
+for path in sorted([] if diagnostic else file_text_sources if file_text_only else error_details_sources if error_details_only else media_send_sources if media_send_only else voice_browser_sources if voice_browser_only else child_hot_configuration_sources if child_hot_configuration_only else task_scroll_sources if task_scroll_only else child_stop_sources if child_stop_only else pane_question_sources if pane_question_only or pane_question_core_only else question_card_sources if question_card_only else message_action_sources if message_action_only else generation_port_sources if generation_port_only else pet_model_sources if pet_model_only else pet_presentation_sources if pet_presentation_only else delete_confirm_sources if delete_confirm_only else subagent_preset_sources if subagent_preset_only else batch_delete_sources if batch_delete_only else ime_sources if ime_only else [conversation_date_source] if conversation_date_only else search_history_sources if search_history_only else [catalog_model_editor_source] if catalog_model_editor_only else search_browser_sources if search_browser_only else provider_catalog_sources if provider_catalog_only else doubao_motion_sources if doubao_motion_only else workspace_entry_sources if workspace_entry_only else workflow_body_sources if workflow_body_only else workspace_import_sources if workspace_import_only else scroll_popup_sources if scroll_popup_only else [platform_source] if platform_only else compression_dialog_sources if compression_dialog_only else [assistant_picker_source] if assistant_picker_only else popup_title_sources if popup_title_only else [rename_presentation_source] if rename_presentation_only else [chat_status_bar_source] if chat_status_bar_only else popup_scroll_sources if popup_scroll_only else rendering_sources if rendering_only else Path("app/src/androidTest").rglob("*")):
     if path.suffix not in {".kt", ".java"} or not path.is_file():
         continue
     if speech_only and path != speech_source:
@@ -569,7 +573,7 @@ Path("smoke/shard-plan.json").write_text(json.dumps(plan, sort_keys=True) + "\n"
 assert sum(len(group) for group in groups) == len(classes)
 assert set().union(*(set(group) for group in groups)) == set(classes)
 manifest = dict(schema_version=1, shard_index=shard, shard_count=shards,
-                discovery_scope="targeted" if file_text_only or error_details_only or media_send_only or voice_browser_only or child_hot_configuration_only or child_stop_only or pane_question_only or pane_question_core_only or question_card_only or generation_port_only or pet_model_only or catalog_model_editor_only or search_browser_only or pet_presentation_only or delete_confirm_only or subagent_preset_only or batch_delete_only or ime_only or conversation_date_only or search_history_only or provider_catalog_only or doubao_motion_only or workspace_entry_only or workflow_body_only or workspace_import_only or scroll_popup_only or platform_only or compression_dialog_only or assistant_picker_only or popup_title_only or rename_presentation_only or chat_status_bar_only or speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or session_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pane_receipt_only or pause_receipt_only or linux_pin_only or linux_settings_only or terminal_screen_only or terminal_command_pager_only or composer_context_only or child_task_card_only or rendering_only or popup_scroll_only else "full",
+                discovery_scope="targeted" if diagnostic or file_text_only or error_details_only or media_send_only or voice_browser_only or child_hot_configuration_only or child_stop_only or pane_question_only or pane_question_core_only or question_card_only or generation_port_only or pet_model_only or catalog_model_editor_only or search_browser_only or pet_presentation_only or delete_confirm_only or subagent_preset_only or batch_delete_only or ime_only or conversation_date_only or search_history_only or provider_catalog_only or doubao_motion_only or workspace_entry_only or workflow_body_only or workspace_import_only or scroll_popup_only or platform_only or compression_dialog_only or assistant_picker_only or popup_title_only or rename_presentation_only or chat_status_bar_only or speech_only or gui_parser_only or screen_history_only or rootless_content_only or menu_only or page_back_only or task_scroll_only or page_performance_only or markdown_entry_only or session_entry_only or sqlite_text_only or cold_display_only or runtime_screenshot_only or rootless_commit_only or screen_cleanup_only or pane_receipt_only or pause_receipt_only or linux_pin_only or linux_settings_only or terminal_screen_only or terminal_command_pager_only or composer_context_only or child_task_card_only or rendering_only or popup_scroll_only else "full",
                 total_tests=sum(classes.values()), all_classes=classes,
                 shards=[dict(index=index, expected_tests=sum(group.values()), classes=sorted(group))
                         for index, group in enumerate(groups)])
@@ -584,9 +588,15 @@ selection = dict(schema_version=1, scope="targeted" if requested is not None els
                  inventory=dict(path=inventory.name, sha256=hashlib.sha256(inventory.read_bytes()).hexdigest()))
 if mode in ("candidate", "daily"):
     selection.update(mode=mode, formal_acceptance=False, full_regression_passed=False)
+if diagnostic:
+    if not selected or set(selected) != {diagnostic["class_name"]}:
+        raise ValueError("Diagnostic must execute its sole selected class")
+    selection.update(diagnostic=True, requested_method=diagnostic["method"],
+                     selected_targets=[diagnostic["target"]], formal_acceptance=False,
+                     full_regression_passed=False)
 Path("smoke/selection.json").write_text(json.dumps(selection, sort_keys=True) + "\n")
 print(sum(selected.values()))
-print(",".join(sorted(selected)))
+print(diagnostic["target"] if diagnostic else ",".join(sorted(selected)))
 PYCOUNT
 )
 expected=${target_spec%%$'\n'*}
@@ -782,7 +792,11 @@ if test "$expected" -gt 0; then
     instrumentation_options=(-e timeout_msec 180000)
   fi
   adb_stage instrumentation 7200 shell am instrument -w -r "${instrumentation_options[@]}" -e class "$test_classes" app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner 2>&1 | tee smoke/platform-tests.txt
-  python3 "$SCRIPT_DIR/acceptance/instrumentation_result.py" \
+  result_options=()
+  if test -n "${SMOKE_TEST_METHOD:-}"; then
+    result_options=(--expected-target "$test_classes")
+  fi
+  python3 "$SCRIPT_DIR/acceptance/instrumentation_result.py" "${result_options[@]}" \
     --output smoke/platform-tests.txt --expected-tests "$expected" \
     > smoke/instrumentation-result.json
   if [[ ",$test_classes," == *",app.daiyu.android.SettingsChromeActivityTest,"* ]]; then

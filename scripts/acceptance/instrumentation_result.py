@@ -45,7 +45,29 @@ def report_text(raw, *, allow_test_metadata=False):
     return text
 
 
-def instrumentation(raw, expected_tests):
+def verify_target(text, target):
+    require(re.fullmatch(r"app\.daiyu\.android\.(?:[A-Za-z_][A-Za-z_0-9]*\.)*[A-Za-z_][A-Za-z_0-9]*#test[A-Za-z_0-9]+", target),
+            "invalid_expected_target")
+    expected_class, expected_method = target.split('#')
+    frame, statuses = {}, []
+    for line in text.split('\n'):
+        for key in ('id', 'class', 'test', 'numtests', 'current'):
+            prefix = 'INSTRUMENTATION_STATUS: ' + key + '='
+            if line.startswith(prefix):
+                require(key not in frame, "duplicate_target_metadata")
+                frame[key] = line[len(prefix):]
+        if line.startswith('INSTRUMENTATION_STATUS_CODE:'):
+            require(frame == {'id': 'AndroidJUnitRunner', 'class': expected_class, 'test': expected_method,
+                              'numtests': '1', 'current': '1'},
+                    "instrumentation_target_conflict")
+            statuses.append(line)
+            frame = {}
+    require(not frame and statuses == ['INSTRUMENTATION_STATUS_CODE: 1',
+                                       'INSTRUMENTATION_STATUS_CODE: 0'],
+            "instrumentation_target_pair_required")
+
+
+def instrumentation(raw, expected_tests, expected_target=None):
     require(type(expected_tests) is int and 0 < expected_tests <= 999999999,
             "invalid_expected_tests")
     text = report_text(raw, allow_test_metadata=True)
@@ -86,6 +108,9 @@ def instrumentation(raw, expected_tests):
     # not the final result of this invocation. Do not merge repeated runs.
     require(text.rstrip("\n").endswith("\nINSTRUMENTATION_CODE: -1"),
             "instrumentation_not_terminal")
+    if expected_target is not None:
+        require(expected_tests == 1, "method_requires_one_test")
+        verify_target(text, expected_target)
     return successes[0]
 
 
@@ -98,12 +123,13 @@ def main(argv=None):
     parser = Parser(description=__doc__)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--expected-tests", required=True, type=int)
+    parser.add_argument("--expected-target")
     try:
         args = parser.parse_args(argv)
         with args.output.open("rb") as stream:
             raw = stream.read(MAX_TEXT_BYTES + 1)
         require(len(raw) <= MAX_TEXT_BYTES, "file_too_large")
-        count = instrumentation(raw, args.expected_tests)
+        count = instrumentation(raw, args.expected_tests, args.expected_target)
     except ResultError as error:
         print(json.dumps({"valid": False, "error": str(error)}, sort_keys=True))
         return 2

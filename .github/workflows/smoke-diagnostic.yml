@@ -1,0 +1,190 @@
+name: 代鱼单用例诊断
+run-name: 代鱼单用例诊断 ${{ inputs.check_id }} API${{ inputs.api }}
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: 复用应用与测试包的完整源码SHA
+        type: string
+        required: true
+      source_run_id:
+        description: 已成功的增量Release编译run（attempt1；不重新编包）
+        type: string
+        required: true
+      test_class:
+        description: 一个完整的JUnit3测试类名
+        type: string
+        required: true
+      test_method:
+        description: 一个test方法名；留空仅运行上面的单类
+        type: string
+        default: ''
+      api:
+        type: choice
+        options: ['26', '37.2']
+        default: '26'
+      check_id:
+        description: 本次快速诊断标识
+        type: string
+        required: true
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: daiyu-smoke-diagnostic-${{ github.ref }}-${{ inputs.api }}
+  cancel-in-progress: false
+env:
+  EXPECTED_SHA: ${{ inputs.source_sha }}
+  SOURCE_SHA: ${{ inputs.source_sha }}
+  SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+  SOURCE_VARIANT: compile
+  SMOKE_MODE: smoke
+  SMOKE_DIAGNOSTIC: 'true'
+  SMOKE_TEST_CLASSES: ${{ inputs.test_class }}
+  SMOKE_TEST_METHOD: ${{ inputs.test_method }}
+  SMOKE_SHARD_COUNT: '1'
+  SMOKE_SHARD_INDEX: '0'
+jobs:
+  diagnostic:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SMOKE_API: ${{ inputs.api }}
+      EMULATOR_RAM_MB: ${{ inputs.api == '26' && '4096' || '6144' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          path: .smoke-validation-tools
+          persist-credentials: false
+      - name: 快速诊断工具契约（不编译）
+        id: contracts
+        env:
+          SMOKE_MODE: ''
+          SMOKE_DIAGNOSTIC: ''
+          SMOKE_TEST_METHOD: ''
+          SMOKE_TEST_CLASSES: ''
+        working-directory: .smoke-validation-tools
+        run: |
+          mkdir -p ../smoke
+          set -o pipefail
+          PYTHONPATH=tests python3 -B -m unittest test_smoke_method test_acceptance_tool_receipt test_frozen_smoke_source test_smoke_boot.SourceTests test_task_scroll_smoke_scope test_speech_platform_discovery -v 2>&1 | tee ../smoke/contracts.log
+          bash -n scripts/smoke_boot.sh
+      - name: 核对源码与单方法选择
+        id: selection
+        run: |
+          python3 .smoke-validation-tools/scripts/verify_smoke_source.py --verify-checkout-only
+          python3 - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          sys.path.insert(0, '.smoke-validation-tools/scripts/acceptance')
+          from smoke_method import diagnostic_selection
+          selected = diagnostic_selection(Path('.'), os.environ)
+          assert selected
+          Path('smoke').mkdir(exist_ok=True)
+          selected.update(source_sha=os.environ['SOURCE_SHA'], tools_sha=os.environ['GITHUB_SHA'],
+                          run_id=os.environ['GITHUB_RUN_ID'], attempt=os.environ['GITHUB_RUN_ATTEMPT'],
+                          api=os.environ['SMOKE_API'], formal_acceptance=False, full_regression_passed=False)
+          Path('smoke/diagnostic-source.json').write_text(json.dumps(selected, sort_keys=True) + '\n')
+          PY
+      - id: download
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: 代鱼增量Release包
+          path: delivery
+          run-id: ${{ inputs.source_run_id }}
+          github-token: ${{ github.token }}
+      - name: 核对既有应用与测试包身份及摘要
+        id: package
+        run: |
+          python3 .smoke-validation-tools/scripts/verify_smoke_source.py
+          (cd delivery && sha256sum -c SHA256SUMS)
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root = Path('delivery')
+          apps = list(root.glob('*.apk'))
+          assert len(apps) == 1, 'Expected one verified app APK, not a find-first choice'
+          files = [apps[0], root / 'tests/platform-test.apk']
+          covered = {line.split(maxsplit=1)[1].lstrip('*')
+                     for line in (root / 'SHA256SUMS').read_text().splitlines() if line.strip()}
+          assert all(p.is_file() and not p.is_symlink() and str(p.relative_to(root)) in covered for p in files)
+          Path('smoke/apk-source.json').write_text(json.dumps({str(p.relative_to(root)):
+              hashlib.sha256(p.read_bytes()).hexdigest() for p in files}, sort_keys=True) + '\n')
+          PY
+      - name: 启用模拟器加速
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd
+        with:
+          cmdline-tools-version: '16111833'
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
+      - name: 统一模拟器命令行工具
+        run: |
+          tools="$ANDROID_HOME/cmdline-tools"
+          test -x "$tools/16111833/bin/avdmanager"
+          rm -rf "$tools/latest"
+          ln -s "$tools/16111833" "$tools/latest"
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libpulse0
+          adb start-server
+      - name: 单API单用例真实绘制诊断
+        id: emulator
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: ${{ inputs.api }}
+          arch: x86_64
+          target: ${{ inputs.api == '26' && 'google_apis' || 'google_apis_ps16k' }}
+          disk-size: 8192M
+          ram-size: ${{ env.EMULATOR_RAM_MB }}M
+          cores: 4
+          emulator-build: ${{ inputs.api == '26' && '13610412' || '' }}
+          emulator-options: -memory ${{ env.EMULATOR_RAM_MB }} -no-window -gpu ${{ inputs.api == '26' && 'swiftshader_indirect' || 'swiftshader' }} -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel ${{ inputs.api == '26' && '-feature -GLDMA' || '' }} ${{ inputs.api == '37.2' && '-feature -Uwb -qemu -chardev netsim,id=uwb -device virtserialport,chardev=uwb,name=uwb' || '' }}
+          emulator-boot-timeout: 180
+          pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ inputs.api }}"
+          disable-animations: true
+          script: bash -c 'set +e; test -s smoke/prelaunch-ready.txt && bash .smoke-validation-tools/scripts/smoke_boot.sh; code=$?; printf "%s\n" "$code" > smoke/exit-code.txt; exit "$code"'
+      - name: 记录诊断终态（区分前置失败与真实用例）
+        if: always()
+        env:
+          JOB_STATUS: ${{ job.status }}
+          CONTRACTS_OUTCOME: ${{ steps.contracts.outcome }}
+          SELECTION_OUTCOME: ${{ steps.selection.outcome }}
+          DOWNLOAD_OUTCOME: ${{ steps.download.outcome }}
+          PACKAGE_OUTCOME: ${{ steps.package.outcome }}
+          EMULATOR_OUTCOME: ${{ steps.emulator.outcome }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          root = Path('smoke')
+          root.mkdir(exist_ok=True)
+          code = root / 'exit-code.txt'
+          data = dict(requested_source_sha=os.environ['SOURCE_SHA'], tools_sha=os.environ['GITHUB_SHA'],
+                      source_run_id=os.environ['SOURCE_RUN_ID'], source_attempt=1,
+                      check_run=os.environ['GITHUB_RUN_ID'], check_attempt=os.environ['GITHUB_RUN_ATTEMPT'],
+                      api=os.environ['SMOKE_API'], requested_class=os.environ['SMOKE_TEST_CLASSES'],
+                      requested_method=os.environ['SMOKE_TEST_METHOD'], job_status=os.environ['JOB_STATUS'],
+                      instrumentation_output_present=(root / 'platform-tests.txt').is_file(),
+                      smoke_exit_code=code.read_text().strip() if code.is_file() else None,
+                      outcomes={key.removesuffix('_OUTCOME').lower(): value for key, value in os.environ.items()
+                                if key.endswith('_OUTCOME')}, formal_acceptance=False, full_regression_passed=False)
+          (root / 'diagnostic-result.json').write_text(json.dumps(data, sort_keys=True) + '\n')
+          PY
+      - name: 上传单用例原始证据
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: 单用例诊断-API${{ inputs.api }}
+          path: smoke/
+          if-no-files-found: error

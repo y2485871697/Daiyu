@@ -38,10 +38,32 @@ class TestRefreshContract(unittest.TestCase):
         self.assertIn(":app:assembleReleaseAndroidTest", workflow)
         self.assertNotIn(":app:assembleRelease\n", workflow)
 
+    def test_method_diagnostics_have_independent_api_queues(self):
+        workflow = (ROOT / '.github/workflows/test-refresh-regression.yml').read_text()
+        concurrency = workflow.split('\nconcurrency:\n', 1)[1].split('\nenv:', 1)[0]
+        groups = [line for line in concurrency.splitlines() if line.startswith('  group: ')]
+        self.assertEqual(1, len(groups))
+        self.assertEqual(1, groups[0].count("${{ inputs.test_method != '' && format('-diagnostic-{0}-{1}-{2}', inputs.smoke_classes, inputs.test_method, inputs.smoke_api) || '' }}"))
+        self.assertEqual(['  cancel-in-progress: false'],
+                         [line for line in concurrency.splitlines() if line.startswith('  cancel-in-progress:')])
+
     def test_inactive_append_failure_probe_preserves_original_wait_and_tick(self):
         source = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatResumeScrollTest.kt').read_text()
         method = source.split('fun testInactiveTerminalAppendIsPresentationReadyBeforeReveal()', 1)[1].split('\n    fun ', 1)[0]
-        self.assertEqual(4, method.count('ui.waitUntil(5_000)'))
+        self.assertEqual(3, method.count('ui.waitUntil(5_000)'))
+        w3_deadline = method.split('val startWall = System.nanoTime()', 1)[1].split('} catch (failure:', 1)[0]
+        self.assertIn('System.nanoTime() - startWall <= 5_000_000_000L', w3_deadline)
+        self.assertEqual(2, w3_deadline.count('checkDeadline()\n'))
+        self.assertNotIn('waitUntil', w3_deadline)
+        self.assertNotIn('Thread.sleep', w3_deadline)
+        loop = w3_deadline.split('while (true)', 1)[1]
+        order = [loop.index(value) for value in (
+            'checkDeadline()', 'val sample = sampledTick()',
+            'current in previous..minOf(previous + 1, appended.length)',
+            'previous = current', 'checkDeadline()',
+            'if (current == appended.length && sample.hasCopy && completed.get() > 0) break')]
+        order[4] = loop.index('checkDeadline()', order[3])
+        self.assertEqual(sorted(order), order)
         self.assertEqual(2, method.count('ui.mainClock.advanceTimeByFrame()'))
         self.assertIn('val appended = first + "后".repeat(80)', method)
         self.assertIn('paintProbe.Capture(replyId)', method)
@@ -54,9 +76,12 @@ class TestRefreshContract(unittest.TestCase):
         sample = method.split('fun presentationSample(): PresentationSample {', 1)[1].split('fun assertNotCompleted', 1)[0]
         self.assertEqual(1, sample.count('.fetchSemanticsNodes()'))
         self.assertIn('useUnmergedTree = true', sample)
-        self.assertIn('.maxOf { it.length }', sample)
-        self.assertIn('nodes.any(copyMatcher::matches)', sample)
-        self.assertIn('nodes.any(appendedMatcher::matches)', sample)
+        self.assertIn('ui.onAllNodes(prefixMatcher or copyMatcher,', sample)
+        self.assertIn('for (node in nodes)', sample)
+        self.assertIn('length = maxOf(length, text.text.length)', sample)
+        self.assertIn('hasCopy = hasCopy || copyMatcher.matches(node)', sample)
+        self.assertIn('hasAppended = hasAppended || appendedMatcher.matches(node)', sample)
+        self.assertIn('check(length >= 0)', sample)
         self.assertIn('ui.waitForIdle()', method.split('fun tick()', 1)[1].split('fun hasActions()', 1)[0])
         self.assertIn('assertNotCompleted(sample)', method)
         self.assertIn('sample.hasAppended', method)

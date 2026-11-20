@@ -13,7 +13,11 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('deferBlockReveal = true', reasoning)
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         self.assertIn('visibility = reveal.visibility(partId)', ui)
-        self.assertIn('else ProjectedMessageMarkdown(text, blocks, presented, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)', ui)
+        self.assertIn(
+            'else ProjectedMessageMarkdown(text, blocks, presented, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow,\n'
+            '            onCurrentBodyInstalled = { MarkdownPaintApplied(reveal, partId) })',
+            ui,
+        )
 
     def test_text_leaf_pairs_each_accepted_source_with_its_own_ast(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()

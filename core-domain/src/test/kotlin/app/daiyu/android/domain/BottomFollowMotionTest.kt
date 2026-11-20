@@ -181,6 +181,56 @@ class BottomFollowMotionTest {
         }
     }
 
+    @Test fun parkedFrameClockRetainsMomentumWithoutRepayingIdleTime() {
+        for (density in listOf(1f, 2f, 3f)) for (hz in listOf(60, 90, 120)) {
+            val motion = BottomFollowMotion()
+            var time = 0L
+            val period = 1_000_000_000L / hz
+            motion.step(1000f * density, time, density, continuous = true)
+            repeat(hz / 2) { time += period; motion.step(1000f * density, time, density, continuous = true) }
+            assertTrue(motion.velocityPxPerSecond > 0f)
+            repeat(6) {
+                val momentum = motion.velocityPxPerSecond
+                motion.pauseFrameClock()
+                motion.pauseFrameClock()
+                assertEquals(momentum, motion.velocityPxPerSecond, 0f)
+                time += 60_000_000_000L
+                var distance = 26f * density
+                assertEquals("A parked follower first reanchors without movement", 0f,
+                    motion.step(distance, time, density, continuous = true), 0f)
+                assertEquals(momentum, motion.velocityPxPerSecond, 0f)
+                var frames = 1
+                while (distance > 0f && frames++ < hz) {
+                    time += period
+                    val delta = motion.step(distance, time, density, continuous = true)
+                    assertTrue(delta > 0f && delta <= minOf(distance, 14f * density))
+                    distance -= delta
+                }
+                assertEquals(0f, distance, 0f)
+                assertTrue("Warm target must keep its momentum after parking: $frames at ${hz}Hz",
+                    frames * 1_000f / hz <= 100f)
+            }
+            motion.reset()
+            assertEquals(0f, motion.velocityPxPerSecond, 0f)
+            motion.pauseFrameClock()
+            assertEquals(0f, motion.step(26f * density, time + period, density, continuous = true), 0f)
+        }
+    }
+
+    @Test fun parkedFollowerUsesOnlyThePostWakeFrameInterval() {
+        val motion = BottomFollowMotion()
+        val control = BottomFollowMotion()
+        for (m in listOf(motion, control)) {
+            m.step(1000f, 0L, 1f, continuous = true)
+            repeat(30) { m.step(1000f, (it + 1) * 16_000_000L, 1f, continuous = true) }
+            m.pauseFrameClock()
+        }
+        assertEquals(0f, motion.step(100f, 60_000_000_000L, 1f, continuous = true), 0f)
+        assertEquals(0f, control.step(100f, 1_000_000_000L, 1f, continuous = true), 0f)
+        assertEquals(control.step(100f, 1_016_000_000L, 1f, continuous = true),
+            motion.step(100f, 60_016_000_000L, 1f, continuous = true), 0f)
+    }
+
     @Test fun stopAndInvalidInputsClearMomentum() {
         val motion = BottomFollowMotion()
         motion.step(200f, 0L, 1f)

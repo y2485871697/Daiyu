@@ -14,6 +14,11 @@ class BottomFollowMotion {
         lastFrameNanos = null
     }
 
+    /** Retain momentum while waiting for a target, without counting idle time. */
+    fun pauseFrameClock() {
+        lastFrameNanos = null
+    }
+
     fun step(distancePx: Float, frameTimeNanos: Long, density: Float, continuous: Boolean = false): Float {
         if (!distancePx.isFinite() || distancePx < 0f || !density.isFinite() || density <= 0f) {
             reset()

@@ -37,6 +37,19 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn('visualScope?.handoff(turn.listKey, reportedReasoning)', assistant)
         self.assertNotIn('handoff.ready(turn.reportedReasoning)', assistant)
 
+    def test_paint_debt_waits_for_snapshot_events_before_requesting_a_frame(self):
+        loop = self.typing.split("while (shown < end) {", 1)[1]
+        waiting, callback = loop.split("withFrameNanos { frameNanos ->", 1)
+        self.assertIn("if (currentAwaitPaintAdmission && !publication.ready)", waiting)
+        self.assertIn("snapshotFlow {", waiting)
+        self.assertIn("}.first { it }", waiting)
+        for wake in ("!currentAwaitPaintAdmission", "publication.ready",
+                     "!markdownTypingCanAdvance(currentCanAdvance, currentPlayback)", "textClearance?.held == true"):
+            self.assertIn(wake, waiting)
+        for forbidden in ("motion.advance(", "motion.pause(", "motion.hold(", "value =", "withFrameNanos"):
+            self.assertNotIn(forbidden, waiting)
+        self.assertIn("currentAwaitPaintAdmission && !publication.ready -> motion.visible(current)", callback)
+
     def test_full_sources_still_project_once_not_per_frame(self):
         self.assertIn("val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING, windows = bodySources.map { it.window })", self.chat)
         self.assertIn("val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,", self.chat)

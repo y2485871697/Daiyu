@@ -383,13 +383,17 @@ class WorkflowNarrationCompositionTest {
     @Test fun newLiveBodyHasAnEmptyFirstBaselineButRemountAndHistoryStaySilent() {
         val sources = listOf(MarkdownTypingSource("answer", "first live chunk"))
         val owners = WorkflowVisualAdmissions(setOf("history"))
-        assertEquals(sources, owners.scope("history", false).bodyBaseline("body", sources, live = true))
+        assertEquals(sources, owners.scope("history", false).bodyBaseline("body", sources))
         val live = owners.scope("live", false)
-        assertTrue(live.bodyBaseline("body", sources, live = true).isEmpty())
+        assertTrue(live.bodyBaseline("body", sources).isEmpty())
         assertEquals("A lazy remount must not replay an admitted chunk", sources,
-            live.bodyBaseline("body", sources, live = true))
-        assertEquals(sources, owners.scope("terminal", false).bodyBaseline("body", sources, live = false))
-        assertEquals(sources, owners.scope("restoring", true).bodyBaseline("body", sources, live = true))
+            live.bodyBaseline("body", sources))
+        val terminal = owners.scope("terminal", false)
+        assertTrue("A first hot terminal snapshot must still begin with no displayed body", terminal.bodyBaseline("body", sources).isEmpty())
+        assertEquals("Remounting a terminal body must not claim another empty baseline", sources,
+            terminal.bodyBaseline("body", sources))
+        assertEquals(sources, owners.scope("paged-terminal", false, live = false).bodyBaseline("body", sources))
+        assertEquals(sources, owners.scope("restoring", true).bodyBaseline("body", sources))
     }
 
     @Test fun restoredAndTerminalOwnersHaveSilentBaselinesAndSurviveLazyRemount() {

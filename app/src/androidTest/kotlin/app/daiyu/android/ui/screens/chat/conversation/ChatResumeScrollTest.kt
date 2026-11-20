@@ -337,6 +337,8 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             ui.waitUntil(5_000) { entered.count == 0L }
             ui.waitForIdle()
             assertEquals("Pending replacement must retain the occupied action slot", before, top("chat-turn:tail"), 1f)
+            ui.onAllNodesWithText("恢复前完整标题", useUnmergedTree = true).assertCountEquals(0)
+            ui.onAllNodesWithText(replacement, useUnmergedTree = true).assertCountEquals(0)
             ui.mainClock.autoAdvance = false
             release.countDown()
             val samples = java.util.ArrayDeque<String>()
@@ -676,7 +678,12 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
     }
 
 
-    fun testPagedCompletedHistoryGetsASilentProductionScope() {
+    fun testPagedCompletedHistoryGetsASilentProductionScope() = verifyCompletedHistoryScope(asTail = false)
+
+    fun testLateCompletedHistoryTailWithUnarmedControlStaysSilent() = verifyCompletedHistoryScope(asTail = true)
+
+    private fun verifyCompletedHistoryScope(asTail: Boolean) {
+        val advances = java.util.concurrent.atomic.AtomicInteger()
         var turns by mutableStateOf<List<ChatTurnUi>>(listOf(ChatTurnUi.User("initial", "initial")))
         var navigation by mutableStateOf(ChatScrollRequest(1))
         var checked = false
@@ -685,7 +692,13 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                     Box(Modifier.size(320.dp, 240.dp)) {
-                        ChatMessageList(turns, ChatScreenActions(), scrollRequest = navigation, turnExtras = { turn ->
+                        val tail = turns.lastOrNull() as? ChatTurnUi.Assistant
+                        val control = androidx.compose.runtime.remember(tail?.listKey) {
+                            ReplyPresentationControl(tail?.listKey, initiallyLive = false)
+                        }
+                        val playback = ReplyPlayback(control, runtimePaused = false)
+                        ChatMessageList(turns, ChatScreenActions(onVisibleTextAdvance = { advances.incrementAndGet() }),
+                            scrollRequest = navigation, replyPlayback = playback, turnExtras = { turn ->
                             if (turn.listKey == "paged-completed") {
                                 val scope = LocalWorkflowVisualScope.current!!
                                 androidx.compose.runtime.SideEffect {
@@ -702,15 +715,17 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
         }
         ui.waitForIdle()
         mainThread {
-            turns = listOf(ChatTurnUi.Assistant("paged-completed", finalText = "已完成的历史正文",
-                status = RunStatus.COMPLETED)) + turns
+            val history = ChatTurnUi.Assistant("paged-completed", finalText = "已完成的历史正文",
+                status = RunStatus.COMPLETED)
+            turns = if (asTail) turns + history else listOf(history) + turns
             navigation = ChatScrollRequest(2, listKey = "paged-completed")
         }
         ui.waitForIdle()
-        ui.onNodeWithTag("chat-messages").performScrollToIndex(0)
+        ui.onNodeWithTag("chat-messages").performScrollToIndex(if (asTail) turns.lastIndex else 0)
         ui.waitForIdle()
         assertTrue("The actual paged history item must compose", checked)
         assertFalse("Paging history must not grant a fresh typing ticket", animated)
+        assertEquals("An unarmed history control cannot fabricate live typing", 0, advances.get())
         ui.onNodeWithText("已完成的历史正文").assertExists()
         assertEquals(0, fixture.opens.get())
     }

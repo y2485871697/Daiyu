@@ -56,6 +56,7 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.draw.drawWithContent
@@ -140,6 +141,8 @@ internal fun RevealedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?,
     }
 }
 
+private class MarkdownBodyGeometry { var heightPx = 0 }
+
 @Composable
 internal fun ProjectedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, modifier: Modifier = Modifier,
     visibleCharacters: Int = Int.MAX_VALUE,
@@ -147,9 +150,13 @@ internal fun ProjectedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?
     visibility: State<Int>? = null,
     sourceWindow: app.daiyu.android.MarkdownSourceWindow? = null,
 ) {
+    val geometry = remember(MarkdownParserIdentity(LocalMarkdownParser.current)) { MarkdownBodyGeometry() }
     val body = rememberMarkdownBodySnapshot(text, blocks, sourceWindow)
-    if (body == null) Box(modifier)
-    else ParsedMessageMarkdown(body.text, body.blocks, modifier, visibleCharacters, generationComplete && body.text == text, visibility)
+    if (body == null) Box(Modifier.height(with(LocalDensity.current) { geometry.heightPx.toDp() }).then(modifier))
+    else Box(Modifier.onSizeChanged { geometry.heightPx = it.height }, propagateMinConstraints = true) {
+        ParsedMessageMarkdown(body.text, body.blocks, modifier,
+            visibleCharacters, generationComplete && body.text == text, visibility)
+    }
 }
 
 @Composable
@@ -227,10 +234,22 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     val measurer = rememberTextMeasurer(cacheSize = 1)
     val publication = LocalMarkdownPaintPublication.current
     val latestCandidateText by rememberUpdatedState(text)
-    val displayedText by remember(frame, playback) {
+    val density = LocalDensity.current
+    val direction = LocalLayoutDirection.current
+    val displayedText by remember(frame, playback, measurer, style, softWrap,
+        density.density, density.fontScale, direction) {
         derivedStateOf {
-            (if (playback?.paused == true) frame.drawn else frame.committed)
-                ?.layoutInput?.text ?: if (playback?.paused == true) AnnotatedString("") else latestCandidateText
+            if (playback?.paused == true) frame.drawn?.layoutInput?.text ?: AnnotatedString("")
+            else {
+                val coordinates = frame.coordinates?.takeIf { it.isAttached }
+                val prepared = if (coordinates != null) frame.layout?.let { previous ->
+                    measurer.measure(latestCandidateText, style, softWrap = softWrap,
+                        constraints = previous.layoutInput.constraints.copy(minHeight = 0))
+                } else null
+                // Prepare the native input before placement; only the real layout and draw publish it.
+                if (prepared != null && clearance.fits(coordinates, prepared.size.height)) latestCandidateText
+                else frame.committed?.layoutInput?.text ?: latestCandidateText
+            }
         }
     }
     val candidateText = if (playback?.paused == true) displayedText else text
@@ -272,8 +291,6 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     }
     SideEffect { publication?.setPending(owner, !published()) }
     DisposableEffect(publication, owner) { onDispose { publication?.setPending(owner, false) } }
-    val density = LocalDensity.current
-    val direction = LocalLayoutDirection.current
     key(style, softWrap, density.density, density.fontScale, direction) {
         BasicText(displayedText, modifier.layout { measurable, constraints ->
             val candidate = measurer.measure(candidateText, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
@@ -335,7 +352,7 @@ private fun MarkdownInlineText(
     paintOffset: Int = 0,
 ) {
     val limit = visibility?.value ?: visibleCharacters
-    if (limit <= 0) return
+    if (limit <= 0) { Box(modifier); return }
     val linkColor = conversationColors().accent
     val body = remember(content, linkColor, openLink) {
         val plain = content.singleOrNull() as? MarkdownInline.Text

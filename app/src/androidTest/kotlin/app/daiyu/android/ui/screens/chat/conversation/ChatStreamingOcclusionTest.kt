@@ -1323,7 +1323,13 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var turn by mutableStateOf(turnFor(if (withTools) "" else seed, complete = false, toolCount = 0))
         val fixedRequest = ChatScrollRequest(1)
         val ready = java.util.concurrent.atomic.AtomicBoolean(false)
-        val reports = java.util.concurrent.CopyOnWriteArrayList<Boolean>()
+        val control = ReplyPresentationControl(turn.listKey, initiallyLive = true)
+        val playback = ReplyPlayback(control, runtimePaused = false)
+        fun typingPending(): Boolean {
+            var pending = false
+            instrumentation.runOnMainSync { pending = control.pending(turn) }
+            return pending
+        }
         var contentActive by mutableStateOf(true)
         lateinit var registry: androidx.lifecycle.LifecycleRegistry
         var geometry: () -> String = { "" }
@@ -1349,7 +1355,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                                             geometry = { viewport.diagnostics() }
                                         }
                                     },
-                                    onPresentationReady = { ready.set(it); reports += it; report(it) })
+                                    onPresentationReady = { ready.set(it); report(it) }, replyPlayback = playback)
                             }, composer = {
                                 Box(Modifier.fillMaxWidth().height(96.dp).testTag("paced-composer"))
                             })
@@ -1432,7 +1438,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var previousHeight = textLayouts().sumOf { it.second.size.height }
         var heightGrowth = 0
         var growthFrames = 0
-        var unreadyFrames = 0
+        var pendingFrames = 0
+        var sawReadyWhileTyping = false
         var paintedGrowth = 0
         var finished = false
         var resumed = false
@@ -1447,7 +1454,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 var primerSettled = false
                 for (index in 0 until 90) {
                     frame()
-                    if (ready.get() && displayed(textLayouts()) == expectedPrimer) {
+                    if (ready.get() && displayed(textLayouts()) == expectedPrimer && !typingPending()) {
                         primerSettled = true
                         break
                     }
@@ -1458,15 +1465,16 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 assertEquals("An idle interval cannot fabricate new input", expectedPrimer, displayed(textLayouts()))
             }
             ui.runOnUiThread {
-                reports.clear()
                 turn = turnFor(full, complete = true)
             }
             val terminalFrames = maxOf(640, (expectedFull.length - expectedSeed.length) * 2 + 180)
             val finalSamples = java.util.ArrayDeque<String>()
             for (index in 0 until terminalFrames) {
                 if (index == resumeAtFrame) {
-                    assertFalse("Resume must interrupt active terminal typing", ready.get())
-                    assertTrue("Resume must preserve a partial answer", expectedFull != displayed(textLayouts()))
+                    val prefix = displayed(textLayouts())
+                    assertTrue("Resume must preserve a nonempty, unfinished answer prefix",
+                        prefix.isNotEmpty() && prefix != expectedFull && expectedFull.startsWith(prefix))
+                    assertTrue("Resume must interrupt active terminal typing", typingPending())
                     ui.runOnUiThread {
                         registry.currentState = androidx.lifecycle.Lifecycle.State.CREATED
                         contentActive = false
@@ -1484,12 +1492,15 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 assertEquals("Drawing a sample must not advance typing", sampleClock, ui.mainClock.currentTime)
                 val layouts = textLayouts()
                 val displayed = displayed(layouts)
+                val pending = typingPending()
+                if (pending) pendingFrames++
+                if (ready.get() && pending && displayed.isNotEmpty() && displayed != expectedFull &&
+                    expectedFull.startsWith(displayed)) sawReadyWhileTyping = true
                 finalSamples.addLast("frame=$index clock=$sampleClock length=${displayed.length} " +
-                    "expected=${expectedFull.length} ready=${ready.get()} viewport=${geometry()}")
+                    "expected=${expectedFull.length} ready=${ready.get()} pending=$pending viewport=${geometry()}")
                 if (finalSamples.size > 8) finalSamples.removeFirst()
                 val height = layouts.sumOf { it.second.size.height }
                 assertTrue("Revealed text must remain an append-only prefix", expectedFull.startsWith(displayed) && displayed.startsWith(previousText))
-                if (!ready.get()) unreadyFrames++
                 if (displayed.isEmpty()) {
                     assertTrue("A completed tool answer must begin drawing without a long admission stall: ${geometry()}", index < 90)
                     continue
@@ -1501,7 +1512,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 val bottom = measuredBottom ?: continue
                 val composerTop = ui.onNodeWithTag("paced-composer").fetchSemanticsNode().boundsInRoot.top
                 val gap = (composerTop - bottom) / density
-                val settled = ready.get() && displayed == expectedFull
+                val settled = ready.get() && !pending && displayed == expectedFull
                 val minimumGap = ChatTailClearance.value - 2f / density
                 val maximumGap = ChatTailClearance.value + if (settled) 64f else 26f
                 if (gap < minimumGap || gap > maximumGap) {
@@ -1526,18 +1537,18 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 previousHeight = height
                 if (settled) { finished = true; break }
             }
-            assertTrue("Exercise terminal formatting before reveal is settled", reports.contains(false))
+            assertTrue("Exercise a formatted, ready page while the real answer is still typing", sawReadyWhileTyping)
             if (slowReceipts) {
                 assertTrue("Keep several seconds of terminal-paced output" +
-                    if (unreadyFrames <= 120 || growthFrames <= 120) {
-                        ": slow=$slowReceipts resume=$resumeAtFrame unready=$unreadyFrames growth=$growthFrames " +
+                    if (pendingFrames <= 120 || growthFrames <= 120) {
+                        ": slow=$slowReceipts resume=$resumeAtFrame pending=$pendingFrames growth=$growthFrames " +
                             "heightGrowth=$heightGrowth paintedGrowth=$paintedGrowth finished=$finished resumed=$resumed " +
                             "budget=$terminalFrames seed=${expectedSeed.length} full=${expectedFull.length}\n" +
                             finalSamples.joinToString("\n") + "\n" + paintDump("paced-tail") +
                             "\ngaps=" + gapProblems.joinToString(" ; ")
-                    } else "", unreadyFrames > 120 && growthFrames > 120)
+                    } else "", pendingFrames > 120 && growthFrames > 120)
             } else {
-                assertTrue("A bootstrap terminal batch must still draw real intermediate frames", unreadyFrames > 1 && growthFrames > 1)
+                assertTrue("A bootstrap terminal batch must still draw real intermediate frames", pendingFrames > 1 && growthFrames > 1)
             }
             assertTrue("Wrap across several real text lines", heightGrowth >= 5)
             assertTrue("Check actual painted growth repeatedly", paintedGrowth >= 5)

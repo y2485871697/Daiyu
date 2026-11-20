@@ -56,7 +56,7 @@ class ChatResumeScrollContract(unittest.TestCase):
         self.assertIn('clearanceLayout.viewportLoss.reset()', disabled)
         self.assertIn('clearanceLayout.followViewport = null', disabled)
         self.assertIn('listState.scrollToItem(index)', follow)
-        self.assertIn('layout.viewportSize, Triple(layout.beforeContentPadding, layout.afterContentPadding, currentOcclusionPx + currentFollowClearancePx), Triple(resumeReady, currentNestedTail.contentHeight, currentNestedTail.textClearance.typingPending)))', ' '.join(follow.split()))
+        self.assertIn('layout.viewportSize, Triple(layout.beforeContentPadding, layout.afterContentPadding, currentOcclusionPx + currentFollowClearancePx), Triple(resumeReady, currentNestedTail.contentHeight, Triple(currentTailKey, currentNestedTail, currentNestedTail.textClearance.typingPending))))', ' '.join(follow.split()))
         observation = self.chat.split('fun observeFollowViewport(', 1)[1].split('fun correctFollowClearance()', 1)[0]
         self.assertIn('val viewport = Triple(layout.viewportSize, layout.beforeContentPadding, currentOcclusionPx + currentFollowClearancePx)', ' '.join(observation.split()))
         self.assertNotIn('layout.afterContentPadding', observation)
@@ -105,14 +105,15 @@ class ChatResumeScrollContract(unittest.TestCase):
         )
         self.assertIn(
             'val initialBaseline = remember(turn.listKey, visualScope, revealResetEpoch) { '
-            'visualScope?.bodyBaseline(turn.listKey, bodySources, '
-            'turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty()) }',
+            'visualScope?.bodyBaseline(turn.listKey, bodySources) }',
             ' '.join(self.chat.split()),
         )
         self.assertNotIn('val bodyRevealEpoch = remember(turn.listKey)', self.chat)
         narration = (BASE / 'WorkflowNarration.kt').read_text()
         self.assertIn('private val bodyOwners = mutableSetOf<String>()', narration)
-        self.assertIn('if (bodyOwners.add(key) && !baseline && live) emptyList() else sources.toList()', narration)
+        self.assertIn('if (bodyOwners.add(key) && !baseline) emptyList() else sources.toList()', narration)
+        self.assertIn('live = turn.status == RunStatus.RUNNING || replyPlayback?.control?.pending(turn) == true', self.chat)
+        self.assertNotIn('live = turn.status == RunStatus.RUNNING || turn.listKey == currentTailKey', self.chat)
         self.assertIn('remember(identity, resetEpoch, retainedLane) { retainedLane?.baseline ?: (initialBaseline ?: sources).toList() }', self.typing)
         self.assertIn('remember(identity, resetEpoch, retainedLane) { retainedLane?.motion ?: MarkdownTypingState(baseline) }', self.typing)
         self.assertIn('remember(playback?.control, presentationLane, identity, resetEpoch)', self.typing)

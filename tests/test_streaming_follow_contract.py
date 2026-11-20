@@ -61,7 +61,7 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("maxOf(frameOverflow.toFloat(), frameObscuredTail.toFloat())", self.follow)
 
     def test_settled_follow_observes_real_extent_and_reconciles_only_stale_lazy_geometry(self):
-        self.assertIn("Triple(resumeReady, currentNestedTail.contentHeight, currentNestedTail.textClearance.typingPending)", self.follow)
+        self.assertIn("Triple(resumeReady, currentNestedTail.contentHeight, Triple(currentTailKey, currentNestedTail, currentNestedTail.textClearance.typingPending))", " ".join(self.follow.split()))
         self.assertIn("currentNestedTail.bounded && currentTailKey == assistantOwnerKey", self.follow)
         self.assertIn("currentNestedTail.contentHeight > 0 && last.size != currentNestedTail.contentHeight", self.follow)
         stale = self.follow.split("last.size != currentNestedTail.contentHeight", 1)[1].split("observeFollowViewport(layout)", 1)[0]
@@ -78,7 +78,14 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("continuous = currentNestedTail.textClearance.typingPending", self.follow)
         idle = self.follow.split("if (followDistance <= 0f)", 1)[1].split("val alignment =", 1)[0]
         self.assertIn("if (currentNestedTail.textClearance.typingPending)", idle)
-        self.assertIn("motion.step(0f, frameTimeNanos, currentDensity,", idle)
+        parked = idle.split("if (currentNestedTail.textClearance.typingPending)", 1)[1].split("}", 1)[0]
+        self.assertIn("motion.pauseFrameClock()", parked)
+        self.assertIn("return@collect", parked)
+        for forbidden in ("withFrameNanos", "motion.step(", "motion.reset("):
+            self.assertNotIn(forbidden, parked)
+        motion = (ROOT / "core-domain/src/main/kotlin/app/daiyu/android/domain/BottomFollowMotion.kt").read_text()
+        parked_clock = motion.split("fun pauseFrameClock() {", 1)[1].split("}", 1)[0]
+        self.assertEqual("lastFrameNanos = null", parked_clock.strip())
         self.assertIn("motion.reset()", idle)
         typing = (CHAT.parent / "MarkdownTyping.kt").read_text()
         self.assertIn("if (progress.target === target) progress.visible else target.start", typing)

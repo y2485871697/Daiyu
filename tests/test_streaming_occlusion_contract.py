@@ -69,7 +69,18 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertNotIn("neverEqualPolicy", frame)
         leaf = markdown.split("internal fun ClearanceText", 1)[1].split("internal fun TextLayoutResult.canPaintPrefixOf", 1)[0]
         self.assertIn("val latestCandidateText by rememberUpdatedState(text)", leaf)
-        self.assertIn('val displayedText by remember(frame, playback) {\n        derivedStateOf {\n            (if (playback?.paused == true) frame.drawn else frame.committed)\n                ?.layoutInput?.text ?: if (playback?.paused == true) AnnotatedString("") else latestCandidateText\n        }\n    }', leaf)
+        native_input = leaf.split('val displayedText by remember(', 1)[1].split('val candidateText =', 1)[0]
+        for token in ('derivedStateOf {',
+                      'if (playback?.paused == true) frame.drawn?.layoutInput?.text ?: AnnotatedString("")',
+                      'frame.coordinates?.takeIf { it.isAttached }',
+                      'measurer.measure(latestCandidateText, style, softWrap = softWrap,',
+                      'constraints = previous.layoutInput.constraints.copy(minHeight = 0)',
+                      'clearance.fits(coordinates, prepared.size.height)',
+                      'else frame.committed?.layoutInput?.text ?: latestCandidateText'):
+            self.assertIn(token, native_input)
+        for forbidden in ('frame.committed =', 'frame.drawn =', 'frame.rendered =',
+                          'publication?.setPending', 'painted[paintOffset] ='):
+            self.assertNotIn(forbidden, native_input)
         self.assertIn("playback?.paused == true -> frame.drawn", leaf)
         self.assertIn('val candidateText = if (playback?.paused == true) displayedText else text', leaf)
         self.assertIn("measurer.measure(candidateText, style", leaf)

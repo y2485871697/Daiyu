@@ -10,7 +10,13 @@ class MarkdownColdStartContract(unittest.TestCase):
     def test_pending_body_has_no_loading_status_or_raw_fallback(self):
         source = (BASE / 'MessageMarkdown.kt').read_text()
         pending = source.split('internal fun ProjectedMessageMarkdown(', 1)[1].split('internal fun ParsedMessageMarkdown(', 1)[0]
-        self.assertIn('if (body == null) Box(modifier)', pending)
+        self.assertIn('private class MarkdownBodyGeometry { var heightPx = 0 }', source)
+        self.assertIn('remember(MarkdownParserIdentity(LocalMarkdownParser.current)) { MarkdownBodyGeometry() }', pending)
+        self.assertIn('if (body == null) Box(Modifier.height(with(LocalDensity.current) { geometry.heightPx.toDp() }).then(modifier))', pending)
+        self.assertIn('else Box(Modifier.onSizeChanged { geometry.heightPx = it.height }, propagateMinConstraints = true)', pending)
+        ready = pending.split('else Box(', 1)[1].split('internal fun rememberMarkdownBodySnapshot', 1)[0]
+        self.assertNotIn('heightPx.toDp()', ready)
+        self.assertIn('ParsedMessageMarkdown(body.text, body.blocks, modifier,', ready)
         self.assertNotIn('MarkdownBodyLoading', source)
         self.assertNotIn('markdown-pending', source)
         self.assertNotIn('正在加载消息', source)

@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.Composable
@@ -334,6 +335,99 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             body("empty-to-body", "First body.").assertIsDisplayed()
             ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertIsDisplayed()
         } finally { release.countDown() }
+    }
+
+    fun testPendingReplacementRetainsOnlyMeasuredGeometryAndReleasesItForNewAst() {
+        val original = "## Original heading\n\n" + "Original paragraph with enough words to wrap. ".repeat(5)
+        val parser = defaultMarkdownParser
+        var source by mutableStateOf(original)
+        var blocks by mutableStateOf<List<MarkdownBlock>?>(parser(original))
+        var owner by mutableStateOf("same")
+        var configured by mutableStateOf(parser)
+        var paddingOrder by mutableStateOf(0)
+        val visibility = mutableStateOf(Int.MAX_VALUE)
+        show {
+            CompositionLocalProvider(LocalMarkdownParser provides configured) {
+                androidx.compose.runtime.key(owner) {
+                    Box(Modifier.width(240.dp).testTag("replacement-host")) {
+                        val tagged = Modifier.testTag("replacement-geometry")
+                        val bodyModifier = when (paddingOrder) {
+                            1 -> tagged.padding(vertical = 9.dp)
+                            2 -> Modifier.padding(vertical = 9.dp).then(tagged)
+                            else -> tagged
+                        }
+                        ProjectedMessageMarkdown(source, blocks,
+                            Modifier.width(240.dp).then(bodyModifier), visibility = visibility)
+                    }
+                }
+            }
+        }
+        fun height() = ui.onNodeWithTag("replacement-host", useUnmergedTree = true).fetchSemanticsNode().size.height
+        val measured = height()
+        assertTrue(measured > 0)
+        val auto = ui.mainClock.autoAdvance
+        ui.mainClock.autoAdvance = false
+        try {
+            for (pending in listOf("**replacement**", "## Ori", "")) {
+                mainThread { source = pending; blocks = null }
+                repeat(3) {
+                    ui.mainClock.advanceTimeByFrame()
+                    ui.waitForIdle()
+                    assertEquals("Pending body retains only its last measured geometry", measured, height())
+                    ui.onAllNodesWithText("Original heading", useUnmergedTree = true).assertCountEquals(0)
+                    if (pending.isNotEmpty()) ui.onAllNodesWithText(pending, useUnmergedTree = true).assertCountEquals(0)
+                }
+            }
+            mainThread { source = "Short"; blocks = parser(source) }
+            ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            val short = height()
+            assertTrue("A new AST must use its natural smaller height", short in 1 until measured)
+            mainThread { source = ""; blocks = emptyList() }
+            ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            assertEquals(0, height())
+            mainThread { source = "pending after clear"; blocks = null }
+            ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            assertEquals("A cleared body cannot resurrect an older occupied height", 0, height())
+            mainThread { source = original; blocks = parser(original) }
+            ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            assertEquals(measured, height())
+            mainThread { source = "Hidden paragraph"; blocks = parser(source); visibility.value = 0 }
+            ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            assertEquals("An undisplayed single paragraph has no occupied height", 0, height())
+            ui.onNodeWithTag("replacement-geometry", useUnmergedTree = true).assertExists()
+            ui.onAllNodesWithText("Hidden paragraph", useUnmergedTree = true).assertCountEquals(0)
+            mainThread { source = "pending after hidden"; blocks = null }
+            ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            assertEquals("A hidden paragraph cannot lend its predecessor's height", 0, height())
+            mainThread { source = original; blocks = parser(original); visibility.value = Int.MAX_VALUE }
+            ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            assertEquals(measured, height())
+            mainThread { source = "pending owner"; blocks = null; owner = "new" }
+            ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            assertEquals("A new owner cannot borrow another body's geometry", 0, height())
+            mainThread { source = original; blocks = parser(original) }
+            ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            assertEquals(measured, height())
+            mainThread { source = "pending parser"; blocks = null; configured = { parser(it) } }
+            ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+            assertEquals("Parser identity changes discard old geometry", 0, height())
+            for (order in listOf(1, 2)) {
+                mainThread { paddingOrder = order; configured = parser; source = original; blocks = parser(original) }
+                ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                val paddedHeight = height()
+                val taggedHeight = ui.onNodeWithTag("replacement-geometry", useUnmergedTree = true).fetchSemanticsNode().size.height
+                assertTrue("Ready body must include vertical padding", paddedHeight > measured)
+                mainThread { source = "padded pending replacement"; blocks = null }
+                ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                assertEquals("Padding order $order must preserve the total occupied height", paddedHeight, height())
+                assertEquals("Padding order $order must preserve tagged-node height", taggedHeight,
+                    ui.onNodeWithTag("replacement-geometry", useUnmergedTree = true).fetchSemanticsNode().size.height)
+                ui.onAllNodesWithText("Original heading", useUnmergedTree = true).assertCountEquals(0)
+                mainThread { source = "Short"; blocks = parser(source) }
+                ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                assertTrue("A smaller AST must release padded geometry", height() in 1 until paddedHeight)
+            }
+        } finally { ui.mainClock.autoAdvance = auto }
     }
 
     fun testColdPendingTurnReplacementCannotBorrowAnotherAnswersBodyOrActions() {

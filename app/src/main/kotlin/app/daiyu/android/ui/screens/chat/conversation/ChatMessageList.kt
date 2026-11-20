@@ -465,7 +465,8 @@ internal fun ChatMessageList(
     val currentAssistants by rememberUpdatedState(assistantTurns)
     val workflowAdmissions = remember(revealResetEpoch) { WorkflowVisualAdmissions(assistantTurns.keys) }
     assistantTurns.values.forEach { turn ->
-        workflowAdmissions.scope(turn.listKey, initialPositionPending, live = turn.status == RunStatus.RUNNING)
+        workflowAdmissions.scope(turn.listKey, initialPositionPending,
+            live = turn.status == RunStatus.RUNNING || replyPlayback?.control?.pending(turn) == true)
     }
     replyPlayback?.let { playback ->
         assistantTurns.values.firstOrNull(playback.control::matches)?.let { turn ->
@@ -906,7 +907,8 @@ internal fun ChatMessageList(
             Triple(canFollowBottom(), Triple(index, last?.offset ?: Int.MIN_VALUE, last?.size ?: 0),
                 Triple(layout.viewportSize, Triple(layout.beforeContentPadding, layout.afterContentPadding,
                     currentOcclusionPx + currentFollowClearancePx),
-                    Triple(resumeReady, currentNestedTail.contentHeight, currentNestedTail.textClearance.typingPending)))
+                    Triple(resumeReady, currentNestedTail.contentHeight,
+                        Triple(currentTailKey, currentNestedTail, currentNestedTail.textClearance.typingPending))))
         }.collect { target ->
             if (target == null) {
                 motion.reset()
@@ -989,15 +991,9 @@ internal fun ChatMessageList(
                     }
                     resumeFollowPending = false
                     if (currentNestedTail.textClearance.typingPending) {
-                        withFrameNanos { frameTimeNanos ->
-                            if (motionOwner != currentTailKey) {
-                                motion.reset()
-                                return@withFrameNanos
-                            }
-                            motion.step(0f, frameTimeNanos, currentDensity,
-                                continuous = currentNestedTail.textClearance.typingPending)
-                        }
-                        continue
+                        // There is no measured scroll debt; geometry or typing completion will wake us.
+                        motion.pauseFrameClock()
+                        return@collect
                     }
                     currentNestedTail.textClearance.finishPacedFollow()
                     motion.reset()
@@ -1425,8 +1421,7 @@ internal fun AssistantTurn(
         if (bodyVisible) emptySet() else ordered.body.filterIsInstance<MessageContentUi.Text>().map { it.itemId }.toSet()
     }
     val initialBaseline = remember(turn.listKey, visualScope, revealResetEpoch) {
-        visualScope?.bodyBaseline(turn.listKey, bodySources,
-            turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty())
+        visualScope?.bodyBaseline(turn.listKey, bodySources)
     }
     val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,
         terminal = generationComplete, resetEpoch = revealResetEpoch,

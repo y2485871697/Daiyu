@@ -111,6 +111,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         }
         val finalMessage = message(emptyList(), listOf(ReportedReasoning("first-final", text, 1100L, blockOffset = 0)))
         val owner = mapped(finalMessage).listKey
+        val playback = ReplyPlayback(ReplyPresentationControl(owner, initiallyLive = true), runtimePaused = false)
         val bodyTag = "reported-reasoning-content:$owner:reasoning:first-final"
         val inner = "reported-reasoning-header:$owner:reasoning:first-final"
         val advances = java.util.concurrent.atomic.AtomicInteger()
@@ -131,7 +132,8 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                 Box(Modifier.size(320.dp, 480.dp)) {
                     ChatMessageList(listOf<ChatTurnUi>(ChatTurnUi.User("history", "历史")) +
                         (source?.let { listOf(mapped(it)) } ?: emptyList()),
-                        ChatScreenActions(onVisibleTextAdvance = { advances.incrementAndGet() }), scrollRequest = ChatScrollRequest(1))
+                        ChatScreenActions(onVisibleTextAdvance = { advances.incrementAndGet() }), scrollRequest = ChatScrollRequest(1),
+                        replyPlayback = playback)
                 }
             }
         } }
@@ -141,20 +143,28 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             mainThread { source = finalMessage }
             var partialFrames = 0
             val terminalFrames = ArrayDeque<String>()
+            fun checkTerminalFrame(shown: String) {
+                completed()
+                terminalFrames.addLast("clock=${ui.mainClock.currentTime} shown=${shown.length}/${text.length} " +
+                    "feedback=${advances.get()} partialFrames=$partialFrames")
+                if (terminalFrames.size > 8) terminalFrames.removeFirst()
+                assertTrue("Only received terminal text may be revealed", text.startsWith(shown))
+                if (shown.length in 1 until text.length) {
+                    partialFrames++
+                    assertDisclosure("work-process-header", true)
+                    assertDisclosure(inner, true)
+                }
+            }
             try {
                 ui.waitUntil(5_000) {
                     ui.mainClock.advanceTimeByFrame()
-                    completed()
                     val shown = body()
-                    terminalFrames.addLast("clock=${ui.mainClock.currentTime} shown=${shown.length}/${text.length} " +
-                        "feedback=${advances.get()} partialFrames=$partialFrames")
-                    if (terminalFrames.size > 8) terminalFrames.removeFirst()
-                    assertTrue("Only received terminal text may be revealed", text.startsWith(shown))
-                    if (shown.length in 1 until text.length) {
-                        partialFrames++
-                        assertDisclosure("work-process-header", true)
-                        assertDisclosure(inner, true)
-                    }
+                    checkTerminalFrame(shown)
+                    shown.isNotEmpty()
+                }
+                assertTrue("Admission must expose a strict prefix", body().length in 1 until text.length)
+                awaitActiveDrain(text, ::body, advances::get) { shown ->
+                    checkTerminalFrame(shown)
                     shown == text
                 }
             } catch (timeout: ComposeTimeoutException) {
@@ -243,22 +253,33 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             assertTrue("The first live narration must actually advance", advances.get() > 0)
             var narrationCompleted = false
             val handoffFrames = ArrayDeque<String>()
+            fun checkHandoffFrame(current: String, body: String) {
+                val toolExists = ui.onAllNodesWithTag("tool-step:admission").fetchSemanticsNodes().isNotEmpty()
+                handoffFrames.addLast("clock=${ui.mainClock.currentTime} narration=${current.length}/${narration.length} " +
+                    "narrationCompleted=$narrationCompleted tool=$toolExists body=${body.length}/${answer.length} " +
+                    "feedback=${advances.get()}")
+                if (handoffFrames.size > 8) handoffFrames.removeFirst()
+                if (current.isNotEmpty() && current.length < narration.length) {
+                    assertDisclosure("work-process-header", expanded = true)
+                    assertTrue("The answer must wait until narration finishes", body.isEmpty())
+                }
+                if (toolExists) assertTrue("No answer prefix may overlap a closing tool", body.isEmpty())
+            }
             try {
+                awaitActiveDrain(narration, { shown(narrationMatcher) }, advances::get) { current ->
+                    if (current == narration) narrationCompleted = true
+                    checkHandoffFrame(current, shown(bodyMatcher))
+                    narrationCompleted
+                }
                 ui.waitUntil(10_000) {
                     ui.mainClock.advanceTimeByFrame()
-                    val current = shown(narrationMatcher)
-                    if (current == narration) narrationCompleted = true
-                    val toolExists = ui.onAllNodesWithTag("tool-step:admission").fetchSemanticsNodes().isNotEmpty()
                     val body = shown(bodyMatcher)
-                    handoffFrames.addLast("clock=${ui.mainClock.currentTime} narration=${current.length}/${narration.length} " +
-                        "narrationCompleted=$narrationCompleted tool=$toolExists body=${body.length}/${answer.length} " +
-                        "feedback=${advances.get()}")
-                    if (handoffFrames.size > 8) handoffFrames.removeFirst()
-                    if (current.isNotEmpty() && current.length < narration.length) {
-                        assertDisclosure("work-process-header", expanded = true)
-                        assertTrue("The answer must wait until narration finishes", body.isEmpty())
-                    }
-                    if (toolExists) assertTrue("No answer prefix may overlap a closing tool", body.isEmpty())
+                    checkHandoffFrame(shown(narrationMatcher), body)
+                    body.isNotEmpty()
+                }
+                assertTrue("Answer admission must expose a strict prefix", shown(bodyMatcher).length in 1 until answer.length)
+                awaitActiveDrain(answer, { shown(bodyMatcher) }, advances::get) { body ->
+                    checkHandoffFrame(shown(narrationMatcher), body)
                     body == answer
                 }
             } catch (timeout: ComposeTimeoutException) {
@@ -423,7 +444,12 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
                     if (shown.length in firstChunk.length + 1 until answer.length) suffixTyped = true
                     drainFrames.addLast("clock=${ui.mainClock.currentTime} shown=${shown.length}/${answer.length} feedback=${advances.get()}" + " settled=${settled.get()}")
                     if (drainFrames.size > 8) drainFrames.removeFirst()
-                    shown == answer && settled.get()
+                    shown == answer
+                }
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    assertEquals("Completion wait cannot change the fully shown answer", answer, readShown())
+                    settled.get()
                 }
             } catch (timeout: androidx.compose.ui.test.ComposeTimeoutException) {
                 throw AssertionError("answer suffix drain timed out: frames=$drainFrames" + "\n${paintDump()}", timeout)

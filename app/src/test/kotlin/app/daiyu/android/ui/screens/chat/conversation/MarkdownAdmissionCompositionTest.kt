@@ -86,6 +86,91 @@ class MarkdownAdmissionCompositionTest {
         } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
     }
 
+    @Test fun paintDebtSuspendsFrameRequestsAndWakesForReleaseDisableAndAppend() = runBlocking {
+        val clock = BroadcastFrameClock()
+        val recomposer = Recomposer(coroutineContext + clock)
+        val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
+        val composition = Composition(NoNodes(), recomposer)
+        val sources = mutableStateOf(emptyList<MarkdownTypingSource>())
+        val parsed = mutableStateOf(projectMarkdown(emptyList()))
+        val enabled = mutableStateOf(true)
+        val admission = mutableStateOf(true)
+        val mounted = mutableStateOf(true)
+        val owner = Any()
+        var reveal: MarkdownReveal? = null
+        var time = 1_000_000_000L
+        var callbacks = 0
+        suspend fun flush() {
+            Snapshot.sendApplyNotifications()
+            repeat(12) { yield() }
+        }
+        suspend fun frame() {
+            flush()
+            time += 16_000_000L
+            if (clock.hasAwaiters) clock.sendFrame(time)
+            repeat(12) { yield() }
+        }
+        try {
+            composition.setContent {
+                if (mounted.value) CompositionLocalProvider(LocalMarkdownReceiptClock provides { time }) {
+                    reveal = rememberMarkdownReveal(sources.value, parsed.value, streaming = true, terminal = false,
+                        enabled = enabled.value, awaitPaintAdmission = admission.value, onVisibleAdvance = { callbacks++ })
+                }
+            }
+            repeat(4) { frame() }
+            reveal!!.publication.setPending(owner, true)
+            sources.value = listOf(MarkdownTypingSource("answer", "abcdefgh"))
+            parsed.value = projectMarkdown(listOf("abcdefgh"))
+            repeat(4) { frame() }
+            assertEquals(0, reveal!!.limit("answer"))
+            assertEquals(0, callbacks)
+            assertFalse("Paint-only debt must suspend instead of requesting more animation frames", clock.hasAwaiters)
+            sources.value = listOf(MarkdownTypingSource("answer", "abcdefghijkl"))
+            parsed.value = projectMarkdown(listOf("abcdefghijkl"))
+            repeat(4) { frame() }
+            assertEquals(0, reveal!!.limit("answer"))
+            assertFalse("A replacement producer must preserve paint debt without spinning", clock.hasAwaiters)
+            reveal!!.publication.setPending(owner, false)
+            repeat(4) { frame() }
+            val prefix = reveal!!.limit("answer")
+            assertTrue("Releasing real paint debt must wake typing", prefix in 1 until 12)
+            reveal!!.publication.setPending(owner, true)
+            repeat(4) { frame() }
+            val frozen = reveal!!.limit("answer")
+            assertFalse(clock.hasAwaiters)
+            enabled.value = false
+            repeat(4) { frame() }
+            reveal!!.publication.setPending(owner, false)
+            repeat(4) { frame() }
+            assertEquals("Releasing debt while disabled cannot advance", frozen, reveal!!.limit("answer"))
+            reveal!!.publication.setPending(owner, true)
+            enabled.value = true
+            repeat(4) { frame() }
+            assertFalse(clock.hasAwaiters)
+            admission.value = false
+            var previous = frozen
+            repeat(160) {
+                frame()
+                val shown = reveal!!.limit("answer")
+                assertTrue("Disabling admission must still advance by at most one character", shown in previous..minOf(previous + 1, 12))
+                previous = shown
+            }
+            assertEquals(12, previous)
+            admission.value = true
+            sources.value = listOf(MarkdownTypingSource("answer", "abcdefghijklmnop"))
+            parsed.value = projectMarkdown(listOf("abcdefghijklmnop"))
+            repeat(4) { frame() }
+            assertFalse(clock.hasAwaiters)
+            val disposed = callbacks
+            mounted.value = false
+            repeat(4) { frame() }
+            reveal!!.publication.setPending(owner, false)
+            repeat(4) { frame() }
+            assertEquals("Disposal must cancel the suspended producer", disposed, callbacks)
+            assertFalse(clock.hasAwaiters)
+        } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
+    }
+
     @Test fun protectedBodyDoesNotConsumeItsFirstChunkBeforeContainerPlacement() = runBlocking {
         val clock = BroadcastFrameClock()
         val recomposer = Recomposer(coroutineContext + clock)

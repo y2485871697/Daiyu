@@ -85,9 +85,21 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('visibility = budget, paintOffset = paintOffset + offsets[column])', row)
         inline = ui.split('private fun MarkdownInlineText(', 1)[1].split('private fun MarkdownBlocks(', 1)[0]
         self.assertIn('ClearanceText(visible, paintOffset, modifier, style)', inline)
+        self.assertIn('if (limit <= 0) { Box(modifier); return }', inline)
         clearance = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun TextLayoutResult.canPaintPrefixOf', 1)[0]
         self.assertIn("val latestCandidateText by rememberUpdatedState(text)", clearance)
-        self.assertIn('val displayedText by remember(frame, playback) {\n        derivedStateOf {\n            (if (playback?.paused == true) frame.drawn else frame.committed)\n                ?.layoutInput?.text ?: if (playback?.paused == true) AnnotatedString("") else latestCandidateText\n        }\n    }', clearance)
+        native_input = clearance.split('val displayedText by remember(', 1)[1].split('val candidateText =', 1)[0]
+        for token in ('derivedStateOf {',
+                      'if (playback?.paused == true) frame.drawn?.layoutInput?.text ?: AnnotatedString("")',
+                      'frame.coordinates?.takeIf { it.isAttached }',
+                      'measurer.measure(latestCandidateText, style, softWrap = softWrap,',
+                      'constraints = previous.layoutInput.constraints.copy(minHeight = 0)',
+                      'clearance.fits(coordinates, prepared.size.height)',
+                      'else frame.committed?.layoutInput?.text ?: latestCandidateText'):
+            self.assertIn(token, native_input)
+        for forbidden in ('frame.committed =', 'frame.drawn =', 'frame.rendered =',
+                          'publication?.setPending', 'painted[paintOffset] ='):
+            self.assertNotIn(forbidden, native_input)
         self.assertIn('BasicText(displayedText', clearance)
         self.assertIn('clearance.fits(coordinates, candidate.size.height)', clearance)
         self.assertIn('clearance.fits(frame.coordinates, actual.size.height)', clearance)

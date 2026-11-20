@@ -49,12 +49,13 @@ class MarkdownReturnContract(unittest.TestCase):
         self.assertNotIn("catch (", self.projection)
 
     def test_uncached_streaming_geometry_and_current_readiness_are_not_replaced_by_plaintext(self):
-        for token in ["val body = rememberMarkdownBodySnapshot(text, blocks, sourceWindow)", "markdownBodySnapshot(text, blocks, published.body, sourceWindow)", "if (body == null) Box(modifier)",
-                      "ParsedMessageMarkdown(body.text, body.blocks, modifier, visibleCharacters, generationComplete && body.text == text, visibility)",
+        for token in ["val body = rememberMarkdownBodySnapshot(text, blocks, sourceWindow)", "markdownBodySnapshot(text, blocks, published.body, sourceWindow)", "if (body == null) Box(Modifier.height(with(LocalDensity.current) { geometry.heightPx.toDp() }).then(modifier))",
+                      "ParsedMessageMarkdown(body.text, body.blocks, modifier,\n            visibleCharacters, generationComplete && body.text == text, visibility)",
                       "else previous?.takeIf { text.startsWith(it.text) && markdownWindowsAppend(listOf(it.window), listOf(window)) }"]:
             self.assertIn(token, self.ui + self.projection)
+        self.assertIn('else Box(Modifier.onSizeChanged { geometry.heightPx = it.height }, propagateMinConstraints = true)', self.ui)
         self.assertIn("messageBodyStyle()", self.ui)
-        self.assertIn("remember(uriHandler, feedbackView)", self.ui)
+        self.assertIn("remember(uriHandler, feedbackView, textClearance)", self.ui)
         self.assertNotIn("rememberSaveable", self.cache)
 
     def test_kotlin_sources_cover_limits_identity_and_cancelled_work(self):

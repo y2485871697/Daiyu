@@ -14,8 +14,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import app.daiyu.android.domain.RunStatus
+import kotlinx.coroutines.flow.first
 
 @Stable
 internal class MarkdownReveal(
@@ -199,6 +201,13 @@ internal fun rememberMarkdownReveal(
         if (!canAdvance) { motion.pause(current); return@produceState }
         val end = maxOf(shown, current.boundary(minOf(current.total, advanceLimit)))
         while (shown < end) {
+            if (currentAwaitPaintAdmission && !publication.ready) {
+                // Only a real paint can release this debt; do not poll it with animation frames.
+                snapshotFlow {
+                    !currentAwaitPaintAdmission || publication.ready ||
+                        !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) || textClearance?.held == true
+                }.first { it }
+            }
             withFrameNanos { frameNanos ->
                 shown = when {
                     !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> {

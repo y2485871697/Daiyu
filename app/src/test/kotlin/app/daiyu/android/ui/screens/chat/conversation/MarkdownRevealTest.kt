@@ -945,14 +945,14 @@ class MarkdownRevealTest {
         assertFalse("A paged completed thought is not a first live presentation",
             history.claimReasoning("paged-history", "thought"))
         val sources = listOf(source("already received"))
-        assertEquals(sources, history.bodyBaseline("paged-history", sources, live = true))
+        assertEquals(sources, history.bodyBaseline("paged-history", sources))
         assertSame(history, admissions.scope("paged-history", baseline = false))
         val active = admissions.scope("active", baseline = false, live = true)
         assertSame("Terminal transition must retain the existing live scope",
             active, admissions.scope("active", baseline = false, live = false))
         assertTrue("A genuinely new live thought still receives its typewriter ticket",
             active.claimReasoning("active", "thought"))
-        assertEquals(emptyList<MarkdownTypingSource>(), active.bodyBaseline("active", sources, live = true))
+        assertEquals(emptyList<MarkdownTypingSource>(), active.bodyBaseline("active", sources))
     }
 
     @Test fun lowReceiptRateKeepsFractionalProgressAcrossRefreshRates() {

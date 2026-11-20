@@ -311,11 +311,11 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             val candidate = measurer.measure(candidateText, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
             frame.layout = candidate
             val future = nextLineText?.let {
-                lineMeasurer.measure(it, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
+                lineMeasurer.measure(it, style, softWrap = softWrap, maxLines = candidate.lineCount + 1,
+                    constraints = constraints.copy(minHeight = 0))
             }
             frame.nextAdvance = future?.takeIf { it.lineCount > candidate.lineCount }?.let {
-                kotlin.math.ceil(it.getLineBottom(candidate.lineCount) -
-                    it.getLineBottom(candidate.lineCount - 1)).toInt()
+                (it.size.height - candidate.size.height).coerceAtLeast(0)
             } ?: 0
             val drawn = frame.drawn?.takeIf { it.canPaintPrefixOf(candidate) && it.layoutInput.text.isNotEmpty() }
             if (playback?.paused != true &&
@@ -353,7 +353,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
 
 internal fun markdownLineSpace(nextAdvance: Int, bodyEnd: Float?, drawnBottom: Float?): Int =
     if (bodyEnd == null || drawnBottom == null) 0 else
-        kotlin.math.floor((nextAdvance - (bodyEnd - drawnBottom).coerceAtLeast(0f)).coerceAtLeast(0f)).toInt()
+        kotlin.math.ceil((nextAdvance - (bodyEnd - drawnBottom).coerceAtLeast(0f)).coerceAtLeast(0f)).toInt()
 
 internal fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boolean {
     val previous = layoutInput

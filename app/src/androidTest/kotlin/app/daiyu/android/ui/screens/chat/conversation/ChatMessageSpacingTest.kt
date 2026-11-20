@@ -97,7 +97,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     }
                 }
                 original?.addSuppressed(AssertionError(
-                    "First same-item append diagnostics ($label; max 32 samples)\n$dump"))
+                    "Same-item append diagnostics ($label; max 32 samples)\n$dump"))
             } catch (diagnosticFailure: Throwable) {
                 val failure = original
                 if (failure != null) failure.addSuppressed(diagnosticFailure) else throw diagnosticFailure
@@ -242,14 +242,16 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     first.copy(finalText = first.finalText + "\n\n" + answer("流式增高末尾", 30)))) }
                 assertCompactTail("流式增高末尾")
             }
-            ui.onNodeWithTag("chat-messages").performTouchInput { click(center) }
-            val grown = screen.turns.last() as ChatTurnUi.Assistant
-            mainThread { screen = screen.copy(turns = listOf(screen.turns.first(),
-                grown.copy(finalText = grown.finalText + "\n\n" + answer("触摸后末尾", 30)))) }
-            ui.waitUntil(5_000) {
-                ui.onAllNodesWithText("触摸后末尾", substring = true).fetchSemanticsNodes().isNotEmpty()
+            traceFirstGrowth("scale=$scale detached append") {
+                ui.onNodeWithTag("chat-messages").performTouchInput { click(center) }
+                val grown = screen.turns.last() as ChatTurnUi.Assistant
+                mainThread { screen = screen.copy(turns = listOf(screen.turns.first(),
+                    grown.copy(finalText = grown.finalText + "\n\n" + answer("触摸后末尾", 30)))) }
+                ui.waitUntil(5_000) {
+                    ui.onAllNodesWithText("触摸后末尾", substring = true).fetchSemanticsNodes().isNotEmpty()
+                }
+                awaitVisualIdle()
             }
-            awaitVisualIdle()
             ui.onNodeWithText("触摸后末尾", substring = true).assertIsNotDisplayed()
             mainThread { screen = screen.copy(scrollRequest = ChatScrollRequest(2)) }
             assertCompactTail("触摸后末尾")

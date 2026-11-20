@@ -82,7 +82,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         clearance = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun TextLayoutResult.canPaintPrefixOf', 1)[0]
         for token in ('val candidateText = if (playback?.paused == true) displayedText else text',
                       'frame.layout = candidate', 'val future = nextLineText?.let {',
-                      'it.lineCount > candidate.lineCount', 'it.getLineBottom(candidate.lineCount)',
+                      'it.lineCount > candidate.lineCount', '(it.size.height - candidate.size.height).coerceAtLeast(0)',
                       'if (playback?.paused != true &&', 'clearance.prepareLine(owner, 0)',
                       'BasicText(displayedText, modifier.layout',
                       'actual.size.height <= available + .01f',
@@ -94,7 +94,12 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertNotIn('== text', publication)
         self.assertNotIn('frame.layout = future', clearance)
         self.assertNotIn('BasicText(nextLineText', clearance)
-        self.assertIn('it.getLineBottom(candidate.lineCount - 1)', clearance)
+        self.assertIn('maxLines = candidate.lineCount + 1', clearance)
+        self.assertNotIn('getLineBottom(', clearance)
+        future = clearance.split('val future = nextLineText?.let {', 1)[1].split('val drawn = frame.drawn?.takeIf', 1)[0]
+        self.assertIn('lineMeasurer.measure(it, style, softWrap = softWrap, maxLines = candidate.lineCount + 1,', future)
+        self.assertIn('constraints = constraints.copy(minHeight = 0)', future)
+        self.assertIn('(it.size.height - candidate.size.height).coerceAtLeast(0)', future)
         self.assertNotIn('val bottomPadding =', clearance)
         self.assertIn('val drawn = frame.drawn?.takeIf { it.canPaintPrefixOf(candidate)', clearance)
         self.assertIn('frame.nextAdvance = future?.takeIf { it.lineCount > candidate.lineCount }', clearance)
@@ -116,7 +121,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertNotIn('contentHeight', body_end)
         line_space = ui.split('internal fun markdownLineSpace(', 1)[1].split('internal fun TextLayoutResult.canPaintPrefixOf', 1)[0]
         self.assertIn('if (bodyEnd == null || drawnBottom == null) 0', line_space)
-        self.assertIn('kotlin.math.floor((nextAdvance - (bodyEnd - drawnBottom).coerceAtLeast(0f)).coerceAtLeast(0f)).toInt()', line_space)
+        self.assertIn('kotlin.math.ceil((nextAdvance - (bodyEnd - drawnBottom).coerceAtLeast(0f)).coerceAtLeast(0f)).toInt()', line_space)
 
 
     def test_table_cell_budget_and_visible_semantics_are_preserved(self):

@@ -34,6 +34,10 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -67,6 +71,54 @@ class MessageMarkdownTest : WiredActivityTestCase() {
     private val reference = MessageImageReference(owner, "00000000-0000-0000-0000-000000000001",
         "image/png", 10, "b".repeat(64), 2, 2)
     private val image = MessageImageUi(owner, reference)
+
+    fun testNextLineBudgetUsesOnlyTheNextNativeLayoutHeight() {
+        show {
+            val measurer = rememberTextMeasurer(cacheSize = 0)
+            SideEffect {
+                val style = TextStyle(fontFamily = FontFamily.Default, fontSize = 16.sp, lineHeight = 26.sp)
+                val constraints = Constraints(maxWidth = 120)
+                for (fontScale in listOf(1f, .8f)) {
+                    for (source in listOf(List(6) { "Ag" }.joinToString("\n"), "W".repeat(160))) {
+                        val label = "fontScale=$fontScale explicit=${source.contains('\n')}"
+                        fun measure(text: String, maxLines: Int = Int.MAX_VALUE): TextLayoutResult = measurer.measure(
+                            AnnotatedString(text), style, softWrap = true, maxLines = maxLines,
+                            constraints = constraints, density = Density(1f, fontScale), layoutDirection = LayoutDirection.Ltr)
+                        val full = measure(source)
+                        assertTrue("$label must contain more than three native lines", full.lineCount > 3)
+                        val native = (1..3).map { lines ->
+                            measure(source.take(full.getLineEnd(lines - 1, visibleEnd = true))).also {
+                                assertEquals("$label prefix native line count", lines, it.lineCount)
+                            }
+                        }
+                        for (index in 0..1) {
+                            val candidate = native[index]
+                            val next = native[index + 1]
+                            val future = measure(source, maxLines = candidate.lineCount + 1)
+                            assertEquals(candidate.lineCount + 1, future.lineCount)
+                            assertEquals("$label capped layout must match the next native prefix", next.size.height, future.size.height)
+                            val growth = next.size.height - candidate.size.height
+                            val advance = (future.size.height - candidate.size.height).coerceAtLeast(0)
+                            assertTrue("$label another native line must grow the layout", growth > 0)
+                            assertEquals(growth, advance)
+                            assertTrue("$label must not reserve the rest of the received body", full.size.height > future.size.height)
+                            val bottom = candidate.size.height.toFloat()
+                            for (existing in listOf(0f, .25f, .75f)) {
+                                val reserve = markdownLineSpace(advance, bottom + existing, bottom)
+                                assertTrue("$label reserve must cover native growth", existing + reserve >= growth.toFloat())
+                                assertTrue("$label reserve is the smallest sufficient integer", existing + reserve - 1f < growth.toFloat())
+                            }
+                        }
+                        val one = native.first()
+                        val unchanged = measure(one.layoutInput.text.text, maxLines = one.lineCount + 1)
+                        assertEquals("$label a line cap alone must not add height", one.size.height, unchanged.size.height)
+                        assertEquals(0, markdownLineSpace((unchanged.size.height - one.size.height).coerceAtLeast(0),
+                            one.size.height.toFloat(), one.size.height.toFloat()))
+                    }
+                }
+            }
+        }
+    }
 
     fun testNativeTextAndCandidateCompareDensityMetricsInsteadOfProviderObjects() {
         var native: TextLayoutResult? = null

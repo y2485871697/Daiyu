@@ -157,6 +157,7 @@ internal class MarkdownPaintSlotsProbe {
                 appendLine("PAINT ${location(paint)} candidate=${describe(candidate)} " +
                     "committed=${describe(layout(paint, "committed"))} rendered=${describe(layout(paint, "rendered"))} " +
                     "drawn=${describe(drawn)} attached=$attached height=$height cachedAvailable=${field(paint, "availableHeight")} " +
+                    "nextAdvance=${field(paint, "nextAdvance")} " +
                     "textEqual=${drawn != null && drawn.layoutInput.text == candidate?.layoutInput?.text} " +
                     "prefix=${drawn != null && candidate != null && drawn.canPaintPrefixOf(candidate)}")
                 val group = paths[paint]?.substringBeforeLast(':')
@@ -189,7 +190,9 @@ internal class MarkdownPaintSlotsProbe {
                     val top = if (attached && list?.isAttached == true)
                         list.localPositionOf(coordinates!!, Offset.Zero).y else null
                     appendLine(" GEOMETRY ${id(clearance)} top=$top held=${clearance.held} " +
-                        "available=${clearance.availableHeight(coordinates)} " +
+                        "available=${clearance.availableHeight(coordinates)} bodyEnd=${clearance.bodyEndInLeaf(coordinates)} " +
+                        "lineSpace=${field(clearance, "lineSpace")} positioned=${field(clearance, "positioned")} " +
+                        "protectionOn=${field(clearance, "geometry") != null} " +
                         "above=${clearance.whollyAboveViewport(coordinates, height)} " +
                         "candidateFits=${candidate?.let { clearance.fits(coordinates, it.size.height) }}")
                 }

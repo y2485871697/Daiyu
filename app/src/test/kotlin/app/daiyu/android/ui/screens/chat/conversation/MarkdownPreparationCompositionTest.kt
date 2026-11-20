@@ -108,8 +108,12 @@ class MarkdownPreparationCompositionTest {
         assertEquals(8, markdownLineSpace(26, 37f, 19f))
         assertEquals(0, markdownLineSpace(26, 71f, 19f))
         assertEquals(26, markdownLineSpace(26, 19f, 45f))
-        assertEquals("Fractional existing space cannot round the budget upward", 13,
+        assertEquals("Fractional trailing space must not underreserve the next native layout", 14,
             markdownLineSpace(26, 31.25f, 19f))
+        assertEquals("A quarter pixel of trailing space cannot pay a full native pixel", 26,
+            markdownLineSpace(26, 19.25f, 19f))
+        assertEquals("Exact integer trailing space is still fully consumed", 25,
+            markdownLineSpace(26, 20f, 19f))
     }
 
     @Test fun pendingAppendsDoNotPrepareTheSameDisplayedAstAgain() = verifyPendingAppends(false)

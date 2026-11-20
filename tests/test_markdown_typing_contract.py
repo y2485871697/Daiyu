@@ -49,16 +49,35 @@ class MarkdownTypingContract(unittest.TestCase):
         publication = self.typing.split("internal class MarkdownPaintPublication {", 1)[1].split("\ninternal val LocalMarkdownPaintPublication", 1)[0]
         self.assertIn("private val readyState = MutableStateFlow(true)", publication)
         self.assertIn("val readySignal = readyState.asStateFlow()", publication)
-        self.assertIn("val ready: Boolean get() = pending.isEmpty()", publication)
+        self.assertIn("val ready: Boolean get() = pending.isEmpty() && installing.isEmpty()", publication)
         pending = publication.split("fun setPending(owner: Any, value: Boolean) {", 1)[1].split("\n    }", 1)[0]
         self.assertIn("if (value) pending[owner] = Unit else pending.remove(owner)", pending)
-        self.assertIn("readyState.value = pending.isEmpty()", pending)
+        self.assertIn("readyState.value = ready", pending)
         self.assertLess(pending.index("pending.remove(owner)"), pending.index("readyState.value"))
         for forbidden in ("launch", "snapshotFlow", "withFrameNanos", "motion."):
             self.assertNotIn(forbidden, pending)
         for forbidden in ("motion.advance(", "motion.pause(", "motion.hold(", "value =", "withFrameNanos"):
             self.assertNotIn(forbidden, waiting)
         self.assertIn("currentAwaitPaintAdmission && !publication.ready -> motion.visible(current)", callback)
+
+    def test_frontier_reservation_precedes_publish_and_requires_exact_installation(self):
+        publication = self.typing.split("internal class MarkdownPaintPublication {", 1)[1].split("\ninternal val LocalMarkdownPaintPublication", 1)[0]
+        self.assertIn("private val installing = mutableStateMapOf<String, Int>()", publication)
+        self.assertIn("if (installingTarget === target) return", publication)
+        self.assertIn("if (installingTarget !== target || installing[id] != visible) return", publication)
+        callback = self.typing.split("withFrameNanos { frameNanos ->", 1)[1].split("\n            }", 1)[0]
+        reserve = "if (currentAwaitPaintAdmission) publication.reserve(current, before, shown)"
+        self.assertIn(reserve, callback)
+        self.assertLess(callback.index("motion.advance("), callback.index(reserve))
+        self.assertLess(callback.index(reserve), callback.index("value = MarkdownTypingFrame(current, shown)"))
+        self.assertIn("ready && target.parts.all", publication)
+        markdown = (BASE / "MessageMarkdown.kt").read_text()
+        renderer = markdown.split("internal fun RevealedMessageMarkdown(", 1)[1].split("private class MarkdownBodyGeometry", 1)[0]
+        self.assertEqual(2, renderer.count("onCurrentBodyInstalled = { MarkdownPaintApplied(reveal, partId) }"))
+        projected = markdown.split("internal fun ProjectedMessageMarkdown(", 1)[1].split("internal fun rememberMarkdownBodySnapshot(", 1)[0]
+        self.assertIn("if (blocks != null && body.text == text && body.window == sourceWindow) onCurrentBodyInstalled()", projected)
+        self.assertLess(projected.index("ParsedMessageMarkdown("), projected.index("onCurrentBodyInstalled()"))
+        self.assertIn("val visible = reveal.limit(partId)\n    SideEffect { reveal.applied(partId, visible) }", renderer)
 
     def test_full_sources_still_project_once_not_per_frame(self):
         self.assertIn("val projection = rememberMarkdownProjection(sources, streaming = turn.status == RunStatus.RUNNING, windows = bodySources.map { it.window })", self.chat)
@@ -136,7 +155,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertEqual(2, assistant.count('textBody = textBody'))
         self.assertIn('MessageContent(ordered.leading, actions, imageLoader, markdown = true, textBody = textBody)', assistant)
         self.assertIn('WorkflowNarrationContent(steps, plainText, textSources,', self.chat)
-        self.assertIn("ProjectedMessageMarkdown(text, blocks, presented, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)", self.ui)
+        self.assertIn("ProjectedMessageMarkdown(text, blocks, presented, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow,\n            onCurrentBodyInstalled = { MarkdownPaintApplied(reveal, partId) })", self.ui)
         content = (BASE / "MessageContent.kt").read_text()
         self.assertIn('key(block.workflowKey(index))', content)
         self.assertIn("textBody: @Composable (MessageContentUi.Text, Modifier)", content)

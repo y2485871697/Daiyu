@@ -36,6 +36,91 @@ class MarkdownAdmissionCompositionTest {
         override fun onClear() = Unit
     }
 
+    @Test fun frontierInstallationWaitsForItsExactTargetAndEveryPaintOwner() {
+        val publication = MarkdownPaintPublication().apply { active = true }
+        val target = MarkdownTypingTarget(listOf(MarkdownTypingPart(MarkdownTypingSource("answer", "abcd"), 4)),
+            0, streaming = true, terminal = false)
+        val old = MarkdownTypingTarget(target.parts, 0, streaming = true, terminal = false)
+        val first = Any()
+        val second = Any()
+        publication.start(target)
+        publication.reserve(target, 0, 1)
+        assertFalse("Publishing a frontier must close admission before leaf installation", publication.readySignal.value)
+        publication.setPending(first, false)
+        publication.applied(old, "answer", 1)
+        publication.applied(target, "answer", 0)
+        assertFalse("An old draw or mismatched frontier cannot acknowledge new installation", publication.ready)
+        publication.setPending(first, true)
+        publication.setPending(second, true)
+        publication.start(target)
+        assertFalse("Restarting the same target must preserve installation debt", publication.ready)
+        publication.applied(target, "answer", 1)
+        assertFalse("Installation does not replace real paint admission", publication.ready)
+        publication.setPending(first, false)
+        assertFalse(publication.ready)
+        publication.setPending(second, false)
+        assertTrue(publication.readySignal.value)
+        publication.reserve(target, 1, 2)
+        publication.applied(target, "answer", 1)
+        assertFalse("A late acknowledgement cannot release the next frontier", publication.ready)
+        publication.start(old)
+        assertTrue("A replacement producer cancels only the obsolete installation", publication.ready)
+        publication.reserve(target, 1, 2)
+        assertTrue("A replaced target cannot reserve the current producer", publication.ready)
+    }
+
+    @Test fun frontierPublicationDoesNotRequestAnExtraFrameBeforeLeafInstallation() = runBlocking {
+        val clock = BroadcastFrameClock()
+        val recomposer = Recomposer(coroutineContext + clock)
+        val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
+        val composition = Composition(NoNodes(), recomposer)
+        val sources = mutableStateOf(emptyList<MarkdownTypingSource>())
+        val parsed = mutableStateOf(projectMarkdown(emptyList()))
+        val first = Any()
+        val second = Any()
+        var reveal: MarkdownReveal? = null
+        var advances = 0
+        var time = 1_000_000_000L
+        suspend fun frame() {
+            Snapshot.sendApplyNotifications()
+            repeat(12) { yield() }
+            time += 16_000_000L
+            if (clock.hasAwaiters) clock.sendFrame(time)
+            repeat(12) { yield() }
+        }
+        try {
+            composition.setContent {
+                CompositionLocalProvider(LocalMarkdownReceiptClock provides { time }) {
+                    reveal = rememberMarkdownReveal(sources.value, parsed.value, streaming = true, terminal = false,
+                        awaitPaintAdmission = true, onVisibleAdvance = { advances++ })
+                }
+            }
+            repeat(4) { frame() }
+            reveal!!.publication.active = true
+            sources.value = listOf(MarkdownTypingSource("answer", "abcdefgh"))
+            parsed.value = projectMarkdown(listOf("abcdefgh"))
+            repeat(4) { frame() }
+            assertEquals(1, advances)
+            assertEquals(1, reveal!!.limit("answer"))
+            assertFalse("A published frontier must wait without requesting a no-op frame", clock.hasAwaiters)
+            reveal!!.publication.setPending(first, true)
+            reveal!!.publication.setPending(second, true)
+            reveal!!.applied("answer", 1)
+            reveal!!.publication.setPending(first, false)
+            repeat(12) { yield() }
+            assertFalse(clock.hasAwaiters)
+            reveal!!.publication.setPending(second, false)
+            repeat(12) { yield() }
+            assertTrue("The final real draw immediately registers the next ordinary tick", clock.hasAwaiters)
+            frame()
+            assertEquals(2, advances)
+            assertEquals(2, reveal!!.limit("answer"))
+            reveal!!.applied("answer", 1)
+            repeat(12) { yield() }
+            assertFalse("An acknowledgement for the old frontier cannot unlock typing", clock.hasAwaiters)
+        } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
+    }
+
     @Test fun paintReadySignalTracksEveryOwnerAndReleasesWithoutSnapshotApply() = runBlocking {
         val publication = MarkdownPaintPublication()
         val first = Any()

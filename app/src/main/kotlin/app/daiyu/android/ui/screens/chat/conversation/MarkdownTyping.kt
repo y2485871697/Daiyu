@@ -32,6 +32,9 @@ internal class MarkdownReveal(
 ) {
     private val completion = derivedStateOf { exact && target != null && visible() >= target.total }
     val settled: Boolean get() = completion.value && publication.settled(target)
+    fun applied(id: String, visible: Int) {
+        target?.let { publication.applied(it, id, visible) }
+    }
     fun presented(id: String) {
         target?.parts?.firstOrNull { it.source.id == id }?.takeIf { limit(id) >= it.length }?.let {
             publication.presented(id, it.source)
@@ -71,16 +74,37 @@ internal class MarkdownPaintPublication {
     var active by mutableStateOf(false)
     private val pending = mutableStateMapOf<Any, Unit>()
     private val published = mutableStateMapOf<String, MarkdownTypingSource>()
+    private var installingTarget: MarkdownTypingTarget? = null
+    private val installing = mutableStateMapOf<String, Int>()
     private val readyState = MutableStateFlow(true)
     val readySignal = readyState.asStateFlow()
-    val ready: Boolean get() = pending.isEmpty()
+    val ready: Boolean get() = pending.isEmpty() && installing.isEmpty()
+    fun start(target: MarkdownTypingTarget) {
+        if (installingTarget === target) return
+        installingTarget = target
+        installing.clear()
+        readyState.value = ready
+    }
+    fun reserve(target: MarkdownTypingTarget, before: Int, visible: Int) {
+        if (!active || visible <= before || installingTarget !== target) return
+        target.parts.forEach { part ->
+            val next = target.limit(part.source.id, visible)
+            if (next > target.limit(part.source.id, before)) installing[part.source.id] = next
+        }
+        readyState.value = ready
+    }
+    fun applied(target: MarkdownTypingTarget, id: String, visible: Int) {
+        if (installingTarget !== target || installing[id] != visible) return
+        installing.remove(id)
+        readyState.value = ready
+    }
     fun setPending(owner: Any, value: Boolean) {
         if (value) pending[owner] = Unit else pending.remove(owner)
-        readyState.value = pending.isEmpty()
+        readyState.value = ready
     }
     fun presented(id: String, source: MarkdownTypingSource) { published[id] = source }
     fun settled(target: MarkdownTypingTarget?): Boolean = !active || target != null &&
-        pending.isEmpty() && target.parts.all { it.length == 0 || published[it.source.id] == it.source }
+        ready && target.parts.all { it.length == 0 || published[it.source.id] == it.source }
 }
 
 internal val LocalMarkdownPaintPublication = staticCompositionLocalOf<MarkdownPaintPublication?> { null }
@@ -198,10 +222,13 @@ internal fun rememberMarkdownReveal(
     val publication = remember(identity, resetEpoch, motion) { MarkdownPaintPublication() }
     val frame = produceState(motion.frame(target), target, canAdvance, advanceLimit, finishImmediately) {
         val current = target ?: return@produceState
+        publication.start(current)
         var shown = motion.visible(current)
         value = MarkdownTypingFrame(current, shown)
         if (finishImmediately) {
-            value = MarkdownTypingFrame(current, motion.finish(current))
+            val finished = motion.finish(current)
+            if (currentAwaitPaintAdmission) publication.reserve(current, shown, finished)
+            value = MarkdownTypingFrame(current, finished)
             return@produceState
         }
         if (!canAdvance) { motion.pause(current); return@produceState }
@@ -215,6 +242,7 @@ internal fun rememberMarkdownReveal(
                 }.combine(publication.readySignal) { controlWake, paintReady -> controlWake || paintReady }.first { it }
             }
             withFrameNanos { frameNanos ->
+                val before = shown
                 shown = when {
                     !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> {
                         motion.pause(current)
@@ -227,6 +255,7 @@ internal fun rememberMarkdownReveal(
                     currentAwaitPaintAdmission && !publication.ready -> motion.visible(current)
                     else -> motion.advance(current, frameNanos, end) { currentAdvance() }
                 }
+                if (currentAwaitPaintAdmission) publication.reserve(current, before, shown)
                 value = MarkdownTypingFrame(current, shown)
             }
         }

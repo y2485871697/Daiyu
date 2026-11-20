@@ -136,9 +136,17 @@ internal fun RevealedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?,
     CompositionLocalProvider(LocalMarkdownPaintPublication provides publication) {
         val presented = modifier
         if (deferBlockReveal) ProjectedMessageMarkdown(text, blocks, presented,
-            generationComplete = generationComplete, visibility = reveal.visibility(partId), sourceWindow = sourceWindow)
-        else ProjectedMessageMarkdown(text, blocks, presented, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)
+            generationComplete = generationComplete, visibility = reveal.visibility(partId), sourceWindow = sourceWindow,
+            onCurrentBodyInstalled = { MarkdownPaintApplied(reveal, partId) })
+        else ProjectedMessageMarkdown(text, blocks, presented, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow,
+            onCurrentBodyInstalled = { MarkdownPaintApplied(reveal, partId) })
     }
+}
+
+@Composable
+private fun MarkdownPaintApplied(reveal: MarkdownReveal, partId: String) {
+    val visible = reveal.limit(partId)
+    SideEffect { reveal.applied(partId, visible) }
 }
 
 private class MarkdownBodyGeometry { var heightPx = 0 }
@@ -149,6 +157,7 @@ internal fun ProjectedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?
     generationComplete: Boolean = true,
     visibility: State<Int>? = null,
     sourceWindow: app.daiyu.android.MarkdownSourceWindow? = null,
+    onCurrentBodyInstalled: @Composable () -> Unit = {},
 ) {
     val geometry = remember(MarkdownParserIdentity(LocalMarkdownParser.current)) { MarkdownBodyGeometry() }
     val body = rememberMarkdownBodySnapshot(text, blocks, sourceWindow)
@@ -156,6 +165,7 @@ internal fun ProjectedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?
     else Box(Modifier.onSizeChanged { geometry.heightPx = it.height }, propagateMinConstraints = true) {
         ParsedMessageMarkdown(body.text, body.blocks, modifier,
             visibleCharacters, generationComplete && body.text == text, visibility)
+        if (blocks != null && body.text == text && body.window == sourceWindow) onCurrentBodyInstalled()
     }
 }
 

@@ -2,6 +2,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.InternalComposeApi
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.currentComposer
@@ -11,6 +12,7 @@ import androidx.compose.runtime.tooling.CompositionGroup
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.AnnotatedString
 import java.util.IdentityHashMap
 
 @OptIn(InternalComposeApi::class)
@@ -39,6 +41,7 @@ internal class MarkdownPaintSlotsProbe {
 
     fun sample(key: String, onPaint: ((PaintSample) -> Unit)? = null): String = Snapshot.withoutReadObservation {
         val paths = IdentityHashMap<Any, String>()
+        val groupSlots = linkedMapOf<String, MutableList<Any>>()
         val errors = linkedSetOf<String>()
         var groups = 0
         var slots = 0
@@ -82,7 +85,10 @@ internal class MarkdownPaintSlotsProbe {
             while (data.hasNext() && slots < 24_000) {
                 val value = data.next()
                 slots++
-                if (value != null && !paths.containsKey(value)) paths[value] = "$path:$slot"
+                if (value != null) {
+                    groupSlots.getOrPut(path) { mutableListOf() }.add(value)
+                    if (!paths.containsKey(value)) paths[value] = "$path:$slot"
+                }
                 slot++
             }
             if (data.hasNext()) truncated = true
@@ -153,6 +159,30 @@ internal class MarkdownPaintSlotsProbe {
                     "drawn=${describe(drawn)} attached=$attached height=$height cachedAvailable=${field(paint, "availableHeight")} " +
                     "textEqual=${drawn != null && drawn.layoutInput.text == candidate?.layoutInput?.text} " +
                     "prefix=${drawn != null && candidate != null && drawn.canPaintPrefixOf(candidate)}")
+                val group = paths[paint]?.substringBeforeLast(':')
+                val peers = group?.let { groupSlots[it] }.orEmpty()
+                // Only mutable text slots are read; evaluating a DerivedState could repair the defect being sampled.
+                val requests = peers.filterIsInstance<MutableState<*>>().mapNotNull { state ->
+                    (state.value as? AnnotatedString)?.let { state to it }
+                }
+                val owners = reveals.flatMap { reveal ->
+                    (field(reveal.publication, "pending") as? Map<*, *>)?.keys.orEmpty()
+                }.filterNotNull().filter { paths[it]?.substringBeforeLast(':') == group }
+                appendLine(" REQUEST group=$group candidates=${requests.size} ownerPending=${owners.isNotEmpty()} " +
+                    "ambiguous=${requests.size != 1} clearances=${clearances.size}")
+                for ((state, requested) in requests.take(4)) {
+                    val published = clearances.singleOrNull()?.let { clearance ->
+                        requested.isEmpty() ||
+                            candidate?.layoutInput?.text == requested && clearance.whollyAboveViewport(coordinates, height) ||
+                            drawn != null && drawn.layoutInput.text == requested && candidate != null &&
+                            drawn.canPaintPrefixOf(candidate) && clearance.fits(coordinates, drawn.size.height)
+                    }
+                    appendLine("  REQUEST_TEXT state=${location(state)} length=${requested.length} " +
+                        "candidateEqual=${candidate?.layoutInput?.text == requested} " +
+                        "committedEqual=${layout(paint, "committed")?.layoutInput?.text == requested} " +
+                        "renderedEqual=${rendered?.layoutInput?.text == requested} " +
+                        "drawnEqual=${drawn?.layoutInput?.text == requested} published=$published")
+                }
                 for (clearance in clearances) {
                     val geometry = field(clearance, "viewportGeometry")
                     val list = field(geometry, "list") as? LayoutCoordinates

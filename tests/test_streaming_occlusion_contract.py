@@ -117,7 +117,7 @@ class StreamingOcclusionContract(unittest.TestCase):
     def test_code_and_workflow_placement_publish_only_changed_height_and_keep_full_border_geometry(self):
         code = (CHAT.parent / "MarkdownCodeReveal.kt").read_text()
         frame = code.split("private class MarkdownCodeViewportFrame", 1)[1].split("@Composable", 1)[0]
-        self.assertIn("var coordinates by mutableStateOf<LayoutCoordinates?>(null)", frame)
+        self.assertIn("var coordinates: LayoutCoordinates? = null", frame)
         self.assertIn("var availableHeight by mutableStateOf(0f)", frame)
         self.assertNotIn("neverEqualPolicy", frame)
         workflow = (CHAT.parent / "WorkflowTimelineLayout.kt").read_text()

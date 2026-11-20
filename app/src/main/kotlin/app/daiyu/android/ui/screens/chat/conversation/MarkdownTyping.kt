@@ -17,6 +17,9 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import app.daiyu.android.domain.RunStatus
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 
 @Stable
@@ -68,9 +71,12 @@ internal class MarkdownPaintPublication {
     var active by mutableStateOf(false)
     private val pending = mutableStateMapOf<Any, Unit>()
     private val published = mutableStateMapOf<String, MarkdownTypingSource>()
+    private val readyState = MutableStateFlow(true)
+    val readySignal = readyState.asStateFlow()
     val ready: Boolean get() = pending.isEmpty()
     fun setPending(owner: Any, value: Boolean) {
         if (value) pending[owner] = Unit else pending.remove(owner)
+        readyState.value = pending.isEmpty()
     }
     fun presented(id: String, source: MarkdownTypingSource) { published[id] = source }
     fun settled(target: MarkdownTypingTarget?): Boolean = !active || target != null &&
@@ -202,11 +208,11 @@ internal fun rememberMarkdownReveal(
         val end = maxOf(shown, current.boundary(minOf(current.total, advanceLimit)))
         while (shown < end) {
             if (currentAwaitPaintAdmission && !publication.ready) {
-                // Only a real paint can release this debt; do not poll it with animation frames.
+                // Real draw releases wake immediately; control changes remain snapshot-observed.
                 snapshotFlow {
-                    !currentAwaitPaintAdmission || publication.ready ||
+                    !currentAwaitPaintAdmission ||
                         !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) || textClearance?.held == true
-                }.first { it }
+                }.combine(publication.readySignal) { controlWake, paintReady -> controlWake || paintReady }.first { it }
             }
             withFrameNanos { frameNanos ->
                 shown = when {

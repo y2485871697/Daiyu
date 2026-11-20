@@ -37,15 +37,25 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn('visualScope?.handoff(turn.listKey, reportedReasoning)', assistant)
         self.assertNotIn('handoff.ready(turn.reportedReasoning)', assistant)
 
-    def test_paint_debt_waits_for_snapshot_events_before_requesting_a_frame(self):
+    def test_paint_debt_uses_immediate_ready_and_snapshot_controls_before_requesting_a_frame(self):
         loop = self.typing.split("while (shown < end) {", 1)[1]
         waiting, callback = loop.split("withFrameNanos { frameNanos ->", 1)
         self.assertIn("if (currentAwaitPaintAdmission && !publication.ready)", waiting)
         self.assertIn("snapshotFlow {", waiting)
-        self.assertIn("}.first { it }", waiting)
-        for wake in ("!currentAwaitPaintAdmission", "publication.ready",
+        self.assertIn("}.combine(publication.readySignal) { controlWake, paintReady -> controlWake || paintReady }.first { it }", waiting)
+        for wake in ("!currentAwaitPaintAdmission",
                      "!markdownTypingCanAdvance(currentCanAdvance, currentPlayback)", "textClearance?.held == true"):
             self.assertIn(wake, waiting)
+        publication = self.typing.split("internal class MarkdownPaintPublication {", 1)[1].split("\ninternal val LocalMarkdownPaintPublication", 1)[0]
+        self.assertIn("private val readyState = MutableStateFlow(true)", publication)
+        self.assertIn("val readySignal = readyState.asStateFlow()", publication)
+        self.assertIn("val ready: Boolean get() = pending.isEmpty()", publication)
+        pending = publication.split("fun setPending(owner: Any, value: Boolean) {", 1)[1].split("\n    }", 1)[0]
+        self.assertIn("if (value) pending[owner] = Unit else pending.remove(owner)", pending)
+        self.assertIn("readyState.value = pending.isEmpty()", pending)
+        self.assertLess(pending.index("pending.remove(owner)"), pending.index("readyState.value"))
+        for forbidden in ("launch", "snapshotFlow", "withFrameNanos", "motion."):
+            self.assertNotIn(forbidden, pending)
         for forbidden in ("motion.advance(", "motion.pause(", "motion.hold(", "value =", "withFrameNanos"):
             self.assertNotIn(forbidden, waiting)
         self.assertIn("currentAwaitPaintAdmission && !publication.ready -> motion.visible(current)", callback)

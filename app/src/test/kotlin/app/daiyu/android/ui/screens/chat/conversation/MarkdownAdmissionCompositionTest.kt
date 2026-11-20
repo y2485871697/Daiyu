@@ -15,6 +15,7 @@ import app.daiyu.android.timeline.ReconnectPosition
 import app.daiyu.android.timeline.TimelineAnchor
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.yield
@@ -33,6 +34,86 @@ class MarkdownAdmissionCompositionTest {
         override fun move(from: Int, to: Int, count: Int) = Unit
         override fun remove(index: Int, count: Int) = Unit
         override fun onClear() = Unit
+    }
+
+    @Test fun paintReadySignalTracksEveryOwnerAndReleasesWithoutSnapshotApply() = runBlocking {
+        val publication = MarkdownPaintPublication()
+        val first = Any()
+        val second = Any()
+        val unknown = Any()
+        assertTrue(publication.readySignal.value)
+        publication.setPending(first, true)
+        publication.setPending(first, true)
+        publication.setPending(second, true)
+        assertFalse(publication.readySignal.value)
+        var released = 0
+        val waiter = launch(start = CoroutineStart.UNDISPATCHED) {
+            publication.readySignal.first { it }
+            released++
+        }
+        try {
+            publication.setPending(unknown, false)
+            publication.setPending(first, false)
+            publication.setPending(first, false)
+            repeat(12) { yield() }
+            assertFalse(publication.readySignal.value)
+            assertEquals("One remaining paint owner must keep admission closed", 0, released)
+            publication.setPending(second, false)
+            assertTrue("The final real draw must update readiness in the same call", publication.readySignal.value)
+            repeat(12) { yield() }
+            assertEquals("Draw release cannot require a snapshot apply or another frame", 1, released)
+            publication.setPending(second, false)
+            assertTrue(publication.readySignal.value)
+            publication.setPending(second, true)
+            assertFalse(publication.readySignal.value)
+            publication.setPending(second, false)
+            assertTrue(publication.readySignal.value)
+        } finally { waiter.cancelAndJoin() }
+    }
+
+    @Test fun realPaintReleaseRequestsTheNextFrameWithoutSnapshotApply() = runBlocking {
+        val clock = BroadcastFrameClock()
+        val recomposer = Recomposer(coroutineContext + clock)
+        val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
+        val composition = Composition(NoNodes(), recomposer)
+        val sources = mutableStateOf(emptyList<MarkdownTypingSource>())
+        val parsed = mutableStateOf(projectMarkdown(emptyList()))
+        val owner = Any()
+        var reveal: MarkdownReveal? = null
+        var advances = 0
+        var time = 1_000_000_000L
+        suspend fun frame() {
+            Snapshot.sendApplyNotifications()
+            repeat(12) { yield() }
+            time += 16_000_000L
+            if (clock.hasAwaiters) clock.sendFrame(time)
+            repeat(12) { yield() }
+        }
+        try {
+            composition.setContent {
+                CompositionLocalProvider(LocalMarkdownReceiptClock provides { time }) {
+                    reveal = rememberMarkdownReveal(sources.value, parsed.value, streaming = true, terminal = false,
+                        awaitPaintAdmission = true, onVisibleAdvance = { advances++ })
+                }
+            }
+            repeat(4) { frame() }
+            reveal!!.publication.setPending(owner, true)
+            sources.value = listOf(MarkdownTypingSource("answer", "abcdefgh"))
+            parsed.value = projectMarkdown(listOf("abcdefgh"))
+            repeat(4) { frame() }
+            assertFalse("Paint debt must suspend frame polling", clock.hasAwaiters)
+            assertEquals(0, advances)
+            reveal!!.publication.setPending(owner, false)
+            // No snapshot apply or frame is sent between real draw release and this assertion.
+            repeat(12) { yield() }
+            assertTrue("Real draw release must register the next frame immediately", clock.hasAwaiters)
+            assertEquals("A ready signal cannot itself reveal text", 0, advances)
+            time += 16_000_000L
+            clock.sendFrame(time)
+            repeat(12) { yield() }
+            assertEquals(1, advances)
+            assertEquals(1, reveal!!.limit("answer"))
+        } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
     }
 
     @Test fun paintOnlyDebtPreservesActiveReceiptFraction() = runBlocking {

@@ -36,4 +36,11 @@ class ReportedReasoningTextTest {
         assertFalse(isReportedReasoningActive(listOf(ReportedReasoning("r", "summary"))))
         assertTrue(hasReportedReasoningText("**Planning concise warm Chinese story answer**"))
     }
+    @Test fun reasoningLabelsUseGenerationStateEvenWhenLocalDisplayIsPaused() {
+        org.junit.Assert.assertEquals("正在思考…", reasoningDisplayLabel(thinking = true, paused = false))
+        org.junit.Assert.assertEquals("已暂停", reasoningDisplayLabel(thinking = true, paused = true))
+        org.junit.Assert.assertEquals("已思考", reasoningDisplayLabel(thinking = false, paused = false))
+        org.junit.Assert.assertEquals("已思考", reasoningDisplayLabel(thinking = false, paused = true))
+    }
+
 }

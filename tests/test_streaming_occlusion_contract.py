@@ -29,7 +29,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("preserveTextClearance && protectClearance() && followIntent()", admission)
         self.assertNotIn("state.textClearance.update(", drawing)
         self.assertIn("body.placeRelative(0, -state.scrollOffset.roundToInt())", placement)
-        self.assertIn("val safeBottom = current.listHeight - current.clearance.toFloat()", source)
+        self.assertIn("val safeBottom = list.size.height - current.clearance.toFloat()", source)
         self.assertIn("bottom - list.localPositionOf(leaf, Offset.Zero).y", source)
         self.assertIn(".onGloballyPositioned { viewport ->", admission)
         self.assertIn("val listHeight: Int, val viewportTop: Float, val viewportHeight: Int", source)
@@ -101,7 +101,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         for token in ("!positioned || height <= 0", "viewportGeometry ?: return false",
                       "current.list?.takeIf { it.isAttached }", "current.viewport?.takeIf { it.isAttached }",
                       "coordinates?.takeIf { it.isAttached }",
-                      "list.localPositionOf(leaf, Offset.Zero).y + height <= maxOf(0f, current.viewportTop)"):
+                      "list.localPositionOf(leaf, Offset.Zero).y + height <= maxOf(0f, viewportTop)"):
             self.assertIn(token, geometry)
         self.assertIn("viewportGeometry = placed.takeIf { attached }", source)
         self.assertIn("geometry = if (protect) placed else null", source)
@@ -114,7 +114,7 @@ class StreamingOcclusionContract(unittest.TestCase):
                       "assertFalse", "origin = (-120).dp", "origin = 240.dp", "origin = 0.dp"):
             self.assertIn(token, device)
 
-    def test_code_and_workflow_placement_publish_only_changed_height_and_keep_full_border_geometry(self):
+    def test_code_and_workflow_placement_keep_closed_border_inside_admitted_height(self):
         code = (CHAT.parent / "MarkdownCodeReveal.kt").read_text()
         frame = code.split("private class MarkdownCodeViewportFrame", 1)[1].split("@Composable", 1)[0]
         self.assertIn("var coordinates: LayoutCoordinates? = null", frame)
@@ -123,9 +123,11 @@ class StreamingOcclusionContract(unittest.TestCase):
         workflow = (CHAT.parent / "WorkflowTimelineLayout.kt").read_text()
         surface = workflow.split("internal fun Modifier.streamingWorkflowSurface", 1)[1].split("internal fun Modifier.workflowInkClearance", 1)[0]
         self.assertIn("clipRect(bottom = height)", surface)
-        self.assertIn("size.width, size.height, CornerRadius(corner)", surface)
-        self.assertIn("Size(size.width - stroke, size.height - stroke)", surface)
-        self.assertNotIn("Size(size.width - stroke, height - stroke)", surface)
+        self.assertIn("val surfaceSize = Size(size.width, height)", surface)
+        self.assertIn("surfaceSize.width, surfaceSize.height, CornerRadius(corner)", surface)
+        self.assertIn("drawRoundRect(background, size = surfaceSize", surface)
+        self.assertIn("Size(surfaceSize.width - stroke, surfaceSize.height - stroke)", surface)
+        self.assertNotIn("Size(size.width - stroke, size.height - stroke)", surface)
 
     def test_glyph_regression_rejects_the_visual_edge_and_verifies_committed_complete_lines(self):
         device = DEVICE.read_text()

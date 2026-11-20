@@ -139,6 +139,12 @@ task_scroll_target = {
 task_scroll_native_layout_target = task_scroll_target | {
     'app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest',
 }
+task_scroll_occlusion_markdown_target = {
+    'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest',
+    'app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest',
+}
 task_scroll_complement = {
     'app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
@@ -149,6 +155,7 @@ task_scroll_resume_only = (mode == 'smoke' and raw_filter ==
     'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest')
 task_scroll_only = mode == 'smoke' and sorted(raw_filter.split(',')) in (
     sorted(task_scroll_target), sorted(task_scroll_native_layout_target), sorted(task_scroll_complement),
+    sorted(task_scroll_occlusion_markdown_target),
     ['app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest'])
 task_scroll_sources = {Path('app/src/androidTest/kotlin') / (name.replace('.', '/') + '.kt')
                        for name in raw_filter.split(',')}

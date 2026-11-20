@@ -153,8 +153,8 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
                     .config[SemanticsProperties.StateDescription] == "已思考"
             }
             assertFalse(visibleText().contains(pending))
-            ui.onNodeWithText("正在显示…").assertExists()
-            ui.onNodeWithText("已思考").assertDoesNotExist()
+            ui.onNodeWithText("正在显示…").assertDoesNotExist()
+            ui.onNodeWithText("已思考").assertExists()
             ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))
             ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertExists()
@@ -164,7 +164,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             release.countDown()
             await { advances > 0 }
             await { visibleText().contains(pending) }
-            await { ui.onAllNodesWithText("正在显示…").fetchSemanticsNodes().isEmpty() }
+            ui.onNodeWithText("正在显示…").assertDoesNotExist()
             ui.onNodeWithText("已思考").assertExists()
             ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))
@@ -303,7 +303,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             await { advances > 0 }
             mainThread { reported = ReportedReasoning("r", pending, 1100L) }
             ui.mainClock.advanceTimeBy(16)
-            ui.onNodeWithText("正在显示…").assertExists()
+            ui.onNodeWithText("已思考").assertExists()
             assertFalse("Hide while received text is still draining", visibleText().contains(pending))
             if (stop) instrumentation.runOnMainSync { stopped = true }
             else {
@@ -918,7 +918,10 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             mainThread { }
             ui.waitForIdle()
             ui.mainClock.advanceTimeBy(32)
-            ui.onNodeWithText("已暂停").assertExists()
+            ui.onNodeWithText("已思考").assertExists()
+            ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))
+            ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertExists()
             val paused = count()
             assertEquals("Pause must hold the last drawn received chunk", 0, paused)
             assertTrue(visibleText().contains(baseline))

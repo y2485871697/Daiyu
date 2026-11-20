@@ -74,7 +74,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
     def test_terminal_state_is_independent_of_first_display_backlog(self):
         card = (CHAT / 'ReportedReasoningCard.kt').read_text()
         for token in ('val displayThinking = isThinking',
-                      'reasoningDisplayLabel(isThinking, isThinking || waitingForReveal, displayPaused)', 'visualScope?.claimReasoning(ownerKey, summary.itemId)',
+                      'reasoningDisplayLabel(isThinking, displayPaused)', 'visualScope?.claimReasoning(ownerKey, summary.itemId)',
                       'ticket.take() && revealGate && !stopped', 'paceTerminal = firstPresentation',
                       'initialBaseline = if (firstPresentation || queuedEmptyBaseline) emptyList() else null',
                       'enabled = revealEnabled && !paused', 'leadingIndicator?.invoke(displayThinking)',

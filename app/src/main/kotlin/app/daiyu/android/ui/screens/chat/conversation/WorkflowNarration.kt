@@ -109,7 +109,7 @@ internal fun WorkflowNarrationContent(
             rememberMarkdownReveal(sources, projection, streaming = running && !displayPaused,
                 terminal = !running && projection?.sources == texts, resetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance,
                 enabled = expanded && !stopped && !paused, allowBaselinePrefix = false, blockedSources = blocked, live = running,
-                initialBaseline = baseline, presentationLane = admission.takeUnless { baselineOnly })
+                initialBaseline = baseline, presentationLane = admission.takeUnless { baselineOnly }, awaitPaintAdmission = true)
         }
         val keys = remember(steps) { steps.mapIndexed { index, item -> item.workflowKey(index) } }
         SideEffect {

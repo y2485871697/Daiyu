@@ -192,7 +192,7 @@ private class WorkflowPaintFrame {
     var availableHeight by mutableStateOf(0f)
 }
 
-/** The candidate keeps its measured extent; the visible surface ends at the same safe edge as its ink. */
+/** Keep the measured extent while closing the visible surface inside the safe edge. */
 @Composable
 internal fun Modifier.streamingWorkflowSurface(background: Color, border: Color, radius: Dp,
     highlight: Color? = null): Modifier {
@@ -206,15 +206,16 @@ internal fun Modifier.streamingWorkflowSurface(background: Color, border: Color,
         val available = minOf(frame.availableHeight, clearance?.availableHeight(frame.coordinates) ?: Float.POSITIVE_INFINITY)
         val height = minOf(size.height, available)
         if (height > 0f) {
-            val corner = minOf(radius.toPx(), size.width / 2f, size.height / 2f)
-            val path = Path().apply { addRoundRect(RoundRect(0f, 0f, size.width, size.height, CornerRadius(corner))) }
+            val surfaceSize = Size(size.width, height)
+            val corner = minOf(radius.toPx(), surfaceSize.width / 2f, surfaceSize.height / 2f)
+            val path = Path().apply { addRoundRect(RoundRect(0f, 0f, surfaceSize.width, surfaceSize.height, CornerRadius(corner))) }
             clipRect(bottom = height) { clipPath(path) {
-                drawRoundRect(background, size = size, cornerRadius = CornerRadius(corner))
+                drawRoundRect(background, size = surfaceSize, cornerRadius = CornerRadius(corner))
                 this@drawWithContent.drawContent()
-                highlight?.let { drawLine(it, Offset(0f, .5.dp.toPx()), Offset(size.width, .5.dp.toPx()), 1.dp.toPx()) }
+                highlight?.let { drawLine(it, Offset(0f, .5.dp.toPx()), Offset(surfaceSize.width, .5.dp.toPx()), 1.dp.toPx()) }
                 val stroke = 1.dp.toPx()
-                if (size.height >= stroke && size.width >= stroke) drawRoundRect(border,
-                    topLeft = Offset(stroke / 2f, stroke / 2f), size = Size(size.width - stroke, size.height - stroke),
+                if (surfaceSize.height >= stroke && surfaceSize.width >= stroke) drawRoundRect(border,
+                    topLeft = Offset(stroke / 2f, stroke / 2f), size = Size(surfaceSize.width - stroke, surfaceSize.height - stroke),
                     cornerRadius = CornerRadius((corner - stroke / 2f).coerceAtLeast(0f)), style = Stroke(stroke))
             } }
         }

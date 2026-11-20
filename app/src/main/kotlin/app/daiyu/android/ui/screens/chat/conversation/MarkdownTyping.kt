@@ -195,7 +195,7 @@ internal fun rememberMarkdownReveal(
             return@produceState
         }
         if (!canAdvance) { motion.pause(current); return@produceState }
-        val end = maxOf(shown, minOf(current.total, advanceLimit))
+        val end = maxOf(shown, current.boundary(minOf(current.total, advanceLimit)))
         while (shown < end) {
             withFrameNanos { frameNanos ->
                 shown = when {

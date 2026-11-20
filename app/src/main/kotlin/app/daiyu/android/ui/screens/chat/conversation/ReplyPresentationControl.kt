@@ -52,9 +52,8 @@ internal data class ReplyPlayback(val control: ReplyPresentationControl, val run
 
 internal val LocalReplyPlayback = staticCompositionLocalOf<ReplyPlayback?> { null }
 
-internal fun reasoningDisplayLabel(thinking: Boolean, displaying: Boolean, paused: Boolean): String = when {
-    displaying && paused -> "已暂停"
+internal fun reasoningDisplayLabel(thinking: Boolean, paused: Boolean): String = when {
+    thinking && paused -> "已暂停"
     thinking -> "正在思考…"
-    displaying -> "正在显示…"
     else -> "已思考"
 }

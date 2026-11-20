@@ -50,6 +50,8 @@ import org.junit.Assert.assertArrayEquals
 
 /** Real consumers, isolated component host: no model, browser, network or production controller. */
 class MessageMarkdownTest : WiredActivityTestCase() {
+    protected override val requiresWindowDraw: Boolean
+        get() = name == "testLargeReceivedChunkPaintsAtMostOneWholeCharacterPerFrame"
     private val opened = CopyOnWriteArrayList<String>()
     private val uriHandler = object : UriHandler {
         override fun openUri(uri: String) { opened += uri }
@@ -1681,7 +1683,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         try {
             ui.runOnUiThread { turn = turn.copy(finalText = source) }
             val matcher = hasAnyAncestor(hasTestTag("leaf-only")) and hasText(plain)
-            advanceUntilObserved("complete received leaf", maxFrames = 12) {
+            advanceUntilObserved("complete received leaf", maxFrames = plain.length * 4 + 12) {
                 ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().size == 1 && completed.get()
             }
             val count = ownerCompositions.get()
@@ -1718,7 +1720,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         try {
             ui.runOnUiThread { turn = turn.copy(finalText = source) }
             val matcher = hasAnyAncestor(hasTestTag("typing-live")) and hasText(plain)
-            advanceUntilObserved("complete received Unicode chunk", maxFrames = 12) {
+            advanceUntilObserved("complete received Unicode chunk", maxFrames = plain.length * 4 + 12) {
                 ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().size == 1 && ready.get()
             }
             val received = annotation(ui.onNode(matcher, useUnmergedTree = true))
@@ -1769,7 +1771,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         try {
             ui.runOnUiThread { turn = turn.copy(content = listOf(MessageContentUi.Text("new-part", source))) }
             val matcher = hasTestTag("message-content-text:0") and hasText(plain)
-            advanceUntilObserved("complete received mixed chunk", maxFrames = 12) {
+            advanceUntilObserved("complete received mixed chunk", maxFrames = plain.length * 4 + 12) {
                 ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().size == 1
             }
             assertEquals(plain, annotation(ui.onNode(matcher, useUnmergedTree = true)).text)
@@ -1798,7 +1800,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         ui.mainClock.autoAdvance = false
         try {
             ui.runOnUiThread { turn = turn.copy(finalText = source) }
-            advanceUntilObserved("received body before completion", maxFrames = 12) {
+            advanceUntilObserved("received body before completion", maxFrames = displayText.length * 4 + 12) {
                 ui.onAllNodes(hasText(displayText), useUnmergedTree = true).fetchSemanticsNodes().size == 1
             }
             assertTrue(confirmed.none { turn.listKey in it })
@@ -1871,6 +1873,65 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         ui.waitForIdle()
         assertEquals(before, body("stable-table", cell.trim()).fetchSemanticsNode().boundsInRoot)
         ui.onNodeWithText("future", useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    @OptIn(androidx.compose.runtime.InternalComposeApi::class)
+    fun testLargeReceivedChunkPaintsAtMostOneWholeCharacterPerFrame() {
+        val initial = "字".repeat(80)
+        val full = initial + "后".repeat(80)
+        val parser: (String) -> List<MarkdownBlock> = { MarkdownParser.parse(it) }
+        for (text in listOf("", initial, full)) {
+            markdownProjectionCache.put(MarkdownProjection(listOf(text), mapOf(text to parser(text)), parser))
+        }
+        var text by mutableStateOf("")
+        val control = ReplyPresentationControl("bounded-paint", initiallyLive = true)
+        val probe = MarkdownPaintSlotsProbe()
+        show {
+            CompositionLocalProvider(LocalMarkdownParser provides parser,
+                LocalReplyPlayback provides ReplyPlayback(control, runtimePaused = false)) {
+                probe.Capture("bounded-paint")
+                val projection = rememberMarkdownProjection(listOf(text))
+                val reveal = rememberMarkdownReveal(listOf(MarkdownTypingSource("final", text)), projection,
+                    streaming = true, terminal = false, initialBaseline = emptyList(),
+                    presentationLane = "bounded-paint", awaitPaintAdmission = true)
+                Column(Modifier.width(320.dp).testTag("bounded-paint")) {
+                    RevealedMessageMarkdown(text, projection?.blocks?.get(text), reveal, "final")
+                }
+            }
+        }
+        ui.mainClock.autoAdvance = false
+        try {
+            var previous = 0
+            fun painted(): Int {
+                var length = 0
+                val clock = ui.mainClock.currentTime
+                instrumentation.runOnMainSync {
+                    probe.sample("bounded-paint") { sample ->
+                        length = maxOf(length, sample.drawn?.layoutInput?.text?.length ?: 0)
+                    }
+                }
+                assertEquals("Read-only sampling cannot add a frame", clock, ui.mainClock.currentTime)
+                return length
+            }
+            fun sampleFrame(): Int {
+                ui.mainClock.advanceTimeByFrame()
+                ui.waitForIdle()
+                val shown = painted()
+                assertTrue("Actual drawn frontier must be monotonic: $previous -> $shown", shown >= previous)
+                assertTrue("One paint frame must not release a received backlog: $previous -> $shown", shown - previous <= 1)
+                previous = shown
+                return shown
+            }
+            ui.runOnUiThread { text = initial }
+            repeat(24) { sampleFrame() }
+            val frozen = previous
+            assertTrue("The received chunk must have real intermediate painted frames", frozen in 1 until initial.length)
+            ui.runOnUiThread { control.pause(true); text = full }
+            repeat(8) { assertEquals("Pause must freeze actual paint", frozen, sampleFrame()) }
+            ui.runOnUiThread { control.pause(false) }
+            repeat(full.length * 4 + 12) { sampleFrame() }
+            assertEquals(full.length, previous)
+        } finally { ui.mainClock.autoAdvance = true }
     }
 
 }

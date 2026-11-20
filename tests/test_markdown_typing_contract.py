@@ -144,8 +144,8 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("showActions = index == parts.parts.lastIndex && actionsReady, actionTurn = turn", reconnect)
 
     def test_received_frontier_and_stale_target_guards_are_present(self):
-        for token in ["if (target !== expected)", "val end = maxOf(previous, limit.coerceIn(0, expected.total))", "position = minOf(frameEnd.toDouble(), position + rate * seconds)",
-                      "if (live || streaming) { seenLive = true; closed = false }", "if (parts == null || baselineLength == null) return target",
+        for token in ["if (target !== expected)", "val end = maxOf(previous, expected.boundary(limit))", "(rate * seconds / width).coerceIn(0.0, 1.0)",
+                      "if (lastAdvanceFrame == frameNanos) return previous", "val phase = position % 1.0 + step", "val next = expected.next(previous)", "if (parts == null || baselineLength == null) return target",
                       "previous[index].id == next[index].id", "next[index].text.startsWith(previous[index].text)"]:
             self.assertIn(token, self.reveal)
 
@@ -228,7 +228,7 @@ class MarkdownTypingContract(unittest.TestCase):
                      "testCompletedReadWaitsForCurrentReceivedTextPublicationWithCachedProjection", "testTableWidthHintsFollowFontScaleWithoutTruncatingLongCellContent"]:
             self.assertIn(name, test)
         unit = (ROOT / "app/src/test/kotlin/app/daiyu/android/ui/screens/chat/conversation/MarkdownRevealTest.kt").read_text()
-        for name in ["lateTerminalTargetsDrainToTheirExactEnd", "receivedFrontierDoesNotDependOnRefreshRate", "everyPrefixIsSurrogateAndCombiningBoundarySafe", "replacementsAndReordersNeverBorrowProgress"]:
+        for name in ["lateTerminalTargetsDrainToTheirExactEnd", "saturatedReceiptsNeverAdvanceMoreThanOneCharacterPerFrame", "lowReceiptRateKeepsFractionalProgressAcrossRefreshRates", "everyPrefixIsSurrogateAndCombiningBoundarySafe", "replacementsAndReordersNeverBorrowProgress"]:
             self.assertIn(name, unit)
 
 

@@ -476,3 +476,75 @@ class ResumeScrollScopeTests(unittest.TestCase):
                 self.assertNotEqual(0, result.returncode)
                 self.assertIn('No instrumentation tests found' if missing else
                               'Ambiguous instrumentation test declaration', result.stderr)
+
+
+class OcclusionMarkdownScopeTests(unittest.TestCase):
+    CLASSES = (
+        'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest',
+        'app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest',
+        'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
+        'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest',
+    )
+
+    def fixture(self, root):
+        helper = TaskScrollSmokeScopeTests().fixture(root)
+        for name in self.CLASSES:
+            path = root / 'app/src/androidTest/kotlin' / (name.replace('.', '/') + '.kt')
+            path.parent.mkdir(parents=True, exist_ok=True)
+            package, _, short = name.rpartition('.')
+            path.write_text(chr(10).join(('package ' + package, 'class ' + short,
+                                         ' : TestCase() {', ' fun testOne() {}', '}', '')))
+        return helper
+
+    def test_exact_four_classes_keep_all_existing_task_scroll_tool_guards(self):
+        self.assertEqual(self.CLASSES, recorder.TASK_SCROLL_OCCLUSION_MARKDOWN_CLASSES)
+        for classes in permutations(self.CLASSES):
+            command, scope = recorder.command_for('python3', dict(
+                SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=','.join(classes)))
+            self.assertEqual('task-scroll-targeted', scope)
+            self.assertEqual(['python3', '-B', '-m', 'unittest', *recorder.TASK_SCROLL_MODULES, '-v'], command)
+            self.assertNotIn('discover', command)
+
+    def test_only_exact_four_classes_in_smoke_receive_the_new_scope(self):
+        raw = ','.join(self.CLASSES)
+        for invalid in (','.join(self.CLASSES[:-1]), raw + ',' + self.CLASSES[0],
+                        raw + ',app.daiyu.android.UnknownTest', raw + ',', ',' + raw,
+                        ' ' + raw, raw + ' ', raw + '#testOne', raw.replace('app.daiyu.', 'app.unknown.', 1)):
+            self.assertEqual('full', recorder.command_for('python3', dict(
+                SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=invalid))[1])
+        for mode in ('', 'compile', 'candidate', 'daily', 'release'):
+            self.assertEqual('full', recorder.command_for('python3', dict(
+                SMOKE_MODE=mode, SMOKE_TEST_CLASSES=raw))[1])
+
+    def test_four_class_inventory_covers_every_class_exactly_once(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            helper = self.fixture(root)
+            selected = []
+            for shard in range(4):
+                result = helper.select(root, shard, classes=','.join(reversed(self.CLASSES)))
+                self.assertEqual(0, result.returncode, result.stderr)
+                selection = json.loads((root / 'smoke/selection.json').read_text())
+                inventory = json.loads((root / 'smoke/instrumentation-shards.json').read_text())
+                self.assertEqual('targeted', inventory['discovery_scope'])
+                self.assertEqual({name: 1 for name in self.CLASSES}, inventory['all_classes'])
+                self.assertEqual(4, inventory['total_tests'])
+                selected.extend(selection['selected_classes'])
+            self.assertCountEqual(self.CLASSES, selected)
+            self.assertEqual(4, len(selected))
+
+    def test_missing_or_ambiguous_requested_sources_stay_fail_closed(self):
+        for missing in (False, True):
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                helper = self.fixture(root)
+                path = root / 'app/src/androidTest/kotlin' / (self.CLASSES[0].replace('.', '/') + '.kt')
+                if missing:
+                    path.unlink()
+                else:
+                    with path.open('a') as output:
+                        output.write('class OtherTest : TestCase() {}' + chr(10))
+                result = helper.select(root, classes=','.join(self.CLASSES))
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn('Unknown instrumentation test class' if missing else
+                              'Ambiguous instrumentation test declaration', result.stderr)

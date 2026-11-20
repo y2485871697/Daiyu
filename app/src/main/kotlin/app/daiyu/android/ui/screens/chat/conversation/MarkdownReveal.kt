@@ -118,6 +118,13 @@ private fun mappedMarkdownPosition(previous: MarkdownTypingTarget, next: List<Ma
 internal class MarkdownTextBoundaries(private val text: String) {
     private val characters = BreakIterator.getCharacterInstance(Locale.ROOT).apply { setText(this@MarkdownTextBoundaries.text) }
 
+    fun floor(limit: Int): Int {
+        val end = limit.coerceIn(0, text.length)
+        return if (characters.isBoundary(end)) end else characters.preceding(end).coerceAtLeast(0)
+    }
+
+    fun next(limit: Int): Int = if (limit >= text.length) text.length else end(limit + 1)
+
     fun end(limit: Int): Int {
         if (limit >= text.length) return text.length
         if (limit <= 0) return 0
@@ -155,13 +162,39 @@ internal class MarkdownTypingTarget(
     val paceTerminal: Boolean = false,
 ) {
     val total = parts.sumOf { it.length.toLong() }.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
-    private data class PartRange(val start: Long, val length: Int)
-    private val ranges = buildMap<String, PartRange> {
+    private data class PartRange(val start: Long, val length: Int, val boundaries: MarkdownTextBoundaries)
+    private val orderedRanges = buildList {
         var offset = 0L
         for (part in parts) {
-            putIfAbsent(part.source.id, PartRange(offset, part.length))
+            add(PartRange(offset, part.length, MarkdownTextBoundaries(part.displayed)))
             offset += part.length
         }
+    }
+    private val ranges = buildMap<String, PartRange> {
+        parts.forEachIndexed { index, part -> putIfAbsent(part.source.id, orderedRanges[index]) }
+    }
+
+    private fun rangeAt(position: Int): PartRange? {
+        var low = 0
+        var high = orderedRanges.size
+        while (low < high) {
+            val middle = (low + high) ushr 1
+            val range = orderedRanges[middle]
+            if (range.start + range.length <= position.toLong()) low = middle + 1 else high = middle
+        }
+        return orderedRanges.getOrNull(low)
+    }
+
+    fun boundary(limit: Int): Int {
+        val end = limit.coerceIn(0, total)
+        val range = rangeAt(end) ?: return end
+        return (range.start + range.boundaries.floor((end.toLong() - range.start).toInt())).toInt()
+    }
+
+    fun next(position: Int): Int {
+        val range = rangeAt(position) ?: return total
+        val local = (position.toLong() - range.start).toInt()
+        return (range.start + range.boundaries.next(local)).coerceAtMost(total.toLong()).toInt()
     }
 
     fun limit(id: String, visible: Int): Int {
@@ -176,6 +209,7 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         private set
     private var position = 0.0
     private var lastFrame = 0L
+    private var lastAdvanceFrame = Long.MIN_VALUE
     private var receivedEnd = 0
     private var arrivalFrame = 0L
     private var arrivalSeconds = .12
@@ -189,8 +223,6 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
     private var rate = 0.0
     private var desiredRate = 0.0
     private var resuming = false
-    private var seenLive = false
-    private var closed = false
 
     fun receive(sources: List<MarkdownTypingSource>, nowNanos: Long, paused: Boolean = false) {
         observesReceipts = true
@@ -229,7 +261,6 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
 
     fun update(parts: List<MarkdownTypingPart>?, baselineLength: Int?, streaming: Boolean, terminal: Boolean,
         live: Boolean = streaming, paceTerminal: Boolean = false): MarkdownTypingTarget? {
-        if (live || streaming) { seenLive = true; closed = false }
         if (parts == null || baselineLength == null) return target
         val previous = target
         val sources = parts.map { it.source }
@@ -242,7 +273,7 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         val appending = markdownTypingAppends(previousSources ?: baseline, sources)
         val mapped = if (previous != null && appending) mappedMarkdownPosition(previous, parts, position) else position
         val start = when {
-            !seenLive || closed && !paceTerminal || !appending -> total
+            !appending -> total
             previous == null -> baselineLength.coerceAtMost(total)
             else -> mapped.toInt().coerceAtMost(total)
         }
@@ -258,8 +289,6 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         }
         val next = MarkdownTypingTarget(parts, start, streaming, terminal, paceTerminal)
         target = next
-        // An empty live body can still be waiting for its first classified answer.
-        if (terminal && total > 0 && start >= total) closed = true
         return next
     }
 
@@ -285,14 +314,14 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         if (target !== expected) return expected.start
         position = expected.total.toDouble()
         pause(expected)
-        if (expected.terminal) closed = true
         return expected.total
     }
 
     fun advance(expected: MarkdownTypingTarget, frameNanos: Long, limit: Int = expected.total, onAdvance: () -> Unit = {}): Int {
         if (target !== expected) return expected.start
         val previous = position.toInt()
-        val end = maxOf(previous, limit.coerceIn(0, expected.total))
+        if (lastAdvanceFrame == frameNanos) return previous
+        val end = maxOf(previous, expected.boundary(limit))
         if (end <= previous) {
             lastFrame = 0L
             return previous
@@ -310,19 +339,26 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
             receivedEnd = end
             arrivalFrame = frameNanos
         }
-        if (lastFrame == 0L) {
-            // Start from this frontier; idle, pause and layout-blocked time buy no catch-up.
-            position = minOf(end.toDouble(), position + 1.0)
+        val next = expected.next(previous)
+        val width = next - previous
+        check(width > 0 && next <= end)
+        val step = if (lastFrame == 0L) {
+            // Idle, pause and layout-blocked time buy no catch-up.
+            1.0
         } else {
             val seconds = ((frameNanos - lastFrame).coerceIn(0L, 50_000_000L)) / 1_000_000_000.0
             rate += (desiredRate - rate) * (1.0 - exp(-seconds / .12))
-            val frameEnd = if (arrived > 1) previous + maxOf(1, (end - previous) / 2) else end
-            position = minOf(frameEnd.toDouble(), position + rate * seconds)
+            (rate * seconds / width).coerceIn(0.0, 1.0)
         }
+        // Keep subcharacter phase, never whole-character catch-up credit.
+        val phase = position % 1.0 + step
+        position = if (phase >= 1.0) {
+            next.toDouble() + if (next < end) phase - 1.0 else 0.0
+        } else previous.toDouble() + phase
         lastFrame = frameNanos
         resuming = false
-        if (position >= expected.total && expected.terminal) closed = true
         val shown = position.toInt().coerceIn(0, expected.total)
+        lastAdvanceFrame = frameNanos
         if (shown > previous) onAdvance()
         return shown
     }

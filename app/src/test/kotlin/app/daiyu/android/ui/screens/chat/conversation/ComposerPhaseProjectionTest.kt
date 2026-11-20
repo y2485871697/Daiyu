@@ -84,12 +84,11 @@ class ComposerPhaseProjectionTest {
         }
     }
 
-    @Test fun labelsSeparateGenerationDisplayAndPause() {
-        assertEquals("正在思考…", reasoningDisplayLabel(true, true, false))
-        assertEquals("正在显示…", reasoningDisplayLabel(false, true, false))
-        assertEquals("已暂停", reasoningDisplayLabel(false, true, true))
-        assertEquals("已暂停", reasoningDisplayLabel(true, true, true))
-        assertEquals("已思考", reasoningDisplayLabel(false, false, false))
+    @Test fun reasoningLabelsFollowGenerationAndNotLocalDisplayBacklog() {
+        assertEquals("正在思考…", reasoningDisplayLabel(thinking = true, paused = false))
+        assertEquals("已暂停", reasoningDisplayLabel(thinking = true, paused = true))
+        assertEquals("已思考", reasoningDisplayLabel(thinking = false, paused = false))
+        assertEquals("已思考", reasoningDisplayLabel(thinking = false, paused = true))
     }
 
     @Test fun narrationPendingOutlivesAnOtherwiseSettledRowAndSurvivesPause() {

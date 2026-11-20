@@ -174,6 +174,12 @@ TASK_SCROLL_PLATFORM_CLASSES = (
 TASK_SCROLL_NATIVE_LAYOUT_CLASSES = TASK_SCROLL_PLATFORM_CLASSES + (
     'app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest',
 )
+TASK_SCROLL_OCCLUSION_MARKDOWN_CLASSES = (
+    'app.daiyu.android.ui.screens.chat.conversation.ChatStreamingOcclusionTest',
+    'app.daiyu.android.ui.screens.chat.conversation.MessageMarkdownTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
+    'app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest',
+)
 TASK_SCROLL_COMPLEMENT_CLASSES = (
     'app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',
     'app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest',
@@ -1236,6 +1242,7 @@ def command_for(python, env):
     if (env.get('SMOKE_MODE') == 'smoke'
             and sorted(env.get('SMOKE_TEST_CLASSES', '').split(',')) in (
                 sorted(TASK_SCROLL_PLATFORM_CLASSES), sorted(TASK_SCROLL_NATIVE_LAYOUT_CLASSES),
+                sorted(TASK_SCROLL_OCCLUSION_MARKDOWN_CLASSES),
                 sorted(TASK_SCROLL_COMPLEMENT_CLASSES),
                 ['app.daiyu.android.ui.screens.chat.conversation.ChatResumeScrollTest'],
                 sorted(('app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest',

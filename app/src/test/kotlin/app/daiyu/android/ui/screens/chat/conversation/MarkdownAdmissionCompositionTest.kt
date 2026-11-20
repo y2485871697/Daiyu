@@ -289,7 +289,7 @@ class MarkdownAdmissionCompositionTest {
             repeat(5) { frame() }
             assertTrue("Admission must reveal a typed prefix", reveal!!.limit("answer") in 1 until text.length)
             assertTrue(advances > 0)
-            repeat(25) { frame() }
+            repeat(text.length + 25) { frame() }
             assertEquals(text.length, reveal!!.limit("answer"))
             val receivedFeedback = advances
             repeat(50) { frame() }
@@ -348,7 +348,7 @@ class MarkdownAdmissionCompositionTest {
             repeat(5) { frame() }
             assertTrue("The accepted projection must type its suffix", reveal!!.limit("answer") in prefix.length + 1 until text.length)
             assertTrue(advances > 0)
-            repeat(25) { frame() }
+            repeat(text.length + 25) { frame() }
             assertEquals(text.length, reveal!!.limit("answer"))
             assertTrue(reveal!!.settled)
         } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
@@ -397,7 +397,7 @@ class MarkdownAdmissionCompositionTest {
             assertTrue("Admission must type a strict received prefix", reveal!!.limit("answer") in 1 until text.length)
             assertTrue(advances > 0)
             complete.value = true
-            repeat(25) { frame() }
+            repeat(text.length + 25) { frame() }
             assertEquals(text.length, reveal!!.limit("answer"))
             assertTrue(reveal!!.settled)
         } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }

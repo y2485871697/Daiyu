@@ -163,9 +163,9 @@ internal class StreamingTextClearance {
         val list = current.list?.takeIf { it.isAttached } ?: return 0f
         val viewport = current.viewport?.takeIf { it.isAttached } ?: return 0f
         val leaf = coordinates?.takeIf { it.isAttached } ?: return 0f
-        val safeBottom = current.listHeight - current.clearance.toFloat()
+        val safeBottom = list.size.height - current.clearance.toFloat()
         val bottom = if (current.clampToViewport)
-            minOf(safeBottom, current.viewportTop + current.viewportHeight) else safeBottom
+            minOf(safeBottom, list.localPositionOf(viewport, Offset.Zero).y + viewport.size.height) else safeBottom
         return (bottom - list.localPositionOf(leaf, Offset.Zero).y).coerceAtLeast(0f)
     }
 
@@ -173,9 +173,10 @@ internal class StreamingTextClearance {
         if (!positioned || height <= 0) return false
         val current = viewportGeometry ?: return false
         val list = current.list?.takeIf { it.isAttached } ?: return false
-        current.viewport?.takeIf { it.isAttached } ?: return false
+        val viewport = current.viewport?.takeIf { it.isAttached } ?: return false
         val leaf = coordinates?.takeIf { it.isAttached } ?: return false
-        return list.localPositionOf(leaf, Offset.Zero).y + height <= maxOf(0f, current.viewportTop)
+        val viewportTop = list.localPositionOf(viewport, Offset.Zero).y
+        return list.localPositionOf(leaf, Offset.Zero).y + height <= maxOf(0f, viewportTop)
     }
 
     fun fits(coordinates: LayoutCoordinates?, height: Int): Boolean =

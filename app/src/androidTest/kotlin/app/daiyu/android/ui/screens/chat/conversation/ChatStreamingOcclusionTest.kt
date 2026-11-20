@@ -39,6 +39,7 @@ import app.daiyu.android.ui.app.AgentAppTheme
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -2080,6 +2081,101 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         val composer = ui.onNodeWithTag("gap-composer").fetchSemanticsNode().boundsInRoot
         assertEquals("The final visible tail uses the same fixed gap", ChatTailClearance.value,
             (composer.top - end.positionInRoot().y - end.size.height) / density, 2f / density)
+    }
+
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+    fun testGrowingWorkflowSurfaceKeepsCompleteAdmittedBottomBorderAndCorners() {
+        val clearance = StreamingTextClearance()
+        var fullHeight by mutableStateOf(120.dp)
+        var density: androidx.compose.ui.unit.Density? = null
+        var safePx = 0
+        var admittedPx = 0
+        val previousAutoAdvance = ui.mainClock.autoAdvance
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    val d = LocalDensity.current
+                    density = d
+                    val bottom = with(d) { (96.dp + ChatTailClearance).roundToPx() }
+                    safePx = with(d) { 360.dp.roundToPx() } - bottom
+                    admittedPx = safePx - with(d) { 24.dp.roundToPx() }
+                    Box(Modifier.fillMaxSize().safeDrawingPadding()) {
+                        Box(Modifier.size(320.dp, 360.dp).background(Color.White).testTag("closed-frame-host")
+                            .onPlaced { clearance.update(it, it, 0, bottom, 0, true, false) }) {
+                            androidx.compose.runtime.CompositionLocalProvider(LocalStreamingTextClearance provides clearance) {
+                                Box(Modifier.offset(x = 16.dp, y = 24.dp).wrapContentHeight(unbounded = true)) {
+                                    Box(Modifier.size(288.dp, fullHeight).testTag("closed-frame-surface")
+                                        .streamingWorkflowSurface(Color.White, Color.Magenta, 16.dp)
+                                        .drawWithContent {
+                                            drawContent()
+                                            val unsafeTop = admittedPx + 4.dp.toPx()
+                                            if (size.height > unsafeTop) drawRect(Color.Black,
+                                                topLeft = Offset(0f, unsafeTop), size = Size(size.width, size.height - unsafeTop))
+                                        }) {
+                                        BasicText("OLD SAFE HHHH", Modifier.padding(12.dp).testTag("closed-frame-old-text"),
+                                            style = TextStyle(color = Color.Black, fontFamily = FontFamily.Monospace,
+                                                fontSize = 20.sp, lineHeight = 28.sp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } }
+            val d = requireNotNull(density)
+            val host = ui.onNodeWithTag("closed-frame-host")
+            val surface = ui.onNodeWithTag("closed-frame-surface")
+            fun shot(): PixelMap {
+                val clock = ui.mainClock.currentTime
+                val image = captureScreenNode(host, advanceAnimationClock = false).toPixelMap()
+                assertEquals("Pixel capture cannot advance the animation", clock, ui.mainClock.currentTime)
+                return image
+            }
+            fun magenta(color: Color) = color.red > .9f && color.blue > .9f && color.green < .1f
+            fun arcInk(image: PixelMap, start: Int, end: Int, top: Int, bottom: Int): Int {
+                var count = 0
+                for (y in top until bottom) for (x in start until end) if (magenta(image[x, y])) count++
+                return count
+            }
+            ui.runOnUiThread { fullHeight = with(d) { admittedPx.toDp() } }
+            frame()
+            val rect = inkRect("closed-frame-host", "closed-frame-surface")
+            assertEquals(safePx.toFloat(), rect.bottom, 0f)
+            val reference = shot()
+            val left = rect.left.toInt()
+            val right = rect.right.toInt()
+            val corner = with(d) { 16.dp.roundToPx() }
+            assertTrue("Intact reference must contain the bottom horizontal border", magenta(reference[(left + right) / 2, safePx - 1]))
+            assertTrue("Intact reference must contain the bottom-left arc", arcInk(reference, left, left + corner, safePx - corner, safePx) > 2)
+            assertTrue("Intact reference must contain the bottom-right arc", arcInk(reference, right - corner, right, safePx - corner, safePx) > 2)
+            assertTrue(inkDelta(reference[left, safePx - 1], Color.White) <= .025f)
+            assertTrue(inkDelta(reference[right - 1, safePx - 1], Color.White) <= .025f)
+            val oldText = inkRect("closed-frame-host", "closed-frame-old-text")
+            var oldInk = 0
+            for (y in floor(oldText.top).toInt() until ceil(oldText.bottom).toInt()) {
+                for (x in floor(oldText.left).toInt() until ceil(oldText.right).toInt()) if (inkDark(reference[x, y])) oldInk++
+            }
+            assertTrue("The preservation oracle must contain actual old glyphs", oldInk > 20)
+            assertTrue(oldText.bottom < safePx - corner)
+            for (growth in listOf(32.dp, 160.dp)) {
+                val targetPx = admittedPx + with(d) { growth.roundToPx() }
+                ui.runOnUiThread { fullHeight = with(d) { targetPx.toDp() } }
+                frame()
+                assertEquals("Full measured extent must not shrink to the admitted frame", targetPx,
+                    surface.fetchSemanticsNode().layoutInfo.coordinates.size.height)
+                val actual = shot()
+                var changed = 0
+                var leaked = 0
+                for (y in 0 until reference.height) for (x in 0 until reference.width) {
+                    if (inkDelta(actual[x, y], reference[x, y]) > .025f) changed++
+                    if (y >= safePx && inkDelta(actual[x, y], Color.White) > .025f) leaked++
+                }
+                assertEquals("Growth must preserve a closed bottom border, both corners and old glyphs: $growth", 0, changed)
+                assertEquals("No border or unsafe child paint may cross the physical safe line", 0, leaked)
+            }
+            assertEquals(0, fixture.opens.get())
+        } finally { ui.mainClock.autoAdvance = previousAutoAdvance }
     }
 
 }

@@ -130,6 +130,7 @@ internal fun ReportedReasoningCard(
                         paceTerminal = firstPresentation,
                         initialBaseline = if (firstPresentation || queuedEmptyBaseline) emptyList() else null,
                         presentationLane = presentationLane.takeIf { revealGate },
+                        awaitPaintAdmission = true,
                     )
                 }
             }
@@ -178,7 +179,7 @@ internal fun ReportedReasoningCard(
             .padding(horizontal = if (embedded) 0.dp else 11.dp, vertical = if (embedded) 5.dp else 9.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (embedded) 6.dp else 7.dp)) {
             Icon(ChatPreviewIcons.Thought, null, Modifier.size(if (embedded) 18.dp else 14.dp), tint = colors.accent)
-            Text(reasoningDisplayLabel(isThinking, isThinking || waitingForReveal, displayPaused), Modifier.weight(1f), color = if (embedded) colors.text else colors.accent,
+            Text(reasoningDisplayLabel(isThinking, displayPaused), Modifier.weight(1f), color = if (embedded) colors.text else colors.accent,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium))
             ReasoningElapsedTime(ownerKey, rememberReasoningTiming(reported), isThinking && allowLiveTiming && !paused, nanoTime, embedded)
             if (hasSummary) {
@@ -321,7 +322,7 @@ internal fun ReasoningStepRow(
                 val complete = (generationComplete || reported.activeSinceNanos == null) && !displayThinking
                 val spinning = displayThinking && !stopped && !displayPaused && LocalWorkflowNodeMotionEnabled.current && !LocalReasoningPaused.current
                 Box(Modifier.size(10.dp).workflowInkClearance().testTag("reasoning-step-state:${reported.itemId}")
-                    .semantics { stateDescription = reasoningDisplayLabel(!generationComplete && reported.activeSinceNanos != null, !complete, displayPaused).removeSuffix("…") }
+                    .semantics { stateDescription = reasoningDisplayLabel(displayThinking, displayPaused).removeSuffix("…") }
                     .workflowCompletion("reasoning:${reported.itemId}", complete, appearance = appearance)
                     .clip(CircleShape).then(when {
                         complete -> Modifier.background(colors.success)

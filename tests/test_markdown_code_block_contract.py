@@ -17,7 +17,7 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         branch = self.markdown.split("is MarkdownBlock.Code ->", 1)[1].split("is MarkdownBlock.Quote ->", 1)[0]
         self.assertIn("MarkdownCodeBlock(block, visibility.value, generationComplete)", branch)
         for token in ["Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center)",
-                      "Modifier.fillMaxWidth().padding(horizontal = 4.dp)", "RoundedCornerShape(8.dp)",
+                      "Modifier.fillMaxWidth().padding(horizontal = 4.dp)", "streamingWorkflowSurface(colors.soft, colors.line, 8.dp)",
                       "textAlign = TextAlign.Left", 'testTag("markdown-code-block")', 'testTag("markdown-code-text")']:
             self.assertIn(token, self.code)
 
@@ -36,7 +36,7 @@ class MarkdownCodeBlockContract(unittest.TestCase):
     def test_body_uses_compact_vertical_padding_and_display_only_newline_projection(self):
         self.assertIn(".padding(horizontal = 12.dp, vertical = 4.dp)", self.code)
         self.assertIn('MarkdownCodeText(block, visibleCharacters, Modifier.testTag("markdown-code-text")', self.code)
-        self.assertIn('BasicText(markdownCodeDisplayText(block, visible)', self.reveal)
+        self.assertIn('ClearanceText(AnnotatedString(markdownCodeDisplayText(block, visible)), null, modifier, style, softWrap = false)', self.reveal)
         policy = (BASE / "MarkdownCodePolicy.kt").read_text()
         self.assertIn("block.windowEnd && visibleText.length == block.text.length", policy)
         self.assertIn('visibleText.removeSuffix("\\n")', policy)
@@ -106,8 +106,8 @@ class MarkdownCodeBlockContract(unittest.TestCase):
         self.assertIn("generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true,", chat)
         self.assertEqual(3, chat.count("textBody = textBody"))
         self.assertIn("generationComplete && body.text == text", self.markdown)
-        self.assertIn("MarkdownBlocks(block.blocks, openLink, visibility, generationComplete)", self.markdown)
-        self.assertIn("MarkdownBlocks(item.blocks, openLink, visibility, generationComplete)", self.markdown)
+        self.assertIn("MarkdownBlocks(block.blocks, openLink, visibility, generationComplete, paintOffset)", self.markdown)
+        self.assertIn("MarkdownBlocks(item.blocks, openLink, visibility, generationComplete, paintOffset)", self.markdown)
 
     def test_expansion_reuses_shared_output_dialog_without_a_close_cross(self):
         for token in ["LocalToolOutputContext provides null", "ToolDisclosureUi(block.language, block.exportText ?: block.text, code = true)",

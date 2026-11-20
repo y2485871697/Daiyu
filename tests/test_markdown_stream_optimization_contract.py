@@ -36,7 +36,8 @@ class MarkdownStreamOptimizationContract(unittest.TestCase):
         code = (BASE / "MarkdownCodeReveal.kt").read_text()
         for token in ["rememberTextMeasurer(cacheSize = 1)", "remember(block.text) { AnnotatedString(block.text) }",
                       "measurer.measure(complete, style, softWrap = false)", "remember(layout.multiParagraph)",
-                      "clipPath(reveal.path) { drawText(layout) }", "text = semanticText",
+                      "clipPath(clip.path) { drawText(previous) }", "previous.canPaintPrefixOf(layout)",
+                      "clearance?.fits(painted.coordinates, clip.height) != false", "text = semanticText",
                       "measurer.measure(semanticText, style, softWrap = false, skipCache = true)",
                       "it.code < 128", "markdownCodeDisplayText(block, visible)",
                       "constraints.constrainHeight(reveal.height)", "constraints.constrainWidth(reveal.width)"]:

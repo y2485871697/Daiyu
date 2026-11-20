@@ -15,7 +15,7 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         self.assertIn("parser === streamingMarkdownParser", projection)
         self.assertIn("target.parts == parts", typing)
         self.assertIn("baselineLength != null", typing)
-        self.assertIn("remember(identity, resetEpoch) { MarkdownTypingState(baseline) }", typing)
+        self.assertIn("remember(identity, resetEpoch, retainedLane) { retainedLane?.motion ?: MarkdownTypingState(baseline) }", typing)
 
     def test_stream_queue_finishes_running_parse_and_conflates_pending_appends(self):
         source = (BASE / 'MarkdownProjection.kt').read_text()

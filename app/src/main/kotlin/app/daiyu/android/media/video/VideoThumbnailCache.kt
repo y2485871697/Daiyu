@@ -18,7 +18,8 @@ import java.nio.file.LinkOption.NOFOLLOW_LINKS
 /** Worker-only derivatives. The caller must verify the current original before EVERY lookup. */
 internal class VideoThumbnailCache(private val directory: File,
     private val maxBytes: Long = 32L * 1024 * 1024, private val maxEntries: Int = 64) {
-    private val gate = Any()
+    // Controllers recreated in this process still use the same on-disk AtomicFiles.
+    private companion object { val gate = Any() }
     private val names = Regex("[0-9a-f]{64}\\.cover")
     private val maxEntryBytes = 5 * 1024 * 1024
 
@@ -112,7 +113,7 @@ internal class VideoThumbnailCache(private val directory: File,
             size -= length; count--
         }
         // AtomicFile's interrupted sidecars are disposable derivatives, not original assets.
-        files.filter { it.name.endsWith(".cover.new") || it.name.endsWith(".cover.bak") }.forEach {
+        files.filter { it.extension in setOf("new", "bak") && names.matches(it.nameWithoutExtension) }.forEach {
             checkMediaPath(it)
             if (Files.isRegularFile(it.toPath(), NOFOLLOW_LINKS)) it.delete()
         }

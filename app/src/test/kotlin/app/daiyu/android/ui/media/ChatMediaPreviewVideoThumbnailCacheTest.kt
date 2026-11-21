@@ -41,6 +41,38 @@ class ChatMediaPreviewVideoThumbnailCacheTest {
         } finally { root.deleteRecursively() }
     }
 
+    @Test fun trimsOnlySidecarsOwnedByThisCache() = worker {
+        val root = Files.createTempDirectory("cover-sidecars").toFile()
+        try {
+            val owned = listOf("new", "bak").map { File(root, "${"a".repeat(64)}.cover.$it") }
+            val neighbors = listOf("notes.cover.new", "notes.cover.bak", "keep.new").map { File(root, it) }
+            (owned + neighbors).forEach { it.writeText("keep") }
+            VideoThumbnailCache(root).load(reference(), 128, { false }) { bitmap() }.recycle()
+            assertTrue(owned.none { it.exists() })
+            neighbors.forEach { assertEquals("keep", it.readText()) }
+        } finally { root.deleteRecursively() }
+    }
+
+    @Test fun concurrentControllersShareOneDecodeAndOnePublishedCover() {
+        val root = Files.createTempDirectory("shared-covers").toFile()
+        val pool = Executors.newFixedThreadPool(2)
+        val ready = java.util.concurrent.CyclicBarrier(2)
+        val decodes = java.util.concurrent.atomic.AtomicInteger()
+        val ref = reference()
+        try {
+            val readers = List(2) {
+                pool.submit {
+                    val cache = VideoThumbnailCache(root)
+                    ready.await(10, java.util.concurrent.TimeUnit.SECONDS)
+                    cache.load(ref, 128, { false }) { decodes.incrementAndGet(); bitmap() }.recycle()
+                }
+            }
+            readers.forEach { it.get(20, java.util.concurrent.TimeUnit.SECONDS) }
+            assertEquals(1, decodes.get())
+            assertEquals(1, root.listFiles()!!.count { it.extension == "cover" })
+        } finally { pool.shutdownNow(); root.deleteRecursively() }
+    }
+
     @Test fun everyWarmLookupStillRequiresTheCurrentOriginalDigestAndMetadata() = worker {
         val root = Files.createTempDirectory("verified-video-covers").toFile()
         try {

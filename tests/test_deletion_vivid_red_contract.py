@@ -52,8 +52,10 @@ class DeletionOriginalRedContractTest(unittest.TestCase):
 
     def test_message_toolbar_and_nondelete_destructive_actions_remain_distinct(self):
         bar = source('ui/screens/chat/conversation/MessageActionBar.kt')
-        delete = bar.split('TooltipBox(text = "删除", enabled = messageActionsEnabled)', 1)[1].split('if (timestamp.isNotBlank())', 1)[0]
-        self.assertIn('tint = colors.muted', delete)
+        self.assertIn('val actionsEnabled = interactionEnabled && messageActionsEnabled && actions.messageActionsEnabled', bar)
+        self.assertIn('val actionTint = colors.muted.copy(alpha = if (actionsEnabled) 1f else .38f)', bar)
+        delete = bar.split('TooltipBox(text = "删除", enabled = actionsEnabled)', 1)[1].split('if (timestamp.isNotBlank())', 1)[0]
+        self.assertIn('tint = actionTint', delete)
         self.assertNotIn('destructiveColors', delete)
         self.assertNotIn('deletionAppearance', source('ui/screens/settings/WorkspaceSettingsScreen.kt'))
         actions = source('ui/components/MiuixDialogActions.kt')

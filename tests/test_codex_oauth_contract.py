@@ -38,7 +38,12 @@ class OAuthContract(unittest.TestCase):
   s=read('model/ProviderSnapshot.kt');self.assertIn('oauth = oauth,',s);self.assertIn('oauth = settings.oauth,',s);self.assertIn('oauth == other.oauth',s)
  def test_every_post_uses_same_auth_and_codex_policy(self):
   s=read('model/ResponsesModel.kt');self.assertEqual(2,s.count('val authentication = authHeaders()'));self.assertIn('if (settings.oauth != null) app.daiyu.android.model.oauth.CodexRequestPolicy.apply(request, settings.requestOptions.speedMode, preserveReasoning = summaryRequest)',s)
-  self.assertLess(s.index('val authentication = authHeaders()',s.index('val pendingPost = post')),s.index('val conn = connect(URL(finalUrl))'))
+  post=s.split('val pendingPost = post',1)[1]
+  auth=post.index('val authentication = authHeaders()')
+  opened=post.index('val conn = ModelHttpTransport.open(URL(finalUrl), connect, beforeConnect)')
+  headers=post.index('authentication.forEach { (name, value) -> conn.setRequestProperty(name, value) }')
+  self.assertLess(post.index('pendingPost.consume(approval)'),auth)
+  self.assertLess(auth,opened);self.assertLess(opened,headers)
  def test_catalog_propagates_auth_and_exact_url(self):
   s=read('model/catalog/ModelCatalogService.kt');self.assertIn('oauth = settings.oauth',s)
   s=read('model/catalog/RemoteModelFetcher.kt');self.assertIn('$baseUrl/models?client_version=',s);self.assertIn('oauthHeaders?.forEach',s);self.assertIn('connection.instanceFollowRedirects = false',s)

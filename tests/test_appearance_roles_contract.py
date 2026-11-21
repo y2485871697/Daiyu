@@ -86,9 +86,11 @@ class AppearanceRolesContractTest(unittest.TestCase):
 
     def test_message_delete_keeps_original_neutral_toolbar_color(self):
         bar = source('ui/screens/chat/conversation/MessageActionBar.kt')
-        delete = bar.split('TooltipBox(text = "删除", enabled = messageActionsEnabled)', 1)[1].split('if (timestamp.isNotBlank())', 1)[0]
-        self.assertIn('ConversationIconButton(onClick = { actions.onDeleteTurn(id) }, enabled = messageActionsEnabled)', delete)
-        self.assertIn('Icon(DaiyuIcons.Delete, "删除", Modifier.size(13.dp), tint = colors.muted)', delete)
+        self.assertIn('val actionsEnabled = interactionEnabled && messageActionsEnabled && actions.messageActionsEnabled', bar)
+        self.assertIn('val actionTint = colors.muted.copy(alpha = if (actionsEnabled) 1f else .38f)', bar)
+        delete = bar.split('TooltipBox(text = "删除", enabled = actionsEnabled)', 1)[1].split('if (timestamp.isNotBlank())', 1)[0]
+        self.assertIn('ConversationIconButton(onClick = { actions.onDeleteTurn(id) }, enabled = actionsEnabled)', delete)
+        self.assertIn('Icon(DaiyuIcons.Delete, "删除", Modifier.size(13.dp), tint = actionTint)', delete)
         self.assertNotIn('colorScheme.error', delete)
 
     def test_explicit_theme_mode_and_tertiary_are_bridged_without_recoloring_browser(self):

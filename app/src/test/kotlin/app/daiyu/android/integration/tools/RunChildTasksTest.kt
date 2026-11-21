@@ -5,7 +5,6 @@ import app.daiyu.android.domain.*
 import app.daiyu.android.domain.delegation.*
 import app.daiyu.android.domain.runtime.RunExecutionOwner
 import app.daiyu.android.domain.runtime.RunnerOptions
-import app.daiyu.android.domain.runtime.ReceiptBatchToolExecutor
 import app.daiyu.android.domain.tools.*
 import org.json.JSONObject
 import org.junit.Assert.*
@@ -15,6 +14,7 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class RunChildTasksTest {
+    @get:org.junit.Rule val liveOwners = LiveRunnerOwners()
     private class Journal : ChildTaskStore {
         val enqueues = AtomicInteger()
         val rows = linkedMapOf<String, ChildTaskRecord>()
@@ -46,20 +46,7 @@ class RunChildTasksTest {
     }
     private val message = Message(MessageId("parent"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
-    private fun owner(): RunExecutionOwner {
-        var result: RunExecutionOwner? = null
-        val executor = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { result = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): List<ToolDispatchResult> = error("no tools")
-        }
-        val model = ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-            override fun cancel() {}
-        } }
-        ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("no tools") },
-            RunnerOptions(receiptBatchExecutor = executor)) {}.run(message, emptyList())
-        return checkNotNull(result)
-    }
+    private fun owner() = liveOwners.issue(message)
     private class Held : ModelPort {
         val opened = AtomicInteger()
         val entered = CountDownLatch(1)

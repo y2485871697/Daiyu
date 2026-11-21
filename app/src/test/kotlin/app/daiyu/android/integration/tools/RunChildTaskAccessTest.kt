@@ -12,23 +12,11 @@ import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
 
 class RunChildTaskAccessTest {
+    @get:org.junit.Rule val liveOwners = LiveRunnerOwners()
     private val old = ChildTaskRecord(ChildRunOwner("conversation", "old-parent", "old-group", 2,
         "child", "child-message"), "old-message", "old-owner", 0, "old-profile", "input")
-    private fun caller(conversation: String): RunExecutionOwner {
-        var captured: RunExecutionOwner? = null
-        val receipts = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { captured = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean): List<ToolDispatchResult> = error("no tools")
-        }
-        val initial = Message(MessageId("new-message"), ConversationId(conversation), RunId("new-parent"),
-            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
-        ChatRunner(ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) { sink(ModelEvent.TextFinal("text", "done")) }
-            override fun cancel() {}
-        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("no tools") },
-            RunnerOptions(receiptBatchExecutor = receipts)) {}.run(initial, emptyList())
-        return checkNotNull(captured)
-    }
+    private fun caller(conversation: String) = liveOwners.issue(Message(MessageId("new-message"),
+        ConversationId(conversation), RunId("new-parent"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
     private fun arguments(action: String = "continue") = JSONObject().put("parent_run_id", old.owner.parentRunId)
         .put("task_group_id", old.owner.taskGroupId).put("generation", old.owner.generation.toString())
         .put("child_run_id", old.owner.childRunId).put("assistant_message_id", old.owner.assistantMessageId)

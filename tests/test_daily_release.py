@@ -228,16 +228,19 @@ class DailyReleaseTests(unittest.TestCase):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
         self.assertIn('          - daily\n', workflow)
         release = workflow.split('  release:\n', 1)[1].split('  synthetic:\n', 1)[0]
-        self.assertLess(release.index('scripts/daily_release.py plan'), release.index('setup-java'))
+        self.assertLess(release.index('scripts/daily_release.py plan'), release.index('uses: ./.github/actions/setup-temurin'))
         self.assertIn(':core-domain:test :app:testReleaseUnitTest :app:lintRelease', release)
         self.assertIn('-PdaiyuProductionRelease=true :app:assembleRelease :app:assembleReleaseAndroidTest', release)
         self.assertIn('scripts/daily_release.py bind', release)
         self.assertIn('代鱼日常Release包-daily', release)
         smoke = workflow.split('  smoke:\n', 1)[1]
-        matrices = [json.loads(value) for value in re.findall(r"'(\[[^']*\])'", smoke)]
-        self.assertEqual([len(value) for value in matrices], [2, 4, 4, 8])
-        self.assertEqual({(row['api'], row['shard']) for row in matrices[0]}, {('26', 0), ('37.2', 0)})
-        self.assertIn("SMOKE_SHARD_COUNT: ${{ inputs.mode == 'daily' && '1' || '4' }}", smoke)
+        # Inspect the daily branch itself; other reviewed targeted branches may also use one shard.
+        daily_matrix = re.search(r"inputs.mode == 'daily' && '(\[[^']*\])'", smoke).group(1)
+        self.assertCountEqual([(row['api'], row['shard']) for row in json.loads(daily_matrix)],
+                              [('26', 0), ('37.2', 0)])
+        default_matrix = re.search(r"\|\| '(\[[^']*\])'\) \}\}", smoke).group(1)
+        self.assertCountEqual([(row['api'], row['shard']) for row in json.loads(default_matrix)],
+                              [(api, shard) for api in ('26', '37.2') for shard in range(4)])
         self.assertIn('scripts/daily_release.py verify', smoke)
         self.assertIn('DAILY_API: ${{ matrix.api }}', smoke)
         self.assertIn('代鱼日常Release证据', smoke)

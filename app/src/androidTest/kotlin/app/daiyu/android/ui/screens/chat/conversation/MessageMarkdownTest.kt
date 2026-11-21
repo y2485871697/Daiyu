@@ -64,7 +64,7 @@ import org.junit.Assert.assertArrayEquals
 class MessageMarkdownTest : WiredActivityTestCase() {
     protected override val requiresWindowDraw: Boolean
         get() = name == "testLargeReceivedChunkPaintsAtMostOneWholeCharacterPerFrame" ||
-            name == "testNativePaintReceiptDoesNotRepeatTextPlacement"
+            name == "testNativePaintReceiptDoesNotRepeatTextPlacement" || name == "testLinkedPrefixReceivesNativePaint"
     private val opened = CopyOnWriteArrayList<String>()
     private val uriHandler = object : UriHandler {
         override fun openUri(uri: String) { opened += uri }
@@ -78,10 +78,14 @@ class MessageMarkdownTest : WiredActivityTestCase() {
 
     fun testNativePaintReceiptDoesNotRepeatTextPlacement() = verifyNativePaintReceiptPlacement()
 
+    fun testLinkedPrefixReceivesNativePaint() {
+        val linked = annotateMessageMarkdown("正文 [链接](https://example.test)", Color.Blue) { error("render opened URI") }
+        verifyNativePaintReceiptPlacement(linked)
+    }
+
     @OptIn(androidx.compose.runtime.InternalComposeApi::class)
-    private fun verifyNativePaintReceiptPlacement() {
+    private fun verifyNativePaintReceiptPlacement(text: AnnotatedString = AnnotatedString("Native draw")) {
         val key = "draw-only-receipt"
-        val text = AnnotatedString("Native draw")
         val clearance = StreamingTextClearance()
         val probe = MarkdownPaintSlotsProbe()
         val placements = AtomicInteger()

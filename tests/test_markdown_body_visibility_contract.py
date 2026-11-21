@@ -45,7 +45,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
             self.assertIn(token, inputs)
         self.assertEqual(' '.join(feedback.split()),
                          'androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { '
-                         'frame.drawn = actual prepareNextLine() '
+                         'frame.drawn = actual prepareNextLine() frame.paintedHere = true '
                          'if (paintOffset != null) painted[paintOffset] = actual } } '
                          'androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { '
                          'publication?.setPending(owner, !published()) }')

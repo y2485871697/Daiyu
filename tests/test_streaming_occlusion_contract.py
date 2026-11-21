@@ -100,7 +100,7 @@ class StreamingOcclusionContract(unittest.TestCase):
                          "latestCandidateText.isEmpty() || frame.layout?.let { candidate -> "
                          "candidate.layoutInput.text == latestCandidateText && clearance.whollyAboveViewport(frame.coordinates, "
                          "maxOf(candidate.size.height, frame.coordinates?.size?.height ?: 0)) "
-                         "} == true || frame.drawn?.let { actual -> "
+                         "} == true || frame.paintedHere && frame.drawn?.let { actual -> "
                          "actual.layoutInput.text == latestCandidateText && frame.layout?.let { actual.canPaintPrefixOf(it) } == true && "
                          "clearance.fits(frame.coordinates, actual.size.height) } == true")
         self.assertNotIn("frame.drawn =", publication)

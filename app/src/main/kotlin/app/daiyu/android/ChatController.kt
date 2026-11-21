@@ -6202,7 +6202,7 @@ class ChatController internal constructor(private val application:Application,
         val owned=synchronized(this) {ownedRunner(owner)} ?: return false
         val accepted=owned.pause()
         if(accepted) synchronized(this) {if(ownedRunner(owner)===owned) {
-            resources?.let(::capturePausedChildren)
+            if (owned.state().pauseRequested) resources?.let(::capturePausedChildren)
             notifyChanged()
         }}
         return accepted
@@ -6211,7 +6211,7 @@ class ChatController internal constructor(private val application:Application,
         val owned = synchronized(this) { ownedRunner(owner) } ?: return null
         val epoch = owned.pauseForBrowser() ?: return null
         synchronized(this) { if (ownedRunner(owner) === owned) {
-            resources?.let(::capturePausedChildren)
+            if (owned.state().pauseRequested) resources?.let(::capturePausedChildren)
             notifyChanged()
         } }
         return epoch

@@ -40,6 +40,18 @@ class RunControlsContractTest(unittest.TestCase):
         self.assertNotIn('onControlPress = { if (!presentationOnly)', screen)
         self.assertNotIn('onControlRelease = { if (!presentationOnly)', screen)
 
+    def test_live_stop_and_resume_do_not_commit_unaccepted_visual_state(self):
+        screen = (APP / 'ui/screens/chat/conversation/ChatScreen.kt').read_text()
+        stop = screen.split('onPrimaryLongPress = {', 1)[1].split('onSupplement =', 1)[0]
+        self.assertIn('if (runtimePhase == ComposerPhase.IDLE) presentation.finish()', stop)
+        self.assertIn('else actions.onPrimaryLongPress()', stop)
+        self.assertIn('if (reply?.reasoningStopped == true) presentation.finish()', screen)
+        self.assertNotIn('text -> presentation.finish(); actions.onSend(text)', screen)
+        self.assertIn('if (queued) presentation.finish()', screen)
+        controller = (APP / 'ChatController.kt').read_text()
+        pause = controller.split('internal fun pause(owner:', 1)[1].split('internal fun resume(owner:', 1)[0]
+        self.assertEqual(2, pause.count('if (owned.state().pauseRequested) resources?.let(::capturePausedChildren)'))
+
     def test_append_outline_ink_center_and_stroke_stay_inside_viewport(self):
         icons = (APP / 'ui/icons/ChatPreviewIcons.kt').read_text()
         self.assertIn('m19 5-6 18-4-8-8-4 18-6ZM9 15 19 5', icons)

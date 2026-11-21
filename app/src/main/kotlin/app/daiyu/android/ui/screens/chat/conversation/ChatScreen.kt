@@ -172,9 +172,20 @@ internal fun DaiyuChatScreen(
         ReplyPresentationControl(reply?.listKey,
             runtimePhase != ComposerPhase.IDLE || reply?.status == app.daiyu.android.domain.RunStatus.RUNNING)
     }
+    val conversationKey = state.conversationKey
+    val previousKey = reply?.listKey
+    val submittedSuccessor = rememberUpdatedState(conversationKey to displayedTurns)
+    DisposableEffect(presentation) {
+        onDispose {
+            val (conversation, rows) = submittedSuccessor.value
+            if (conversation == conversationKey && previousKey != null && rows.lastOrNull()?.listKey != previousKey &&
+                rows.any { it.listKey == previousKey }) presentation.finish()
+        }
+    }
     SideEffect {
         if (runtimePhase != ComposerPhase.IDLE || reply?.status == app.daiyu.android.domain.RunStatus.RUNNING)
             presentation.observeLive()
+        if (reply?.reasoningStopped == true) presentation.finish()
         when (runtimePhase) {
             ComposerPhase.PAUSED -> presentation.pause(true)
             ComposerPhase.RUNNING -> presentation.pause(false)
@@ -186,7 +197,6 @@ internal fun DaiyuChatScreen(
     val composer = state.composer.copy(
         phase = when {
             presentationOnly -> if (playback.paused) ComposerPhase.PAUSED else ComposerPhase.RUNNING
-            runtimePhase == ComposerPhase.RUNNING && presentation.pauseRequested -> ComposerPhase.PAUSED
             else -> runtimePhase
         },
         presentationOnly = presentationOnly,
@@ -198,10 +208,9 @@ internal fun DaiyuChatScreen(
             else actions.onPrimaryTap()
         },
         onPrimaryLongPress = {
-            presentation.finish()
-            if (runtimePhase != ComposerPhase.IDLE) actions.onPrimaryLongPress()
+            if (runtimePhase == ComposerPhase.IDLE) presentation.finish()
+            else actions.onPrimaryLongPress()
         },
-        onSend = { text -> presentation.finish(); actions.onSend(text) },
         onSupplement = { text -> actions.onSupplement(text).also { queued -> if (queued) presentation.finish() } },
     )
     val userMessageEntrance = suppliedUserMessageEntrance ?:

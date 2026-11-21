@@ -72,7 +72,6 @@ import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
@@ -221,6 +220,7 @@ private class MarkdownTextFrame {
     var measureConstraints by mutableStateOf<Constraints?>(null)
     var layout by mutableStateOf<TextLayoutResult?>(null)
     var rendered by mutableStateOf<TextLayoutResult?>(null)
+    var paintedHere by mutableStateOf(false)
     var drawn by mutableStateOf<TextLayoutResult?>(null)
     var committed by mutableStateOf<TextLayoutResult?>(null)
 }
@@ -275,7 +275,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     fun published(): Boolean = latestCandidateText.isEmpty() || frame.layout?.let { candidate ->
         candidate.layoutInput.text == latestCandidateText && clearance.whollyAboveViewport(frame.coordinates,
             maxOf(candidate.size.height, frame.coordinates?.size?.height ?: 0))
-    } == true || frame.drawn?.let { actual ->
+    } == true || frame.paintedHere && frame.drawn?.let { actual ->
         actual.layoutInput.text == latestCandidateText && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
             clearance.fits(frame.coordinates, actual.size.height)
     } == true
@@ -366,6 +366,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                 androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
                     frame.drawn = actual
                     prepareNextLine()
+                    frame.paintedHere = true
                     if (paintOffset != null) painted[paintOffset] = actual
                 }
             }
@@ -647,11 +648,11 @@ private fun annotateMarkdownSpans(
             is MarkdownText.HeadingSpan -> addStyle(SpanStyle(fontWeight = FontWeight.Bold,
                 fontSize = headingSize(span.level).sp), start, end)
             is URLSpan -> if (MarkdownText.isSafeLink(span.url)) {
+                // Give the measurer and BasicText the same styled input. A link's own
+                // TextLinkStyles would add a span only inside BasicText before layout.
+                addStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline), start, end)
                 addLink(LinkAnnotation.Url(
                     span.url,
-                    styles = TextLinkStyles(style = SpanStyle(
-                        color = linkColor, textDecoration = TextDecoration.Underline,
-                    )),
                     linkInteractionListener = { link ->
                         val url = (link as? LinkAnnotation.Url)?.url
                         if (url != null && MarkdownText.isSafeLink(url)) onOpenLink(url)

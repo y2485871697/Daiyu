@@ -2499,7 +2499,7 @@ class MainActivity : ComponentActivity() {
                         onConversationTogglePin = { item -> guard { toggleRetainedPin(item.id) } },
                         onConversationExport = { item -> backupGuard { pickConversationExports(listOf(item.id)) } },
                         onConversationsExport = { ids -> backupGuard { pickConversationExports(ids) } },
-                        exportEnabled = controller.ready && controller.active == null && !controller.hasLiveChildTasks() &&
+                        exportEnabled = sidebarVisible && retainedPage == "chat" && controller.ready && controller.active == null && !controller.hasLiveChildTasks() &&
                             controller.problem?.startsWith("会话恢复失败") != true && !backupBusy && !exportPickerPending && pendingBackupRequest == null,
                         onNewConversation = { guard { createNewConversation(); dismissSidebar() } },
                         onSelectFolder = { id -> paneState = paneState.copy(selectedFolderId = id); updatePane() },
@@ -3434,13 +3434,14 @@ class MainActivity : ComponentActivity() {
         controller.isAppearanceLightNavigationBars = lightBars
     }
 
-    private fun chatActions(onVisibleCompleted: (Set<String>) -> Unit): ChatScreenActions {
+    @Composable private fun chatActions(onVisibleCompleted: (Set<String>) -> Unit): ChatScreenActions {
         val dictationProjection = currentDictationProjection()
         val renderedOwner = controlOwner
         val renderedTextSend = pendingTextSend
         val renderedConversation = chatState.conversationKey
         val renderedRevealOwner = controller.active?.takeIf { it.conversationId.value == renderedConversation }
-        val renderedRevealTurns = chatState.turns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey }
+        val turns = chatState.turns
+        val renderedRevealTurns = remember(turns) { turns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey } }
         val renderedRevealAdvance = hapticsHost?.revealAdvance(renderedConversation)
         val renderedEditorGeneration = editorGeneration
         val renderedContextEntryEpoch = contextManagementEntryEpoch
@@ -4072,11 +4073,12 @@ class MainActivity : ComponentActivity() {
         val generation = editorGeneration
         val revision = controller.dataRevision
         val id = selected?.id
-        val completed = shown.mapNotNull { (_, message) ->
+        val readable = id != null && completionPageReadable()
+        val completed = if (!readable) emptySet() else shown.mapNotNull { (_, message) ->
             if (message.conversationId == id && message.role == Message.ASSISTANT_ROLE && message.status == RunStatus.COMPLETED)
                 message.id.value to message.runId.value else null
         }.toSet()
-        val owner = if (completionPageReadable() && id != null && completed.isNotEmpty())
+        val owner = if (id != null && completed.isNotEmpty())
             app.daiyu.android.ui.screens.chat.conversation.CompletionReadOwner(id, generation, revision, completed) else null
         // Capture the exact event off the UI thread, before the measured-frame callback.
         val receiptState = app.daiyu.android.ui.screens.chat.conversation.rememberCompletionReceipt(owner) { conversation ->

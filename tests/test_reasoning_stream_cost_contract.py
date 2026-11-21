@@ -10,6 +10,8 @@ class ReasoningStreamCostContract(unittest.TestCase):
         main = (SRC / 'MainActivity.kt').read_text()
         source = (SRC / 'ui/screens/chat/conversation/CompletionRead.kt').read_text()
         owner = main.split('@Composable private fun completionReadAction()', 1)[1].split('private fun completionPageReadable()', 1)[0]
+        self.assertIn('if (!readable) emptySet() else shown.mapNotNull', owner)
+        self.assertIn('val renderedRevealTurns = remember(turns)', main)
         self.assertIn('message.status == RunStatus.COMPLETED', owner)
         self.assertIn('message.id.value to message.runId.value', owner)
         self.assertIn('CompletionReadOwner(id, generation, revision, completed)', owner)

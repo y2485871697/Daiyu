@@ -198,6 +198,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                     layers.enter("source")
                     val frame = layers.frame("source")
                     layers.setActive(true)
+
                     frame.recorded(IntSize(2, 2)); scheduler.runCurrent()
                     assertFalse(copy.isCompleted)
                     layers.beginGesture(frame)
@@ -217,6 +218,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                         cancelledLayers.enter("cancelled-source")
                         val cancelledFrame = cancelledLayers.frame("cancelled-source")
                         cancelledLayers.setActive(true)
+
                         cancelledFrame.recorded(IntSize(2, 2)); scheduler.runCurrent()
                         cancelledLayers.beginGesture(cancelledFrame)
                         assertFalse(cancelledCopy.isCompleted)
@@ -284,6 +286,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 layers.enter("settings")
                 val frame = layers.frame("settings")
                 layers.setActive(true)
+
                 frame.recorded(IntSize(2, 2))
                 scheduler.runCurrent()
                 assertEquals("recording alone never copies", 0, copies.size)
@@ -337,6 +340,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 layers.enter("settings")
                 val frame = layers.frame("settings")
                 layers.setActive(true)
+
                 frame.recorded(IntSize(2, 2)); scheduler.runCurrent()
                 assertEquals(0, copies.size)
                 layers.beginGesture(frame)
@@ -389,6 +393,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                     layers.enter("chat")
                     val target = layers.frame("chat")
                     layers.setActive(true)
+                    target.layer
                     target.recorded(size); scheduler.runCurrent()
                     layers.freezeCurrent()
                     assertEquals("the final read is already submitted before leaving chat", 1, copies.size)
@@ -521,6 +526,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             assertEquals("only freeze submits the final copy", 1, copies.size)
             layers.enter("destination")
             val destination = layers.frame("destination")
+            destination.layer
             repeat(12) { destination.recorded(IntSize(2, 2)); scheduler.advanceTimeBy(16); scheduler.runCurrent() }
             assertEquals("destination animation never submits speculative copies", 1, copies.size)
             val finalPixels = ImageBitmap(2, 2)
@@ -542,9 +548,12 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
         withFrozenCopies { layers, scheduler, copies ->
             layers.enter("source")
             val frame = layers.frame("source")
+            frame.layer // The fixture simulates a recorded draw below.
             layers.setActive(true)
+
             frame.recorded(IntSize(2, 2))
             assertTrue(layers.beginGesture(frame))
+
             frame.recorded(IntSize(2, 2))
             copies[0].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
             assertNull("a changed generation rejects the final read", frame.image)
@@ -558,6 +567,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             layers.clearPreviews()
             copies[2].complete(ImageBitmap(2, 2)); scheduler.runCurrent()
             assertNull("global preview epoch rejects a late read", frame.image)
+
             frame.recorded(IntSize(3, 2))
             layers.beginGesture(frame)
             layers.setActive(false); layers.setActive(true)
@@ -625,6 +635,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 layers.enter("settings")
                 val previous = layers.frame("settings")
                 layers.setActive(true)
+                val oldLayer = previous.layer
                 previous.recorded(IntSize(2, 2))
                 scheduler.runCurrent()
                 assertNull(previous.ready)
@@ -638,8 +649,8 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 layers.enter("settings")
                 val returned = layers.frame("settings")
                 assertNotSame(previous, returned)
-                assertNotSame(previous.layer, returned.layer)
-                assertTrue("replacing a visit releases its layer", previous.layer.isReleased)
+                assertFalse("route handoff must not allocate a recording layer", returned.hasRecordingLayer)
+                assertTrue("replacing a visit releases its layer", oldLayer.isReleased)
                 assertNull(previous.ready)
                 assertSame("independent prepared pixels survive the old layer's release", pixels, returned.ready)
                 assertEquals(IntSize(2, 2), returned.size)
@@ -651,6 +662,8 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
                 assertFalse(returned.animateReturn)
                 assertTrue("a covered visit can continue its exact immutable source before its first recording", layers.beginGesture(returned))
                 assertSame(pixels, returned.image)
+                assertFalse("inherited preview does not allocate a layer", returned.hasRecordingLayer)
+                assertNotSame(oldLayer, returned.layer)
                 layers.resume(returned)
                 scheduler.advanceTimeBy(65); scheduler.runCurrent()
                 assertEquals("never copy an unrecorded replacement layer", 1, copies)
@@ -690,6 +703,7 @@ class PageBackStackActivityTest : WiredActivityTestCase() {
             layers.enter("source")
             val frame = layers.frame("source")
             layers.setActive(true)
+
             frame.recorded(IntSize(2, 2))
             layers.beginGesture(frame)
             val oldTab = ImageBitmap(2, 2)

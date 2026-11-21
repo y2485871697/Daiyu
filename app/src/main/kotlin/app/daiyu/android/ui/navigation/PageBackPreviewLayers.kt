@@ -25,7 +25,15 @@ import kotlinx.coroutines.withContext
 internal class PageBackPreviewLayers(private val context: GraphicsContext, private val scope: CoroutineScope,
     private val contextChangeReason: Int = 0,
     private val snapshot: suspend (Frame) -> ImageBitmap = { frame -> frame.layer.toImageBitmap() }) {
-    internal class Frame(val key: Any, val layer: GraphicsLayer, var sourceKey: Any = key, var contentKey: Any = key) {
+    internal class Frame(val key: Any, createLayer: () -> GraphicsLayer, var sourceKey: Any = key, var contentKey: Any = key) {
+        // A returning visit can draw inherited pixels without recording a new layer yet.
+        private val recordingLayer = lazy(LazyThreadSafetyMode.NONE) {
+            check(!releaseRequested)
+            createLayer()
+        }
+        val layer: GraphicsLayer get() = recordingLayer.value
+        val hasRecordingLayer get() = recordingLayer.isInitialized()
+        val layerReleased get() = hasRecordingLayer && layer.isReleased
         var size = IntSize.Zero
         var generation = 0L
         var captureEpoch = 0L
@@ -188,7 +196,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         val token = captureBackPerformanceToken()
         observeCaptures(token)
         val canBegin = active && !closed && frames[frame.key] === frame && frame.size != IntSize.Zero &&
-            (frame.generation > 0L || frame.inheritedImage != null) && !frame.releaseRequested && !frame.layer.isReleased
+            (frame.generation > 0L || frame.inheritedImage != null) && !frame.releaseRequested && !frame.layerReleased
         if (frame.readyGeneration >= 0 && frame.readyGeneration < frame.generation) {
             BackPerformance.mark(BackPerformanceRecorder.Event.PREVIEW_SOURCE_STALE, token,
                 (frame.generation - frame.readyGeneration).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
@@ -232,7 +240,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     }
 
     private fun capture(frame: Frame, sourceToken: BackPerformanceRecorder.Token?) {
-        if (closed || !active || frame.releaseRequested || frame.size == IntSize.Zero || frame.layer.isReleased ||
+        if (closed || !active || frame.releaseRequested || frame.size == IntSize.Zero || frame.layerReleased ||
             !frame.frozen || frame.generation == 0L ||
             frame.captures.any { !it.isCompleted && !it.isCancelled }) return
         // Submit the final read while the source is alive; cancelled reads drain separately.
@@ -279,7 +287,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
             frame.captures.add(capture)
             capture.invokeOnCompletion {
                 frame.captures.remove(capture)
-                if (frame.releaseRequested && frame.captures.isEmpty()) context.releaseGraphicsLayer(frame.layer)
+                if (frame.releaseRequested && frame.captures.isEmpty() && frame.hasRecordingLayer) context.releaseGraphicsLayer(frame.layer)
             }
         }
     }
@@ -287,7 +295,7 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
     fun frame(key: Any, sourceKey: Any = key, contentKey: Any = key): Frame {
         return synchronousTrace("daiyu.back.layers.frame") {
             val previous = frames.remove(key)
-            Frame(key, context.createGraphicsLayer(), sourceKey, contentKey).also { frame ->
+            Frame(key, { context.createGraphicsLayer() }, sourceKey, contentKey).also { frame ->
                 if (previous != null && !previous.releaseRequested && previous.sourceKey == sourceKey && previous.contentKey == contentKey) {
                     // Recorded geometry is independent of whether this visit has frozen pixels.
                     frame.size = previous.size
@@ -312,7 +320,9 @@ internal class PageBackPreviewLayers(private val context: GraphicsContext, priva
         frame.image = null
         frame.ready = null
         frame.inheritedImage = null
-        if (frame.captures.isEmpty()) context.releaseGraphicsLayer(frame.layer)
+        if (frame.captures.isEmpty()) {
+            if (frame.hasRecordingLayer) context.releaseGraphicsLayer(frame.layer)
+        }
         else frame.captures.toList().forEach { it.cancel() }
     }
 

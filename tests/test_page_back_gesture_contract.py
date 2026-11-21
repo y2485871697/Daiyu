@@ -320,7 +320,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('JankDiagnostics.section("daiyu.back-preview=route-change")', enter)
         self.assertIn('if (returning) freeze(it) else freezeForNavigation(it)', enter)
         self.assertLess(enter.index('freeze(it)'), enter.index('currentKey = key'))
-        self.assertIn('if (frame.releaseRequested && frame.captures.isEmpty()) context.releaseGraphicsLayer(frame.layer)', layers)
+        self.assertIn('if (frame.releaseRequested && frame.captures.isEmpty() && frame.hasRecordingLayer) context.releaseGraphicsLayer(frame.layer)', layers)
         self.assertIn('val previous = frames.remove(key)', layers)
         self.assertIn('previous?.let { release(it) }', layers)
         self.assertNotIn('drawLayer(target.layer)', self.host)

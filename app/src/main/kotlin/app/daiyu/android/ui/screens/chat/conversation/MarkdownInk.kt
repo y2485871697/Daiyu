@@ -15,7 +15,7 @@ internal class MarkdownInk(start: Int) {
     fun paintPosition(offset: Int, length: Int, stopped: Boolean): Double {
         val visible = (position - offset).coerceIn(0.0, length.toDouble())
         if (stopped) return (paintedEnds[offset] ?: 0.0).coerceAtMost(visible)
-        if (position <= offset + length) lastDrawnProgress = position
+        if (position >= offset && position <= offset.toDouble() + length) lastDrawnProgress = position
         paintedEnds[offset] = visible
         return visible
     }
@@ -24,7 +24,8 @@ internal class MarkdownInk(start: Int) {
     fun visibleHeight(layout: TextLayoutResult, offset: Int, stopped: Boolean): Int {
         val length = layout.layoutInput.text.length
         val local = if (stopped) paintedEnds[offset] ?: 0.0 else position - offset
-        if (local <= 0.0) return 0
+        if (local < 0.0 || length == 0 || stopped && local == 0.0) return 0
+        if (local == 0.0) return kotlin.math.ceil(layout.getLineBottom(0)).toInt()
         if (local >= length) return layout.size.height
         val last = (kotlin.math.ceil(local).toInt() - 1).coerceIn(0, length - 1)
         return kotlin.math.ceil(layout.getLineBottom(layout.getLineForOffset(last))).toInt()

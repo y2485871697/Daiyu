@@ -12,6 +12,7 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class ShizukuCommandTransportTest {
+    @get:org.junit.Rule val liveOwners = LiveRunnerOwners()
     // Model the Android File target semantics even when this fake-backend test runs on Windows.
     private class AndroidFile(private val androidPath: String) : File(androidPath) {
         override fun getPath(): String = androidPath
@@ -47,8 +48,8 @@ class ShizukuCommandTransportTest {
     }
     private val config = TerminalConfiguration(backend = "shizuku", workingDirectory = AndroidFile("/work 'quoted'"),
         environment = mapOf("TEST" to "a'b\nc", "PATH" to "/system/bin"))
-    private class Fixture(val configuration: TerminalConfiguration, val uid: Int? = 2000, val backend: Backend = Backend()) {
-        val owner = runnerOwner(Message(MessageId("m"), ConversationId("c"), RunId("r"), Message.ASSISTANT_ROLE,
+    private inner class Fixture(val configuration: TerminalConfiguration, val uid: Int? = 2000, val backend: Backend = Backend()) {
+        val owner = liveOwners.issue(Message(MessageId("m"), ConversationId("c"), RunId("r"), Message.ASSISTANT_ROLE,
             emptyList(), RunStatus.RUNNING))
         val task = TaskAuthorization("s", "r")
         var connects = 0

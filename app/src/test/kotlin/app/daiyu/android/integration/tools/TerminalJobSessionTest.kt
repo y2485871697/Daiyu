@@ -1,7 +1,5 @@
 package app.daiyu.android.integration.tools
 
-import app.daiyu.android.CatalogFixturePort
-
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.*
@@ -18,24 +16,13 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Real Runner owner / central catalog / ledger, injectable fixed-command backend. No shell/network. */
 class TerminalJobSessionTest {
+    @get:org.junit.Rule val liveOwners = LiveRunnerOwners()
     private val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
     private fun plan(mode: String = "async") = TerminalJobPlan(message.conversationId, message.runId,
         TerminalPtyLaunch.Android(listOf("/system/bin/sh"), mapOf("PATH" to "/system/bin"), File(System.getProperty("java.io.tmpdir")).absoluteFile),
         "printf 'approved exact command'", mode)
-    private fun owner(): RunExecutionOwner {
-        var value: RunExecutionOwner? = null
-        val executor = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { value = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
-        }
-        ChatRunner(CatalogFixturePort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-            override fun cancel() {}
-        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("unused") },
-            RunnerOptions(receiptBatchExecutor = executor)) {}.run(message, emptyList())
-        return checkNotNull(value)
-    }
+    private fun owner() = liveOwners.issue(message)
     private open class Backend : TerminalJobTransport {
         val calls = mutableListOf<Pair<String, JSONObject>>()
         val closes = AtomicInteger()

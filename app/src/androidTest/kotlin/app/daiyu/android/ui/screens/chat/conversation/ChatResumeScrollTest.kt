@@ -770,6 +770,12 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
                     restored.answerPaint["final"]?.last?.source == text + suffix
                 }
                 assertEquals("Offscreen growth is one new snapshot, not a replay of history", beforeDisposal + 1, advances.get())
+                // The legacy action-bar projection is published independently of the drawn document.
+                ui.waitUntil(5_000) {
+                    tick()
+                    restored.motion.target?.let { it.total == text.length + suffix.length && restored.motion.visible(it) == it.total } == true
+                }
+                assertEquals("Settling the footer must not replay the document notification", beforeDisposal + 1, advances.get())
                 assertEquals(text.length + suffix.length, restored.motion.target!!.let(restored.motion::visible))
                 assertEquals("The offscreen suffix must enter the production target", text.length + suffix.length,
                     restored.motion.target!!.total)

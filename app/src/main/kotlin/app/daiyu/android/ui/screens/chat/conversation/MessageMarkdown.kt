@@ -312,7 +312,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     }
     LaunchedEffect(clearance, owner) {
         snapshotFlow {
-            Triple(frame.layout, clearance.availableHeight(frame.coordinates), playback?.paused == true)
+            Triple(frame.layout?.size?.height, clearance.availableHeight(frame.coordinates), playback?.paused == true)
         }.collect { refreshAdmission() }
     }
     val publicationCheck by rememberUpdatedState { published() }

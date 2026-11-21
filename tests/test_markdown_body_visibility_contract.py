@@ -6,6 +6,17 @@ BASE = Path(__file__).resolve().parents[1] / 'app/src/main/kotlin/app/daiyu/andr
 
 
 class MarkdownBodyVisibilityContract(unittest.TestCase):
+    def test_admission_refresh_emits_geometry_changes_not_each_prefix_layout(self):
+        ui = (BASE / 'MessageMarkdown.kt').read_text()
+        leaf = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun markdownLineSpace', 1)[0]
+        refresh = leaf.split('LaunchedEffect(clearance, owner) {', 1)[1].split('val publicationCheck', 1)[0]
+        self.assertIn('Triple(frame.layout?.size?.height, clearance.availableHeight(frame.coordinates), playback?.paused == true)', refresh)
+        self.assertNotIn('Triple(frame.layout,', refresh)
+        self.assertIn('}.collect { refreshAdmission() }', refresh)
+        self.assertIn('snapshotFlow { publicationCheck() }.collect { publication?.setPending(owner, !it) }', leaf)
+        self.assertIn('frame.coordinates?.let(::placed)', leaf)
+        self.assertIn('.onPlaced(::placed).onGloballyPositioned(::placed)', leaf)
+
     def test_draw_observes_render_inputs_but_not_post_draw_feedback(self):
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         leaf = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun markdownLineSpace', 1)[0]

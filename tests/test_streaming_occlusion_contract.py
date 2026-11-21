@@ -46,8 +46,8 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end, streamSnapshot) { currentAdvance() } }', " ".join(typing.split()))
         markdown = (CHAT.parent / "MessageMarkdown.kt").read_text()
         for token in ("remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }",
-                      "clearance.fits(coordinates, candidate.size.height)", "painted[paintOffset] = actual",
-                      "actual.size.height <= available + .01f", "frame.committed",
+                      "clearance.fits(coordinates, inkHeight(candidate))", "painted[paintOffset] = actual",
+                      "inkHeight(actual) <= available + .01f", "frame.committed",
                       'BasicText(displayedText',
                       "paintOffset + offset", "paintOffset + offsets[column]",
                       "previous?.canPaintPrefixOf(candidate) == true", "current.text.text.startsWith(previous.text.text)",
@@ -84,7 +84,7 @@ class StreamingOcclusionContract(unittest.TestCase):
                       'measurer.measure(latestCandidateText, style, softWrap = softWrap,',
                       'frame.measureConstraints?.let { constraints ->',
                       'constraints = constraints.copy(minHeight = 0)',
-                      'clearance.fits(coordinates, prepared.size.height)',
+                      'clearance.fits(coordinates, inkHeight(prepared))',
                       'else frame.committed?.layoutInput?.text ?: latestCandidateText'):
             self.assertIn(token, native_input)
         self.assertNotIn('frame.layout', native_input)
@@ -102,7 +102,7 @@ class StreamingOcclusionContract(unittest.TestCase):
                          "maxOf(candidate.size.height, frame.coordinates?.size?.height ?: 0)) "
                          "} == true || frame.paintedHere && frame.drawn?.let { actual -> "
                          "actual.layoutInput.text == latestCandidateText && frame.layout?.let { actual.canPaintPrefixOf(it) } == true && "
-                         "clearance.fits(frame.coordinates, actual.size.height) } == true")
+                         "clearance.fits(frame.coordinates, inkHeight(actual)) } == true")
         self.assertNotIn("frame.drawn =", publication)
         self.assertNotIn("painted[", publication)
         self.assertIn("!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text", leaf)

@@ -8,25 +8,48 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.text.TextLayoutResult
 
-/** One in-flight slice and one latest destination. New arrivals cannot move the in-flight deadline. */
+/** Position is a fractional UTF-16 offset for drawing; the clock spends graphemes, not code units. */
 internal class MarkdownInk(start: Int) {
     var position by mutableDoubleStateOf(start.toDouble()); private set
     private val paintedEnds = mutableMapOf<Int, Double>()
     fun paintPosition(offset: Int, length: Int, stopped: Boolean): Double {
         val visible = (position - offset).coerceIn(0.0, length.toDouble())
         if (stopped) return (paintedEnds[offset] ?: 0.0).coerceAtMost(visible)
+        if (position <= offset + length) lastDrawnProgress = position
         paintedEnds[offset] = visible
         return visible
     }
-    private var goal = start
-    private var unitsPerSecond = 0.0
-    fun advance(end: Int, seconds: Double) {
-        if (end < position) { position = end.toDouble(); goal = end; return }
-        if (position >= goal || goal > end) {
-            goal = end
-            unitsPerSecond = maxOf(36.0, (goal - position) / .096)
+    private var lastDrawnProgress = -1.0
+
+    fun visibleHeight(layout: TextLayoutResult, offset: Int, stopped: Boolean): Int {
+        val length = layout.layoutInput.text.length
+        val local = if (stopped) paintedEnds[offset] ?: 0.0 else position - offset
+        if (local <= 0.0) return 0
+        if (local >= length) return layout.size.height
+        val last = (kotlin.math.ceil(local).toInt() - 1).coerceIn(0, length - 1)
+        return kotlin.math.ceil(layout.getLineBottom(layout.getLineForOffset(last))).toInt()
+    }
+
+    fun advance(text: String, boundaries: MarkdownTextBoundaries, limit: Int, seconds: Double) {
+        val end = boundaries.floor(limit.coerceIn(0, text.length))
+        if (position >= end) { position = end.toDouble(); return }
+        // A delayed first layout or a blocked draw cannot spend invisible animation time.
+        if (lastDrawnProgress != position && text[position.toInt()] != '\uFFFC') return
+        var start = boundaries.floor(position.toInt())
+        var next = boundaries.next(start)
+        val fraction = (position - start) / (next - start)
+        // At 48 remaining graphemes the upstream speed already saturates (48 / .2 == 240).
+        var scan = start
+        var count = 0
+        while (scan < end && count < 49) { scan = boundaries.next(scan); count++ }
+        var budget = ((count - fraction) / .2).coerceIn(36.0, 240.0) * seconds.coerceIn(0.0, .05) + fraction
+        while (budget >= 1.0 && next <= end) {
+            start = next
+            budget -= 1.0
+            if (start == end) break
+            next = boundaries.next(start)
         }
-        position = minOf(goal.toDouble(), position + seconds.coerceIn(0.0, .05) * unitsPerSecond)
+        position = if (start == end) end.toDouble() else start + (next - start) * budget
     }
 }
 
@@ -36,6 +59,10 @@ internal val LocalInkOffset = staticCompositionLocalOf { 0 }
 @Composable
 internal fun rememberPartInk(reveal: MarkdownReveal, id: String): MarkdownInk? {
     if (!reveal.inkEnabled) return null
+    val text = reveal.displayText(id)
+    val bounds = remember(text) { MarkdownTextBoundaries(text) }
+    val currentText by rememberUpdatedState(text)
+    val currentBounds by rememberUpdatedState(bounds)
     val admission = reveal.visibility(id)
     val ink = remember(reveal.publication, id) { reveal.inkFor(id) }
     val paused = LocalReplyPlayback.current?.let { it.paused || it.control.stopped } == true || !LocalChatPresentationActive.current
@@ -51,7 +78,7 @@ internal fun rememberPartInk(reveal: MarkdownReveal, id: String): MarkdownInk? {
             while (ink.position != admission.value.toDouble()) {
                 withFrameNanos { now ->
                     if (currentPlayback?.let { it.paused || it.control.stopped } != true)
-                        ink.advance(admission.value, (now - before) / 1e9)
+                        ink.advance(currentText, currentBounds, admission.value, (now - before) / 1e9)
                     before = now
                 }
             }

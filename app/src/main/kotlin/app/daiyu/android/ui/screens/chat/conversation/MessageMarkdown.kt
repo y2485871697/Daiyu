@@ -234,10 +234,15 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     val ink = LocalMarkdownInk.current
     val inkControl = LocalReplyPlayback.current?.control
     val inkOffset = paintOffset ?: LocalInkOffset.current
+    fun inkHeight(layout: TextLayoutResult): Int = ink?.visibleHeight(layout, inkOffset, inkControl?.stopped == true) ?: layout.size.height
     if (clearance == null) {
         var result by remember { mutableStateOf<TextLayoutResult?>(null) }
         val bounds = remember(ink, text.text) { ink?.let { MarkdownTextBoundaries(text.text) } }
-        BasicText(text, modifier.drawWithContent {
+        BasicText(text, modifier.layout { measurable, constraints ->
+            val child = measurable.measure(constraints)
+            val height = result?.takeIf { it.layoutInput.text == text }?.let(::inkHeight) ?: if (ink == null) child.height else 0
+            layout(child.width, constraints.constrainHeight(height)) { child.placeRelative(0, 0) }
+        }.drawWithContent {
             val layout = result?.takeIf { it.layoutInput.text == text }
             drawMarkdownInk(layout, ink, inkOffset, bounds, inkControl?.stopped == true)
         }, style, softWrap = softWrap, onTextLayout = { result = it })
@@ -273,7 +278,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                             constraints = constraints.copy(minHeight = 0))
                     } else null
                     // Prepare the native input before placement; only the real layout and draw publish it.
-                    if (prepared != null && clearance.fits(coordinates, prepared.size.height)) latestCandidateText
+                    if (prepared != null && clearance.fits(coordinates, inkHeight(prepared))) latestCandidateText
                     else frame.committed?.layoutInput?.text ?: latestCandidateText
                 }
             }
@@ -287,7 +292,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             maxOf(candidate.size.height, frame.coordinates?.size?.height ?: 0))
     } == true || frame.paintedHere && frame.drawn?.let { actual ->
         actual.layoutInput.text == latestCandidateText && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
-            clearance.fits(frame.coordinates, actual.size.height)
+            clearance.fits(frame.coordinates, inkHeight(actual))
     } == true
     fun prepareNextLine() {
         if (playback?.paused == true) return
@@ -307,7 +312,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             val previous = frame.committed ?: paintOffset?.let { painted[it] }
             val accepted = when {
                 playback?.paused == true -> frame.drawn
-                clearance.fits(coordinates, candidate.size.height) -> candidate
+                clearance.fits(coordinates, inkHeight(candidate)) -> candidate
                 previous?.canPaintPrefixOf(candidate) == true -> previous
                 else -> null
             }
@@ -353,7 +358,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                 clearance.prepareLine(owner, 0)
             val committed = measurable.measure(constraints.copy(minHeight = 0))
             layout(constraints.constrainWidth(maxOf(candidate.size.width, committed.width)),
-                constraints.constrainHeight(maxOf(candidate.size.height, committed.height))) {
+                constraints.constrainHeight(if (ink == null) maxOf(candidate.size.height, committed.height) else inkHeight(candidate))) {
                 androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
                     frame.coordinates?.let(::placed)
                 }
@@ -371,7 +376,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                     (!frozen && selected?.let { result.canPaintPrefixOf(it) } == true)
             }
             if (actual != null && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
-                actual.size.height <= available + .01f && (!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text)) {
+                inkHeight(actual) <= available + .01f && (!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text)) {
                 if (actual.layoutInput.text.text != displayedText.text && ink != null) return@drawWithContent
                 drawMarkdownInk(actual, ink, inkOffset, inkBounds, inkControl?.stopped == true)
                 androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {

@@ -6,20 +6,26 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownRevealTest {
-    @Test fun inkCatchesUpWithoutFlushingAndStopPinsTheActualPaint() {
+    @Test fun originalInkClockNeedsDrawAndCapsLongBurstsInGraphemes() {
         val ink = MarkdownInk(0)
-        var end = 0
-        repeat(60) { frame ->
-            end += 500
-            ink.advance(end, .016)
-            assertTrue(ink.position < end || frame > 0)
-            if (frame > 12) assertTrue(ink.position >= end - 6000)
+        val text = "😀".repeat(1500)
+        val bounds = MarkdownTextBoundaries(text)
+        repeat(20) { ink.advance(text, bounds, text.length, .016) }
+        assertEquals(0.0, ink.position, 0.0)
+        ink.paintPosition(0, text.length, false)
+        ink.advance(text, bounds, text.length, 2.0)
+        assertEquals(24.0, ink.position, .00001) // 50 ms x 240 graphemes/s x two UTF-16 units
+        assertEquals(0.0, ink.paintPosition(0, text.length, true), 0.0)
+        repeat(30) {
+            val drawn = ink.paintPosition(0, text.length, false)
+            ink.advance(text, bounds, text.length, 1.0 / 60)
+            assertEquals(8.0, ink.position - drawn, .00001)
+            assertEquals(drawn, ink.paintPosition(0, text.length, true), .00001)
         }
-        val drawn = ink.paintPosition(0, end, false)
-        repeat(24) { ink.advance(end, .016) }
-        assertEquals(end.toDouble(), ink.position, .0001)
-        assertEquals(drawn, ink.paintPosition(0, end, true), .0001)
-        assertEquals(0.0, ink.paintPosition(end, 50, true), .0001)
+        val short = MarkdownInk(0)
+        short.paintPosition(0, 2, false)
+        short.advance("字字", MarkdownTextBoundaries("字字"), 2, .016)
+        assertEquals(.576, short.position, .00001)
     }
 
     @Test fun onlyStrictBodyAppendInvalidatesMeasuredActionSlot() {

@@ -58,6 +58,7 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.draw.drawWithContent
@@ -245,7 +246,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     }
     val playback = LocalReplyPlayback.current
     val measurer = rememberTextMeasurer(cacheSize = 1)
-    val lineMeasurer = rememberTextMeasurer(cacheSize = 1)
+    val lineMeasurer = rememberTextMeasurer(cacheSize = 2)
     val publication = LocalMarkdownPaintPublication.current
     val latestCandidateText by rememberUpdatedState(text)
     val density = LocalDensity.current
@@ -323,10 +324,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             val candidate = measurer.measure(candidateText, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
             frame.layout = candidate
             frame.measureConstraints = candidate.layoutInput.constraints
-            val future = nextLineText?.let {
-                lineMeasurer.measure(it, style, softWrap = softWrap, maxLines = candidate.lineCount + 1,
-                    constraints = constraints.copy(minHeight = 0))
-            }
+            val future = nextLineText?.let { lineMeasurer.measureMarkdownNextLine(candidate, it) }
             frame.nextAdvance = future?.takeIf { it.lineCount > candidate.lineCount }?.let {
                 (it.size.height - candidate.size.height).coerceAtLeast(0)
             } ?: 0
@@ -367,6 +365,25 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             frame.rendered = it
         })
     }
+}
+
+internal fun TextMeasurer.measureMarkdownNextLine(candidate: TextLayoutResult, text: AnnotatedString): TextLayoutResult? {
+    val input = candidate.layoutInput
+    if (!text.text.startsWith(input.text.text)) return null
+    fun measurePrefix(prefix: AnnotatedString, maxLines: Int = Int.MAX_VALUE) = measure(prefix, input.style,
+        softWrap = input.softWrap, maxLines = maxLines, constraints = input.constraints.copy(minHeight = 0),
+        density = input.density, layoutDirection = input.layoutDirection, fontFamilyResolver = input.fontFamilyResolver)
+    val nextLine = candidate.lineCount
+    val probe = measurePrefix(text, maxLines = nextLine + 1)
+    if (probe.lineCount <= nextLine) return null
+    val start = probe.getLineStart(nextLine)
+    var end = probe.getLineEnd(nextLine)
+    if (end > start && text[end - 1] == '\n') {
+        end--
+        if (end > start && text[end - 1] == '\r') end--
+    }
+    val prefixEnd = maxOf(input.text.length, end)
+    return measurePrefix(text.subSequence(0, prefixEnd)).takeIf { it.lineCount > nextLine }
 }
 
 internal fun markdownLineSpace(nextAdvance: Int, bodyEnd: Float?, drawnBottom: Float?): Int =

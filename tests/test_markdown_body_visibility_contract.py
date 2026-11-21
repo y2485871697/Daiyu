@@ -129,7 +129,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         clearance = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun TextLayoutResult.canPaintPrefixOf', 1)[0]
         for token in ('val candidateText = if (playback?.paused == true) displayedText else text',
-                      'frame.layout = candidate', 'val future = nextLineText?.let {',
+                      'frame.layout = candidate', 'val future = nextLineText?.let { lineMeasurer.measureMarkdownNextLine(candidate, it) }',
                       'it.lineCount > candidate.lineCount', '(it.size.height - candidate.size.height).coerceAtLeast(0)',
                       'if (playback?.paused != true &&', 'clearance.prepareLine(owner, 0)',
                       'BasicText(displayedText, modifier.layout',
@@ -142,12 +142,27 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertNotIn('== text', publication)
         self.assertNotIn('frame.layout = future', clearance)
         self.assertNotIn('BasicText(nextLineText', clearance)
-        self.assertIn('maxLines = candidate.lineCount + 1', clearance)
         self.assertNotIn('getLineBottom(', clearance)
         future = clearance.split('val future = nextLineText?.let {', 1)[1].split('val drawn = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.drawn }', 1)[0]
-        self.assertIn('lineMeasurer.measure(it, style, softWrap = softWrap, maxLines = candidate.lineCount + 1,', future)
-        self.assertIn('constraints = constraints.copy(minHeight = 0)', future)
+        self.assertIn('lineMeasurer.measureMarkdownNextLine(candidate, it)', future)
         self.assertIn('(it.size.height - candidate.size.height).coerceAtLeast(0)', future)
+        helper = ui.split('internal fun TextMeasurer.measureMarkdownNextLine(', 1)[1].split('internal fun markdownLineSpace(', 1)[0]
+        for token in ('val input = candidate.layoutInput',
+                      'if (!text.text.startsWith(input.text.text)) return null',
+                      'constraints = input.constraints.copy(minHeight = 0)',
+                      'density = input.density, layoutDirection = input.layoutDirection, fontFamilyResolver = input.fontFamilyResolver',
+                      'val nextLine = candidate.lineCount',
+                      'val probe = measurePrefix(text, maxLines = nextLine + 1)',
+                      'if (probe.lineCount <= nextLine) return null',
+                      'val start = probe.getLineStart(nextLine)',
+                      'var end = probe.getLineEnd(nextLine)',
+                      'val prefixEnd = maxOf(input.text.length, end)',
+                      'return measurePrefix(text.subSequence(0, prefixEnd)).takeIf { it.lineCount > nextLine }'):
+            self.assertIn(token, helper)
+        self.assertNotIn('probe.size.height', helper)
+        self.assertNotIn('visibleEnd = true', helper)
+        self.assertNotIn('trimEnd(', helper)
+        self.assertIn('val lineMeasurer = rememberTextMeasurer(cacheSize = 2)', clearance)
         self.assertNotIn('val bottomPadding =', clearance)
         self.assertIn('val drawn = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.drawn }\n                ?.takeIf { it.canPaintPrefixOf(candidate) && it.layoutInput.text.isNotEmpty() }', clearance)
         self.assertIn('frame.nextAdvance = future?.takeIf { it.lineCount > candidate.lineCount }', clearance)

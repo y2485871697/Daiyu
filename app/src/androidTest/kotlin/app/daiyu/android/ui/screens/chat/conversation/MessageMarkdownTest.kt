@@ -94,9 +94,11 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                         for (index in 0..1) {
                             val candidate = native[index]
                             val next = native[index + 1]
-                            val future = measure(source, maxLines = candidate.lineCount + 1)
+                            val future = measurer.measureMarkdownNextLine(candidate, AnnotatedString(source))
+                            assertNotNull("$label must measure the next native prefix", future)
+                            future!!
                             assertEquals(candidate.lineCount + 1, future.lineCount)
-                            assertEquals("$label capped layout must match the next native prefix", next.size.height, future.size.height)
+                            assertEquals("$label measured layout must match the next native prefix", next.size.height, future.size.height)
                             val growth = next.size.height - candidate.size.height
                             val advance = (future.size.height - candidate.size.height).coerceAtLeast(0)
                             assertTrue("$label another native line must grow the layout", growth > 0)
@@ -114,6 +116,24 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                         assertEquals("$label a line cap alone must not add height", one.size.height, unchanged.size.height)
                         assertEquals(0, markdownLineSpace((unchanged.size.height - one.size.height).coerceAtLeast(0),
                             one.size.height.toFloat(), one.size.height.toFloat()))
+                        assertNull("$label unchanged text has no next line",
+                            measurer.measureMarkdownNextLine(one, one.layoutInput.text))
+                    }
+                    fun native(text: String) = measurer.measure(AnnotatedString(text), style,
+                        softWrap = true, constraints = constraints, density = Density(1f, fontScale),
+                        layoutDirection = LayoutDirection.Ltr)
+                    val first = native("Ag")
+                    for ((received, expected) in listOf(
+                        "Ag\n\nAg" to "Ag\n",
+                        "Ag\r\nAg\r\nAg" to "Ag\r\nAg",
+                        "Ag\nAg  \nAg" to "Ag\nAg  ",
+                    )) {
+                        val next = measurer.measureMarkdownNextLine(first, AnnotatedString(received))
+                        assertNotNull("fontScale=$fontScale must retain native line boundaries", next)
+                        next!!
+                        assertEquals(expected, next.layoutInput.text.text)
+                        assertEquals(native(expected).lineCount, next.lineCount)
+                        assertEquals(native(expected).size.height, next.size.height)
                     }
                 }
             }

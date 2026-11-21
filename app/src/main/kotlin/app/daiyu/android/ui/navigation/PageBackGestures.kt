@@ -89,7 +89,7 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
     private val scope: kotlinx.coroutines.CoroutineScope,
     val diagnosticOwner: Any,
     private val beginPreview: () -> Boolean,
-    val commit: (Float, Boolean, Float, Float, Boolean, () -> Unit) -> Unit) {
+    val commit: PageBackGestureState.(Float, Boolean, Float, Float, Boolean, () -> Unit) -> Unit) {
     var predictiveGeneration = 0L
     var alive = true
     var transitionBlocked = false
@@ -110,6 +110,7 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
             settleJob?.cancel()
             settleJob = null
             progress = 0f
+            releaseMotion = null
             visualProgress = 0f
             gestureVisualActive = false
             swipeCommit = null
@@ -170,7 +171,21 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
      * The visual value is read only from graphicsLayer/draw lambdas below. Keeping it separate
      * from the logical progress prevents every pointer move from re-entering the page content.
      */
-    var visualProgress by mutableFloatStateOf(0f)
+    private var dragProgress by mutableFloatStateOf(0f)
+    private var releaseMotion by mutableStateOf<PageBackCompletionMotion?>(null)
+    var visualProgress: Float
+        get() = releaseMotion?.animation?.value ?: dragProgress
+        private set(value) { dragProgress = value }
+
+    fun followRelease(motion: PageBackCompletionMotion) { releaseMotion = motion }
+
+    fun rollBackRelease(motion: PageBackCompletionMotion) {
+        if (releaseMotion !== motion) return
+        val displayed = visualProgress
+        releaseMotion = null
+        visualProgress = displayed
+        reset()
+    }
     var gestureVisualActive by mutableStateOf(false)
         private set
     var active by mutableStateOf(false)
@@ -179,6 +194,7 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
 
     fun update(owner: Any, value: Float, predictive: Boolean, direction: Float = 1f) {
         if (this.owner !== owner) {
+            releaseMotion = null
             previewStarted = false
             predictiveMotion = VelocityTracker()
         }
@@ -212,7 +228,10 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
             active = false
             predictive = false
             progress = 0f
+            // Pointer/session cleanup relinquishes input, not the prepared departure's clock.
+            if (owner != null && releaseMotion != null && alive && !immediate && previewAllowed) return
             val start = visualProgress
+            releaseMotion = null
             if (immediate || !alive || start <= 0f || !previewAllowed) {
                 settleJob?.cancel()
                 settleJob = null
@@ -518,6 +537,7 @@ internal fun PageBackGestureHost(
             val request = if (value > 0f && currentTarget != null && visualBackTargetKey != null) {
                 layers.prepare(frame, visualBackTargetKey, value, predictive, direction, velocity)
             } else null
+            request?.motion?.let { followRelease(it) }
             try { synchronousTrace("daiyu.back.business-handler") { back() } } finally {
                 if (request != null) {
                     val token = request.motion?.diagnosticToken
@@ -529,7 +549,10 @@ internal fun PageBackGestureHost(
                             checked = true
                             BackPerformance.mark(BackPerformanceRecorder.Event.ABANDON_CHECK, token)
                             // A veto or an asynchronous save must not be treated as a completed pop.
-                            if (stack.routeKey(routeKey) == visualRouteKey) layers.abandon(request)
+                            if (stack.routeKey(routeKey) == visualRouteKey) {
+                                layers.abandon(request)
+                                request.motion?.let { rollBackRelease(it) }
+                            }
                             else BackPerformance.mark(BackPerformanceRecorder.Event.ABANDON_ROUTE_CHANGED, token)
                         } finally {
                             if (!checked) BackPerformance.mark(BackPerformanceRecorder.Event.ABANDON_CHECK_CANCELLED, token)

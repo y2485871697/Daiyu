@@ -116,7 +116,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertLess(disposal.index('state.alive = false'), disposal.index('state.reset()'))
         self.assertIn('if (owner != null && this.owner !== owner) return', self.host)
         self.assertNotIn('animateFloatAsState', self.host)
-        self.assertIn('var visualProgress by mutableFloatStateOf(0f)', self.host)
+        self.assertIn('private var dragProgress by mutableFloatStateOf(0f)', self.host)
         self.assertIn('var gestureVisualActive by mutableStateOf(false)', self.host)
         self.assertIn('val value = state.visualProgress', self.host)
         self.assertIn('settle.animateTo(0f, spring', self.host)
@@ -556,7 +556,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
         self.assertIn('it.size == size && it.canDrawPreview', layers)
         self.assertIn('initialVelocity = pageBackInitialVelocity(departure.progress, departure.velocity)', self.host)
-        self.assertIn('if (stack.routeKey(routeKey) == visualRouteKey) layers.abandon(request)', self.host)
+        self.assertIn('if (stack.routeKey(routeKey) == visualRouteKey) {', self.host)
 
     def test_zero_progress_returns_follow_the_departing_visits_exact_predecessor(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
@@ -737,6 +737,13 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('if (!commit) cancelVelocity = screensPerSecond', pointer)
         self.assertIn('if (commit && state.alive) state.dispatchBack(screensPerSecond)', pointer)
         self.assertLess(pointer.index('if (claimed && change.changedToUp())'), pointer.index('if (!commit) cancelVelocity'))
+
+    def test_release_cleanup_does_not_start_a_second_clock(self):
+        self.assertIn('get() = releaseMotion?.animation?.value ?: dragProgress', self.host)
+        reset = self.host.split('    fun reset(', 1)[1].split('private class PageBackCallbackSession', 1)[0]
+        self.assertLess(reset.index('if (owner != null && releaseMotion != null'), reset.index('settle.animateTo(0f'))
+        self.assertIn('request?.motion?.let { followRelease(it) }', self.host)
+        self.assertIn('request.motion?.let { rollBackRelease(it) }', self.host)
 
     def test_completion_clock_is_owned_by_prepared_request_not_destination_effect(self):
         layers = (APP / 'ui/navigation/PageBackPreviewLayers.kt').read_text()

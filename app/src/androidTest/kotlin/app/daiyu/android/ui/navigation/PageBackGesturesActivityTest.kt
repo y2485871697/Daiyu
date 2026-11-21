@@ -1177,6 +1177,8 @@ class PageBackGesturesActivityTest : WiredActivityTestCase() {
             swipeToCommit()
             assertEquals(1, backCount)
             assertEquals("callback is not proof of a pop", "test-page", route)
+            val released = cancelProgress()
+            assertTrue("unaccepted release keeps the displayed drag position", released > .5f)
             ui.mainClock.advanceTimeByFrame() // revoke the unconsumed request
             ui.onNodeWithTag("page-back-departure").assertDoesNotExist()
             ui.mainClock.advanceTimeBy(1000)

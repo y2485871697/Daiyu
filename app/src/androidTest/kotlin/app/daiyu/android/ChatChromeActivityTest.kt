@@ -903,7 +903,7 @@ class ChatChromeActivityTest : WiredActivityTestCase() {
         show(composer().copy(text = "", enabled = false), ChatScreenActions(
             onControlPress = { callbacks++ }, onControlRelease = { callbacks++ },
             onPrimaryTap = { callbacks++ }, onPrimaryLongPress = { callbacks++ },
-            onSend = { callbacks++ }, onSupplement = { callbacks++ }, onOpenReasoning = { callbacks++ }, onOpenAssistant = { callbacks++ },
+            onSend = { callbacks++ }, onSupplement = { callbacks++; true }, onOpenReasoning = { callbacks++ }, onOpenAssistant = { callbacks++ },
         ))
         node("chat-send").assertDoesNotExist()
         listOf("chat-control", "chat-reasoning", "chat-assistant").forEach {

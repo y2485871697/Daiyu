@@ -30,7 +30,7 @@ class CompressionSendGateContractTest(unittest.TestCase):
         activity = (APP / "MainActivity.kt").read_text()
         self.assertIn('onCompressionSendBlocked = { toast("正在压缩上下文") }', activity)
         self.assertIn("onSend = send@{ text ->\n            if (!currentChat()) return@send\n            if (compressionSendBlocked()) return@send", activity)
-        self.assertIn("onSupplement = supplement@{ text ->\n            if (!currentChat()) return@supplement\n            if (compressionSendBlocked()) return@supplement", activity)
+        self.assertIn("onSupplement = supplement@{ text ->\n            if (!currentChat()) return@supplement false\n            if (compressionSendBlocked()) return@supplement", activity)
         draft = activity.split("private fun sendDraft(", 1)[1].split("private fun cancelPendingTextSend", 1)[0]
         self.assertLess(draft.index("compressionSendBlocked()"), draft.index("controller.database.draft("))
         supplement = activity.split("private fun submitSupplement(", 1)[1].split("private fun ", 1)[0]

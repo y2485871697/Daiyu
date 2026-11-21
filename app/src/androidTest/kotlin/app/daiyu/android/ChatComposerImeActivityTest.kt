@@ -853,7 +853,7 @@ class ChatComposerImeActivityTest : WiredActivityTestCase() {
                         }
                         val actions = ChatScreenActions(
                             onSend = { assertEquals(listOf("clear", "hide"), dismissEvents); observedDraft = it; sends++ },
-                            onSupplement = { assertEquals(listOf("clear", "hide"), dismissEvents); observedDraft = it; appends++ })
+                            onSupplement = { assertEquals(listOf("clear", "hide"), dismissEvents); observedDraft = it; appends++; true })
                         androidx.compose.runtime.CompositionLocalProvider(
                             androidx.compose.ui.platform.LocalFocusManager provides focus,
                             androidx.compose.ui.platform.LocalSoftwareKeyboardController provides keyboard) {

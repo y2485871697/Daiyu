@@ -431,7 +431,7 @@ internal fun ChatMessageList(
         reconnectPartsByKey.values.flatMapTo(hashSetOf()) { it.placedIds }
     }
     val fallbackAfter = remember(turns, timeline, placedReconnectIds) {
-        reconnectFallbackEntriesForTurns(turns, timeline, placedReconnectIds)
+        if (timeline.isEmpty()) emptyMap() else reconnectFallbackEntriesForTurns(turns, timeline, placedReconnectIds)
     }
     val compressionAfter = app.daiyu.android.timeline.compressionActivitiesByAnchor(
         compressionActivities + listOfNotNull(compressionActivity), timeline)
@@ -1200,9 +1200,9 @@ internal fun ChatMessageList(
     LaunchedEffect(listState) {
         snapshotFlow {
             val layout = listState.layoutInfo
-            val visibleKeys = layout.visibleItemsInfo.map { it.key }.toSet()
-            val formatted = currentAssistants.values.none { turn ->
-                turn.listKey in visibleKeys && readyTurns[turn.listKey] != turn
+            val formatted = layout.visibleItemsInfo.none { item ->
+                val turn = currentAssistants[item.key] ?: return@none false
+                readyTurns[turn.listKey] != turn
             }
             val confirmedEmpty = currentHistoryReady && currentTurns.isEmpty() && currentTailIndex < 0
             currentHistoryReady && !currentRetainingRows &&
@@ -1219,14 +1219,13 @@ internal fun ChatMessageList(
         val entrance = userMessageEntrance ?: return@LaunchedEffect
         snapshotFlow {
             val layout = listState.layoutInfo
-            val enteringKeys: Set<Any> = currentTurns.filterIsInstance<ChatTurnUi.User>().filter {
-                it.matchesKey(entrance.request.key) || it.matchesKey(entrance.request.messageId)
-            }.map { it.listKey }.toSet()
             presentationActive && pageActive && scrollResumed && !initialPositionPending && !currentRetainingRows &&
                 (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial) &&
                 (!followBottom || !listState.canScrollForward) &&
                 layout.visibleItemsInfo.any { item ->
-                    item.key in enteringKeys &&
+                    val row = currentTurns.getOrNull(item.index) as? ChatTurnUi.User
+                    row != null && item.key == row.listKey &&
+                        (row.matchesKey(entrance.request.key) || row.matchesKey(entrance.request.messageId)) &&
                         item.size > 0 && item.offset < layout.viewportEndOffset - currentOcclusionPx &&
                         item.offset + item.size > layout.viewportStartOffset &&
                         item.offset + item.size <= layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx + 1

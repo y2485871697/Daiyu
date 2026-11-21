@@ -16,7 +16,7 @@ class ChatCompressionSendActivityTest : WiredActivityTestCase() {
                         ChatComposer(ComposerUi(text = text, phase = phase, enabled = globallyEnabled,
                             supplementAvailable = true, mainContextCompressing = compressing),
                             ChatScreenActions(onCompressionSendBlocked = { notices++ }, onSend = { sends++ },
-                                onSupplement = { supplements++ }, onControlPress = { controls++ }, onPrimaryTap = { controls++ }))
+                                onSupplement = { supplements++; true }, onControlPress = { controls++ }, onPrimaryTap = { controls++ }))
                     }
                 } }
                 ui.waitForIdle()
@@ -47,7 +47,7 @@ class ChatCompressionSendActivityTest : WiredActivityTestCase() {
                         supplementAvailable = true, mainContextCompressing = compressing,
                         preparingSendKey = "ticket-${phase.name}-$compressing"),
                         ChatScreenActions(onCancelSend = { cancellations++ }, onSend = { sends++ },
-                            onSupplement = { supplements++ }, onPrimaryTap = { controls++ },
+                            onSupplement = { supplements++; true }, onPrimaryTap = { controls++ },
                             onPrimaryLongPress = { controls++ }, onControlPress = { controls++ },
                             onControlRelease = { controls++ }, onCompressionSendBlocked = { notices++ }))
                 }

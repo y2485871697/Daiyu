@@ -181,8 +181,8 @@ class ChatResumeScrollContract(unittest.TestCase):
             'SideEffect { onViewportReady(!initialPositionPending && incomingTurns.isNotEmpty()) }', 1
         )[1].split('DisposableEffect(userMessageEntrance, listState)', 1)[0]
         formatted = callback.split('val formatted =', 1)[1].split('val confirmedEmpty =', 1)[0]
-        self.assertEqual('currentAssistants.values.none { turn -> '
-                         'turn.listKey in visibleKeys && readyTurns[turn.listKey] != turn }',
+        self.assertEqual('layout.visibleItemsInfo.none { item -> '
+                         'val turn = currentAssistants[item.key] ?: return@none false readyTurns[turn.listKey] != turn }',
                          ' '.join(formatted.split()))
         self.assertNotIn('revealedTurns', callback)
         for token in ('currentHistoryReady && !currentRetainingRows',

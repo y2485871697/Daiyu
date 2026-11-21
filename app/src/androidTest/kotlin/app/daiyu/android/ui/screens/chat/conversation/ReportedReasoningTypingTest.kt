@@ -166,15 +166,15 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             }
             await {
                 ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true).fetchSemanticsNode()
-                    .config[SemanticsProperties.StateDescription] == "已思考"
+                    .config[SemanticsProperties.StateDescription] == "正在思考"
             }
             assertFalse(visibleText().contains(pending))
             ui.onNodeWithText("正在显示…").assertDoesNotExist()
-            ui.onNodeWithText("已思考").assertExists()
+            ui.onNodeWithText("正在思考…").assertExists()
             ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)
-                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已思考"))
-            ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertExists()
-            ui.onNodeWithText("正在思考…").assertDoesNotExist()
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "正在思考"))
+            ui.onNodeWithContentDescription("思考完成", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithText("已思考").assertDoesNotExist()
             ui.onNodeWithTag("work-process-header").assert(
                 SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
             release.countDown()
@@ -319,7 +319,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             await { advances > 0 }
             mainThread { reported = ReportedReasoning("r", pending, 1100L) }
             ui.mainClock.advanceTimeBy(16)
-            ui.onNodeWithText("已思考").assertExists()
+            ui.onNodeWithText("正在思考…").assertExists()
             assertFalse("Hide while received text is still draining", visibleText().contains(pending))
             if (stop) instrumentation.runOnMainSync { stopped = true }
             else {

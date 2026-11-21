@@ -3796,13 +3796,16 @@ class MainActivity : ComponentActivity() {
             else if (!imageHost.busy && !videoSending) sendDraft(text)
         } },
         onSupplement = supplement@{ text ->
-            if (!currentChat()) return@supplement
-            if (compressionSendBlocked()) return@supplement
-            if (currentDictationProjection() != null) return@supplement
+            if (!currentChat()) return@supplement false
+            if (compressionSendBlocked()) return@supplement false
+            if (currentDictationProjection() != null) return@supplement false
+            var queued = false
             if (editorMatches() && text == draft && !imageHost.sending && !shizukuWritesBlocked) guard {
-            offlineHost.invalidate()
-            gestureOwner()?.let { submitSupplement(it, text) }
-        } },
+                offlineHost.invalidate()
+                queued = gestureOwner()?.let { submitSupplement(it, text) } == true
+            }
+            queued
+        },
         onCancelSend = { renderedTextSend?.let(::cancelPendingTextSend) },
         onPrimaryTap = { guard {
             gestureOwner()?.let { owner -> controller.runState(owner)?.let { state ->
@@ -7367,21 +7370,21 @@ class MainActivity : ComponentActivity() {
     }
     private fun supplementMediaBlocked() = imageHost.hasAttachments || imageHost.busy ||
         videoHost.state.items.isNotEmpty() || videoSending || videoComposerControls?.blocked == true
-    private fun submitSupplement(owner: Message, text: String) {
-        if (compressionSendBlocked(owner.conversationId)) return
-        if (text != draft) return
+    private fun submitSupplement(owner: Message, text: String): Boolean {
+        if (compressionSendBlocked(owner.conversationId)) return false
+        if (text != draft) return false
         if (supplementMediaBlocked()) {
             toast("当前任务不支持追加图片或原视频")
-            return
+            return false
         }
         if (!controller.canSupplement(owner)) {
             toast("当前任务暂不能追加")
-            return
+            return false
         }
-        val ticket = supplementDraft.begin(MessageId(java.util.UUID.randomUUID().toString()), supplementEditor()) ?: return
+        val ticket = supplementDraft.begin(MessageId(java.util.UUID.randomUUID().toString()), supplementEditor()) ?: return false
         userEntranceSupplementId = ticket.messageId
         publishChat()
-        try {
+        return try {
             val queued = controller.admitSupplement(owner, ticket.messageId, text) {
                 if (activityUsable()) refresh()
             }
@@ -7389,10 +7392,12 @@ class MainActivity : ComponentActivity() {
                 if (activityUsable() && supplementDraft.pending === ticket && supplementDraft.receipt == null)
                     toast("追加结果未确认，请查看会话")
             }, 15_000L)
+            queued
         } catch (_: Exception) {
             supplementDraft.receive(SupplementAdmission.Unconfirmed(ticket.messageId))
             settleSupplementReceipt()
             publishChat()
+            false
         }
     }
     private fun currentControlOwner(): Message? =

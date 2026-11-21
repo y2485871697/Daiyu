@@ -148,7 +148,8 @@ internal fun ReportedReasoningCard(
     val settled = summaryDisplays.all { it.displaySettled }
     val presenting = observedLive || summaryDisplays.any { it.firstPresentation }
     val waitingForReveal = summaryDisplays.any { it.waitingForReveal }
-    val displayThinking = isThinking
+    val displayThinking = isThinking || (observedLive && !stopped && !paused && parentExpanded &&
+        !manuallyCollapsed && arrived && waitingForReveal)
     val displayPaused = paused
     val disclosureExpanded = currentOverride ?: (!stopped && (isThinking || presenting && (!settled || waitingForReveal)))
     val expanded = hasSummary && disclosureExpanded && summaryDisplays.any { display ->
@@ -179,7 +180,7 @@ internal fun ReportedReasoningCard(
             .padding(horizontal = if (embedded) 0.dp else 11.dp, vertical = if (embedded) 5.dp else 9.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(if (embedded) 6.dp else 7.dp)) {
             Icon(ChatPreviewIcons.Thought, null, Modifier.size(if (embedded) 18.dp else 14.dp), tint = colors.accent)
-            Text(reasoningDisplayLabel(isThinking, displayPaused), Modifier.weight(1f), color = if (embedded) colors.text else colors.accent,
+            Text(reasoningDisplayLabel(displayThinking, displayPaused), Modifier.weight(1f), color = if (embedded) colors.text else colors.accent,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium))
             ReasoningElapsedTime(ownerKey, rememberReasoningTiming(reported), isThinking && allowLiveTiming && !paused, nanoTime, embedded)
             if (hasSummary) {

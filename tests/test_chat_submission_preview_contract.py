@@ -174,9 +174,9 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
         self.assertNotIn('preview.text ?: return turns', preview)
         readiness = rows.split('val entrance = userMessageEntrance ?: return@LaunchedEffect', 1)[1].split(
             '.collect { positioned -> entrance.updatePlacement(listState, positioned) }', 1)[0]
-        for token in ('currentTurns.filterIsInstance<ChatTurnUi.User>()',
-                      'it.matchesKey(entrance.request.key) || it.matchesKey(entrance.request.messageId)',
-                      'map { it.listKey }.toSet()', 'item.key in enteringKeys'):
+        for token in ('currentTurns.getOrNull(item.index) as? ChatTurnUi.User',
+                      'row.matchesKey(entrance.request.key) || row.matchesKey(entrance.request.messageId)',
+                      'item.key == row.listKey'):
             self.assertIn(token, readiness)
         self.assertNotIn('item.key == entrance.request.messageId', readiness)
         device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/UserMessageMediaEntranceTest.kt').read_text()

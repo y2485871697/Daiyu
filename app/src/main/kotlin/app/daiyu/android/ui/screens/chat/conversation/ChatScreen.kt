@@ -83,7 +83,7 @@ data class ChatScreenActions(
     val onMore: () -> Unit = {},
     val onCompressionSendBlocked: () -> Unit = {},
     val onSend: (String) -> Unit = {},
-    val onSupplement: (String) -> Unit = {},
+    val onSupplement: (String) -> Boolean = { false },
     val onTextChange: (String) -> Unit = {},
     val onSelectionChange: (Int, Int) -> Unit = { _, _ -> },
     val onReferenceShortcut: (ComposerShortcut, String) -> Unit = { _, _ -> },
@@ -202,6 +202,7 @@ internal fun DaiyuChatScreen(
             if (runtimePhase != ComposerPhase.IDLE) actions.onPrimaryLongPress()
         },
         onSend = { text -> presentation.finish(); actions.onSend(text) },
+        onSupplement = { text -> actions.onSupplement(text).also { queued -> if (queued) presentation.finish() } },
     )
     val userMessageEntrance = suppliedUserMessageEntrance ?:
         rememberUserMessageEntrance(state.userMessageEntrance, presentationActive, awaitPlacement = true)

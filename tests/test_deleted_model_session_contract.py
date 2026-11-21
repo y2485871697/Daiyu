@@ -37,8 +37,13 @@ class DeletedModelSessionContract(unittest.TestCase):
         self.assertIn('!workerFinished || !cleanupFinished || !toolsDrained || itemReleased',batch)
         self.assertIn('if (!definition.acceptsNewTask()) return ChildTaskCommandReceipt.Rejected("child_model_deleted")',retained)
         frozen=(APP/'delegation/SavedSubAgentRuntimeBindings.kt').read_text()
-        self.assertIn('AtomicReference(binding.profile to original)',frozen)
-        self.assertIn('if (deletedSelection()) lastSelection.get().second',frozen)
+        scoped = frozen.split('fun taskDefinition(): ChildModelDefinition {', 1)[1]
+        self.assertIn('var last = original', scoped)
+        latest = scoped.split('latest = { synchronized(lock) {', 1)[1].split('}, selection = binding.child', 1)[0]
+        self.assertLess(latest.index('if (deletedSelection()) last else try'), latest.index('val resolved = latestModel(profile.id)'))
+        self.assertLess(latest.index('check(latestConfig() == next'), latest.index('resolved.also { last = it }'))
+        self.assertIn('if (deletedSelection()) last else throw failure', latest)
+        self.assertIn('admissionAllowed = { !deletedSelection() }', scoped)
     def test_catalog_absence_recovers_without_interpreting_unknown_provider_as_deleted(self):
         s=(APP/'ChatController.kt').read_text()
         self.assertIn('runCatching { recoverDeletedModelBindings() }.onFailure',s)

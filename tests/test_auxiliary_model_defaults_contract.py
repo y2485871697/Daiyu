@@ -24,7 +24,7 @@ class AuxiliaryModelDefaultsContract(unittest.TestCase):
         controller = (MAIN / 'ChatController.kt').read_text()
         self.assertIn('token.summaryPreparation, requestProvider,', controller)
         self.assertIn('it.runner === running && it.initial.id == original.id', controller)
-        self.assertIn('capacity.sendBudgetTokens, currentProvider)', controller)
+        self.assertIn('capacity.sendBudgetTokens, currentProvider, systemPrompt = capacity.systemPrompt)', controller)
         worker = (MAIN / 'context/ContextManagementWorker.kt').read_text()
         self.assertIn('else selection.binding == null', worker)
         self.assertIn('if (frozenCurrent != null) chatModel(frozenCurrent, windowTokens, usage)', worker)

@@ -88,6 +88,8 @@ internal class VoiceCallService : Service() {
             catch (_: RuntimeException) { if (owner === next) owner = null; started(false) }
         }
         fun release(context: Context) {
+            // Navigation can release twice without ever requesting a call.
+            if (owner == null) return
             owner = null
             context.applicationContext.stopService(Intent(context, VoiceCallService::class.java))
         }

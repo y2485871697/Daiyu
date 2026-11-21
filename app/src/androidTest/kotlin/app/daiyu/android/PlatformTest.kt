@@ -21,6 +21,30 @@ class PlatformTest:InstrumentationTestCase() {
     }
 
     private fun testContext()=testContext(instrumentation.targetContext)
+    fun testIdleNavigationDoesNotStopAnUnownedVoiceCallService() {
+        val ctx = object : android.content.ContextWrapper(instrumentation.targetContext) {
+            var starts = 0
+            var stops = 0
+            override fun getApplicationContext(): android.content.Context = this
+            override fun startForegroundService(service: android.content.Intent): android.content.ComponentName? {
+                starts++
+                return service.component
+            }
+            override fun stopService(service: android.content.Intent): Boolean { stops++; return true }
+        }
+        runTestOnUiThread {
+            val service = app.daiyu.android.voice.control.VoiceCallService
+            service.release(ctx)
+            assertEquals(0, ctx.stops)
+            try {
+                service.start(ctx, {}, {})
+                assertEquals(1, ctx.starts)
+                service.release(ctx) // A submitted but not yet ready start must still be stopped.
+                service.release(ctx)
+                assertEquals(1, ctx.stops)
+            } finally { service.release(ctx) }
+        }
+    }
     fun testPersistenceRecoveryAndDraftIsolation() {
         val context=testContext()
         context.deleteDatabase("conversations.db")

@@ -12,8 +12,12 @@ class MarkdownRevealTest {
         val bounds = MarkdownTextBoundaries(text)
         repeat(20) { ink.advance(text, bounds, text.length, .016) }
         assertEquals(0.0, ink.position, 0.0)
+        assertEquals(1, ink.layoutEnd(text.length, false))
+        assertEquals(0, ink.layoutEnd(text.length, true))
         ink.paintPosition(0, text.length, false)
         ink.advance(text, bounds, text.length, 2.0)
+        assertEquals(24, ink.layoutEnd(text.length, false))
+        assertEquals(0, ink.layoutEnd(text.length, true))
         assertEquals(24.0, ink.position, .00001) // 50 ms x 240 graphemes/s x two UTF-16 units
         assertEquals(0.0, ink.paintPosition(0, text.length, true), 0.0)
         repeat(30) {

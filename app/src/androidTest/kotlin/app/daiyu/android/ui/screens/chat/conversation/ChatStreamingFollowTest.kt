@@ -20,6 +20,7 @@ import top.yukonga.miuix.kmp.basic.Text
 import java.util.concurrent.CopyOnWriteArrayList
 
 class ChatStreamingFollowTest : WiredActivityTestCase() {
+    override val requiresWindowDraw: Boolean = true
     private var height by mutableStateOf(600.dp)
     private var request by mutableStateOf(ChatScrollRequest(1))
     private var body by mutableStateOf("")

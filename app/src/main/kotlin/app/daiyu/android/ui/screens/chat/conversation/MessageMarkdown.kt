@@ -196,7 +196,12 @@ internal fun ParsedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, m
         if (textClearance?.held != true && MarkdownText.isSafeLink(url)) TouchHaptics.action(feedbackView) { runCatching { uriHandler.openUri(url) } }
         Unit
     } }
-    val visible = visibility ?: rememberUpdatedState(visibleCharacters)
+    val admitted = visibility ?: rememberUpdatedState(visibleCharacters)
+    val ink = LocalMarkdownInk.current
+    val control = LocalReplyPlayback.current?.control
+    val visible = remember(admitted, ink, control) { derivedStateOf {
+        ink?.layoutEnd(admitted.value, control?.stopped == true) ?: admitted.value
+    } }
     val clearance = LocalStreamingTextClearance.current
     val painted = if (clearance != null) remember(clearance) { mutableMapOf<Int, TextLayoutResult>() } else null
     CompositionLocalProvider(LocalMarkdownPaintedText provides painted) {
@@ -231,7 +236,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     softWrap: Boolean = true, nextLineText: AnnotatedString? = null) {
     val clearance = LocalStreamingTextClearance.current
     val painted = LocalMarkdownPaintedText.current ?: remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }
-    val ink = LocalMarkdownInk.current
+    val ink = LocalMarkdownInk.current.takeIf { paintOffset != null || LocalInkOffset.current >= 0 }
     val inkControl = LocalReplyPlayback.current?.control
     val inkOffset = paintOffset ?: LocalInkOffset.current
     fun inkHeight(layout: TextLayoutResult): Int = ink?.visibleHeight(layout, inkOffset, inkControl?.stopped == true) ?: layout.size.height

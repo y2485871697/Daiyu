@@ -57,6 +57,7 @@ import kotlin.math.floor
 import top.yukonga.miuix.kmp.basic.Text
 
 class ChatStreamingOcclusionTest : WiredActivityTestCase() {
+    override val requiresWindowDraw: Boolean = true
     private val paintSlots = MarkdownPaintSlotsProbe()
     private fun paintDump(key: String): String {
         var result = "not sampled"

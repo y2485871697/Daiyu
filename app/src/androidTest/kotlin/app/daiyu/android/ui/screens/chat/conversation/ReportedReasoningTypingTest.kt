@@ -29,14 +29,7 @@ import kotlinx.coroutines.runBlocking
 
 /** Real production renderers with a recording visible-advance callback, not a motor test. */
 class ReportedReasoningTypingTest : WiredActivityTestCase() {
-    override val requiresWindowDraw: Boolean
-        get() = when (name) {
-            "testCollapsedThoughtDoesNotWaitForHiddenReveal",
-            "testStandaloneTerminalThoughtPausesWithTheComposer",
-            "testMixedTerminalThoughtPausesWithTheComposer",
-            "testWorkflowTerminalThoughtPausesWithTheComposer" -> true
-            else -> false
-        }
+    override val requiresWindowDraw: Boolean = true
     private enum class Path { STANDALONE, MIXED, WORK }
 
     private fun turn(path: Path, text: String, live: Boolean = true): ChatTurnUi.Assistant {

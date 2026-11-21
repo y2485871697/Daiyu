@@ -30,6 +30,13 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
     }
     private var lastDrawnProgress = -1.0
 
+    // Layout may include the first glyph to bootstrap draw, never an entire unpainted batch.
+    fun layoutEnd(admitted: Int, stopped: Boolean): Int {
+        val frontier = if (stopped) lastDrawnProgress.coerceAtLeast(0.0) else position
+        val bootstrap = if (!stopped && frontier == 0.0) 1 else 0
+        return maxOf(bootstrap, kotlin.math.ceil(frontier).toInt()).coerceAtMost(admitted)
+    }
+
     fun visibleHeight(layout: TextLayoutResult, offset: Int, stopped: Boolean): Int {
         val length = layout.layoutInput.text.length
         val local = if (stopped) paintedEnds[offset] ?: 0.0 else position - offset
@@ -64,7 +71,7 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
 }
 
 internal val LocalMarkdownInk = staticCompositionLocalOf<MarkdownInk?> { null }
-internal val LocalInkOffset = staticCompositionLocalOf { 0 }
+internal val LocalInkOffset = staticCompositionLocalOf { -1 }
 
 @Composable
 internal fun rememberPartInk(reveal: MarkdownReveal, id: String): MarkdownInk? {

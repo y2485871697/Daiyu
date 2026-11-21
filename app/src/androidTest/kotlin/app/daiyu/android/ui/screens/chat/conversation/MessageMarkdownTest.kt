@@ -76,8 +76,10 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         "image/png", 10, "b".repeat(64), 2, 2)
     private val image = MessageImageUi(owner, reference)
 
+    fun testNativePaintReceiptDoesNotRepeatTextPlacement() = verifyNativePaintReceiptPlacement()
+
     @OptIn(androidx.compose.runtime.InternalComposeApi::class)
-    fun testNativePaintReceiptDoesNotRepeatTextPlacement() {
+    private fun verifyNativePaintReceiptPlacement() {
         val key = "draw-only-receipt"
         val text = AnnotatedString("Native draw")
         val clearance = StreamingTextClearance()

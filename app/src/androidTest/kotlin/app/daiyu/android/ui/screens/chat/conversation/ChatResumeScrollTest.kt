@@ -809,6 +809,7 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
         mainThread { active = false }
         ui.waitUntil(10_000) { ui.onAllNodesWithTag("chat-send").fetchSemanticsNodes().size == 1 }
         ui.onNodeWithText("done").assertIsDisplayed()
+        ui.onNodeWithTag("chat-messages").performTouchInput { swipeDown() }
         ui.onNodeWithTag("chat-messages").performScrollToIndex(0)
         ui.onNodeWithText("History row 0").assertIsDisplayed()
         ui.onNodeWithText("done").assertDoesNotExist()

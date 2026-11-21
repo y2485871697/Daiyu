@@ -39,13 +39,21 @@ class PageEnterContractTest(unittest.TestCase):
         self.assertLess(scrim, live)
         for token in ('translationX = -departure.direction * size.width * 0.25f * exit.value',
                       'alpha = 1f - 0.1f * exit.value',
-                      'drawRect(Color.Black, alpha = 0.5f * exit.value)',
+                      'alpha = 0.5f * exit.value',
                       'kotlin.math.round(departure.direction * size.width * (1f - exit.value))',
                       '(showDeparture && departure?.forward == true)',
                       'if (departure != null && showDeparture && !departure.forward) Box('):
             self.assertIn(token, self.host)
         self.assertEqual(1, self.host.count('{ content() }'))
         self.assertNotIn('drawLayer(departure.frame.layer)', self.host)
+
+    def test_dim_single_solid_layer_without_recording_animated_paint(self):
+        for tag in ('page-back-scrim', 'page-enter-scrim', 'page-back-departure-scrim'):
+            part = self.host.split('.testTag("' + tag + '")', 1)[0].rsplit('Box(Modifier.fillMaxSize()', 1)[1]
+            self.assertIn('.graphicsLayer {', part)
+            self.assertIn('compositingStrategy = CompositingStrategy.ModulateAlpha', part)
+            self.assertIn('}.background(Color.Black)', part)
+            self.assertNotIn('drawBehind', part)
 
     def test_entry_reuses_original_programmatic_curve_not_the_gesture_preference(self):
         self.assertIn('if (departure.progress == 0f) exit.animateTo(1f, tween(durationMillis = 500, easing = NavProgrammaticEasing))', self.host)

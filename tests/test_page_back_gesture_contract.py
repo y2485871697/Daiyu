@@ -151,7 +151,7 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertNotIn('animateFloatAsState', self.host)
         self.assertIn('visualProgress = nextProgress', self.host)
         self.assertIn('val value = state.visualProgress', self.host)
-        self.assertIn('drawRect(Color.Black, alpha = 0.5f * (1f - state.visualProgress))', self.host)
+        self.assertIn('alpha = 0.5f * (1f - state.visualProgress)', self.host)
         self.assertIn('state.gestureVisualActive', self.host)
         self.assertIn('settle.animateTo(0f, spring', self.host)
         self.assertIn('if (settleJob === kotlinx.coroutines.currentCoroutineContext()[Job])', self.host)
@@ -703,7 +703,7 @@ class PageBackGestureContractTest(unittest.TestCase):
     def test_original_miuix_motion_is_full_width_with_parallax_and_independent_dimming(self):
         for token in ('kotlin.math.round(state.direction * size.width * visibleProgress)',
                       'size.width * 0.25f * (1f - value)', 'alpha = 1f - 0.1f * (1f - value)',
-                      'drawRect(Color.Black, alpha = 0.5f * (1f - state.visualProgress))', 'absoluteSquircleClip',
+                      'alpha = 0.5f * (1f - state.visualProgress)', 'absoluteSquircleClip',
                       'POSITION_BOTTOM_LEFT', 'page-back-scrim', 'page-back-departure-scrim',
                       'state.predictiveGeneration != predictiveGeneration'):
             self.assertIn(token, self.host)

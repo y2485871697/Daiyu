@@ -747,20 +747,23 @@ internal fun PageBackGestureHost(
                 }.drawBehind {
                     drawPreview(target)
                 }.testTag("page-back-target"))
-                Box(Modifier.fillMaxSize().drawBehind {
-                    drawRect(Color.Black, alpha = 0.5f * (1f - state.visualProgress))
-                }.testTag("page-back-scrim"))
+                Box(Modifier.fillMaxSize().graphicsLayer {
+                    alpha = 0.5f * (1f - state.visualProgress)
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
+                }.background(Color.Black).testTag("page-back-scrim"))
             }
             if (departure != null && showDeparture && departure.forward) {
                 Box(Modifier.fillMaxSize().graphicsLayer {
                     translationX = -departure.direction * size.width * 0.25f * exit.value
                     alpha = 1f - 0.1f * exit.value
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
                 }.drawBehind {
                     drawPreview(departure.frame)
                 }.testTag("page-enter-previous"))
-                Box(Modifier.fillMaxSize().drawBehind {
-                    drawRect(Color.Black, alpha = 0.5f * exit.value)
-                }.testTag("page-enter-scrim"))
+                Box(Modifier.fillMaxSize().graphicsLayer {
+                    alpha = 0.5f * exit.value
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
+                }.background(Color.Black).testTag("page-enter-scrim"))
             }
             key(if (retainedRootContent == null) contentKey else RetainedRootSurface) {
                 Box(Modifier.fillMaxSize().graphicsLayer {
@@ -823,10 +826,10 @@ internal fun PageBackGestureHost(
                     key(contentKey) { content() }
                 }
             }
-            if (departure != null && showDeparture && !departure.forward) Box(Modifier.fillMaxSize().drawBehind {
-                val value = exit.value
-                drawRect(Color.Black, alpha = 0.5f * (1f - value))
-            }.testTag("page-back-departure-scrim"))
+            if (departure != null && showDeparture && !departure.forward) Box(Modifier.fillMaxSize().graphicsLayer {
+                alpha = 0.5f * (1f - exit.value)
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+            }.background(Color.Black).testTag("page-back-departure-scrim"))
             if (departure != null && showDeparture && !departure.forward) Box(Modifier.fillMaxSize().graphicsLayer {
                 val value = exit.value
                 translationX = kotlin.math.round(departure.direction * size.width * value)

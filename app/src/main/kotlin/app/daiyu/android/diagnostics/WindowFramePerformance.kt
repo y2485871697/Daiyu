@@ -37,6 +37,7 @@ internal class WindowFramePerformance private constructor(
         handler?.postDelayed({ work() }, delay); Unit
     }
     private val log = store.frames
+    internal fun recordingPageFrames() = log.captureEpoch() != null
     private val diagnostic = app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS
     private val windows = LinkedHashMap<Window, String>()
     private val sessions = LinkedHashMap<Window, Session>() // Main thread owns listener membership.
@@ -343,14 +344,17 @@ private fun Context.findFrameActivity(): Activity? {
 @Composable
 internal fun ObserveDiagnosticInteraction(kind: String, readPhase: () -> String) {
     val diagnostic = app.daiyu.android.BuildConfig.JANK_DIAGNOSTICS
-    if (!diagnostic && kind != "chat-scroll") return
     val context = LocalContext.current
     val host = WindowFramePerformance.forContext(context)
+    val recordNavigation = kind == "navigation" && host?.recordingPageFrames() == true
+    if (!recordNavigation) {
+        if (!diagnostic && kind != "chat-scroll") return
+    }
     val window = (LocalView.current.parent as? DialogWindowProvider)?.window ?: context.findFrameActivity()?.window
     val token = remember(host, window, kind) { Any() }
     val current = androidx.compose.runtime.rememberUpdatedState(readPhase)
     val safeKind = kind.takeIf { it in setOf("menu", "popup", "navigation", "drawer", "chat-scroll") } ?: "interaction"
-    androidx.compose.runtime.LaunchedEffect(host, window, token) {
+    androidx.compose.runtime.LaunchedEffect(host, window, token, recordNavigation) {
         val cookie = System.identityHashCode(token)
         var activeSpan: String? = null
         try {
@@ -362,6 +366,8 @@ internal fun ObserveDiagnosticInteraction(kind: String, readPhase: () -> String)
                     "scroll" -> BackPerformanceRecorder.Scroll.NON_DRAG_SCROLL
                     else -> BackPerformanceRecorder.Scroll.IDLE
                 })
+                if (!diagnostic && recordNavigation && window != null)
+                    host?.context(window, token, if (safePhase == "idle") null else "navigation=$safePhase")
                 if (!diagnostic) return@collect
                 if (window != null) host?.context(window, token, "$safeKind=$safePhase")
                 activeSpan?.let { JankDiagnostics.endPhase(it, cookie) }
@@ -375,7 +381,7 @@ internal fun ObserveDiagnosticInteraction(kind: String, readPhase: () -> String)
         } finally {
             if (safeKind == "chat-scroll") host?.scroll(BackPerformanceRecorder.Scroll.IDLE)
             activeSpan?.let { JankDiagnostics.endPhase(it, cookie) }
-            if (diagnostic && window != null) host?.context(window, token, null)
+            if ((diagnostic || recordNavigation) && window != null) host?.context(window, token, null)
         }
     }
 }

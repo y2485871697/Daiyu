@@ -64,7 +64,7 @@ object ChatTurnMapper {
             val original = source(message, block)
             toolReceipt(original, block)?.state ?: toolState(original, block)
         }
-        val activity: (RenderMessage, MessageBlock.Tool) -> ToolActivityUi? = { message, block -> toolReceipt(source(message, block), block)?.activity }
+        val activity: (RenderMessage, MessageBlock.Tool) -> ToolReceiptUi? = { message, block -> toolReceipt(source(message, block), block) }
         val databaseOwners = messages.flatMap { owner -> owner.historySegments.map { segment ->
             TurnOwner(owner.conversationId.value, owner.runId.value, segment.messageId.value) to owner.id.value
         } }.toMap()
@@ -110,7 +110,7 @@ object ChatTurnMapper {
             WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value), block)
         return mapRows(history, owners, { _, _ -> null }, { message, block -> receipt(message, block)?.state },
             { message, block -> dedicatedTool(WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value), block) },
-            { message, block -> receipt(message, block)?.activity }, { timestamp(it.createdAt) }, boundariesAfter, { _, _ -> null }, presentations,
+            ::receipt, { timestamp(it.createdAt) }, boundariesAfter, { _, _ -> null }, presentations,
             { emptyList() }, reconnects, childTaskNames)
     }
 
@@ -141,7 +141,7 @@ object ChatTurnMapper {
         errors: (RenderMessage, MessageBlock.Tool) -> Boolean?,
         states: (RenderMessage, MessageBlock.Tool) -> WorkStepState?,
         dedicated: (RenderMessage, MessageBlock.Tool) -> String?,
-        activity: (RenderMessage, MessageBlock.Tool) -> ToolActivityUi?,
+        activity: (RenderMessage, MessageBlock.Tool) -> ToolReceiptUi?,
         timestamp: (RenderMessage) -> String, boundariesAfter: Set<String>,
         assistantIdentity: (RenderMessage, String) -> app.daiyu.android.assistants.AssistantReplyIdentity?,
         presentations: ToolPresentationCache?, messageVideos: (RenderMessage) -> List<MessageVideoUi>,
@@ -311,7 +311,7 @@ object ChatTurnMapper {
         confirmedToolError: (RenderMessage, MessageBlock.Tool) -> Boolean?,
         toolState: (RenderMessage, MessageBlock.Tool) -> WorkStepState?,
         dedicatedTool: (RenderMessage, MessageBlock.Tool) -> String?,
-        activity: (RenderMessage, MessageBlock.Tool) -> ToolActivityUi?,
+        activity: (RenderMessage, MessageBlock.Tool) -> ToolReceiptUi?,
         integrateReasoning: Boolean = message.blocks.any { it is MessageBlock.Tool },
         presentations: ToolPresentationCache? = null,
         videos: List<MessageVideoUi> = emptyList(),
@@ -361,7 +361,7 @@ object ChatTurnMapper {
         listOf(message.conversationId.value, message.runId.value, message.id.value,
             block.invocation.id.value, occurrence.toString()).joinToString("", prefix = "tool:") { "${it.length}:$it" }
 
-    private fun workStep(message: RenderMessage, block: MessageBlock.Tool, confirmedError: Boolean?, receipt: WorkStepState?, dedicatedKey: String?, activity: ToolActivityUi?, presentations: ToolPresentationCache?, occurrence: Int = toolOccurrence(message, block),
+    private fun workStep(message: RenderMessage, block: MessageBlock.Tool, confirmedError: Boolean?, receipt: WorkStepState?, dedicatedKey: String?, projection: ToolReceiptUi?, presentations: ToolPresentationCache?, occurrence: Int = toolOccurrence(message, block),
         childTaskNames: Map<ChildRunOwner, String> = emptyMap()): WorkStepUi {
         val cached = presentations?.present(block) ?: ToolCardPresentations.present(block.invocation.name, block.invocation.arguments, block.result)
         val display = childTaskNamedPresentation(cached, message.conversationId.value, block.invocation.name,
@@ -381,7 +381,9 @@ object ChatTurnMapper {
             hasBrowserScreenshot = display.hasBrowserScreenshot,
             hasScreenScreenshot = display.hasScreenScreenshot,
             operationGlyph = display.operationGlyph,
-            activity = activity ?: ToolActivityUi.from(receipt ?: when (confirmedError) {
+            awaitingDispatch = !(projection?.dispatched ?: (receipt != WorkStepState.NOT_EXECUTED &&
+                (block.result != null || confirmedError != null || receipt == WorkStepState.OK || receipt == WorkStepState.FAILED))),
+            activity = projection?.activity ?: ToolActivityUi.from(receipt ?: when (confirmedError) {
                 true -> WorkStepState.FAILED
                 false -> WorkStepState.OK
                 null -> if (message.status == RunStatus.RUNNING && block.result == null) WorkStepState.PENDING else WorkStepState.UNKNOWN
@@ -393,7 +395,7 @@ object ChatTurnMapper {
         confirmedToolError: (RenderMessage, MessageBlock.Tool) -> Boolean?,
         toolState: (RenderMessage, MessageBlock.Tool) -> WorkStepState?,
         dedicatedTool: (RenderMessage, MessageBlock.Tool) -> String?,
-        activity: (RenderMessage, MessageBlock.Tool) -> ToolActivityUi?,
+        activity: (RenderMessage, MessageBlock.Tool) -> ToolReceiptUi?,
         presentations: ToolPresentationCache?,
         childTaskNames: Map<ChildRunOwner, String>): ChatTurnUi.Assistant {
         val hasTools = message.blocks.any { it is MessageBlock.Tool }

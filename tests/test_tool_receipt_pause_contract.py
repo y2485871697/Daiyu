@@ -11,7 +11,7 @@ class ToolReceiptPauseContract(unittest.TestCase):
         visible = host.split('val currentReceipts =', 1)[1].split('val remapTurns', 1)[0]
         self.assertIn('displayReader(loaded, currentReceipts, controller::runState, controller::runStopping)', visible)
         self.assertIn('retainedReceipts?.invoke(message, block)', visible)
-        self.assertIn('if (receiptsReady) null else', visible)
+        self.assertIn('if (receiptsReady && block.result != null) null else', visible)
         prepare = host.split('private fun prepareToolReceipts()', 1)[1].split('private fun publishChat()', 1)[0]
         for fence in ('toolReceiptRead?.cancel()', 'withContext(Dispatchers.IO)',
                       'toolReceiptRequest !== request', 'toolReceiptRequested != key', '!key.canDisplayFor(currentToolReceiptKey())'):

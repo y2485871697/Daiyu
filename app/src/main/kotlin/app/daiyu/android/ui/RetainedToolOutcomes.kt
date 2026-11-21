@@ -214,7 +214,12 @@ internal object RetainedToolOutcomes {
     // The caller must match conversation/run/message before supplying liveState.
     fun pendingProjection(status: RunStatus, block: MessageBlock.Tool,
         liveState: ExecutionState? = null, stopping: Boolean = false, receiptPending: Boolean = false): ToolReceiptUi? {
-        if (block.result == null) return null
+        if (block.result == null) {
+            if (status != RunStatus.RUNNING || liveState == null || block.invocation.id !in liveState.activeToolCalls ||
+                liveState.phase !in setOf(ExecutionPhase.TOOL_EXECUTING, ExecutionPhase.WAITING_USER)) return null
+            return toolReceiptPresentation(ToolDisposition.READY, true, liveState.phase,
+                liveState.pauseRequested, stopping, status, activeCall = true)
+        }
         val projected = if (status != RunStatus.RUNNING || liveState == null || block.invocation.id !in liveState.activeToolCalls)
             ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN)
         else toolReceiptPresentation(ToolDisposition.UNKNOWN, liveOwner = true, phase = liveState.phase,

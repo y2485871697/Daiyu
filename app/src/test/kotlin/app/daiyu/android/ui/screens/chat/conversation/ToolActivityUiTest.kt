@@ -10,7 +10,7 @@ import org.junit.Test
 class ToolActivityUiTest {
     @Test fun staleOwnersCannotBecomeRunningPausedOrWaiting() {
         for (phase in ExecutionPhase.entries) for (disposition in listOf(ToolDisposition.READY, ToolDisposition.IN_FLIGHT)) {
-            assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN), toolReceiptPresentation(disposition, false, phase, true))
+            assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN, disposition == ToolDisposition.IN_FLIGHT), toolReceiptPresentation(disposition, false, phase, true))
         }
     }
     @Test fun livePhasesArePresentationOnly() {

@@ -206,11 +206,11 @@ class TerminalToolTargetTest {
                 val target = app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)
                 val resolved = ChatTurnMapper.withStreamingOwner(pending, live, terminalTargets = mapOf(call to target))
                 val shown = resolved.filterIsInstance<ChatTurnUi.Assistant>().single().workflowContent().withResolvedTerminalCards()
-                val step = shown.steps.filterIsInstance<MessageContentUi.Tool>().single().step
-                assertNotNull(shown.work)
-                assertEquals("${original.name} · Debian • root", step.name)
+                assertNull(shown.work)
+                assertTrue(shown.steps.isEmpty())
+                val step = runtimeSteps(resolved).distinctBy { it.renderKey }.single()
                 assertEquals("Debian • root", step.executionTargetLabel)
-                assertTrue(step.isVisibleInWorkflow)
+                assertFalse(step.isVisibleInWorkflow)
                 assertEquals(original.activity, step.activity)
                 assertEquals(original.state, step.state)
                 assertEquals(listOf(original), runtimeSteps(pending).distinctBy { it.renderKey })
@@ -244,7 +244,7 @@ class TerminalToolTargetTest {
         assertSame(original.pending, noCard.pending)
     }
 
-    @Test fun targetVisibilityOnlyGatesTerminalCategoriesAndNeverRealChildQueues() {
+    @Test fun queuedCallsStayHiddenEvenAfterTerminalTargetResolution() {
         val terminal = WorkStepUi("target", "执行命令", "", category = "terminal")
         for (state in WorkStepState.entries) for (activity in ToolActivityUi.entries) {
             for (category in listOf("terminal", "background_job")) {
@@ -265,20 +265,15 @@ class TerminalToolTargetTest {
                 dedicatedTool = { _, _ -> if (mixed) "queue-test" else null }, toolReceipt = { _, _ -> queued })
             val turn = ChatTurnMapper.withStreamingOwner(turns, owner).filterIsInstance<ChatTurnUi.Assistant>().single()
             val shown = turn.workflowContent().withResolvedTerminalCards()
-            val step = shown.steps.filterIsInstance<MessageContentUi.Tool>().single().step
-            assertTrue(step.isVisibleInWorkflow)
-            assertNull(step.executionTargetLabel)
-            assertEquals(ToolActivityUi.QUEUED, step.displayActivity)
-            assertNotNull(shown.work)
-            assertTrue(turn.hasVisibleResponse())
+            assertTrue(shown.steps.isEmpty())
+            assertNull(shown.work)
+            assertFalse(turn.hasVisibleResponse())
             assertEquals(3, runtimeSteps(turns).distinctBy { it.renderKey }.size)
             val target = app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)
             val resolved = ChatTurnMapper.withStreamingOwner(turns, owner, terminalTargets = mapOf(terminal to target, job to target))
                 .filterIsInstance<ChatTurnUi.Assistant>().single().workflowContent().withResolvedTerminalCards()
-            val after = resolved.steps.filterIsInstance<MessageContentUi.Tool>().map { it.step }
-            assertEquals(3, after.size)
-            assertEquals(step, after.single { it.toolName == tool })
-            assertTrue(after.filter { it.toolName != tool }.all { it.executionTargetLabel == "Debian • root" })
+            assertTrue(resolved.steps.isEmpty())
+            assertNull(resolved.work)
         }
     }
 

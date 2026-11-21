@@ -18,7 +18,7 @@ class ReceiptSnapshotContract(unittest.TestCase):
         self.assertIn('RetainedToolOutcomes.pendingProjection(message, block,', host)
         projection = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/RetainedToolOutcomes.kt').read_text()
         pending = projection.split('fun pendingProjection(', 1)[1].split('fun projectionReader(database:', 1)[0]
-        self.assertIn('if (block.result == null) return null', pending)
+        self.assertIn('if (block.result == null) {', pending)
         self.assertIn('ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN)', pending)
         self.assertIn('block.invocation.id !in liveState.activeToolCalls', pending)
         self.assertIn('status != RunStatus.RUNNING', pending)
@@ -47,7 +47,7 @@ class ReceiptSnapshotContract(unittest.TestCase):
         host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         display = host.split('val visibleDisplayReceipts =', 1)[1].split('val visibleChildNames', 1)[0]
         self.assertIn('retainedDisplayReceipts?.invoke(owner, block)', display)
-        self.assertIn('if (receiptsReady) null else', display)
+        self.assertIn('if (receiptsReady && block.result != null) null else', display)
         self.assertIn('RetainedToolOutcomes.pendingProjection(source.status, block,', display)
         self.assertIn('liveState = live?.let(controller::runState)', display)
         self.assertNotIn('ToolActivityUi.RUNNING', display)

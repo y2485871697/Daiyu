@@ -209,11 +209,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 dedicatedTool = { _, _ -> if (mixed) "runtime-test" else null })
             val resolvedPending = ChatTurnMapper.withStreamingOwner(pendingBase, live,
                 terminalTargets = mapOf(call to app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)))
-            drawSnapshot(resolvedPending, "已折叠")
-            assertTrue(frames.none { it.texts.contains("待派发") || it.description.contains("待派发") })
-            val firstVisible = frames.first { it.headers > 0 }
-            assertTrue("The card and real target must first appear together: $firstVisible",
-                firstVisible.texts.any { it.endsWith(" · Debian • root") })
+            drawSnapshot(resolvedPending, null)
+            assertTrue("Target alone cannot admit a card", frames.all { it.headers == 0 })
             val base = ChatTurnMapper.map(listOf(live), reconnects = reconnects,
                 dedicatedTool = { _, _ -> if (mixed) "runtime-test" else null },
                 toolReceipt = { _, _ -> ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING) })
@@ -253,7 +250,7 @@ class ToolOperationCardTest : WiredActivityTestCase() {
         }
     }
 
-    fun testConcurrentChildQueueRemainsVisibleWithoutTerminalEnvironment() {
+    fun testOnlyTheDispatchedChildCallAppears() {
         val receipt = toolReceiptPresentation(app.daiyu.android.domain.runtime.ToolDisposition.READY, true,
             app.daiyu.android.domain.runtime.ExecutionPhase.TOOL_EXECUTING)
         assertEquals(ToolActivityUi.QUEUED, receipt.activity)
@@ -267,22 +264,21 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 dedicatedTool = { _, _ -> if (mixed) "queue-test" else null }, toolReceipt = { _, _ -> receipt })
             val turn = ChatTurnMapper.withStreamingOwner(turns, owner).filterIsInstance<ChatTurnUi.Assistant>().single()
             show(turn, ChatScreenActions())
-            ui.onNodeWithTag("tool-step-header:${call.id.value}", useUnmergedTree = true)
-                .assertExists().assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "排队中 · 已折叠"))
-            ui.onAllNodesWithTag("tool-step:${call.id.value}", useUnmergedTree = true).assertCountEquals(1)
+            ui.onNodeWithTag("tool-step-header:${call.id.value}", useUnmergedTree = true).assertDoesNotExist()
             for (hidden in listOf(terminal, job)) {
                 ui.onNodeWithTag("tool-step:${hidden.id.value}", useUnmergedTree = true).assertDoesNotExist()
                 ui.onNodeWithTag("tool-step-header:${hidden.id.value}", useUnmergedTree = true).assertDoesNotExist()
             }
             val target = app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)
-            val resolved = ChatTurnMapper.withStreamingOwner(turns, owner, terminalTargets = mapOf(terminal to target, job to target))
+            val active = ChatTurnMapper.map(listOf(owner), dedicatedTool = { _, _ -> if (mixed) "queue-test" else null },
+                toolReceipt = { _, block -> if (block.invocation == call) ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING) else receipt })
+            val resolved = ChatTurnMapper.withStreamingOwner(active, owner, terminalTargets = mapOf(terminal to target, job to target))
                 .filterIsInstance<ChatTurnUi.Assistant>().single()
             show(resolved, ChatScreenActions())
-            ui.onAllNodesWithTag("tool-step:${call.id.value}", useUnmergedTree = true).assertCountEquals(1)
             ui.onNodeWithTag("tool-step-header:${call.id.value}", useUnmergedTree = true)
-                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "排队中 · 已折叠"))
-            for (shown in listOf(terminal, job)) {
-                ui.onNodeWithTag("tool-step-header:${shown.id.value}").assertTextContains("Debian • root", substring = true)
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "执行中 · 已折叠"))
+            for (hidden in listOf(terminal, job)) {
+                ui.onNodeWithTag("tool-step-header:${hidden.id.value}").assertDoesNotExist()
             }
         }
     }

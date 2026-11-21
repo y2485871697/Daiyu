@@ -23,7 +23,13 @@ enum class ToolActivityUi(val label: String) {
     }
 }
 
-data class ToolReceiptUi(val state: WorkStepState, val activity: ToolActivityUi = ToolActivityUi.from(state))
+data class ToolReceiptUi(val state: WorkStepState, val activity: ToolActivityUi = ToolActivityUi.from(state),
+    /** Null means the receipt cannot establish dispatch; a returned result can still establish it. */
+    val dispatched: Boolean? = when (activity) {
+        ToolActivityUi.RUNNING, ToolActivityUi.WAITING, ToolActivityUi.SUCCESS, ToolActivityUi.FAILED -> true
+        ToolActivityUi.PENDING, ToolActivityUi.QUEUED, ToolActivityUi.NOT_EXECUTED -> false
+        else -> null
+    })
 
 internal fun toolReceiptPresentation(disposition: ToolDisposition, liveOwner: Boolean,
     phase: ExecutionPhase, pauseRequested: Boolean = false,
@@ -54,5 +60,11 @@ internal fun toolReceiptPresentation(disposition: ToolDisposition, liveOwner: Bo
         disposition == ToolDisposition.READY -> ToolActivityUi.QUEUED
         else -> ToolActivityUi.RUNNING
     }
-    return ToolReceiptUi(state, activity)
+    val dispatched = when (disposition) {
+        ToolDisposition.IN_FLIGHT, ToolDisposition.SUCCEEDED, ToolDisposition.FAILED -> true
+        ToolDisposition.NOT_EXECUTED -> false
+        ToolDisposition.READY -> liveOwner && activeCall
+        ToolDisposition.UNKNOWN -> true.takeIf { liveOwner && activeCall }
+    }
+    return ToolReceiptUi(state, activity, dispatched)
 }

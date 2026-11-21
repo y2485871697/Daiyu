@@ -376,16 +376,11 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         // Keep subcharacter phase, never whole-character catch-up credit.
         val phase = position % 1.0 + step
         position = if (adaptiveBody && phase >= 1.0) {
-            var frontier = next
-            var credit = (phase - 1.0) * width
-            while (frontier < end) {
-                val following = expected.next(frontier)
-                val cost = following - frontier
-                if (credit < cost) break
-                credit -= cost
-                frontier = following
-            }
-            frontier.toDouble() + if (frontier < end) credit / (expected.next(frontier) - frontier) else 0.0
+            // The budget is in UTF-16 units. Snap its destination once, even across parts.
+            val destination = (next + (phase - 1.0) * width).coerceAtMost(end.toDouble())
+            val frontier = expected.boundary(destination.toInt())
+            frontier.toDouble() + if (frontier < end)
+                (destination - frontier) / (expected.next(frontier) - frontier) else 0.0
         } else if (phase >= 1.0) {
             next.toDouble() + if (next < end) phase - 1.0 else 0.0
         } else previous.toDouble() + phase

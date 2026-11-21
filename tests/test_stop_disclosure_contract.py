@@ -19,13 +19,13 @@ class StopDisclosureContractTest(unittest.TestCase):
         card = (CHAT / 'ReportedReasoningCard.kt').read_text()
         for marker in ('rememberSaveable(ownerKey, stopped)', 'remember(ownerKey, stopped) { MutableTransitionState(expanded) }',
                        '(!stopped || currentOverride == true)', 'val handoffReady = stopped ||',
-                       '?: (!stopped && (isThinking || observedLive && !settled))'):
+                       '?: (!stopped && (isThinking || presenting && (!settled || waitingForReveal)))'):
             self.assertIn(marker, card)
         chat = (CHAT / 'ChatMessageList.kt').read_text()
         assistant = chat.split('internal fun AssistantTurn(', 1)[1].split('private fun AssistantTextContent', 1)[0]
-        self.assertIn('turn.reportedReasoning.filter { turn.reasoningStopped ||', assistant)
+        self.assertIn('reportedReasoning.filter { turn.reasoningStopped ||', assistant)
         self.assertIn('.forEach(handoff::complete)', assistant)
-        self.assertIn('val reasoningReady = turn.reasoningStopped || handoff.ready(turn.reportedReasoning)', assistant)
+        self.assertIn('val reasoningReady = turn.reasoningStopped || handoff.ready(reportedReasoning)', assistant)
         ordered = chat.split('private fun AssistantTextContent', 1)[1]
         self.assertIn('val reasoningReady = turn.reasoningStopped || handoff.ready(workReasoning)', ordered)
         self.assertIn('stopped = turn.reasoningStopped', ordered)
@@ -46,8 +46,13 @@ class StopDisclosureContractTest(unittest.TestCase):
         for marker in ('val finished = finishing && reasoningReady', 'rememberSaveable(ownerKey, finishing, stopped)',
                        'val expanded = currentOverride ?: (!stopped && !finished)',
                        'reasoningReady && fullyClosed',
-                       'rememberSaveable(step.owner, step.toolCallId) { mutableStateOf(false) }'):
+                       'rememberSaveable(step.renderKey) { mutableStateOf(false) }'):
             self.assertIn(marker, work)
+
+        mapper = (CHAT / 'ChatTurnMapper.kt').read_text()
+        self.assertIn('renderKey = toolRenderKey(message, block, occurrence)', mapper)
+        self.assertIn('listOf(message.conversationId.value, message.runId.value, message.id.value,', mapper)
+        self.assertIn('block.invocation.id.value, occurrence.toString()', mapper)
 
     def test_stopped_divider_never_installs_a_click_action_or_error_sheet(self):
         divider = (CHAT / 'ChatTimelineDivider.kt').read_text()
@@ -69,10 +74,11 @@ class StopDisclosureContractTest(unittest.TestCase):
 
     def test_main_projects_stop_boundaries_before_mapping_from_the_same_message_snapshot(self):
         source = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
-        begin = source.index('val visibleTimeline = app.daiyu.android.timeline.withStoppedRuns(')
+        begin = source.index('val savedTimeline = timelineEntries.takeIf { timelineConversation == selected?.id }')
         end = source.index('turns = ChatTurnMapper.withStreamingOwner', begin)
         before_map = source[begin:end]
-        self.assertIn('shown.map { it.second }, timelineEntries.takeIf', before_map)
+        self.assertIn('withStoppedDisplayRows(it, savedTimeline)', before_map)
+        self.assertIn('withStoppedRuns(shown.map { it.second }, savedTimeline)', before_map)
         self.assertIn('val workflowBoundaries = visibleTimeline.filterNot', before_map)
         self.assertIn('timeline = visibleTimeline', before_map)
 

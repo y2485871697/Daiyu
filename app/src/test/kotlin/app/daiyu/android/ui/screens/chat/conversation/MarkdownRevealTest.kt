@@ -989,6 +989,23 @@ class MarkdownRevealTest {
         assertEquals(at30.toDouble(), shown(8_333_333L).toDouble(), 1.0)
     }
 
+    @Test fun burstStopsBeforeAnUnadmittedSurrogateInTheNextPart() {
+        val state = MarkdownTypingState(emptyList())
+        val first = "字".repeat(70)
+        val second = "😀".repeat(125)
+        val a = MarkdownTypingSource("a", first)
+        val b = MarkdownTypingSource("b", second)
+        state.receive(listOf(a, b), 1_000_000_000L)
+        val target = state.update(listOf(MarkdownTypingPart(a, first.length), MarkdownTypingPart(b, second.length)),
+            0, true, false)!!
+        repeat(90) { index ->
+            val seen = state.advance(target, 1_000_000_000L + index * 16_000_000L, first.length + 151, true)
+            assertTrue(seen <= first.length + 150)
+            if (seen >= first.length) assertEquals(0, (seen - first.length) % 2)
+        }
+        assertEquals(first.length + 150, state.visible(target))
+    }
+
     @Test fun adaptiveBodyDrainsFastUnicodeReceiptsWithoutSkippingTheAnimation() {
         val state = MarkdownTypingState(emptyList())
         val text = "字😀e\u0301".repeat(100)

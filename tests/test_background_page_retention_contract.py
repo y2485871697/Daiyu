@@ -35,7 +35,7 @@ class BackgroundPageRetentionContractTest(unittest.TestCase):
 
     def test_new_provider_callbacks_recheck_their_original_foreground_permit(self):
         route = source('ProviderManagementRoute.kt')
-        self.assertIn('if (current(p) && enabled && creating === newProvider && newProvider.draft === draft)', route)
+        self.assertIn('if (current(p) && enabled && busy == null && !controller.dataBusy && creating === newProvider && newProvider.draft === draft)', route)
         self.assertIn('if (current(p) && enabled && creating === newProvider && newProvider.draft === submitted', route)
         for entry in ('onAddOpenAi', 'onAddAnthropic', 'onAddSpeech'):
             self.assertIn(entry + ' = { if (current(p) && enabled)', route)
@@ -52,7 +52,7 @@ class BackgroundPageRetentionContractTest(unittest.TestCase):
 
     def test_local_model_pause_retains_input_and_rotates_callback_identities(self):
         local = source('LocalCatalogModelsScreen.kt')
-        pause = local.split('fun pause() {', 1)[1].split('fun reload()', 1)[0]
+        pause = local.split('fun pause() {', 1)[1].split('fun reconcile(', 1)[0]
         self.assertIn('request?.set(true)', pause)
         self.assertIn('deleting = null', pause)
         self.assertIn('editing = editing?.copy()', pause)
@@ -64,9 +64,11 @@ class BackgroundPageRetentionContractTest(unittest.TestCase):
 
     def test_local_model_reload_checks_revision_without_unmounting_the_editor(self):
         local = source('LocalCatalogModelsScreen.kt')
-        reload = local.split('fun reload() {', 1)[1].split('fun matches(', 1)[0]
+        reload = local.split('fun reconcile(', 1)[1].split('fun matches(', 1)[0]
         self.assertNotIn('editing = null', reload)
         self.assertNotIn('adding = null', reload)
+        self.assertIn('if (current() && request === token && !token.get()) {', reload)
+        self.assertIn('reconcile(value)', reload)
         self.assertIn('selection.expectedRevision', reload)
         self.assertIn('selection.record', reload)
         self.assertIn('addBase.revision', reload)
@@ -84,7 +86,11 @@ class BackgroundPageRetentionContractTest(unittest.TestCase):
         self.assertIn('if (selectedIds != null) { selectedIds = null; deletingSelected = null }', local)
         self.assertIn('else { visit.set(false); cancel(); onBack() }', local)
         route = source('ProviderManagementRoute.kt')
-        self.assertIn('if (creating != null) { serial++; clearPrompts(); refresh(); return }', route)
+        self.assertIn('if (creating != null) { closeDetail(); refresh(); return }', route)
+        close = route.split('fun closeDetail() {', 1)[1].split('fun refresh()', 1)[0]
+        self.assertIn('serial++', close)
+        self.assertIn('clearPrompts()', close)
+        self.assertIn('creating?.revoke(); creating = null', route)
         self.assertIn('onDispose {', route)
 
     def test_activity_regressions_cover_retention_and_old_callbacks(self):

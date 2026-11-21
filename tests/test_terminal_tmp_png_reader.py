@@ -31,7 +31,7 @@ class TerminalTmpPngReaderTest(unittest.TestCase):
             raise AssertionError('Actual Kotlin reader literal not found')
         cls.reader = textwrap.dedent(match.group(1))
 
-    def setUp(self):
+    def make_directory(self):
         directory = tempfile.TemporaryDirectory(prefix='daiyu-reader-test-', dir='/tmp')
         self.addCleanup(directory.cleanup)
         self.root = Path(directory.name)
@@ -44,10 +44,12 @@ class TerminalTmpPngReaderTest(unittest.TestCase):
     def assert_error(self, path, reason):
         result = self.invoke(path)
         self.assertEqual(1, result.returncode, result.stderr)
-        self.assertEqual(b'ERR:' + reason + b'\n', result.stdout)
+        self.assertEqual(b'ERR:' + reason + os.linesep.encode(), result.stdout)
         self.assertEqual(b'', result.stderr)
 
+    @unittest.skipIf(os.name == "nt", "Linux /tmp reader requires POSIX directory descriptors; covered by Linux matrix")
     def test_actual_png_and_path_characters(self):
+        self.make_directory()
         path = self.root / "帧 ' quoted.png"
         path.write_bytes(PNG)
         result = self.invoke(path)
@@ -56,7 +58,9 @@ class TerminalTmpPngReaderTest(unittest.TestCase):
         self.assertEqual(b'', result.stderr)
         self.assertEqual(PNG, path.read_bytes())
 
+    @unittest.skipIf(os.name == "nt", "Linux /tmp reader requires POSIX directory descriptors; covered by Linux matrix")
     def test_limit_and_non_png(self):
+        self.make_directory()
         path = self.root / 'frame.png'
         data = SIG + bytes(CAP - len(SIG))
         path.write_bytes(data)
@@ -68,7 +72,9 @@ class TerminalTmpPngReaderTest(unittest.TestCase):
         path.write_bytes(b'not a png')
         self.assert_error(path, b'not_png')
 
+    @unittest.skipIf(os.name == "nt", "Linux /tmp reader requires POSIX directory descriptors; covered by Linux matrix")
     def test_symlinks_directory_fifo_and_missing(self):
+        self.make_directory()
         target = self.root / 'frame.png'
         target.write_bytes(PNG)
         link = self.root / 'link.png'
@@ -86,6 +92,6 @@ class TerminalTmpPngReaderTest(unittest.TestCase):
         self.assert_error(self.root / 'missing.png', b'open_or_read_failed')
 
     def test_invalid_paths(self):
-        for path in ('/workspace/frame.png', '/tmp//frame.png', str(self.root) + '/../frame.png', str(self.root) + '/./frame.png'):
+        for path in ('/workspace/frame.png', '/tmp//frame.png', '/tmp/reader/../frame.png', '/tmp/reader/./frame.png'):
             with self.subTest(path=path):
                 self.assert_error(path, b'invalid_path')

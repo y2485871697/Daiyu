@@ -26,7 +26,8 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('}.collect { refreshAdmission() }', refresh)
         self.assertIn('snapshotFlow { publicationCheck() }.collect { publication?.setPending(owner, !it) }', leaf)
         self.assertIn('frame.coordinates?.let(::placed)', leaf)
-        self.assertIn('.onPlaced(::placed).onGloballyPositioned(::placed)', leaf)
+        callback = leaf.split('}.onPlaced { coordinates ->', 1)[1].split('}.onGloballyPositioned(::placed)', 1)[0]
+        self.assertIn('Snapshot.withoutReadObservation { placed(coordinates) }', callback)
 
     def test_draw_observes_render_inputs_but_not_post_draw_feedback(self):
         ui = (BASE / 'MessageMarkdown.kt').read_text()

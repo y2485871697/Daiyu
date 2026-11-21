@@ -429,13 +429,34 @@ class StreamingOcclusionContract(unittest.TestCase):
                       "ChatTailClearance.value, (composer.top - shortBottom) / density"):
             self.assertIn(token, case)
 
+    def test_viewport_republication_tracks_clip_inputs_without_republishing_unchanged_placement(self):
+        source = CHAT.read_text()
+        state = source.split("internal class StreamingTailViewport(", 1)[1].split("@Composable", 1)[0]
+        placed = state.split("fun placedViewport(", 1)[1].split("    var anchorCorrection", 1)[0]
+        for token in ("list: LayoutCoordinates?", "list?.takeIf { it.isAttached }",
+                      "coordinates.isAttached && attachedList != null",
+                      "attachedList.localPositionOf(coordinates, Offset.Zero).y else null",
+                      "Placement(coordinates.size, attachedList?.size, top)",
+                      "placedCoordinates !== coordinates || placedList !== attachedList || viewportPlacement != placement"):
+            self.assertIn(token, placed)
+        guarded = placed.split("if (placedCoordinates !== coordinates", 1)[1]
+        self.assertEqual(1, placed.count("viewportCoordinates = coordinates"))
+        self.assertIn("viewportCoordinates = coordinates", guarded)
+        self.assertNotIn("positionInWindow", placed)
+        viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
+        for callback in (".onPlaced { viewport ->", ".onGloballyPositioned { viewport ->"):
+            body = viewport.split(callback, 1)[1].split("            }", 1)[0]
+            self.assertIn("state.placedViewport(viewport, listCoordinates())", body)
+            self.assertIn("state.textClearance.update(listCoordinates(), viewport", body)
+        self.assertNotIn("state.viewportCoordinates = viewport", viewport)
+
     def test_drawing_clip_protects_follow_clearance_but_retains_detached_backdrop(self):
         source = CHAT.read_text()
         viewport = source.split("internal fun StreamingTailContainer(", 1)[1].split("internal fun ChatMessageList(", 1)[0]
         drawing = viewport.split(".drawWithContent {", 1)[1].split(".scrollable", 1)[0]
         self.assertIn("import androidx.compose.runtime.neverEqualPolicy", source)
         self.assertIn("var viewportCoordinates by mutableStateOf<LayoutCoordinates?>(null, neverEqualPolicy())", source)
-        self.assertIn(".onPlaced { viewport ->\n                state.viewportCoordinates = viewport", viewport)
+        self.assertIn(".onPlaced { viewport ->\n                state.placedViewport(viewport, listCoordinates())", viewport)
         self.assertIn("val viewport = state.viewportCoordinates?.takeIf { it.isAttached }", drawing)
         geometry = drawing.split("val actualTop = ", 1)[1].split("} else size.height", 1)[0]
         self.assertEqual(

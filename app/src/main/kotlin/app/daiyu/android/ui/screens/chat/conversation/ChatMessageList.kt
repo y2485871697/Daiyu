@@ -217,8 +217,26 @@ internal class StreamingTailViewport(initiallyBounded: Boolean) {
     var followCatchup by mutableStateOf(false)
     var viewportOffset by mutableIntStateOf(0)
     var itemOrigin by mutableStateOf<Float?>(null)
-    // Re-publish placement even when Compose reuses the coordinates object.
+    // Coordinates are reused in place; publish only changes to the draw clip's geometry.
     var viewportCoordinates by mutableStateOf<LayoutCoordinates?>(null, neverEqualPolicy())
+    private data class Placement(val viewportSize: androidx.compose.ui.unit.IntSize,
+        val listSize: androidx.compose.ui.unit.IntSize?, val top: Float?)
+    private var placedCoordinates: LayoutCoordinates? = null
+    private var placedList: LayoutCoordinates? = null
+    private var viewportPlacement: Placement? = null
+
+    fun placedViewport(coordinates: LayoutCoordinates, list: LayoutCoordinates?) {
+        val attachedList = list?.takeIf { it.isAttached }
+        val top = if (coordinates.isAttached && attachedList != null)
+            attachedList.localPositionOf(coordinates, Offset.Zero).y else null
+        val placement = Placement(coordinates.size, attachedList?.size, top)
+        if (placedCoordinates !== coordinates || placedList !== attachedList || viewportPlacement != placement) {
+            placedCoordinates = coordinates
+            placedList = attachedList
+            viewportPlacement = placement
+            viewportCoordinates = coordinates
+        }
+    }
     var anchorCorrection = ""
     var followDiagnostic = ""
     var clearanceDiagnostic = ""
@@ -286,13 +304,13 @@ internal fun StreamingTailContainer(
         }, modifier = Modifier
             .testTag("chat-stream-viewport:$itemKey")
             .onPlaced { viewport ->
-                state.viewportCoordinates = viewport
+                state.placedViewport(viewport, listCoordinates())
                 val followingCatchup = state.bounded && state.followCatchup && followIntent()
                 state.textClearance.update(listCoordinates(), viewport, state.scrollOffset.roundToInt(), drawClearance(),
                     state.paintHeight, preserveTextClearance && protectClearance() && followIntent(), !followingCatchup)
             }
             .onGloballyPositioned { viewport ->
-                state.viewportCoordinates = viewport
+                state.placedViewport(viewport, listCoordinates())
                 val followingCatchup = state.bounded && state.followCatchup && followIntent()
                 state.textClearance.update(listCoordinates(), viewport, state.scrollOffset.roundToInt(), drawClearance(),
                     state.paintHeight, preserveTextClearance && protectClearance() && followIntent(), !followingCatchup)

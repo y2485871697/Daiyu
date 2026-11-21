@@ -17,10 +17,12 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import app.daiyu.android.domain.RunStatus
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 @Stable
 internal class MarkdownReveal(
@@ -223,45 +225,47 @@ internal fun rememberMarkdownReveal(
     val textClearance by rememberUpdatedState(clearance)
     val publication = remember(identity, resetEpoch, motion) { MarkdownPaintPublication() }
     val frame = produceState(motion.frame(target), target, canAdvance, advanceLimit, finishImmediately) {
-        val current = target ?: return@produceState
-        publication.start(current)
-        var shown = motion.visible(current)
-        value = MarkdownTypingFrame(current, shown)
-        if (finishImmediately) {
-            val finished = motion.finish(current)
-            if (currentAwaitPaintAdmission) publication.reserve(current, shown, finished)
-            value = MarkdownTypingFrame(current, finished)
-            return@produceState
-        }
-        if (!canAdvance) { motion.pause(current); return@produceState }
-        val end = maxOf(shown, current.boundary(minOf(current.total, advanceLimit)))
-        while (shown < end) {
-            if (currentAwaitPaintAdmission && !publication.ready) {
-                // Real draw releases wake immediately; control changes remain snapshot-observed.
-                snapshotFlow {
-                    !currentAwaitPaintAdmission ||
-                        !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) || textClearance?.held == true
-                }.combine(publication.readySignal) { controlWake, paintReady -> controlWake || paintReady }.first { it }
+        withContext(Dispatchers.Main.immediate) {
+            val current = target ?: return@withContext
+            publication.start(current)
+            var shown = motion.visible(current)
+            value = MarkdownTypingFrame(current, shown)
+            if (finishImmediately) {
+                val finished = motion.finish(current)
+                if (currentAwaitPaintAdmission) publication.reserve(current, shown, finished)
+                value = MarkdownTypingFrame(current, finished)
+                return@withContext
             }
-            withFrameNanos { frameNanos ->
-                val before = shown
-                shown = when {
-                    !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> {
-                        motion.pause(current)
-                        motion.visible(current)
-                    }
-                    textClearance?.held == true -> {
-                        motion.hold(current, frameNanos)
-                        motion.visible(current)
-                    }
-                    currentAwaitPaintAdmission && !publication.ready -> motion.visible(current)
-                    else -> motion.advance(current, frameNanos, end) { currentAdvance() }
+            if (!canAdvance) { motion.pause(current); return@withContext }
+            val end = maxOf(shown, current.boundary(minOf(current.total, advanceLimit)))
+            while (shown < end) {
+                if (currentAwaitPaintAdmission && !publication.ready) {
+                    // Real draw releases wake immediately; control changes remain snapshot-observed.
+                    snapshotFlow {
+                        !currentAwaitPaintAdmission ||
+                            !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) || textClearance?.held == true
+                    }.combine(publication.readySignal) { controlWake, paintReady -> controlWake || paintReady }.first { it }
                 }
-                if (currentAwaitPaintAdmission) publication.reserve(current, before, shown)
-                value = MarkdownTypingFrame(current, shown)
+                withFrameNanos { frameNanos ->
+                    val before = shown
+                    shown = when {
+                        !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> {
+                            motion.pause(current)
+                            motion.visible(current)
+                        }
+                        textClearance?.held == true -> {
+                            motion.hold(current, frameNanos)
+                            motion.visible(current)
+                        }
+                        currentAwaitPaintAdmission && !publication.ready -> motion.visible(current)
+                        else -> motion.advance(current, frameNanos, end) { currentAdvance() }
+                    }
+                    if (currentAwaitPaintAdmission) publication.reserve(current, before, shown)
+                    value = MarkdownTypingFrame(current, shown)
+                }
             }
+            if (end < current.total) motion.pause(current)
         }
-        if (end < current.total) motion.pause(current)
     }
     val typingPending by remember(frame, target, canAdvance, advanceLimit) { derivedStateOf {
         canAdvance && target != null && frame.value.let { progress ->

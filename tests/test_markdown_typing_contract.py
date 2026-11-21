@@ -8,6 +8,26 @@ BASE = APP / "ui/screens/chat/conversation"
 
 
 class MarkdownTypingContract(unittest.TestCase):
+    def test_producer_uses_immediate_main_without_replacing_its_frame_clock_or_job(self):
+        producer = self.typing.split(
+            'val frame = produceState(motion.frame(target), target, canAdvance, advanceLimit, finishImmediately) {',
+            1)[1].split('    val typingPending', 1)[0]
+        self.assertIn('import kotlinx.coroutines.Dispatchers\n', self.typing)
+        self.assertIn('import kotlinx.coroutines.withContext\n', self.typing)
+        self.assertTrue(producer.lstrip().startswith('withContext(Dispatchers.Main.immediate) {'))
+        self.assertTrue(producer.rstrip().endswith('\n        }\n    }'))
+        self.assertIn('val current = target ?: return@withContext', producer)
+        self.assertIn('if (!canAdvance) { motion.pause(current); return@withContext }', producer)
+        self.assertEqual(1, producer.count('withContext('))
+        self.assertEqual(1, producer.count('withFrameNanos { frameNanos ->'))
+        self.assertEqual(1, producer.count('motion.advance('))
+        self.assertIn('}.combine(publication.readySignal) { controlWake, paintReady -> controlWake || paintReady }.first { it }', producer)
+        for forbidden in ('return@produceState', 'launch(', 'async(', 'CoroutineScope(', 'Job(',
+                          'SupervisorJob(', 'minusKey(', 'newSingleThreadContext(', 'NonCancellable',
+                          'MonotonicFrameClock', 'BroadcastFrameClock', 'Choreographer',
+                          'Dispatchers.Unconfined', 'Dispatchers.Default', 'delay(', 'yield('):
+            self.assertNotIn(forbidden, producer)
+
     @classmethod
     def setUpClass(cls):
         cls.parser = (APP / "MarkdownParser.kt").read_text()
@@ -92,7 +112,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("private val installing = mutableStateMapOf<String, Int>()", publication)
         self.assertIn("if (installingTarget === target) return", publication)
         self.assertIn("if (installingTarget !== target || installing[id] != visible) return", publication)
-        callback = self.typing.split("withFrameNanos { frameNanos ->", 1)[1].split("\n            }", 1)[0]
+        callback = self.typing.split("withFrameNanos { frameNanos ->", 1)[1].split("\n                }", 1)[0]
         reserve = "if (currentAwaitPaintAdmission) publication.reserve(current, before, shown)"
         self.assertIn(reserve, callback)
         self.assertLess(callback.index("motion.advance("), callback.index(reserve))
@@ -111,7 +131,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("val reveal = rememberMarkdownReveal(bodySources, projection, streaming = turn.isStreaming,", self.chat)
         self.assertIn("onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources,", self.chat)
         self.assertIn("live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty()", self.chat)
-        callback = self.typing.split("withFrameNanos { frameNanos ->", 1)[1].split("\n            }", 1)[0]
+        callback = self.typing.split("withFrameNanos { frameNanos ->", 1)[1].split("\n                }", 1)[0]
         self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end) { currentAdvance() } }', " ".join(callback.split()))
         self.assertEqual(1, callback.count("motion.advance("))
         self.assertEqual(1, callback.count("motion.pause("))

@@ -61,7 +61,8 @@ class ToolEnabledChildRunTest {
     }
     private class Fixture(val assembly: Assembly = Assembly(), val transport: Transport = Transport(),
         val capacity: Semaphore = Semaphore(1),
-        val contextRuntime: RunContextRuntime? = null, val runtimeStore: RuntimeStore? = null) {
+        val contextRuntime: RunContextRuntime? = null, val runtimeStore: RuntimeStore? = null,
+        val openTransport: ((Int) -> ModelSession)? = null) {
         val parent = RunExecutionOwner.issue(Message(MessageId("parent-message"), ConversationId("conversation"), RunId("parent"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
         val scope = ChildRunScope.capture(ChildRunOwner("conversation", "parent", "group", 7, "child", "child-message"),
@@ -75,7 +76,7 @@ class ToolEnabledChildRunTest {
             object : CatalogFixturePort {
                 override fun open(history: List<Message>): ModelSession = error("schema required")
                 override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
-                    check(definitions.isNotEmpty()); histories += history.toList(); return transport
+                    check(definitions.isNotEmpty()); histories += history.toList(); return openTransport?.invoke(histories.size) ?: transport
                 }
             }
         }, journal, capacity, runtimeStore = runtimeStore, contextRuntime = contextRuntime)
@@ -203,15 +204,34 @@ class ToolEnabledChildRunTest {
                 return listOf(summary) + history.takeLast(1)
             }
         }
+        val oldCancel = CountDownLatch(1)
+        val oldEntered = CountDownLatch(1)
+        lateinit var worker: Thread
+        lateinit var latestCancel: Thread
+        val latestEntered = CountDownLatch(1)
         val f = Fixture(assembly, transport, contextRuntime = runtime, runtimeStore = object : RuntimeStore {
             override fun save(checkpoint: RunCheckpoint) {
                 if (checkpoint.context?.capacity != null) limited.incrementAndGet()
+            }
+        }, openTransport = { index ->
+            worker = Thread.currentThread()
+            object : ModelSession by transport {
+                override fun cancel() {
+                    if (index == 1) { oldEntered.countDown(); check(oldCancel.await(10, TimeUnit.SECONDS)) }
+                    else { latestCancel = Thread.currentThread(); latestEntered.countDown() }
+                    transport.cancel()
+                }
             }
         })
         try {
             assertTrue(f.run.start())
             await(f.journal.finished); await(f.assembly.observed)
-            f.assembly.report(ChildToolDrain.Drained); f.waitDrained()
+            await(oldEntered); await(latestEntered)
+            latestCancel.join(3000); worker.join(3000)
+            assertFalse(latestCancel.isAlive); assertFalse(worker.isAlive)
+            f.assembly.report(ChildToolDrain.Drained)
+            assertFalse(f.run.drained); assertEquals(0, f.capacity.availablePermits())
+            oldCancel.countDown(); f.waitDrained(); assertEquals(1, f.capacity.availablePermits())
             assertEquals(ChildTaskStatus.COMPLETED, f.run.snapshot.record.status)
             assertEquals("continued", f.run.snapshot.record.text)
             assertEquals(1, summaries.get()); assertEquals(1, executions.get())
@@ -219,7 +239,7 @@ class ToolEnabledChildRunTest {
             assertEquals(2, transport.requests.get()); assertEquals(2, f.histories.size)
             assertEquals(MessageId("compacted-child-history"), f.histories.last().first().id)
             assertEquals(0, limited.get()); assertFalse(f.run.contextLimited)
-        } finally { f.run.close() }
+        } finally { oldCancel.countDown(); f.run.close() }
     }
 
     @Test fun pauseBeforeStartPreservesOriginalBrowserChildAndNeverConstructsUntilResume() {

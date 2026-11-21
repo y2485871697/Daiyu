@@ -24,7 +24,7 @@ sealed interface ChildToolDrain {
 }
 
 /** Explicit trusted-UI admission, separate from (and never enabling) text-only ChildModelBatch.
- * One-shot lifetime: no model reopen, no constructor replay and no recovery admission.
+ * One admission; context compaction may reopen the transport without creating another child.
  * Capacity is returned only after worker exit, transport cancel return AND physical tool drain.
  */
 class ToolEnabledChildRun(
@@ -44,7 +44,7 @@ class ToolEnabledChildRun(
     private var cancelled = false
     private var workerExited = false
     private var acquired = false
-    private var transportDrained = true
+    private var openTransports = 0
     private var observing = false
     private var toolDrain: ChildToolDrain? = null
     private var unknown = false
@@ -135,7 +135,7 @@ class ToolEnabledChildRun(
                     failureStage = ChildFailureStage.OPEN
                     val transport = try { port.open(history, definitions) }
                     catch (failure: Exception) { executionFailure = failure; throw failure }
-                    synchronized(gate) { transportDrained = false }
+                    synchronized(gate) { openTransports++ }
                     val once = AtomicBoolean(false)
                     return object : ModelSession {
                         override fun updateToolDefinitions(definitions: List<app.daiyu.android.domain.ToolDefinition>) {
@@ -153,7 +153,7 @@ class ToolEnabledChildRun(
                             try { transport.cancel() }
                             catch (_: Exception) { synchronized(gate) { unknown = true } }
                             finally {
-                                synchronized(gate) { transportDrained = true }
+                                synchronized(gate) { openTransports-- }
                                 releaseIfReady()
                             }
                         }
@@ -236,7 +236,7 @@ class ToolEnabledChildRun(
 
     private fun releaseIfReady() {
         synchronized(gate) {
-            if (!released && !unknown && workerExited && transportDrained && toolDrain == ChildToolDrain.Drained) {
+            if (!released && !unknown && workerExited && openTransports == 0 && toolDrain == ChildToolDrain.Drained) {
                 // Semaphore.release is nonblocking and invokes no host code. Publish drained
                 // only AFTER the real release, so observers cannot retire a half-released owner.
                 if (acquired) capacity.release()

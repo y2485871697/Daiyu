@@ -1,5 +1,8 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
@@ -31,7 +34,7 @@ internal fun StreamingAnswer(source: String, streaming: Boolean, id: String, rev
         if (shown?.source == source) { reveal.applied(id, limit); reveal.presented(id) }
     }
     if (shown != null) BetterSelectionContainer(modifier) {
-        Markdown(document = shown, modifier = Modifier.drawWithContent { drawContent(); receipt.last = shown },
+        Markdown(document = shown, modifier = Modifier.animateContentSize().padding(horizontal = 4.dp).drawWithContent { drawContent(); receipt.last = shown },
             style = MiuixTheme.textStyles.body1.copy(color = conversationColors().text, fontSize = 16.sp, lineHeight = 26.sp),
             onLinkClick = { if (MarkdownText.isSafeLink(it)) runCatching { uri.openUri(it) }; Unit })
     }

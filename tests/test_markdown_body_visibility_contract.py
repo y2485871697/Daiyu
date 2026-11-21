@@ -108,6 +108,8 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('if (frozen) receipt.last else document', body)
         self.assertNotIn('rememberPartInk(', body)
         self.assertNotIn('withFrameNanos', body)
+        self.assertIn('Modifier.animateContentSize().padding(horizontal = 4.dp)', body)
+        self.assertIn('!currentComplete.value && index == currentSources.value.lastIndex', (BASE / 'ChatMessageList.kt').read_text())
 
     def test_hidden_answer_and_typewriter_share_the_same_release_gate(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()

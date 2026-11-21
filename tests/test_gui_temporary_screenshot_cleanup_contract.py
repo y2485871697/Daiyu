@@ -34,7 +34,9 @@ class TemporaryScreenScreenshotCleanupContract(unittest.TestCase):
 
     def test_only_registered_files_are_deleted_and_existing_previews_are_not_adopted(self):
         source = (APP / 'media/ScreenToolImageStore.kt').read_text()
-        receipt = source.split('    fun receipt(', 1)[1].split('    @Synchronized', 1)[0]
+        entry = source.split('    fun receipt(', 1)[1].split('    @Synchronized', 1)[0]
+        self.assertIn('assetReceipt(conversation, run, call, image.png, metadata)', entry)
+        receipt = source.split('    private fun assetReceipt(', 1)[1].split('    @Synchronized', 1)[0]
         finish = source.split('    fun finishRun(', 1)[1].split('    @Synchronized', 1)[0]
         self.assertLess(receipt.index('if (!Files.exists(target.toPath(), NOFOLLOW_LINKS))'), receipt.index('owned.add(target)'))
         self.assertLess(receipt.index('Files.move('), receipt.index('owned.add(target)'))
@@ -42,7 +44,10 @@ class TemporaryScreenScreenshotCleanupContract(unittest.TestCase):
         self.assertIn('owned.remove(temporary)', receipt)
         self.assertIn('check(!wasCleared(conversation, run))', receipt)
         self.assertIn('put("temporary", temporaryFiles[Owner(conversation, run)]?.contains(target) == true)', receipt)
-        self.assertIn('val files = temporaryFiles[owner] ?: return 0', finish)
+        self.assertIn('val files = temporaryFiles[owner] ?: emptySet()', finish)
+        self.assertIn('val images = fileImages[owner].orEmpty()', finish)
+        self.assertIn('if (files.isEmpty() && images.isEmpty() && owner !in temporaryFiles) return 0', finish)
+        self.assertLess(finish.index('it.fd.sync()'), finish.index('fileImages.remove(owner)'))
         self.assertIn('for (file in files)', finish)
         self.assertIn('checkMediaPath(file)', finish)
         self.assertIn('Files.isRegularFile(file.toPath(), NOFOLLOW_LINKS) && file.delete()', finish)

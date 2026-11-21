@@ -27,7 +27,7 @@ class ModelPickerBalanceContract(unittest.TestCase):
         self.assertIn('controller.providers.snapshot().providers.map { it.slotId }', host)
         self.assertIn('controller.providerBalances.onResume(lifecycleScope, android.os.SystemClock.uptimeMillis())', host)
         self.assertNotIn('balanceLifecycles', host)
-        opened = host.split('private fun openChatModels()', 1)[1].split('private fun dismissChatModels()', 1)[0]
+        opened = host.split('private fun openChatModels(', 1)[1].split('private fun dismissChatModels()', 1)[0]
         self.assertIn('controller.providerBalances.requestRefresh(lifecycleScope)', opened)
         coordinator = source('balance/ProviderBalanceCoordinator.kt')
         self.assertIn('30_000L', coordinator)

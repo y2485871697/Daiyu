@@ -899,7 +899,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.onNodeWithText("含未完成步骤", substring = true).assertDoesNotExist()
         ui.onNodeWithTag("work-process-header").performClick()
         ui.onNodeWithTag("tool-step-header:t1").assert(SemanticsMatcher.expectValue(
-            SemanticsProperties.StateDescription, "待派发 · 已折叠"))
+            SemanticsProperties.StateDescription, "已折叠"))
     }
 
     fun testMixedResultCountsUpdateWithoutReopeningOrDuplicatingRows() {

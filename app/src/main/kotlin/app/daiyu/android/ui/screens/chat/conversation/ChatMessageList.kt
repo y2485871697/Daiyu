@@ -1507,14 +1507,19 @@ internal fun AssistantTurn(
     }
     val holdActionSlot = actionSlotOwner && actionTurn.status != RunStatus.RUNNING && actionSlotHeightPx > 0 &&
         (!generationComplete || !revealSettled || !showActions)
-    if (turn.hasVisibleResponse() || showActions && actionTurn !== turn || holdActionSlot) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        val identity = turn.assistantIdentity
-        val avatar by produceState<android.graphics.Bitmap?>(null, identity?.avatarPng) {
-            value = withContext(Dispatchers.IO) { runCatching { identity?.avatarBitmap() }.getOrNull() }
+    val identity = turn.assistantIdentity
+    val customAvatar = identity?.avatarPng
+    val avatar = key(customAvatar) {
+        produceState<Result<android.graphics.Bitmap?>?>(null, customAvatar) {
+            if (customAvatar != null) value = withContext(Dispatchers.IO) { runCatching { identity?.avatarBitmap() } }
         }
-        if (showIdentity) Row(Modifier.testTag("reply-identity:${turn.listKey}").padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
+    }
+    if (turn.hasVisibleResponse() || showActions && actionTurn !== turn || holdActionSlot) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        if (showIdentity) Row(Modifier.testTag("reply-identity:${turn.listKey}").workflowInkClearance().drawWithContent {
+            if (customAvatar == null || avatar.value != null) drawContent()
+        }.padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(7.dp)) {
-            AssistantAvatar(bitmap = avatar, size = 26.dp)
+            AssistantAvatar(bitmap = avatar.value?.getOrNull(), size = 26.dp)
             Text(identity?.name ?: "助手", color = conversationColors().text,
                 style = MiuixTheme.textStyles.body2.copy(fontSize = 13.sp, lineHeight = 18.sp))
         }

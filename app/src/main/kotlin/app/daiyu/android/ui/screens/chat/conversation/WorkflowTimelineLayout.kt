@@ -195,7 +195,7 @@ private class WorkflowPaintFrame {
 /** Keep the measured extent while closing the visible surface inside the safe edge. */
 @Composable
 internal fun Modifier.streamingWorkflowSurface(background: Color, border: Color, radius: Dp,
-    highlight: Color? = null): Modifier {
+    highlight: Color? = null, headerHeight: (() -> Int)? = null): Modifier {
     val clearance = LocalStreamingTextClearance.current
     val frame = remember(clearance) { WorkflowPaintFrame() }
     fun positioned(coordinates: LayoutCoordinates) {
@@ -205,7 +205,8 @@ internal fun Modifier.streamingWorkflowSurface(background: Color, border: Color,
     return onPlaced(::positioned).onGloballyPositioned(::positioned).drawWithContent {
         val available = minOf(frame.availableHeight, clearance?.availableHeight(frame.coordinates) ?: Float.POSITIVE_INFINITY)
         val height = minOf(size.height, available)
-        if (height > 0f) {
+        val header = headerHeight?.invoke()
+        if (height > 0f && (header == null || header > 0 && height + .01f >= header)) {
             val surfaceSize = Size(size.width, height)
             val corner = minOf(radius.toPx(), surfaceSize.width / 2f, surfaceSize.height / 2f)
             val path = Path().apply { addRoundRect(RoundRect(0f, 0f, surfaceSize.width, surfaceSize.height, CornerRadius(corner))) }

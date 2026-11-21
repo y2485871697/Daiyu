@@ -209,7 +209,8 @@ class ToolOperationCardTest : WiredActivityTestCase() {
                 dedicatedTool = { _, _ -> if (mixed) "runtime-test" else null })
             val resolvedPending = ChatTurnMapper.withStreamingOwner(pendingBase, live,
                 terminalTargets = mapOf(call to app.daiyu.android.domain.runtime.TerminalExecutionTarget("linux:debian", 0, 0, true, true)))
-            drawSnapshot(resolvedPending, "待派发 ·")
+            drawSnapshot(resolvedPending, "已折叠")
+            assertTrue(frames.none { it.texts.contains("待派发") || it.description.contains("待派发") })
             val firstVisible = frames.first { it.headers > 0 }
             assertTrue("The card and real target must first appear together: $firstVisible",
                 firstVisible.texts.any { it.endsWith(" · Debian • root") })

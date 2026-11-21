@@ -14,7 +14,7 @@ data class ToolCategoryDetailsUi(
 )
 
 internal object ToolCategoryDetails {
-    private val states = mapOf("queued" to "排队中", "pending" to "待派发", "running" to "执行中",
+    private val states = mapOf("queued" to "排队中", "running" to "执行中",
         "starting" to "启动中", "completed" to "已完成", "succeeded" to "成功", "failed" to "失败",
         "not_executed" to "未执行", "unknown" to "结果未确认", "paused" to "已暂停", "pausing" to "暂停中",
         "stopping" to "停止中", "stopped" to "已停止", "exited" to "已退出", "closed" to "已关闭",

@@ -40,6 +40,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.draw.clip
@@ -101,6 +102,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     val motions = nodeMotions ?: remember(ownerKey) { WorkflowNodeMotions(items) }
     androidx.compose.runtime.SideEffect { if (!expanded || stopped) motions.suppress(items) }
     val colors = conversationColors()
+    val headerHeight = remember(ownerKey) { androidx.compose.runtime.mutableIntStateOf(0) }
     val title = work.title
     val progressSummary = displayedWork.progressSummary
     CompositionLocalProvider(LocalWorkflowDisclosureParent provides disclosure,
@@ -109,9 +111,9 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
         LocalReasoningPaused provides (work.controlActivity == ToolActivityUi.PAUSED || work.controlActivity == ToolActivityUi.PAUSING)) {
     Column(modifier.fillMaxWidth().then(disclosure.containerModifier)
         .streamingWorkflowSurface(colors.surface, colors.line, 12.dp,
-            if (colors.dark) Color(0x05FFFFFF) else Color(0x40FFFFFF))
+            if (colors.dark) Color(0x05FFFFFF) else Color(0x40FFFFFF), headerHeight = { headerHeight.intValue })
         .testTag("work-process-surface")) {
-        BoxWithConstraints(Modifier.fillMaxWidth()) {
+        BoxWithConstraints(Modifier.fillMaxWidth().onSizeChanged { headerHeight.intValue = it.height }) {
             val summaryWidth = maxWidth * .56f
             val stacked = maxWidth < 300.dp || LocalDensity.current.fontScale >= 1.2f
             Row(Modifier.fillMaxWidth().testTag("work-process-header").workflowInkClearance().then(disclosure.headerModifier).heightIn(min = 44.dp).conversationClickable {
@@ -226,6 +228,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
         ToolActivityUi.INTERRUPTED -> "所属运行已中断"
         else -> activity.label
     }
+    val disclosureLabel = if (expanded) "已展开" else "已折叠"
     Row(Modifier.fillMaxWidth().testTag("tool-step:${step.toolCallId}").then(disclosure.containerModifier).drawBehind {
         if (showConnector) drawLine(colors.line,
             Offset(5.dp.toPx(), 27.dp.toPx()), Offset(5.dp.toPx(), minOf(size.height,
@@ -254,7 +257,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
                 Row(Modifier.fillMaxWidth().testTag("tool-step-header:${step.toolCallId}").workflowInkClearance().then(disclosure.headerModifier).heightIn(min = 44.dp).conversationClickable {
                     disclosure.toggle(opening = !expanded); expanded = !expanded
                 }
-                    .semantics { stateDescription = "$stateLabel · ${if (expanded) "已展开" else "已折叠"}" }
+                    .semantics { stateDescription = if (stateLabel.isEmpty()) disclosureLabel else "$stateLabel · $disclosureLabel" }
                     .padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Icon(ToolOperationIcons.operation(step.operationGlyph), null, Modifier.size(18.dp).testTag("tool-operation-icon:${step.toolCallId}"), tint = colors.accent)
@@ -263,10 +266,10 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
                             inlineContent = toolHeaderInlineContent(colors.text),
                             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 13.sp, lineHeight = 18.sp, fontWeight = FontWeight.Medium),
                             maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        if (stacked) Text(stateLabel, Modifier.fillMaxWidth(), color = tint,
+                        if (stacked && stateLabel.isNotEmpty()) Text(stateLabel, Modifier.fillMaxWidth(), color = tint,
                             style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 17.sp))
                     }
-                    if (!stacked) Text(stateLabel, Modifier.widthIn(max = 88.dp).width(IntrinsicSize.Max), color = tint,
+                    if (!stacked && stateLabel.isNotEmpty()) Text(stateLabel, Modifier.widthIn(max = 88.dp).width(IntrinsicSize.Max), color = tint,
                         style = MiuixTheme.textStyles.footnote1.copy(fontSize = 12.sp, lineHeight = 17.sp))
                     Icon(DaiyuIcons.ChevronRight,
                         if (expanded) "收起操作详情" else "展开操作详情", Modifier.size(14.dp).settingsDisclosureRotation(expanded), tint = colors.muted)

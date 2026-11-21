@@ -109,7 +109,7 @@ class SmokeMethodTests(unittest.TestCase):
         script = (ROOT / 'scripts/smoke_boot.sh').read_text().split("<<'PYCOUNT'", 1)[1].split('\nPYCOUNT', 1)[0]
         (self.root / 'smoke').mkdir()
         env = dict(os.environ, **ENV, SMOKE_SCRIPT_DIR=str(ROOT / 'scripts'))
-        result = subprocess.run([sys.executable, '-c', script], cwd=self.root, env=env,
+        result = subprocess.run([sys.executable, '-X', 'utf8', '-'], input=script, encoding='utf-8', cwd=self.root, env=env,
                                 capture_output=True, text=True)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(['1', TARGET], result.stdout.splitlines())

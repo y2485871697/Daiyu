@@ -48,7 +48,7 @@ class QuestionCardSmokeScopeTest(unittest.TestCase):
         env = dict(os.environ, SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=','.join(classes),
                    SMOKE_SHARD_COUNT='4', SMOKE_SHARD_INDEX=str(shard), SMOKE_API=api,
                    SMOKE_SCRIPT_DIR=str(ROOT / 'scripts'))
-        return subprocess.run([sys.executable, '-c', guard], cwd=root, env=env, text=True, capture_output=True)
+        return subprocess.run([sys.executable, '-X', 'utf8', '-'], input=guard, encoding='utf-8', cwd=root, env=env, text=True, capture_output=True)
 
     def fixture(self, root):
         (root / 'smoke').mkdir()

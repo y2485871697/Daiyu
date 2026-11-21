@@ -147,7 +147,7 @@ class RenamePresentationContractTest(unittest.TestCase):
             path = root / fixture.relative_to(ROOT)
             path.parent.mkdir(parents=True)
             path.write_text(fixture.read_text())
-            result = subprocess.run([sys.executable, '-c', script], cwd=root,
+            result = subprocess.run([sys.executable, '-X', 'utf8', '-'], input=script, encoding='utf-8', cwd=root,
                 env=dict(os.environ, SMOKE_MODE='smoke', SMOKE_TEST_CLASSES=recorder.RENAME_PRESENTATION_PLATFORM_CLASS,
                          SMOKE_SCRIPT_DIR=str(ROOT / 'scripts'), SMOKE_SHARD_COUNT='1', SMOKE_SHARD_INDEX='0'),
                 text=True, capture_output=True)

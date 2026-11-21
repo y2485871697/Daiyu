@@ -110,7 +110,7 @@ class PaneQuestionSmokeScopeTest(unittest.TestCase):
         env = dict(os.environ, SMOKE_SCRIPT_DIR=str(ROOT / "scripts"), SMOKE_MODE="smoke",
                    SMOKE_API=api, SMOKE_SHARD_COUNT="4", SMOKE_SHARD_INDEX=str(shard),
                    SMOKE_TEST_CLASSES=",".join(names))
-        return subprocess.run([sys.executable, "-B", "-c", guard], cwd=root, env=env,
+        return subprocess.run([sys.executable, "-B", '-X', 'utf8', '-'], input=guard, encoding='utf-8', cwd=root, env=env,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     def fixture(self, root, names=CLASSES):

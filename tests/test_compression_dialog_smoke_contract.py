@@ -46,7 +46,7 @@ class CompressionDialogInventoryTests(unittest.TestCase):
                                  'class DoubaoCallOverlayTest : BaseTest() {\n fun testOne() {}\n}\n'
                                  'class AmbiguousOverlayTest : BaseTest() {\n fun testTwo() {}\n}\n')
             result = subprocess.run(
-                [sys.executable, '-c', body], cwd=root, capture_output=True, text=True,
+                [sys.executable, '-X', 'utf8', '-'], input=body, encoding='utf-8', cwd=root, capture_output=True, text=True,
                 env=dict(os.environ, SMOKE_MODE=mode,
                          SMOKE_TEST_CLASSES=','.join(TARGETS) if raw is None else raw,
                          SMOKE_API='all', SMOKE_SHARD_COUNT=str(shards),

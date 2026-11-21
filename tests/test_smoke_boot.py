@@ -406,7 +406,7 @@ class SourceTests(unittest.TestCase):
                 guard = "from unittest.mock import patch\nfrom pathlib import Path\n"
                 guard += "with patch.object(Path, 'rglob', side_effect=AssertionError('full androidTest scan')):\n"
                 guard += '    exec(' + repr(selector) + ')\n'
-                result = subprocess.run(['python3', '-c', guard], cwd=root, env=env,
+                result = subprocess.run([os.sys.executable, '-X', 'utf8', '-'], input=guard, encoding='utf-8', cwd=root, env=env,
                                         capture_output=True, text=True)
                 self.assertEqual(0, result.returncode, result.stderr)
                 manifest = json.loads((root / 'smoke/instrumentation-shards.json').read_text())

@@ -17,13 +17,13 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import app.daiyu.android.domain.RunStatus
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.merge
-import kotlinx.coroutines.flow.produceIn
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 @Stable
@@ -82,12 +82,20 @@ internal class MarkdownPaintPublication {
     private val installing = mutableStateMapOf<String, Int>()
     private val readyState = MutableStateFlow(true)
     val readySignal = readyState.asStateFlow()
+    private val wakeups = Channel<Unit>(Channel.CONFLATED)
+    fun wake() { wakeups.trySend(Unit) }
+    suspend fun awaitWakeup() { wakeups.receive() }
+    private fun refreshReady() {
+        val isReady = ready
+        readyState.value = isReady
+        if (isReady) wake()
+    }
     val ready: Boolean get() = pending.isEmpty() && installing.isEmpty()
     fun start(target: MarkdownTypingTarget) {
         if (installingTarget === target) return
         installingTarget = target
         installing.clear()
-        readyState.value = ready
+        refreshReady()
     }
     fun reserve(target: MarkdownTypingTarget, before: Int, visible: Int) {
         if (!active || visible <= before || installingTarget !== target) return
@@ -95,17 +103,17 @@ internal class MarkdownPaintPublication {
             val next = target.limit(part.source.id, visible)
             if (next > target.limit(part.source.id, before)) installing[part.source.id] = next
         }
-        readyState.value = ready
+        refreshReady()
     }
     fun applied(target: MarkdownTypingTarget, id: String, visible: Int) {
         if (installingTarget !== target || installing[id] != visible) return
         installing.remove(id)
-        readyState.value = ready
+        refreshReady()
     }
     fun setPending(owner: Any, value: Boolean) {
         androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
             if (value) pending[owner] = Unit else pending.remove(owner)
-            readyState.value = ready
+            refreshReady()
         }
     }
     fun presented(id: String, source: MarkdownTypingSource) { published[id] = source }
@@ -241,18 +249,17 @@ internal fun rememberMarkdownReveal(
             if (!canAdvance) { motion.pause(current); return@withContext }
             val end = maxOf(shown, current.boundary(minOf(current.total, advanceLimit)))
             if (shown < end) {
-                val paintWakeups = merge(
+                val controlWakeups = launch(start = CoroutineStart.UNDISPATCHED) {
                     snapshotFlow {
                         !currentAwaitPaintAdmission ||
                             !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) || textClearance?.held == true
-                    },
-                    publication.readySignal,
-                ).buffer(Channel.CONFLATED).produceIn(this)
+                    }.collect { publication.wake() }
+                }
                 try {
                     while (shown < end) {
                         while (currentAwaitPaintAdmission && !publication.ready &&
                             markdownTypingCanAdvance(currentCanAdvance, currentPlayback) && textClearance?.held != true) {
-                            paintWakeups.receive()
+                            publication.awaitWakeup()
                         }
                         withFrameNanos { frameNanos ->
                             val before = shown
@@ -273,7 +280,7 @@ internal fun rememberMarkdownReveal(
                         }
                     }
                 } finally {
-                    paintWakeups.cancel()
+                    controlWakeups.cancel()
                 }
             }
             if (end < current.total) motion.pause(current)

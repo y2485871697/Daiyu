@@ -69,6 +69,51 @@ class MarkdownAdmissionCompositionTest {
         assertTrue("A replaced target cannot reserve the current producer", publication.ready)
     }
 
+    @Test fun directPaintWakeupRechecksDebtAndResumesWithoutAForwardingCollector() = runBlocking {
+        val publication = MarkdownPaintPublication().apply { active = true }
+        val target = MarkdownTypingTarget(listOf(MarkdownTypingPart(MarkdownTypingSource("answer", "ab"), 2)),
+            0, streaming = true, terminal = false)
+        val owner = Any()
+        publication.start(target)
+        publication.reserve(target, 0, 1)
+        publication.setPending(owner, true)
+        var resumed = 0
+        val waiter = launch(kotlinx.coroutines.Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+            while (!publication.ready) publication.awaitWakeup()
+            resumed++
+        }
+        try {
+            assertEquals("A stale ready token is not an installation or paint acknowledgement", 0, resumed)
+            publication.applied(target, "answer", 1)
+            assertEquals("Installing a body does not clear its real paint debt", 0, resumed)
+            publication.setPending(owner, false)
+            assertEquals("The final draw reaches the waiting producer without a flow-forwarding turn", 1, resumed)
+            assertTrue(publication.readySignal.value)
+        } finally { waiter.cancelAndJoin() }
+    }
+
+    @Test fun cancelledPaintWaiterDoesNotCloseTheNextProducerWakeup() = runBlocking {
+        val publication = MarkdownPaintPublication()
+        val owner = Any()
+        publication.setPending(owner, true)
+        var resumed = 0
+        val old = launch(kotlinx.coroutines.Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+            while (!publication.ready) publication.awaitWakeup()
+            resumed++
+        }
+        old.cancelAndJoin()
+        val current = launch(kotlinx.coroutines.Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+            while (!publication.ready) publication.awaitWakeup()
+            resumed++
+        }
+        try {
+            publication.wake()
+            assertEquals("A control notification cannot pay the remaining paint debt", 0, resumed)
+            publication.setPending(owner, false)
+            assertEquals("Only the live producer receives the final release", 1, resumed)
+        } finally { current.cancelAndJoin() }
+    }
+
     @Test fun frontierPublicationDoesNotRequestAnExtraFrameBeforeLeafInstallation() = runBlocking {
         val clock = BroadcastFrameClock()
         val recomposer = Recomposer(coroutineContext + clock)

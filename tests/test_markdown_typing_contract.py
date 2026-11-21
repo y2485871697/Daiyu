@@ -21,8 +21,8 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertEqual(1, producer.count('withContext('))
         self.assertEqual(1, producer.count('withFrameNanos { frameNanos ->'))
         self.assertEqual(1, producer.count('motion.advance('))
-        self.assertIn(').buffer(Channel.CONFLATED).produceIn(this)', producer)
-        for forbidden in ('return@produceState', 'launch(', 'async(', 'CoroutineScope(', 'Job(',
+        self.assertIn('val controlWakeups = launch(start = CoroutineStart.UNDISPATCHED)', producer)
+        for forbidden in ('return@produceState', 'async(', 'CoroutineScope(', 'Job(',
                           'SupervisorJob(', 'minusKey(', 'newSingleThreadContext(', 'NonCancellable',
                           'MonotonicFrameClock', 'BroadcastFrameClock', 'Choreographer',
                           'Dispatchers.Unconfined', 'Dispatchers.Default', 'delay(', 'yield('):
@@ -89,12 +89,13 @@ class MarkdownTypingContract(unittest.TestCase):
         setup, loop = producer.split('while (shown < end) {', 1)
         self.assertIn('if (shown < end) {', setup)
         self.assertEqual(1, producer.count('snapshotFlow {'))
-        self.assertEqual(1, producer.count('val paintWakeups = merge('))
-        self.assertEqual(1, producer.count(').buffer(Channel.CONFLATED).produceIn(this)'))
+        self.assertEqual(1, producer.count('val controlWakeups = launch('))
+        self.assertEqual(1, producer.count('}.collect { publication.wake() }'))
         self.assertIn('import kotlinx.coroutines.channels.Channel\n', self.typing)
-        for name in ('buffer', 'merge', 'produceIn'):
-            self.assertIn(f'import kotlinx.coroutines.flow.{name}\n', self.typing)
-        self.assertIn('publication.readySignal,', setup)
+        self.assertIn('import kotlinx.coroutines.launch\n', self.typing)
+        self.assertIn('import kotlinx.coroutines.CoroutineStart\n', self.typing)
+        self.assertNotIn('publication.readySignal', producer)
+        self.assertEqual(1, producer.count('launch('))
         for forbidden in ('snapshotFlow', 'merge(', 'produceIn(', '.combine(', '.first'):
             self.assertNotIn(forbidden, loop)
         self.assertIn('try {\n                    while (shown < end) {', setup + 'while (shown < end) {')
@@ -108,20 +109,26 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertEqual(' '.join(waiting.split()),
                          'while (currentAwaitPaintAdmission && !publication.ready && '
                          'markdownTypingCanAdvance(currentCanAdvance, currentPlayback) && textClearance?.held != true) { '
-                         'paintWakeups.receive() }')
+                         'publication.awaitWakeup() }')
         for forbidden in ('motion.advance(', 'motion.pause(', 'motion.hold(', 'value =', 'withFrameNanos'):
             self.assertNotIn(forbidden, waiting)
         self.assertEqual('val before = shown shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end) { currentAdvance() } } if (currentAwaitPaintAdmission) publication.reserve(current, before, shown) value = MarkdownTypingFrame(current, shown)', ' '.join(callback.split()))
-        self.assertIn('} finally {\n                    paintWakeups.cancel()\n                }', producer)
-        self.assertEqual(1, producer.count('paintWakeups.cancel()'))
+        self.assertIn('} finally {\n                    controlWakeups.cancel()\n                }', producer)
+        self.assertEqual(1, producer.count('controlWakeups.cancel()'))
         publication = self.typing.split("internal class MarkdownPaintPublication {", 1)[1].split("\ninternal val LocalMarkdownPaintPublication", 1)[0]
         self.assertIn("private val readyState = MutableStateFlow(true)", publication)
         self.assertIn("val readySignal = readyState.asStateFlow()", publication)
         self.assertIn("val ready: Boolean get() = pending.isEmpty() && installing.isEmpty()", publication)
+        self.assertIn("private val wakeups = Channel<Unit>(Channel.CONFLATED)", publication)
+        self.assertIn("fun wake() { wakeups.trySend(Unit) }", publication)
+        self.assertIn("suspend fun awaitWakeup() { wakeups.receive() }", publication)
+        self.assertIn("readyState.value = isReady\n        if (isReady) wake()", publication)
+        self.assertNotIn("wakeups.close", publication)
+        self.assertNotIn("wakeups.cancel", publication)
         pending = publication.split("fun setPending(owner: Any, value: Boolean) {", 1)[1].split("\n    }", 1)[0]
         self.assertIn("if (value) pending[owner] = Unit else pending.remove(owner)", pending)
-        self.assertIn("readyState.value = ready", pending)
-        self.assertLess(pending.index("pending.remove(owner)"), pending.index("readyState.value"))
+        self.assertIn("refreshReady()", pending)
+        self.assertLess(pending.index("pending.remove(owner)"), pending.index("refreshReady()"))
         for forbidden in ("launch", "snapshotFlow", "withFrameNanos", "motion."):
             self.assertNotIn(forbidden, pending)
 

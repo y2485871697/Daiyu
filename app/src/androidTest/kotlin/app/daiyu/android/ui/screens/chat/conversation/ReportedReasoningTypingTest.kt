@@ -114,9 +114,8 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         assertEquals(0, advances)
         mainThread { value = turn(path, first) }
         await { advances > 0 }
-        val intermediate = visibleText()
-        assertTrue(intermediate.contains("首"))
-        awaitTyped(first)
+        await { visibleText().contains(first) }
+        assertEquals("One accepted reasoning snapshot must not replay individual characters", 1, advances)
         val settled = advances
         ui.mainClock.advanceTimeBy(160)
         assertEquals(settled, advances)
@@ -126,7 +125,8 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         assertEquals(settled, advances)
         mainThread { value = turn(path, afterResume) }
         await { advances > settled }
-        awaitTyped(afterResume)
+        await { visibleText().contains(afterResume) }
+        assertEquals("Resume must publish only the newly received snapshot", settled + 1, advances)
         ui.mainClock.autoAdvance = true
     }
 
@@ -302,7 +302,12 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
     private fun assertHiddenThoughtDoesNotWaitForReveal(stop: Boolean) {
         val baseline = "起始摘要"
         val pending = baseline + "未显示".repeat(100)
-        prepare(baseline, pending)
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val parser: (String) -> List<app.daiyu.android.MarkdownBlock> = { source ->
+            if (source == pending) { entered.countDown(); check(release.await(15, java.util.concurrent.TimeUnit.SECONDS)) }
+            MarkdownParser.parse(source)
+        }
         var reported by mutableStateOf(ReportedReasoning("r", baseline, 0L, 0L))
         var stopped by mutableStateOf(false)
         var advances = 0
@@ -310,17 +315,18 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         try {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
-                    ReasoningStepRow("hidden", reported, stopped = stopped,
-                        onVisibleAdvance = { advances++ })
+                    CompositionLocalProvider(LocalMarkdownParser provides parser) {
+                        ReasoningStepRow("hidden", reported, stopped = stopped, onVisibleAdvance = { advances++ })
+                    }
                 }
             } }
             await { visibleText().contains(baseline) }
             mainThread { reported = ReportedReasoning("r", pending, 0L, 0L) }
-            await { advances > 0 }
+            await { entered.count == 0L }
             mainThread { reported = ReportedReasoning("r", pending, 1100L) }
             ui.mainClock.advanceTimeBy(16)
             ui.onNodeWithText("正在思考…").assertExists()
-            assertFalse("Hide while received text is still draining", visibleText().contains(pending))
+            assertFalse("Hide before the new snapshot is ready", visibleText().contains(pending))
             if (stop) instrumentation.runOnMainSync { stopped = true }
             else {
                 captureScreenNode(node("reported-reasoning-header:hidden:reasoning:r"), advanceAnimationClock = false)
@@ -335,9 +341,10 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             ui.onNodeWithText("正在思考…").assertDoesNotExist()
             await { ui.onAllNodesWithTag("reported-reasoning-content:hidden:reasoning:r").fetchSemanticsNodes().isEmpty() }
             val hiddenAdvances = advances
+            release.countDown()
             repeat(4) { ui.mainClock.advanceTimeByFrame() }
             assertEquals(hiddenAdvances, advances)
-        } finally { ui.mainClock.autoAdvance = true }
+        } finally { release.countDown(); ui.mainClock.autoAdvance = true }
     }
 
     fun testCollapsedThoughtDoesNotWaitForHiddenReveal() = assertHiddenThoughtDoesNotWaitForReveal(false)

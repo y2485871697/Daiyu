@@ -131,6 +131,7 @@ internal fun ReportedReasoningCard(
                         initialBaseline = if (firstPresentation || queuedEmptyBaseline) emptyList() else null,
                         presentationLane = presentationLane.takeIf { revealGate },
                         awaitPaintAdmission = true,
+                        streamSnapshot = true,
                     )
                 }
             }

@@ -10,6 +10,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
         source = (CHAT / 'ReportedReasoningCard.kt').read_text()
         for token in ['val reveal = key(revealGate)', 'rememberMarkdownReveal(', 'MarkdownTypingSource(summary.itemId, text, sourceWindow)',
                       'RevealedMessageMarkdown(', 'display.reveal, summary.itemId',
+                      'awaitPaintAdmission = true', 'streamSnapshot = true',
                       'resetEpoch = revealResetEpoch', 'onVisibleAdvance = onVisibleAdvance']:
             self.assertIn(token, source)
         self.assertNotIn('ProjectedMessageMarkdown(', source)

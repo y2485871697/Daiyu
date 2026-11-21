@@ -10,7 +10,7 @@ BASE = APP / "ui/screens/chat/conversation"
 class MarkdownTypingContract(unittest.TestCase):
     def test_producer_uses_immediate_main_without_replacing_its_frame_clock_or_job(self):
         producer = self.typing.split(
-            'val frame = produceState(motion.frame(target), target, canAdvance, advanceLimit, finishImmediately) {',
+            'val frame = produceState(motion.frame(target), target, canAdvance, advanceLimit, finishImmediately, adaptiveBody) {',
             1)[1].split('    val typingPending', 1)[0]
         self.assertIn('import kotlinx.coroutines.Dispatchers\n', self.typing)
         self.assertIn('import kotlinx.coroutines.withContext\n', self.typing)
@@ -112,7 +112,7 @@ class MarkdownTypingContract(unittest.TestCase):
                          'publication.awaitWakeup() }')
         for forbidden in ('motion.advance(', 'motion.pause(', 'motion.hold(', 'value =', 'withFrameNanos'):
             self.assertNotIn(forbidden, waiting)
-        self.assertEqual('val before = shown shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end) { currentAdvance() } } if (currentAwaitPaintAdmission) publication.reserve(current, before, shown) value = MarkdownTypingFrame(current, shown)', ' '.join(callback.split()))
+        self.assertEqual('val before = shown shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end, adaptiveBody) { currentAdvance() } } if (currentAwaitPaintAdmission) publication.reserve(current, before, shown) value = MarkdownTypingFrame(current, shown)', ' '.join(callback.split()))
         self.assertIn('} finally {\n                    controlWakeups.cancel()\n                }', producer)
         self.assertEqual(1, producer.count('controlWakeups.cancel()'))
         publication = self.typing.split("internal class MarkdownPaintPublication {", 1)[1].split("\ninternal val LocalMarkdownPaintPublication", 1)[0]
@@ -157,7 +157,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources,", self.chat)
         self.assertIn("live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty()", self.chat)
         callback = self.typing.split("withFrameNanos { frameNanos ->", 1)[1].split("\n                        }", 1)[0]
-        self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end) { currentAdvance() } }', " ".join(callback.split()))
+        self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end, adaptiveBody) { currentAdvance() } }', " ".join(callback.split()))
         self.assertEqual(1, callback.count("motion.advance("))
         self.assertEqual(1, callback.count("motion.pause("))
         self.assertEqual(1, callback.count("motion.hold("))

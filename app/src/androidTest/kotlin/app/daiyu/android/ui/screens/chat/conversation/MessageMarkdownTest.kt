@@ -64,7 +64,8 @@ import org.junit.Assert.assertArrayEquals
 class MessageMarkdownTest : WiredActivityTestCase() {
     protected override val requiresWindowDraw: Boolean
         get() = name == "testLargeReceivedChunkPaintsAtMostOneWholeCharacterPerFrame" ||
-            name == "testNativePaintReceiptDoesNotRepeatTextPlacement" || name == "testLinkedPrefixReceivesNativePaint"
+            name == "testNativePaintReceiptDoesNotRepeatTextPlacement" || name == "testLinkedPrefixReceivesNativePaint" ||
+            name == "testFastBodyReceiptsKeepIntermediatePaints"
     private val opened = CopyOnWriteArrayList<String>()
     private val uriHandler = object : UriHandler {
         override fun openUri(uri: String) { opened += uri }
@@ -2114,7 +2115,12 @@ class MessageMarkdownTest : WiredActivityTestCase() {
     }
 
     @OptIn(androidx.compose.runtime.InternalComposeApi::class)
-    fun testLargeReceivedChunkPaintsAtMostOneWholeCharacterPerFrame() {
+    fun testLargeReceivedChunkPaintsAtMostOneWholeCharacterPerFrame() = verifyChunkPaint(false)
+
+    fun testFastBodyReceiptsKeepIntermediatePaints() = verifyChunkPaint(true)
+
+    @OptIn(androidx.compose.runtime.InternalComposeApi::class)
+    private fun verifyChunkPaint(adaptive: Boolean) {
         val initial = "字".repeat(80)
         val full = initial + "后".repeat(80)
         val parser: (String) -> List<MarkdownBlock> = { MarkdownParser.parse(it) }
@@ -2140,7 +2146,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                     val projection = rememberMarkdownProjection(listOf(text))
                     val reveal = rememberMarkdownReveal(listOf(MarkdownTypingSource("final", text)), projection,
                         streaming = true, terminal = false, initialBaseline = emptyList(),
-                        presentationLane = "bounded-paint", awaitPaintAdmission = true)
+                        presentationLane = "bounded-paint", awaitPaintAdmission = true, adaptiveBody = adaptive)
                     Column(Modifier.width(320.dp).testTag("bounded-paint")) {
                         RevealedMessageMarkdown(text, projection?.blocks?.get(text), reveal, "final")
                     }
@@ -2151,6 +2157,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         try {
             var previous = 0
             var paintDump = ""
+            var grouped = false
             var sawPaintFrame = false
             fun painted(): Int {
                 var length = 0
@@ -2169,12 +2176,16 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                 ui.waitForIdle()
                 val shown = painted()
                 assertTrue("Actual drawn frontier must be monotonic: $previous -> $shown", shown >= previous)
-                assertTrue("One paint frame must not release a received backlog: $previous -> $shown", shown - previous <= 1)
+                if (adaptive) {
+                    if (shown - previous > 1) grouped = true
+                } else assertTrue("One paint frame must not release a received backlog: $previous -> $shown", shown - previous <= 1)
                 previous = shown
                 return shown
             }
             ui.runOnUiThread { text = initial }
-            repeat(24) { sampleFrame() }
+            if (adaptive) {
+                for (frame in 0..24) { if (sampleFrame() > 0) break }
+            } else repeat(24) { sampleFrame() }
             val frozen = previous
             assertTrue("The fixture must mount the real clearance paint path: $paintDump", sawPaintFrame)
             assertTrue("The received chunk must have real intermediate painted frames: frozen=$frozen\n$paintDump",
@@ -2189,6 +2200,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             ui.runOnUiThread { presentationActive = true }
             repeat(full.length * 4 + 12) { sampleFrame() }
             assertEquals(full.length, previous)
+            if (adaptive) assertTrue("Fast body arrivals must actually paint grouped prefixes", grouped)
         } finally { ui.mainClock.autoAdvance = true }
     }
 

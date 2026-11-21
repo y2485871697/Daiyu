@@ -326,6 +326,11 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
     }
 
     fun advance(expected: MarkdownTypingTarget, frameNanos: Long, limit: Int = expected.total, onAdvance: () -> Unit = {}): Int {
+        return advance(expected, frameNanos, limit, adaptiveBody = false, onAdvance = onAdvance)
+    }
+
+    fun advance(expected: MarkdownTypingTarget, frameNanos: Long, limit: Int, adaptiveBody: Boolean,
+        onAdvance: () -> Unit = {}): Int {
         if (target !== expected) return expected.start
         val previous = position.toInt()
         if (lastAdvanceFrame == frameNanos) return previous
@@ -360,12 +365,28 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         } else {
             val seconds = ((frameNanos - lastFrame).coerceIn(0L, 50_000_000L)) / 1_000_000_000.0
             rate += (desiredRate - rate) * (1.0 - exp(-seconds / .12))
-            (rate * seconds / width).coerceIn(0.0, 1.0)
+            if (adaptiveBody) {
+                // Drain a burst over several painted frames; slow arrivals still use the receipt clock.
+                val remaining = end - previous
+                val budget = maxOf(rate, if (remaining >= 16) remaining / .18 else 0.0) * seconds
+                budget.coerceAtMost(maxOf(width.toDouble(), remaining / 3.0)) / width
+            } else (rate * seconds / width).coerceIn(0.0, 1.0)
         }
         activeReceiptNanos = null
         // Keep subcharacter phase, never whole-character catch-up credit.
         val phase = position % 1.0 + step
-        position = if (phase >= 1.0) {
+        position = if (adaptiveBody && phase >= 1.0) {
+            var frontier = next
+            var credit = (phase - 1.0) * width
+            while (frontier < end) {
+                val following = expected.next(frontier)
+                val cost = following - frontier
+                if (credit < cost) break
+                credit -= cost
+                frontier = following
+            }
+            frontier.toDouble() + if (frontier < end) credit / (expected.next(frontier) - frontier) else 0.0
+        } else if (phase >= 1.0) {
             next.toDouble() + if (next < end) phase - 1.0 else 0.0
         } else previous.toDouble() + phase
         lastFrame = frameNanos

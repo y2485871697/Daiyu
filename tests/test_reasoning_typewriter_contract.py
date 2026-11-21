@@ -106,7 +106,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
         self.assertEqual(1, typing.count('withFrameNanos { frameNanos ->'))
         self.assertIn('val clearance = LocalStreamingTextClearance.current\n'
                       '    val textClearance by rememberUpdatedState(clearance)', typing)
-        self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end) { currentAdvance() } }', ' '.join(typing.split()))
+        self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end, adaptiveBody) { currentAdvance() } }', ' '.join(typing.split()))
         self.assertIn('val currentPlayback by rememberUpdatedState(playback)', typing)
         self.assertIn('canAdvance && playback?.paused != true', typing)
         self.assertEqual(1, typing.count('motion.hold(current, frameNanos)'))

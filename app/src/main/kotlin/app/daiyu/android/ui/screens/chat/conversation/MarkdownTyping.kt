@@ -181,6 +181,7 @@ internal fun rememberMarkdownReveal(
     initialBaseline: List<MarkdownTypingSource>? = null,
     presentationLane: Any? = null,
     awaitPaintAdmission: Boolean = false,
+    adaptiveBody: Boolean = false,
 ): MarkdownReveal {
     val currentAdvance by rememberUpdatedState(onVisibleAdvance)
     val currentAwaitPaintAdmission by rememberUpdatedState(awaitPaintAdmission)
@@ -234,7 +235,7 @@ internal fun rememberMarkdownReveal(
     val clearance = LocalStreamingTextClearance.current
     val textClearance by rememberUpdatedState(clearance)
     val publication = remember(identity, resetEpoch, motion) { MarkdownPaintPublication() }
-    val frame = produceState(motion.frame(target), target, canAdvance, advanceLimit, finishImmediately) {
+    val frame = produceState(motion.frame(target), target, canAdvance, advanceLimit, finishImmediately, adaptiveBody) {
         withContext(Dispatchers.Main.immediate) {
             val current = target ?: return@withContext
             publication.start(current)
@@ -273,7 +274,7 @@ internal fun rememberMarkdownReveal(
                                     motion.visible(current)
                                 }
                                 currentAwaitPaintAdmission && !publication.ready -> motion.visible(current)
-                                else -> motion.advance(current, frameNanos, end) { currentAdvance() }
+                                else -> motion.advance(current, frameNanos, end, adaptiveBody) { currentAdvance() }
                             }
                             if (currentAwaitPaintAdmission) publication.reserve(current, before, shown)
                             value = MarkdownTypingFrame(current, shown)

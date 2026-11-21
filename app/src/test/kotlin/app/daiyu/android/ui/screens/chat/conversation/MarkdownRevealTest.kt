@@ -989,6 +989,28 @@ class MarkdownRevealTest {
         assertEquals(at30.toDouble(), shown(8_333_333L).toDouble(), 1.0)
     }
 
+    @Test fun adaptiveBodyDrainsFastUnicodeReceiptsWithoutSkippingTheAnimation() {
+        val state = MarkdownTypingState(emptyList())
+        val text = "字😀e\u0301".repeat(100)
+        state.receive(listOf(source(text)), 1_000_000_000L)
+        val target = state.update(listOf(part(text)), 0, true, false)!!
+        val bounds = MarkdownTextBoundaries(text)
+        var before = 0
+        var grouped = false
+        val frames = (0..60).map { index ->
+            val shown = state.advance(target, 1_000_000_000L + index * 16_000_000L, target.total, true)
+            assertEquals(bounds.floor(shown), shown)
+            assertTrue(shown >= before)
+            if (index == 0) assertEquals(bounds.next(0), shown)
+            if (before < text.length && shown > bounds.next(before)) grouped = true
+            before = shown
+            shown
+        }
+        assertTrue(grouped)
+        assertTrue(frames.distinct().size > 4)
+        assertEquals(text.length, frames.last())
+    }
+
     @Test fun unicodeRevealAdmitsOnlyOneCompleteCharacterPerFrame() {
         val text = "A😀𠮷e\u0301👩‍💻Z"
         val boundaries = MarkdownTextBoundaries(text)

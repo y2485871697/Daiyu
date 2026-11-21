@@ -100,7 +100,7 @@ class ChatResumeScrollContract(unittest.TestCase):
             'terminal = generationComplete, resetEpoch = revealResetEpoch, '
             'onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources, '
             'live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true, '
-            'initialBaseline = initialBaseline, presentationLane = "body:${turn.listKey}", awaitPaintAdmission = true)',
+            'initialBaseline = initialBaseline, presentationLane = "body:${turn.listKey}", awaitPaintAdmission = true, adaptiveBody = true)',
             ' '.join(self.chat.split()),
         )
         self.assertIn(

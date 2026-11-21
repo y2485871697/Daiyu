@@ -6,6 +6,17 @@ BASE = Path(__file__).resolve().parents[1] / 'app/src/main/kotlin/app/daiyu/andr
 
 
 class MarkdownBodyVisibilityContract(unittest.TestCase):
+    def test_native_text_recording_layer_stays_inside_unchanged_real_draw_gate(self):
+        ui = (BASE / 'MessageMarkdown.kt').read_text()
+        leaf = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun markdownLineSpace', 1)[0]
+        boundary = '}.graphicsLayer(), style, softWrap = softWrap, onTextLayout = {'
+        self.assertIn(boundary, leaf)
+        draw = leaf.split('.drawWithContent {', 1)[1].split(boundary, 1)[0]
+        self.assertLess(draw.index('drawContent()'), draw.index('frame.drawn = actual'))
+        self.assertNotIn('whollyAbove', draw)
+        self.assertNotIn('drawText(', leaf)
+        self.assertNotIn('CompositingStrategy.Offscreen', leaf)
+
     def test_admission_refresh_emits_geometry_changes_not_each_prefix_layout(self):
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         leaf = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun markdownLineSpace', 1)[0]
@@ -20,7 +31,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
     def test_draw_observes_render_inputs_but_not_post_draw_feedback(self):
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         leaf = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun markdownLineSpace', 1)[0]
-        draw = leaf.split('.drawWithContent {', 1)[1].split('}, style, softWrap = softWrap, onTextLayout = {', 1)[0]
+        draw = leaf.split('.drawWithContent {', 1)[1].split('}.graphicsLayer(), style, softWrap = softWrap, onTextLayout = {', 1)[0]
         inputs, feedback = draw.split('drawContent()', 1)
         self.assertNotIn('withoutReadObservation', inputs)
         for token in ('minOf(frame.availableHeight, clearance.availableHeight(frame.coordinates))',

@@ -369,7 +369,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
                 publication?.setPending(owner, !published())
             }
-        }, style, softWrap = softWrap, onTextLayout = {
+        }.graphicsLayer(), style, softWrap = softWrap, onTextLayout = {
             frame.rendered = it
         })
     }

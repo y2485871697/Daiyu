@@ -349,7 +349,10 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                 }
                 committed.placeRelative(0, 0)
             }
-        }.onPlaced(::placed).onGloballyPositioned(::placed).drawWithContent {
+        }.onPlaced { coordinates ->
+            // Admission also runs from its own observers; paint receipts must not reschedule placement.
+            androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { placed(coordinates) }
+        }.onGloballyPositioned(::placed).drawWithContent {
             val available = minOf(frame.availableHeight, clearance.availableHeight(frame.coordinates))
             val frozen = playback?.paused == true
             val selected = if (frozen) frame.drawn else frame.committed

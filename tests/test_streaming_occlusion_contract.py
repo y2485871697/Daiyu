@@ -117,6 +117,17 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertNotIn("frame.drawn =", layout)
         self.assertNotIn("painted[paintOffset] =", layout)
 
+    def test_native_onplaced_receipt_does_not_subscribe_the_layout_to_draw_state(self):
+        markdown = (CHAT.parent / "MessageMarkdown.kt").read_text()
+        leaf = markdown.split("internal fun ClearanceText", 1)[1].split("internal fun TextLayoutResult.canPaintPrefixOf", 1)[0]
+        callback = leaf.split("}.onPlaced { coordinates ->", 1)[1].split("}.onGloballyPositioned(::placed)", 1)[0]
+        self.assertIn("Snapshot.withoutReadObservation { placed(coordinates) }", callback)
+        self.assertNotIn("committed.placeRelative", callback)
+        self.assertNotIn(".onPlaced(::placed)", leaf)
+        self.assertIn("committed.placeRelative(0, 0)", leaf)
+        self.assertIn("snapshotFlow { publicationCheck() }.collect { publication?.setPending(owner, !it) }", leaf)
+        self.assertIn("}.collect { refreshAdmission() }", leaf)
+
     def test_wholly_offscreen_receipt_does_not_relax_visible_paint_or_other_owners(self):
         source = CHAT.read_text()
         geometry = source.split("fun whollyAboveViewport(", 1)[1].split("fun fits(", 1)[0]

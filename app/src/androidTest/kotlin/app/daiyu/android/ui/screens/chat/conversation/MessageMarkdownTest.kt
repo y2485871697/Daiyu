@@ -18,7 +18,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Color
@@ -60,7 +63,8 @@ import org.junit.Assert.assertArrayEquals
 /** Real consumers, isolated component host: no model, browser, network or production controller. */
 class MessageMarkdownTest : WiredActivityTestCase() {
     protected override val requiresWindowDraw: Boolean
-        get() = name == "testLargeReceivedChunkPaintsAtMostOneWholeCharacterPerFrame"
+        get() = name == "testLargeReceivedChunkPaintsAtMostOneWholeCharacterPerFrame" ||
+            name == "testNativePaintReceiptDoesNotRepeatTextPlacement"
     private val opened = CopyOnWriteArrayList<String>()
     private val uriHandler = object : UriHandler {
         override fun openUri(uri: String) { opened += uri }
@@ -71,6 +75,64 @@ class MessageMarkdownTest : WiredActivityTestCase() {
     private val reference = MessageImageReference(owner, "00000000-0000-0000-0000-000000000001",
         "image/png", 10, "b".repeat(64), 2, 2)
     private val image = MessageImageUi(owner, reference)
+
+    @OptIn(androidx.compose.runtime.InternalComposeApi::class)
+    fun testNativePaintReceiptDoesNotRepeatTextPlacement() {
+        val key = "draw-only-receipt"
+        val text = AnnotatedString("Native draw")
+        val clearance = StreamingTextClearance()
+        val probe = MarkdownPaintSlotsProbe()
+        val placements = AtomicInteger()
+        val draws = AtomicInteger()
+        var drawEnabled by mutableStateOf(false)
+        var placementOffset by mutableStateOf(0)
+        show {
+            SideEffect { clearance.update(null, null, 0, 0, 0, protect = false, clampToViewport = false) }
+            CompositionLocalProvider(LocalStreamingTextClearance provides clearance) {
+                probe.Capture(key)
+                ClearanceText(text, paintOffset = 0,
+                    modifier = Modifier.width(200.dp).layout { measurable, constraints ->
+                        val child = measurable.measure(constraints)
+                        layout(child.width, child.height) {
+                            placements.incrementAndGet()
+                            child.placeRelative(placementOffset, 0)
+                        }
+                    }.drawWithContent {
+                        draws.incrementAndGet()
+                        if (drawEnabled) drawContent()
+                    },
+                    style = TextStyle(color = Color.Black, fontSize = 16.sp))
+            }
+        }
+        fun sample(): MarkdownPaintSlotsProbe.PaintSample {
+            val samples = mutableListOf<MarkdownPaintSlotsProbe.PaintSample>()
+            instrumentation.runOnMainSync { probe.sample(key) { samples += it } }
+            return samples.single()
+        }
+        ui.waitUntil(5_000) { draws.get() > 0 }
+        awaitVisualIdle()
+        val beforePaint = sample()
+        assertEquals(text, beforePaint.candidate?.layoutInput?.text)
+        assertEquals(text, beforePaint.rendered?.layoutInput?.text)
+        assertNull("Native layout is not a paint receipt", beforePaint.drawn)
+        val before = placements.get()
+        assertTrue("The placement probe must have run before drawing is released", before > 0)
+
+        instrumentation.runOnMainSync {
+            drawEnabled = true
+            Snapshot.sendApplyNotifications()
+        }
+        ui.waitUntil(5_000) { sample().drawn?.layoutInput?.text == text }
+        instrumentation.runOnMainSync { Snapshot.sendApplyNotifications() }
+        awaitVisualIdle()
+        val afterPaint = sample()
+        assertSame("A new paint receipt must belong to the same mounted leaf", beforePaint.frame, afterPaint.frame)
+        assertSame("Drawing must acknowledge the real native layout", afterPaint.rendered, afterPaint.drawn)
+        assertEquals("A draw-only receipt must not request another text placement", before, placements.get())
+
+        mainThread { placementOffset = 1 }
+        assertTrue("The probe must still see a real placement change", placements.get() > before)
+    }
 
     fun testNextLineBudgetUsesOnlyTheNextNativeLayoutHeight() {
         show {

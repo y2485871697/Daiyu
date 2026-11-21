@@ -88,7 +88,12 @@ class ChatTimelineContractTest(unittest.TestCase):
     def test_repeat_summary_is_rejected_before_full_history_expansion(self):
         publish = source('context/ContextService.kt').split('internal fun publishRunCompression(', 1)[1].split('internal fun publishRunArchive(', 1)[0]
         self.assertLess(publish.index('SELECT 1 FROM chat_timeline_events'), publish.index('val originals ='))
-        self.assertIn('wrapped.removePrefix(opening).removeSuffix(ending)', publish)
+        self.assertIn('val text = SummaryCheckpoint.unframe(wrapped) ?: return', publish)
+        unframe = source('context/SummaryCheckpoint.kt').split('fun unframe(', 1)[1].split('fun withoutLegacyMarker(', 1)[0]
+        for opening, ending in [('opening', 'ending'), ('legacyOpening', 'legacyEnding')]:
+            self.assertIn(f'text.startsWith({opening}) && text.endsWith({ending}) -> text.removePrefix({opening}).removeSuffix({ending})', unframe)
+        self.assertIn('else -> null', unframe)
+        self.assertIn('takeIf { it.isNotBlank() }', unframe)
         self.assertIn('summaryIdentity', source('context/ContextPreparationCoordinator.kt'))
         self.assertIn('configuration.apiModel', source('context/ProviderSummaryModel.kt'))
 

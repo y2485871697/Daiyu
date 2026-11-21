@@ -21,7 +21,9 @@ class SelectionStaysOpenContractTest(unittest.TestCase):
         self.assertIn("finishSelection { if (canInteract()) actionProfileId = profile.id }", leaf)
     def test_model_success_refreshes_authoritative_session_without_remount(self):
         main = (SRC / "MainActivity.kt").read_text()
-        success = main.split("private fun selectChatModel(", 1)[1].split("private fun gatewayCurrent", 1)[0]
+        selection = main.split("private fun selectChatModel(", 1)[1].split("\n    private fun ", 1)[0]
+        success = selection.split("completed = { success ->", 1)[1]
+        self.assertIn("dialogActionsCurrent(lease) && chatModelOwner === owner && chatModelSession === session", success)
         self.assertIn("reloadChatModels(owner, retainPresentation = true)", success)
         self.assertNotIn("dismissChatModels()", success)
         reload = main.split("private fun reloadChatModels(", 1)[1].split("private fun selectChatModel(", 1)[0]

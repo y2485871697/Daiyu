@@ -9,9 +9,9 @@ TEST = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android'
 class PreparationDisclosureAlphaContract(unittest.TestCase):
     def test_deleted_assistant_snapshot_uses_existing_preparation_cleanup(self):
         source = (MAIN / 'ChatController.kt').read_text(encoding='utf-8')
-        ordinary = source.index('val ordinaryRun = platformAction == null')
+        ordinary = source.index('val ordinaryRun = !voiceConversation && platformAction == null')
         prepared = source.index('val prepared = try {', ordinary)
-        snapshot = source.index('val ordinaryAssistant = if (ordinaryRun)', ordinary)
+        snapshot = source.index('val ordinaryAssistant = if (ordinaryRun || voiceConversation)', ordinary)
         self.assertGreater(snapshot, prepared)
         self.assertIn('checkNotNull(assistantStore.read(assistantContext.assistantId))', source[snapshot:snapshot + 220])
         fixture = (TEST / 'ControllerAssistantBindingTest.kt').read_text(encoding='utf-8')
@@ -26,7 +26,7 @@ class PreparationDisclosureAlphaContract(unittest.TestCase):
         source = (MAIN / 'ui/screens/chat/conversation/WorkProcessCard.kt').read_text(encoding='utf-8')
         self.assertIn('key(ownerKey, "reasoning", reported.itemId) {', source)
         self.assertNotIn('key(ownerKey, "reasoning", reported.itemId, expanded)', source)
-        self.assertLess(source.index('val reasoningState = rememberSaveableStateHolder()'), source.index('AnimatedVisibility(expanded, enter = fadeIn() + expandVertically(expandFrom = Alignment.Top)'))
+        self.assertLess(source.index('val reasoningState = rememberSaveableStateHolder()'), source.index('AnimatedVisibility(visibility,'))
         self.assertIn('reasoningState.SaveableStateProvider(reported.itemId)', source)
         fixture = (TEST / 'ui/screens/chat/conversation/ReasoningWorkflowTest.kt').read_text(encoding='utf-8')
         self.assertIn('assertDisclosure(first, expanded = false)', fixture)

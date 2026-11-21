@@ -9,7 +9,7 @@ import tempfile
 import shutil
 import unittest
 import zipfile
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'scripts'))
@@ -180,7 +180,7 @@ class CandidateSourceTests(unittest.TestCase):
         shutil.copytree(self.root / 'tests', delivery / 'tests')
         (parent / '.github/workflows').mkdir(parents=True)
         (parent / '.github/workflows/build.yml').write_text(self.current)
-        env = dict(self.env, GITHUB_SHA='b' * 40, GITHUB_RUN_ID='789', GITHUB_RUN_ATTEMPT='1',
+        env = dict(self.env, EXPECTED_SHA='b' * 40, GITHUB_SHA='c' * 40, GITHUB_RUN_ID='789', GITHUB_RUN_ATTEMPT='1',
                    GITHUB_REPOSITORY='owner/repo', GH_TOKEN='fixture-not-a-secret')
         responses = [self.run, dict(jobs=self.jobs), metadata]
         def open_url(request, timeout):
@@ -196,9 +196,11 @@ class CandidateSourceTests(unittest.TestCase):
                     patch.object(source.urllib.request, 'urlopen', side_effect=open_url), \
                     patch.object(source.subprocess, 'run') as run_git, \
                     patch.object(source.subprocess, 'check_output', side_effect=[
-                        '.github/workflows/build.yml\0scripts/verify_smoke_source.py\0', self.previous]):
+                        'b' * 40, 'c' * 40, '.github/workflows/build.yml\0scripts/verify_smoke_source.py\0', self.previous]):
                 source.main()
-                run_git.assert_called_once_with(['git', 'merge-base', '--is-ancestor', 'a' * 40, 'b' * 40], check=True)
+                self.assertEqual(run_git.call_args_list, [
+                    call(['git', 'merge-base', '--is-ancestor', 'b' * 40, 'c' * 40], check=True),
+                    call(['git', 'merge-base', '--is-ancestor', 'a' * 40, 'b' * 40], check=True)])
             return json.loads((parent / 'smoke/source.json').read_text())
         finally:
             if sys.exc_info()[0] is not None:
@@ -219,6 +221,8 @@ class CandidateSourceTests(unittest.TestCase):
         receipt = self.main_fixture()
         self.assertEqual(receipt['build_sha'], 'a' * 40)
         self.assertEqual(receipt['check_sha'], 'b' * 40)
+        self.assertEqual(receipt['workflow_sha'], 'c' * 40)
+        self.assertEqual(receipt['validation_tools_sha'], 'c' * 40)
         self.assertEqual(receipt['build_attempt'], 1)
         self.assertIs(receipt['formal_acceptance'], False)
         self.assertEqual(receipt['source_artifact']['id'], 456)
@@ -289,7 +293,7 @@ class CandidateSourceTests(unittest.TestCase):
             for variant in ['debug', 'release', 'candidate', 'daily']:
                 for api in ['all', '26', '37.2']:
                     value = expression
-                    for key, item in [('mode', mode), ('source_variant', variant), ('smoke_api', api)]:
+                    for key, item in [('mode', mode), ('source_variant', variant), ('smoke_api', api), ('smoke_classes', '')]:
                         value = value.replace('inputs.' + key, repr(item))
                     matrix = json.loads(eval(value.replace('&&', ' and ').replace('||', ' or '),
                                              {'__builtins__': {}}, {}))

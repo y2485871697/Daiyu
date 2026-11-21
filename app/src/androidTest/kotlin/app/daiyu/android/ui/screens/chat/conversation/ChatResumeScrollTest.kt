@@ -568,7 +568,6 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             }
             instrumentation.runOnMainSync { releaseReady = true }
             var previous = first.length
-            var sawPartial = false
             val startTicks = ticksStarted
             val finishTicks = ticksFinished
             val startClock = ui.mainClock.currentTime
@@ -586,9 +585,7 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
                     checkDeadline()
                     val sample = sampledTick()
                     val current = sample.visibleLength
-                    assertTrue("Each released frame advances at most one character",
-                        current in previous..minOf(previous + 1, appended.length))
-                    if (current > previous && current < appended.length) sawPartial = true
+                    assertTrue("A released snapshot never rewinds or passes its input", current in previous..appended.length)
                     if (current < appended.length) assertNotCompleted(sample)
                     previous = current
                     checkDeadline()
@@ -611,14 +608,14 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
                 }.onFailure { failure.addSuppressed(it) }
                 failure.addSuppressed(AssertionError("W3 original wait failed: " +
                     "ticksStarted=${ticksStarted - startTicks} ticksFinished=${ticksFinished - finishTicks} " +
-                    "clock=$startClock..$endClock wallMs=$wallMs previous=$previous sawPartial=$sawPartial " +
+                    "clock=$startClock..$endClock wallMs=$wallMs previous=$previous " +
                     "${timingSummary()} " +
                     "advances=${advances.get()} completed=${completed.get()} ready=$presentationReady " +
                     "requestedPresentationActive=${!awaitingAppend || releaseReady && presentationReady} " +
                     "postFailure $semantics geometry=$viewport\n$paint"))
                 throw failure
             }
-            assertTrue("The suffix must type, not flush when readiness opens", sawPartial)
+            assertEquals("The admitted suffix publishes once", 1, advances.get())
             assertTrue("Released presentation must emit visible advances", advances.get() > 0)
             ui.onNodeWithText(appended).assertExists()
         } finally {
@@ -674,6 +671,7 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
     private fun exerciseReplyHistoryRemount(partial: Boolean) {
         val replyId = "scroll-retained-reply"
         val text = if (partial) "字".repeat(80) else "已经显示的正文不能因为滑动聊天记录而再次播放。"
+        val initial = if (partial) text.take(12) else text
         val oldControl = ReplyPresentationControl(replyId, initiallyLive = true)
         var turns by mutableStateOf<List<ChatTurnUi>>(listOf(ChatTurnUi.User("scroll-question", "question")))
         var playback by mutableStateOf<ReplyPlayback?>(null)
@@ -713,26 +711,24 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             }
             tick(8)
             mainThread {
-                turns = turns.dropLast(1) + ChatTurnUi.Assistant(replyId, finalText = text,
+                turns = turns.dropLast(1) + ChatTurnUi.Assistant(replyId, finalText = initial,
                     status = RunStatus.RUNNING, isStreaming = true)
             }
             val parser = MarkdownParserIdentity(defaultMarkdownParser)
             lateinit var lane: ReplyTypingLane
             var frontier = 0
-            var sawPartial = false
             for (frame in 0 until 120) {
                 tick()
                 mainThread {
                     lane = oldControl.lane("body:$replyId", parser, 0L) { error("Production body lane must exist") }
                     lane.motion.target?.let { target ->
                         frontier = lane.motion.visible(target)
-                        if (frontier in 1 until target.total) sawPartial = true
                     }
                 }
-                if (partial && sawPartial || !partial && frontier == text.length) break
+                if (frontier == initial.length) break
             }
-            assertTrue("The live reply must really type before disposal", sawPartial)
-            if (partial) assertTrue(frontier in 1 until text.length) else assertEquals(text.length, frontier)
+            assertEquals("The received snapshot must be shown before disposal", initial.length, frontier)
+            assertTrue(advances.get() > 0)
             assertSame(oldControl, suppliedControl)
             ui.onNodeWithTag("chat-messages").performTouchInput { click(center) }
             val beforeDisposal = advances.get()
@@ -766,15 +762,9 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             val remounted = restored.motion.target!!.let(restored.motion::visible)
             assertTrue("The shown prefix must never rewind", remounted >= frozen)
             if (partial) {
-                assertTrue("Ten seconds offscreen must not flush the suffix", remounted <= frozen + 1)
-                assertTrue(remounted < text.length + suffix.length)
-                var continued = false
-                repeat(180) {
-                    tick()
-                    val shown = restored.motion.target!!.let(restored.motion::visible)
-                    if (shown > remounted && shown < text.length + suffix.length) continued = true
-                }
-                assertTrue("Only new output must continue typing", continued)
+                repeat(60) { tick() }
+                assertEquals("Offscreen growth is one new snapshot, not a replay of history", beforeDisposal + 1, advances.get())
+                assertEquals(text.length + suffix.length, restored.motion.target!!.let(restored.motion::visible))
                 assertEquals("The offscreen suffix must enter the production target", text.length + suffix.length,
                     restored.motion.target!!.total)
                 val shown = restored.motion.target!!.let(restored.motion::visible)

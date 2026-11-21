@@ -257,13 +257,16 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             if (playback?.paused == true) frame.drawn?.layoutInput?.text ?: AnnotatedString("")
             else {
                 val coordinates = frame.coordinates?.takeIf { it.isAttached }
-                val prepared = if (coordinates != null) frame.measureConstraints?.let { constraints ->
-                    measurer.measure(latestCandidateText, style, softWrap = softWrap,
-                        constraints = constraints.copy(minHeight = 0))
-                } else null
-                // Prepare the native input before placement; only the real layout and draw publish it.
-                if (prepared != null && clearance.fits(coordinates, prepared.size.height)) latestCandidateText
-                else frame.committed?.layoutInput?.text ?: latestCandidateText
+                if (clearance.availableHeight(coordinates) == Float.POSITIVE_INFINITY) latestCandidateText
+                else {
+                    val prepared = if (coordinates != null) frame.measureConstraints?.let { constraints ->
+                        measurer.measure(latestCandidateText, style, softWrap = softWrap,
+                            constraints = constraints.copy(minHeight = 0))
+                    } else null
+                    // Prepare the native input before placement; only the real layout and draw publish it.
+                    if (prepared != null && clearance.fits(coordinates, prepared.size.height)) latestCandidateText
+                    else frame.committed?.layoutInput?.text ?: latestCandidateText
+                }
             }
         }
     }
@@ -282,7 +285,9 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
         val drawn = frame.drawn?.takeIf {
             candidate != null && it.canPaintPrefixOf(candidate) && it.layoutInput.text.isNotEmpty()
         }
-        clearance.prepareLine(owner, markdownLineSpace(frame.nextAdvance,
+        // Finish the current native line before reserving the following one.
+        val growthPending = candidate != null && drawn != null && candidate.size.height > drawn.size.height
+        clearance.prepareLine(owner, if (growthPending) 0 else markdownLineSpace(frame.nextAdvance,
             clearance.bodyEndInLeaf(frame.coordinates), drawn?.size?.height?.toFloat()))
     }
     fun placed(coordinates: LayoutCoordinates) {
@@ -322,7 +327,10 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     key(style, softWrap, density.density, density.fontScale, direction) {
         BasicText(displayedText, modifier.layout { measurable, constraints ->
             val candidate = measurer.measure(candidateText, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
-            frame.layout = candidate
+            val previous = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.layout }
+            if (previous == null || previous.multiParagraph !== candidate.multiParagraph ||
+                previous.layoutInput != candidate.layoutInput || previous.size != candidate.size)
+                frame.layout = candidate
             frame.measureConstraints = candidate.layoutInput.constraints
             val future = nextLineText?.let { lineMeasurer.measureMarkdownNextLine(candidate, it) }
             frame.nextAdvance = future?.takeIf { it.lineCount > candidate.lineCount }?.let {

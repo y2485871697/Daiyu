@@ -43,7 +43,12 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('else frame.committed?.layoutInput?.text ?: latestCandidateText', native)
         self.assertIn('frame.drawn?.layoutInput?.text ?: AnnotatedString("")', native)
         measure = leaf.split('BasicText(displayedText, modifier.layout { measurable, constraints ->', 1)[1].split('.onPlaced(::placed)', 1)[0]
-        self.assertIn('frame.layout = candidate\n            frame.measureConstraints = candidate.layoutInput.constraints', measure)
+        self.assertIn(
+            'val previous = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.layout } '
+            'if (previous == null || previous.multiParagraph !== candidate.multiParagraph || '
+            'previous.layoutInput != candidate.layoutInput || previous.size != candidate.size) '
+            'frame.layout = candidate frame.measureConstraints = candidate.layoutInput.constraints',
+            ' '.join(measure.split()))
         self.assertIn('val drawn = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.drawn }', measure)
         draw = leaf.split('.drawWithContent {', 1)[1]
         self.assertIn('drawContent()\n                androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {\n                    frame.drawn = actual\n                    prepareNextLine()', draw)
@@ -172,6 +177,20 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         prepare = clearance.split('fun prepareNextLine()', 1)[1].split('fun placed(', 1)[0]
         self.assertIn('if (playback?.paused == true) return', prepare)
         self.assertIn('it.canPaintPrefixOf(candidate)', prepare)
+        self.assertIn('val growthPending = candidate != null && drawn != null && candidate.size.height > drawn.size.height', prepare)
+        self.assertIn('clearance.prepareLine(owner, if (growthPending) 0 else markdownLineSpace(frame.nextAdvance,', prepare)
+        self.assertNotIn('candidate.layoutInput.text != drawn.layoutInput.text', prepare)
+        display = clearance.split('val displayedText by remember(', 1)[1].split('val candidateText =', 1)[0]
+        self.assertIn('if (clearance.availableHeight(coordinates) == Float.POSITIVE_INFINITY) latestCandidateText', display)
+        self.assertIn(
+            'if (clearance.availableHeight(coordinates) == Float.POSITIVE_INFINITY) latestCandidateText '
+            'else { val prepared = if (coordinates != null) frame.measureConstraints?.let { constraints ->',
+            ' '.join(display.split()))
+        self.assertIn('if (prepared != null && clearance.fits(coordinates, prepared.size.height)) latestCandidateText', display)
+        measure = clearance.split('BasicText(displayedText, modifier.layout', 1)[1].split('frame.measureConstraints =', 1)[0]
+        self.assertIn('Snapshot.withoutReadObservation { frame.layout }', measure)
+        self.assertIn('previous.multiParagraph !== candidate.multiParagraph', measure)
+        self.assertIn('previous.layoutInput != candidate.layoutInput || previous.size != candidate.size', measure)
         self.assertNotIn('drawn?.getLineBottom(', prepare)
         placed = clearance.split('fun placed(', 1)[1].split('val refreshAdmission', 1)[0]
         self.assertIn('prepareNextLine()', placed)

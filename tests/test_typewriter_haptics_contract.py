@@ -11,11 +11,15 @@ class TypewriterHapticsContract(unittest.TestCase):
         typing = (CHAT / "MarkdownTyping.kt").read_text()
         motion = (CHAT / "MarkdownReveal.kt").read_text().split("fun advance(", 1)[1]
         self.assertIn("rememberUpdatedState(onVisibleAdvance)", typing)
-        self.assertIn("motion.advance(current, frameNanos, end, streamSnapshot) { currentAdvance() }", typing)
+        self.assertIn("motion.advance(current, frameNanos, end, streamSnapshot)", typing)
+        self.assertIn("id !in publication.answerPaint && current.limit(id, end) > current.limit(id, before)", typing)
         self.assertIn("if (target !== expected) return expected.start", motion)
         self.assertIn("if (shown > previous) onAdvance()", motion)
         self.assertLess(motion.index("if (target !== expected)"), motion.index("onAdvance()"))
-        self.assertEqual(1, typing.count("currentAdvance()"))
+        document = (CHAT / "StreamingAnswer.kt").read_text()
+        self.assertLess(document.index("drawContent()"), document.index("reveal.onDocumentAdvance()"))
+        self.assertIn("!frozen && shown.source.isNotEmpty() && previous?.source != shown.source", document)
+        self.assertIn("{ currentAdvance() }", typing)
 
     def test_latest_viewport_lifecycle_and_occlusion_gate_are_in_callback(self):
         source = (CHAT / "ChatMessageList.kt").read_text()

@@ -91,7 +91,7 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("if (progress.target === target) progress.visible else target.start", typing)
         self.assertIn("minOf(target.total, advanceLimit)", typing)
         self.assertIn("onDispose { clearance?.setTypingPending(clearanceOwner, false) }", typing)
-        self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end, streamSnapshot) { currentAdvance() } }', " ".join(typing.split()))
+        self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end, streamSnapshot) {', " ".join(typing.split()))
 
     def test_explicit_scroll_and_touch_keep_ownership(self):
         self.assertIn("if (target == null) {", self.follow)

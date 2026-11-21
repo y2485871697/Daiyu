@@ -93,13 +93,21 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
 
     def test_text_leaf_pairs_each_accepted_source_with_its_own_ast(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()
-        for token in ('rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete)',
+        for token in ('rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete, streamAnswer = true)',
                       'rememberAssistantTextBody(plainNarration, textSources, narration.projection, narration.reveal, generationComplete)',
                       'currentSources.value.indexOfFirst { it.id == text.itemId }',
                       'accepted?.sources?.getOrNull(index)?.takeIf { text.text.startsWith(it) }',
                       'RevealedMessageMarkdown(displayed, accepted?.blocksAt(index)',
                       'generationComplete = currentComplete.value && displayed == text.text'):
             self.assertIn(token, chat)
+
+    def test_streaming_answer_uses_the_upstream_document_not_a_second_ink_clock(self):
+        body = (BASE / 'StreamingAnswer.kt').read_text()
+        self.assertIn('rememberMarkdownDocument(', body)
+        self.assertIn('Markdown(document = shown', body)
+        self.assertIn('if (frozen) receipt.last else document', body)
+        self.assertNotIn('rememberPartInk(', body)
+        self.assertNotIn('withFrameNanos', body)
 
     def test_hidden_answer_and_typewriter_share_the_same_release_gate(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()

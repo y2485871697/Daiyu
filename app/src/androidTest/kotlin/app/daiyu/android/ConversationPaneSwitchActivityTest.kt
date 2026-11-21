@@ -371,10 +371,10 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
         .apply { isAccessible = true }.get(activity) as MutableState<*>).value as
         app.daiyu.android.storage.MessageDisplayWindow?
 
-    private fun seedOlderHistory(conversation: Conversation) {
-        val user = Message(MessageId("older-user"), conversation.id, RunId("older-run"), Message.USER_ROLE,
+    private fun seedOlderHistory(conversation: Conversation, index: Int = 0) {
+        val user = Message(MessageId("older-user-$index"), conversation.id, RunId("older-run-$index"), Message.USER_ROLE,
             listOf(MessageBlock.Text("q", "older question")), RunStatus.COMPLETED)
-        val answer = user.copy(id = MessageId("older-answer"), role = Message.ASSISTANT_ROLE,
+        val answer = user.copy(id = MessageId("older-answer-$index"), role = Message.ASSISTANT_ROLE,
             blocks = listOf(MessageBlock.Text("a", "older answer")), status = RunStatus.RUNNING)
         fixture.database.send(user, answer)
         fixture.database.save(answer.copy(status = RunStatus.COMPLETED))
@@ -390,7 +390,7 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
 
     private fun assertLatestBodyVisibleBeforeOlderRead(unansweredTail: Boolean) {
         val (_, second) = prepareConversations()
-        seedOlderHistory(second)
+        repeat(6) { seedOlderHistory(second, it) }
         seedToolHistory(second)
         if (unansweredTail) fixture.database.writableDatabase.insertOrThrow("messages", null,
             android.content.ContentValues().apply {
@@ -400,7 +400,7 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
                 put("status", RunStatus.COMPLETED.name); put("protocol", "[]"); put("history_segments", "[]")
             })
         val original = fixture.database.messages(second.id)
-        val firstRows = if (unansweredTail) 3 else 2
+        val firstRows = if (unansweredTail) 13 else 12
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
         val reader = activity.paneDisplayWindowReader
@@ -420,7 +420,8 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
             mainThread {
                 assertEquals(firstRows, displayWindow()!!.rows.size)
                 assertEquals(2, displayWindow()!!.deferredRows)
-                assertEquals("prepared history body", chatState().turns.filterIsInstance<ChatTurnUi.Assistant>().single().finalText)
+                assertEquals("prepared history body", chatState().turns.filterIsInstance<ChatTurnUi.Assistant>().last().finalText)
+                assertEquals("older answer", chatState().turns.filterIsInstance<ChatTurnUi.Assistant>().dropLast(1).last().finalText)
                 keys = chatState().turns.map { it.listKey }
                 scroll = chatState().scrollRequest!!.serial
                 MainActivity::class.java.getDeclaredMethod("dismissSidebar").apply { isAccessible = true }.invoke(activity)
@@ -444,7 +445,7 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
 
     fun testCancelledOlderPreparationCannotReplaceNewSelection() {
         val (_, second, third) = prepareConversations()
-        seedOlderHistory(second)
+        repeat(6) { seedOlderHistory(second, it) }
         seedToolHistory(second)
         val entered = CountDownLatch(1)
         val release = CountDownLatch(1)
@@ -462,7 +463,7 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
             assertTrue(entered.await(10, TimeUnit.SECONDS))
             assertSelected(second, "draft-1")
             lateinit var oldJob: Job
-            mainThread { oldJob = selectionJob(); assertEquals(2, chatState().turns.size) }
+            mainThread { oldJob = selectionJob(); assertEquals(12, chatState().turns.size) }
             click(third)
             assertSelected(third, "draft-2")
             val cacheField = MainActivity::class.java.getDeclaredField("toolPresentations").apply { isAccessible = true }
@@ -481,7 +482,7 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
 
     fun testFailedOlderReadKeepsLatestBodyAndHydratesFullTailAfterClose() {
         val (_, second) = prepareConversations()
-        seedOlderHistory(second)
+        repeat(6) { seedOlderHistory(second, it) }
         val original = seedToolHistory(second)
         val reader = activity.paneDisplayWindowReader
         mainThread { activity.paneDisplayWindowReader = { error("older display unavailable") } }
@@ -493,11 +494,11 @@ class ConversationPaneSwitchActivityTest : WiredActivityTestCase() {
             }
             mainThread {
                 assertEquals(2, displayWindow()!!.deferredRows)
-                assertEquals("prepared history body", chatState().turns.filterIsInstance<ChatTurnUi.Assistant>().single().finalText)
+                assertEquals("prepared history body", chatState().turns.filterIsInstance<ChatTurnUi.Assistant>().last().finalText)
                 MainActivity::class.java.getDeclaredMethod("dismissSidebar").apply { isAccessible = true }.invoke(activity)
             }
             awaitControl("fallback authority includes deferred rows") { displayWindow() == null }
-            mainThread { assertEquals(4, chatState().turns.size); assertEquals("draft-1", hostValue("getDraft")) }
+            mainThread { assertEquals(14, chatState().turns.size); assertEquals("draft-1", hostValue("getDraft")) }
             assertEquals(original, fixture.database.messages(second.id))
             assertEquals(0, fixture.opens.get())
         } finally { mainThread { activity.paneDisplayWindowReader = reader } }

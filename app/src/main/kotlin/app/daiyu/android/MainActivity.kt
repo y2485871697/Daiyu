@@ -1484,7 +1484,7 @@ class MainActivity : ComponentActivity() {
         val conversations = controller.database.conversations()
         val conversation = conversations.single { it.id.value == id }
         PaneConversationSnapshot(conversation, conversations, emptyList(),
-            controller.database.displayMessages(conversation.id, latestRunOnly = true))
+            controller.database.displayMessages(conversation.id, latestRunOnly = true, minimumTailRows = 12))
     }
     internal var paneDisplayWindowReader: (ConversationId) -> app.daiyu.android.storage.MessageDisplayWindow =
         { id -> controller.database.displayMessages(id) }

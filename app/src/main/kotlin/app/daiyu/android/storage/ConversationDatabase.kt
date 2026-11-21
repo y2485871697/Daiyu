@@ -991,12 +991,12 @@ class ConversationDatabase internal constructor(context: Context, private val af
     }
     private fun transaction(block:(SQLiteDatabase)->Unit) { val db=writableDatabase;db.beginTransaction();try {block(db);db.setTransactionSuccessful()} finally {db.endTransaction()} }
     internal fun displayMessages(id: ConversationId, before: Long = Long.MAX_VALUE, limit: Int = 50,
-        latestRunOnly: Boolean = false): MessageDisplayWindow {
+        latestRunOnly: Boolean = false, minimumTailRows: Int = 0): MessageDisplayWindow {
         require(limit in 1..200)
         val db = writableDatabase
         db.beginTransaction()
         try {
-            val result = MessageDisplayStore.read(db, id, before, limit, latestRunOnly = latestRunOnly)
+            val result = MessageDisplayStore.read(db, id, before, limit, latestRunOnly = latestRunOnly, minimumTailRows = minimumTailRows)
             // Read sidecars only for the physical rows in this bounded window. Ordinary text
             // conversations keep the cheap display projection, with no original media IO.
             val enriched = if (result.rows.isEmpty()) result else {

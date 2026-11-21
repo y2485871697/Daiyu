@@ -20,12 +20,12 @@ internal object MessageDisplayStore {
     }
 
     fun read(db: SQLiteDatabase, conversation: ConversationId, before: Long, limit: Int, rebuildWindow: Boolean = true,
-        latestRunOnly: Boolean = false): MessageDisplayWindow {
+        latestRunOnly: Boolean = false, minimumTailRows: Int = 0): MessageDisplayWindow {
         check(db.inTransaction())
-        val metadata = db.rawQuery("SELECT seq,id,run_id,role,status,created_at FROM messages WHERE conversation_id=? AND seq<? ORDER BY seq DESC LIMIT ?",
+        val metadata = db.rawQuery("SELECT seq,id,run_id,role,status,created_at,error IS NOT NULL,EXISTS(SELECT 1 FROM message_display WHERE message_id=messages.id) FROM messages WHERE conversation_id=? AND seq<? ORDER BY seq DESC LIMIT ?",
             arrayOf(conversation.value, before.toString(), limit.toString())).use { c ->
             buildList { while (c.moveToNext()) add(Metadata(c.getLong(0), c.getString(1), c.getString(2),
-                c.getString(3), c.getString(4), if (c.isNull(5)) null else c.getLong(5))) }.reversed()
+                c.getString(3), c.getString(4), if (c.isNull(5)) null else c.getLong(5), c.getInt(6) != 0, c.getInt(7) != 0)) }.reversed()
         }
         // Keep the newest answered run and every later user row, not the entire page for an unanswered tail.
         val ids = if (!latestRunOnly) metadata else {
@@ -34,6 +34,10 @@ internal object MessageDisplayStore {
                 val run = metadata[assistant].run
                 var first = assistant
                 while (first > 0 && metadata[first - 1].run == run) first--
+                // Include nearby turns on the first draw, without dropping an unanswered tail
+                // or splitting the run that straddles the expanded boundary.
+                first = minOf(first, (metadata.size - minimumTailRows).coerceAtLeast(0))
+                while (first > 0 && metadata[first - 1].run == metadata[first].run) first--
                 metadata.subList(first, metadata.size)
             }
         }
@@ -76,12 +80,11 @@ internal object MessageDisplayStore {
                 }
                 return MessageDisplayRow(MessageId(row.id), conversation, RunId(row.run), row.role,
                     blocks.map(LegacySearchDisplay::display), RunStatus.valueOf(row.status),
-                    SQLiteText.read(db, "messages", "error", "id", row.id), row.time,
+                    if (row.hasError) SQLiteText.read(db, "messages", "error", "id", row.id) else null, row.time,
                     segments.map { MessageDisplaySegment(it.messageId, it.role, it.blocks.map(LegacySearchDisplay::display),
                         it.createdAt, it.reportedReasoning, coordinateBlocks = it.blocks) }, coordinateBlocks = blocks)
             }
-            val cached = db.rawQuery("SELECT 1 FROM message_display WHERE message_id=?", arrayOf(row.id)).use { it.moveToFirst() }
-            val hit = if (!cached) null else try {
+            val hit = if (!row.cached) null else try {
                 val value = JSONObject(requireNotNull(SQLiteText.read(db, "message_display", "payload", "message_id", row.id)))
                 val projection = decodePayload(value)
                 if (value.getInt("version") == 3 && compactBlocks(value, projection)) {
@@ -118,7 +121,7 @@ internal object MessageDisplayStore {
         return try { MessageDisplayWindow(rows, deferredRows = metadata.size - ids.size) } catch (invalid: IllegalArgumentException) {
             if (!rebuildWindow) throw invalid
             ids.forEach { db.delete("message_display", "message_id=?", arrayOf(it.id)) }
-            read(db, conversation, before, limit, rebuildWindow = false, latestRunOnly = latestRunOnly)
+            read(db, conversation, before, limit, rebuildWindow = false, latestRunOnly = latestRunOnly, minimumTailRows = minimumTailRows)
         }
     }
 
@@ -137,7 +140,7 @@ internal object MessageDisplayStore {
     }
 
     private data class Metadata(val seq: Long, val id: String, val run: String, val role: String,
-        val status: String, val time: Long?)
+        val status: String, val time: Long?, val hasError: Boolean, val cached: Boolean)
 
     private fun hasCandidate(role: String, blocks: JSONArray): Boolean = role == Message.ASSISTANT_ROLE &&
         (0 until blocks.length()).any { index -> blocks.getJSONObject(index).let {

@@ -75,6 +75,22 @@ class TerminalImageReadTest {
         assertEquals(0, registry.inspectJobs().getJSONArray("jobs").length())
     }
 
+    @Test fun finishedImageReadsAndFailedStartsLeaveNoProcessRegistryEntries() = fixture { root, registry ->
+        val field = TerminalRegistry::class.java.getDeclaredField("jobs").apply { isAccessible = true }
+        val map = field.get(null) as Map<*, *>
+        fun ownedEntries() = synchronized(map) { map.values.count { job ->
+            val log = job!!.javaClass.getDeclaredField("log").apply { isAccessible = true }.get(job) as File
+            log.parentFile.parentFile == root
+        } }
+        registry.startProcess = { TestProcess(ByteArrayInputStream(("PNG:" +
+            Base64.getEncoder().encodeToString(png) + "\n").toByteArray())) }
+        repeat(4) { assertArrayEquals(png, registry.readLinuxTmpPng("/tmp/frame.png") { false }) }
+        assertEquals(0, ownedEntries())
+        registry.startProcess = { throw java.io.IOException("fixture start failed") }
+        assertThrows(java.io.IOException::class.java) { registry.readLinuxTmpPng("/tmp/frame.png") { false } }
+        assertEquals(0, ownedEntries())
+    }
+
     @Test fun traversalNonAsciiMalformedAndTruncatedFramesAreNotDelivered() = fixture { _, registry ->
         var starts = 0
         registry.startProcess = { starts++; throw AssertionError("Invalid path must not launch") }

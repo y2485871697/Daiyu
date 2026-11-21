@@ -185,6 +185,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
                         synchronized(jobs) {
                             it.dispatchFinished = true
                             releaseFinishedResources(it)
+                            forgetDrainedImageRead(it)
                         }
                     }
                 }
@@ -400,7 +401,7 @@ class TerminalRegistry(context: Context) : AutoCloseable {
             catch (_: Exception) { job.unknown = true }
             finally {
                 job.pumpFinished = true
-                try { synchronized(jobs) { releaseFinishedResources(job) } }
+                try { synchronized(jobs) { releaseFinishedResources(job); forgetDrainedImageRead(job) } }
                 catch (_: InterruptedException) { job.unknown = true; Thread.currentThread().interrupt() }
                 catch (_: Exception) { job.unknown = true }
             }
@@ -609,10 +610,22 @@ class TerminalRegistry(context: Context) : AutoCloseable {
         // Completion is a read-only historical fact, not a restorable process handle.
         try { saveJob(job) } catch (_: Exception) { /* A failed durable receipt remains unknown on disk. */ }
     }
-    private fun releaseStartupCleanup(job: Job, cleanup: PtyStartupCleanup) = synchronized(job) {
-        if (job.startupCleanup !== cleanup) return@synchronized
-        job.completion = JobCompletion(job.state, null, "unknown", true)
-        job.startupCleanup = null
+    // Image reads have neither a public job identity nor a historical receipt.
+    // Called with the registry map locked; never discard a late process or cleanup handle.
+    private fun forgetDrainedImageRead(job: Job) {
+        if (job.memoryOnly && job.dispatchFinished && job.handle == null && job.startupCleanup == null &&
+            (job.completion != null || job.state in setOf("start_failed", "cancelled_before_dispatch"))) {
+            jobs.remove(job.id, job)
+        }
+    }
+    private fun releaseStartupCleanup(job: Job, cleanup: PtyStartupCleanup) = synchronized(jobs) {
+        synchronized(job) {
+            if (job.startupCleanup === cleanup) {
+                job.completion = JobCompletion(job.state, null, "unknown", true)
+                job.startupCleanup = null
+                forgetDrainedImageRead(job)
+            }
+        }
     }
     private fun readRecord(file:File):JSONObject { check(file.length()<=16384); return JSONObject(file.readText()) }
     private fun saveJob(job:Job) {

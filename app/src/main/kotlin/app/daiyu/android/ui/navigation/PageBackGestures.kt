@@ -34,7 +34,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -94,16 +94,14 @@ internal class PageBackGestureState(val predictiveEnabled: Boolean, val resumed:
     var alive = true
     var transitionBlocked = false
     var interruptEnterMotion: () -> Unit = {}
-    class PreviewOwner(enabled: Boolean, previewEnabled: Boolean) {
-        var enabled by mutableStateOf(enabled)
-        var previewEnabled by mutableStateOf(previewEnabled)
-    }
-    val previewOwners = mutableStateListOf<PreviewOwner>()
+    private var previewBlockers by mutableIntStateOf(0)
+    fun blockPreview() { previewBlockers++; refreshPreview() }
+    fun unblockPreview() { previewBlockers-- }
     var gesturePreviewReady by mutableStateOf(true)
         private set
     private var previewStarted = false
     private var predictiveMotion = VelocityTracker()
-    val previewAllowed get() = gesturePreviewReady && previewOwners.none { it.enabled && !it.previewEnabled }
+    val previewAllowed get() = gesturePreviewReady && previewBlockers == 0
     fun restorePreview() { gesturePreviewReady = true }
     fun refreshPreview() {
         if (!previewAllowed) {
@@ -310,16 +308,10 @@ internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = 
         BackHandler(enabled, onBack)
         return
     }
-    val previewOwner = remember(state) { PageBackGestureState.PreviewOwner(enabled, previewEnabled) }
-    DisposableEffect(state, previewOwner) {
-        state.previewOwners.add(previewOwner)
-        state.refreshPreview()
-        onDispose { state.previewOwners.remove(previewOwner); state.refreshPreview() }
-    }
-    SideEffect {
-        previewOwner.enabled = enabled
-        previewOwner.previewEnabled = previewEnabled
-        state.refreshPreview()
+    // Ordinary handlers never change the preview gate when a route mounts or leaves.
+    if (enabled && !previewEnabled) DisposableEffect(state) {
+        state.blockPreview()
+        onDispose { state.unblockPreview() }
     }
     val dispatcher = checkNotNull(LocalOnBackPressedDispatcherOwner.current).onBackPressedDispatcher
     val lifecycleOwner = LocalLifecycleOwner.current

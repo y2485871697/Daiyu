@@ -667,8 +667,9 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('localLoading = true; localPage = 1', test)
 
     def test_nested_preview_owners_unregister_and_commit_is_guarded(self):
-        for guard in ('state.previewOwners.add(previewOwner)', 'state.previewOwners.remove(previewOwner)',
-                      'previewOwners.none { it.enabled && !it.previewEnabled }',
+        for guard in ('if (enabled && !previewEnabled) DisposableEffect(state)', 'state.blockPreview()',
+                      'onDispose { state.unblockPreview() }', 'gesturePreviewReady && previewBlockers == 0',
+                      'previewBlockers++; refreshPreview()', 'fun unblockPreview() { previewBlockers-- }',
                       'if (!alive || (toolbarPending && !toolbarDispatching) || (transitionBlocked && swipeCommit == null) || committing) return', 'committing = true',
                       'state.transitionBlocked = (activeDeparture && departure?.forward != true) ||',
                       '(state.previewAllowed && !state.active && state.gestureVisualActive)'):

@@ -4066,7 +4066,7 @@ class MainActivity : ComponentActivity() {
         remote: DictationDraftTarget?,
         universal: VoiceControlState,
     ): Boolean {
-        if (!activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible) return false
+        if (!activityUsable() || !voiceForeground || !chatRouteSelected || sidebarVisible) return false
         fun current(target: DictationDraftTarget?) = target != null && voiceEditorCurrent(target)
         return (system.listening && dictationHost.state.value == system && current(system.target)) ||
             (offline.listening && offlineHost.state.value == offline && current(offline.target)) ||

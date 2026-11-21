@@ -170,7 +170,8 @@ class ChatResumeScrollContract(unittest.TestCase):
         release = method.split('val startWall = System.nanoTime()', 1)[1].split('} catch (failure: Throwable)', 1)[0]
         self.assertIn('System.nanoTime() - startWall <= 5_000_000_000L', release)
         self.assertEqual(3, release.count('checkDeadline()'))
-        self.assertIn('current in previous..minOf(previous + 1, appended.length)', release)
+        self.assertIn('current in previous..appended.length', release)
+        self.assertIn('assertEquals("The admitted suffix publishes once", 1, advances.get())', method)
         self.assertIn('if (current < appended.length) assertNotCompleted(sample)', release)
         self.assertIn('if (current == appended.length && sample.hasCopy && completed.get() > 0) break', release)
         self.assertNotIn('waitUntil', release)

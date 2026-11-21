@@ -309,7 +309,7 @@ class SourceTests(unittest.TestCase):
                     (avd / 'test.ini').write_text(f'target=android-{target}\n')
                     (avd / 'test.avd/config.ini').write_text('hw.lcd.width=320\nhw.lcd.height=640\n')
                     result = subprocess.run(['sh', '-c', f'bash "{script.as_posix()}" "{api}"'], cwd=root,
-                                            env=dict(os.environ, ANDROID_HOME=temporary,
+                                            env=dict(os.environ, RUNNER_ENVIRONMENT="fixture", ANDROID_HOME=temporary,
                                                      ANDROID_AVD_HOME=str(avd), INSTALL_EXIT=str(install_exit)),
                                             capture_output=True)
                     self.assertEqual(result.returncode == 0, expected, result.stderr)

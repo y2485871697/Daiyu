@@ -85,9 +85,9 @@ class PageBackSmokeScopeTests(unittest.TestCase):
     def test_gesture_retained_pair_receipt_keeps_current_tools_and_frozen_identity(self):
         for selected in ((CLASSES[0], CLASSES[3]), CLASSES,
                          (*CLASSES, 'app.daiyu.android.MessageActionsActivityTest')):
-            old = Path.cwd()
-            try:
-                with tempfile.TemporaryDirectory() as directory:
+            with tempfile.TemporaryDirectory() as directory:
+                old = Path.cwd()
+                try:
                     os.chdir(directory)
                     env = dict(GITHUB_SHA='b' * 40, EXPECTED_SHA='a' * 40, GITHUB_RUN_ID='14',
                                GITHUB_RUN_ATTEMPT='1', SMOKE_MODE='smoke',
@@ -107,8 +107,8 @@ class PageBackSmokeScopeTests(unittest.TestCase):
                         self.assertEqual('page-back-targeted', receipt['scope'])
                         self.assertEqual(9, receipt['exit_code'])
                         self.assertEqual(call.call_args.args[0], receipt['command'])
-            finally:
-                os.chdir(old)
+                finally:
+                    os.chdir(old)
 
     def test_return_with_message_actions_keeps_exact_targeted_command_and_inventory(self):
         extra = 'app.daiyu.android.MessageActionsActivityTest'

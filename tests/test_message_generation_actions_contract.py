@@ -105,7 +105,7 @@ class MessageGenerationActionsContract(unittest.TestCase):
         recorder = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(recorder)
         with tempfile.TemporaryDirectory() as directory:
-            tools = Path(directory) / "frozen-tools"
+            tools = Path(directory).resolve() / "frozen-tools"
             evidence = Path(directory) / "evidence"
             source = tools / "scripts/acceptance/record_tool_tests.py"
             env = dict(GITHUB_SHA="b" * 40, EXPECTED_SHA="a" * 40,
@@ -113,7 +113,7 @@ class MessageGenerationActionsContract(unittest.TestCase):
                        SMOKE_TEST_CLASSES=",".join(recorder.MESSAGE_ACTION_PLATFORM_CLASSES))
             def child(command, stdout, stderr, env=None, cwd=None):
                 self.assertEqual(tools, cwd)
-                self.assertTrue(env["PYTHONPATH"].startswith(str(tools / "tests")))
+                self.assertEqual(str(tools / "tests"), env["PYTHONPATH"].split(os.pathsep)[0])
                 stdout.write(b"fixture failed as expected\n")
                 return 7
             with patch.dict(os.environ, env, clear=True), patch.object(recorder, "__file__", str(source)), \

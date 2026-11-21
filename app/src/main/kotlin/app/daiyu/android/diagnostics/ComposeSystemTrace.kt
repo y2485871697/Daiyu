@@ -16,6 +16,8 @@ internal object ComposeSystemTrace {
         observed = BackPerformance.recorder::compositionObserved,
         limited = BackPerformance.recorder::compositionLimited,
         completed = BackPerformance.recorder::composition,
+        // FrameMetrics stays active for every frame. Bound compiler probes during route handoff.
+        callBudget = 128,
     )
 
     private val popupSamples = BackCompositionSamples(

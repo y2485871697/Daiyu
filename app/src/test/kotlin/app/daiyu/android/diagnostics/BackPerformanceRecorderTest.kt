@@ -457,6 +457,17 @@ class BackPerformanceRecorderTest {
         f.end(); assertEquals(1, f.rows.size)
     }
 
+    @Test fun boundedBackSamplingStopsClockReadsButStillRecordsSlowFrames() {
+        val f = Fixture(); val token = f.start(); var reads = 0
+        val samples = BackCompositionSamples(clock = { reads++; f.now }, observed = f.recorder::compositionObserved,
+            limited = f.recorder::compositionLimited, completed = f.recorder::composition, callBudget = 2)
+        repeat(100) { samples.start(token, "small"); samples.end(token) }
+        assertEquals(4, reads)
+        f.frame(); f.end()
+        assertTrue(f.rows.single().composeLimited)
+        assertTrue(f.rows.single().slow > 0)
+    }
+
     @Test fun compositionDepthAndCallbackBudgetsStopUntilAnotherWindow() {
         val f = Fixture(); val samples = f.compositions(); var token = f.start(); f.frame()
         repeat(BackCompositionSamples.MAX_DEPTH + 1) { samples.start(token, "nested") }

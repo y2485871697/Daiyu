@@ -3398,23 +3398,7 @@ class MainActivity : ComponentActivity() {
                         })
                     }
                 }
-                // Saved independently for the standalone composer or this conversation.
-                // The preparation worker freezes it once; edits never mutate an active request.
-                val thinkingOwner = chatState.conversationKey
-                val thinkingSpeed = confirmedGptSpeed
-                SubAgentThinkingEffortPickerDialog(show = thinkingPicker, effort = ReasoningEffort.textPreference(reasoningPreference.get(thinkingOwner), model = confirmedReasoningModel),
-                    mainChat = true, speedMode = chatState.composer.gptSpeedMode,
-                    speedEnabled = chatState.composer.gptSpeedEnabled,
-                    onCycleSpeed = { cycleChatGptSpeed(thinkingSpeed, thinkingOwner) },
-                    options = ReasoningEffort.textChoices(confirmedReasoningModel),
-                    onDismiss = { thinkingPicker = false }, onEffortChange = { effort ->
-                        if (activityUsable() && selected?.id?.value == thinkingOwner) {
-                            if (allowTaskConfigurationChange(thinkingOwner?.let(::ConversationId))) try {
-                                if (controller.setChatReasoning(thinkingOwner, effort)) publishChat()
-                                else toast("任务占用中")
-                            } catch (_: Exception) { toast("思考偏好保存未确认") }
-                        }
-                    })
+                ChatThinkingPickerSurface()
             }
         }
         }
@@ -3423,6 +3407,27 @@ class MainActivity : ComponentActivity() {
         // Recreating an Activity never replays an external VIEW/import confirmation.
         if (state == null) offerOpenedBackup(intent)
         consumeOpenedAttachments()
+    }
+
+    @Composable private fun ChatThinkingPickerSurface() {
+        if (!thinkingPicker) return
+        // Saved independently for the standalone composer or this conversation.
+        // The preparation worker freezes it once; edits never mutate an active request.
+        val thinkingOwner = chatState.conversationKey
+        val thinkingSpeed = confirmedGptSpeed
+        SubAgentThinkingEffortPickerDialog(show = thinkingPicker, effort = ReasoningEffort.textPreference(reasoningPreference.get(thinkingOwner), model = confirmedReasoningModel),
+            mainChat = true, speedMode = chatState.composer.gptSpeedMode,
+            speedEnabled = chatState.composer.gptSpeedEnabled,
+            onCycleSpeed = { cycleChatGptSpeed(thinkingSpeed, thinkingOwner) },
+            options = ReasoningEffort.textChoices(confirmedReasoningModel),
+            onDismiss = { thinkingPicker = false }, onEffortChange = { effort ->
+                if (activityUsable() && selected?.id?.value == thinkingOwner) {
+                    if (allowTaskConfigurationChange(thinkingOwner?.let(::ConversationId))) try {
+                        if (controller.setChatReasoning(thinkingOwner, effort)) publishChat()
+                        else toast("任务占用中")
+                    } catch (_: Exception) { toast("思考偏好保存未确认") }
+                }
+            })
     }
 
     @Suppress("DEPRECATION")

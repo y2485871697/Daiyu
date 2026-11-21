@@ -662,6 +662,10 @@ internal fun PageBackGestureHost(
     }
 
     val showDeparture = resumed && !departureInterrupted && departure != null && departing && departure.frame.canDrawPreview && !departure.returnSkipped && !departure.forwardSkipped && state.previewAllowed
+    // Over an opaque, uniform host, tinting the live page towards that same background
+    // gives group opacity without rendering the whole live subtree into an offscreen buffer.
+    val tintLiveReturn = showDeparture && departure?.forward == false && background.alpha == 1f &&
+        retainedRootContent != null && retainedRootVisible && !(target != null && state.gestureVisualActive)
     val entering by rememberUpdatedState(activeDeparture && departure?.forward == true)
     val returning by rememberUpdatedState(showDeparture && departure?.forward == false)
     val claimSwipe by rememberUpdatedState {
@@ -773,7 +777,7 @@ internal fun PageBackGestureHost(
                     } else if (departure != null && showDeparture) {
                         val value = exit.value
                         translationX = -departure.direction * size.width * 0.25f * (1f - value)
-                        alpha = 1f - 0.1f * (1f - value)
+                        if (!tintLiveReturn) alpha = 1f - 0.1f * (1f - value)
                         // A single frozen bitmap needs no fullscreen offscreen alpha pass.
                         if (departure.targetImage != null && !(retainedRootContent != null && retainedRootVisible))
                             compositingStrategy = CompositingStrategy.ModulateAlpha
@@ -829,6 +833,10 @@ internal fun PageBackGestureHost(
                     key(contentKey) { content() }
                 }
             }
+            if (tintLiveReturn) Box(Modifier.fillMaxSize().graphicsLayer {
+                alpha = 0.1f * (1f - exit.value)
+                compositingStrategy = CompositingStrategy.ModulateAlpha
+            }.background(background))
             if (departure != null && showDeparture && !departure.forward) Box(Modifier.fillMaxSize().graphicsLayer {
                 alpha = 0.5f * (1f - exit.value)
                 compositingStrategy = CompositingStrategy.ModulateAlpha

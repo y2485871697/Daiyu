@@ -30,7 +30,7 @@ class PopupPerformanceContract(unittest.TestCase):
         self.assertEqual(1, trace.count('rootName = ::popupCompositionRoot'))
         sampler = (APP / 'diagnostics/BackCompositionSamples.kt').read_text()
         self.assertIn('if (depth == 0 && rootName?.invoke(name) == false) return', sampler)
-        self.assertLess(sampler.index('rootName?.invoke(name)'), sampler.index('if (calls == MAX_CALLS'))
+        self.assertLess(sampler.index('rootName?.invoke(name)'), sampler.index('if (calls == callBudget'))
         self.assertIn('const val MAX_CALLS = 4096', sampler)
 
     def test_only_fixed_selector_calls_opt_into_the_shared_dialog(self):

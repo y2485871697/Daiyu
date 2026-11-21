@@ -705,6 +705,14 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('if (departure.targetImage != null && !(retainedRootContent != null && retainedRootVisible))\n                            compositingStrategy = CompositingStrategy.ModulateAlpha', block)
         self.assertIn('if (retainedRootContent != null && retainedRootVisible) null else departure.targetImage', self.host)
 
+    def test_live_return_uses_uniform_host_tint_below_original_black_scrim(self):
+        self.assertIn('background.alpha == 1f &&', self.host)
+        self.assertIn('retainedRootContent != null && retainedRootVisible && !(target != null && state.gestureVisualActive)', self.host)
+        self.assertIn('if (!tintLiveReturn) alpha = 1f - 0.1f * (1f - value)', self.host)
+        tint = self.host.split('if (tintLiveReturn) Box(', 1)[1].split('testTag("page-back-departure-scrim")', 1)[0]
+        self.assertLess(tint.index('alpha = 0.1f * (1f - exit.value)'), tint.index('alpha = 0.5f * (1f - exit.value)'))
+        self.assertIn('}.background(background)', tint)
+
     def test_original_miuix_motion_is_full_width_with_parallax_and_independent_dimming(self):
         for token in ('kotlin.math.round(state.direction * size.width * visibleProgress)',
                       'size.width * 0.25f * (1f - value)', 'alpha = 1f - 0.1f * (1f - value)',

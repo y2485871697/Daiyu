@@ -86,8 +86,8 @@ class ToolEnabledChildRunTest {
         }
     }
 
-    @Test fun capacityPauseIsVisibleAndResumeCompressesTheSameChildWithoutRecreation() {
-        val paused = CountDownLatch(1)
+    @Test fun disabledPressureCompressionDoesNotHaltOrRecreateTheChild() {
+        val limited = AtomicInteger()
         val summaries = AtomicInteger()
         val runtime = object : RunContextRuntime {
             override val automatic = false
@@ -102,25 +102,22 @@ class ToolEnabledChildRunTest {
         }
         val f = Fixture(contextRuntime = runtime, runtimeStore = object : RuntimeStore {
             override fun save(checkpoint: RunCheckpoint) {
-                if (checkpoint.context?.capacity != null) paused.countDown()
+                if (checkpoint.context?.capacity != null) limited.incrementAndGet()
             }
         })
         try {
-            assertTrue(f.run.start()); await(paused)
-            assertTrue(f.run.contextLimited)
-            assertTrue(f.run.snapshot.contextLimited)
-            assertEquals(ChildTaskPauseState.PAUSED, f.run.pauseState)
-            assertEquals(0, f.factories.get())
-            assertEquals(ChildTaskControlReceipt.PENDING, f.run.resume())
+            assertTrue(f.run.start())
             await(f.journal.finished); await(f.assembly.observed)
             f.transport.returnCancel.countDown(); f.assembly.report(ChildToolDrain.Drained)
             f.waitDrained()
-            assertEquals(1, summaries.get()); assertEquals(1, f.factories.get()); assertEquals(1, f.assembly.prepares.get())
+            assertEquals(0, summaries.get()); assertEquals(1, f.factories.get()); assertEquals(1, f.assembly.prepares.get())
+            assertEquals(0, limited.get()); assertEquals(1, f.transport.requests.get())
+            assertEquals(ChildTaskStatus.COMPLETED, f.run.snapshot.record.status)
             assertFalse(f.run.contextLimited)
         } finally { f.transport.returnCancel.countDown(); f.run.close() }
     }
 
-    @Test fun automaticUsageCompactsAtChildBoundaryWithoutManualResumeOrRecreation() {
+    @Test fun terminalUsageDoesNotStartAnUnusedSummaryOrReopenTheChild() {
         val summaries = AtomicInteger()
         val limited = AtomicInteger()
         val transport = Transport().apply { respond = { sink ->
@@ -130,6 +127,8 @@ class ToolEnabledChildRunTest {
         } }
         val runtime = object : RunContextRuntime {
             override val windowTokens = 1000L
+            override val pressureThresholdTokens = 800L
+            override fun headerIdentity(tools: List<ToolDefinition>) = "test-child"
             override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) =
                 if (summaries.get() == 0) 100L else 50L
             override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
@@ -149,7 +148,7 @@ class ToolEnabledChildRunTest {
             await(f.journal.finished); await(f.assembly.observed)
             f.transport.returnCancel.countDown(); f.assembly.report(ChildToolDrain.Drained)
             f.waitDrained()
-            assertEquals(1, summaries.get()); assertEquals(1, f.factories.get()); assertEquals(1, f.assembly.prepares.get())
+            assertEquals(0, summaries.get()); assertEquals(1, f.factories.get()); assertEquals(1, f.assembly.prepares.get())
             assertEquals(0, limited.get()); assertFalse(f.run.contextLimited)
             assertEquals(1, transport.requests.get())
             assertEquals(ChildTaskStatus.COMPLETED, f.run.snapshot.record.status)
@@ -188,6 +187,8 @@ class ToolEnabledChildRunTest {
         }
         val runtime = object : RunContextRuntime {
             override val windowTokens = 1000L
+            override val pressureThresholdTokens = 800L
+            override fun headerIdentity(tools: List<ToolDefinition>) = "test-child"
             override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L
             override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
                 request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,

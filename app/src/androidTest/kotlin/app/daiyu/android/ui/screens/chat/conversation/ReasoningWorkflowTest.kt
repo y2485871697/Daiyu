@@ -890,7 +890,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
     fun testCompletedHeaderOmitsUnfinishedHintButKeepsPendingToolState() {
         prepare()
         val source = message(listOf(tool("t1")), listOf(ReportedReasoning("r1", "first summary", blockOffset = 0)))
-        val turn = ChatTurnMapper.map(listOf(source), toolReceipt = { _, _ -> ToolReceiptUi(WorkStepState.PENDING) })
+        val turn = ChatTurnMapper.map(listOf(source), toolReceipt = { _, _ -> ToolReceiptUi(WorkStepState.PENDING, dispatched = true) })
             .single() as ChatTurnUi.Assistant
         assertEquals(1, turn.workProcess!!.completedStepCount)
         assertEquals(WorkStepState.PENDING, turn.workProcess.segments.flatMap { it.steps }.single().state)
@@ -921,7 +921,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
             AssistantTurn(turn, ChatScreenActions())
         } } }
         awaitHeader()
-        ui.onNodeWithText("已完成5步").assertIsDisplayed()
+        ui.onNodeWithText("已完成4步").assertIsDisplayed()
         assertDisclosure("work-process-header", expanded = false)
         mainThread { turn = project(WorkStepState.UNKNOWN, WorkStepState.FAILED) }
         ui.onNodeWithText("已完成5步").assertIsDisplayed()
@@ -931,7 +931,7 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         ui.onNodeWithTag("tool-step-header:failed").assertIsDisplayed()
         ui.onNodeWithTag("work-process-header").performClick()
         mainThread { turn = project(WorkStepState.NOT_EXECUTED, WorkStepState.FAILED) }
-        ui.onNodeWithText("已完成5步").assertIsDisplayed()
+        ui.onNodeWithText("已完成4步").assertIsDisplayed()
         ui.onNodeWithText("已完成5步 · 结果未确认").assertDoesNotExist()
         assertDisclosure("work-process-header", expanded = false)
     }

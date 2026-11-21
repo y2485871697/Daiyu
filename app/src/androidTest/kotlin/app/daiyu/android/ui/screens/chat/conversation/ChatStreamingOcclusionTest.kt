@@ -68,7 +68,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
     }
     private val inkSurfaceColor = Color(0xFFE0E0E0)
     private var inkReference by mutableStateOf(false)
-    private data class InkGlyph(val layout: TextLayoutResult, val at: Offset, val extent: Int = layout.size.height)
+    private data class InkGlyph(val layout: TextLayoutResult, val at: Offset, val extent: Int = layout.size.height,
+        val frontier: Double = layout.layoutInput.text.length.toDouble())
     private var inkGlyph: InkGlyph? = null
     private data class InkFrame(val glyphs: List<InkGlyph>, val regions: List<androidx.compose.ui.geometry.Rect>,
         val top: Float, val bottom: Float)
@@ -102,7 +103,26 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 val frame = inkFrame
                 if (frame != null) clipRect(top = frame.top, bottom = frame.bottom) {
                     frame.regions.forEach { drawRect(Color.White, it.topLeft, it.size) }
-                    frame.glyphs.forEach { drawText(it.layout, topLeft = it.at) }
+                    frame.glyphs.forEach { glyph ->
+                        val end = glyph.layout.layoutInput.text.length
+                        if (glyph.frontier >= end) drawText(glyph.layout, topLeft = glyph.at)
+                        else if (end > 0) {
+                            // These raster fixtures are BMP text; shade the final cell independently
+                            // from production's range paths, preserving the full opaque prefix.
+                            val cell = glyph.layout.getBoundingBox(end - 1).translate(glyph.at)
+                            clipRect(cell.left, cell.top, cell.right, cell.bottom, androidx.compose.ui.graphics.ClipOp.Difference) {
+                                drawText(glyph.layout, topLeft = glyph.at)
+                            }
+                            clipRect(cell.left, cell.top, cell.right, cell.bottom) {
+                                val canvas = drawContext.canvas
+                                val paint = androidx.compose.ui.graphics.Paint().apply {
+                                    alpha = (glyph.frontier - (end - 1)).toFloat().coerceIn(0f, 1f)
+                                }
+                                canvas.saveLayer(cell, paint)
+                                try { drawText(glyph.layout, topLeft = glyph.at) } finally { canvas.restore() }
+                            }
+                        }
+                    }
                 } else inkGlyph?.let { p ->
                     drawRect(Color.White, p.at,
                         Size(p.layout.size.width.toFloat(), p.layout.size.height.toFloat()))
@@ -617,6 +637,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         }
         var body by mutableStateOf(texts.first())
         var live by mutableStateOf(true)
+        val controller = ReplyPresentationControl("ink-wire-tail", true)
+        val playback = ReplyPlayback(controller, false)
         mainThread {
             activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
                 AgentAppTheme(AppearanceSettings(themeMode =
@@ -628,7 +650,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                                 ChatTurnUi.Assistant("ink-wire-tail", finalText = body,
                                     status = if (live) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = live),
                                 ChatScreenActions(), scrollRequest = ChatScrollRequest(1), composerBottomInset = inset,
-                                hasTurnExtras = { false }, turnExtras = { turn ->
+                                replyPlayback = playback, hasTurnExtras = { false }, turnExtras = { turn ->
                                     if (turn.id == "ink-wire-tail") paintSlots.Capture(turn.id)
                                 })
                         }, composer = { InkEditor() })
@@ -662,6 +684,11 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             }.sortedWith(compareBy<InkGlyph> { it.at.y }.thenBy { it.at.x })
             prefixes += glyphs.joinToString("|") { it.layout.layoutInput.text.text }
             pendingLeaves = glyphs.any { it.at.y + it.extent > safe + .01f }
+            val source = markdownBlocksDisplayText(defaultMarkdownParser(body))
+            val frontier = controller.lane("body:ink-wire-tail", MarkdownParserIdentity(defaultMarkdownParser), 0L) {
+                error("Missing real body lane")
+            }.inks.getValue("final").position
+            var cursor = 0
             val visible = glyphs.mapIndexedNotNull { index, candidate ->
                 if (candidate.at.y + candidate.extent > safe + .01f) unsafeCandidates++
                 if (candidate.layout.layoutInput.text.any { !it.isWhitespace() } &&
@@ -669,10 +696,16 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     approved[index] = candidate.layout
                 }
                 approved[index]?.takeIf { candidate.at.y + it.size.height <= safe + .01f }?.let {
-                    InkGlyph(it, candidate.at)
+                    val leaf = it.layoutInput.text.text
+                    val start = source.indexOf(leaf, cursor)
+                    if (start < 0) InkGlyph(it, candidate.at) // list marker is decoration, not a source glyph
+                    else {
+                        cursor = start + leaf.length
+                        InkGlyph(it, candidate.at, frontier = (frontier - start).coerceIn(0.0, leaf.length.toDouble()))
+                    }
                 }
             }.filter { it.at.y >= viewportTop }
-            val p = visible.maxWithOrNull(compareBy<InkGlyph> {
+            val p = visible.filter { it.frontier >= 1.0 }.maxWithOrNull(compareBy<InkGlyph> {
                 it.at.y + it.layout.getLineBottom(it.layout.lineCount - 1)
             }.thenBy { it.at.x })
             if (p == null) {
@@ -1504,7 +1537,8 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                     "expected=${expectedFull.length} ready=${ready.get()} pending=$pending viewport=${geometry()}")
                 if (finalSamples.size > 8) finalSamples.removeFirst()
                 val height = layouts.sumOf { it.second.size.height }
-                assertTrue("Revealed text must remain an append-only prefix", expectedFull.startsWith(displayed) && displayed.startsWith(previousText))
+                assertTrue("Revealed text must remain an append-only prefix: frame=$index previous=<$previousText> current=<$displayed> " +
+                    "samples=$finalSamples", expectedFull.startsWith(displayed) && displayed.startsWith(previousText))
                 if (displayed.isEmpty()) {
                     assertTrue("A completed tool answer must begin drawing without a long admission stall: ${geometry()}", index < 90)
                     continue

@@ -138,11 +138,11 @@ class TouchHapticsContractTest(unittest.TestCase):
         text = (SRC / "ui/components/DaiyuDialogs.kt").read_text()
         scrim = text.split('testTag("choice-sheet-viewport")', 1)[1].split(".windowInsetsPadding", 1)[0]
         self.assertIn("clickFeedback = false", scrim)
-        self.assertIn("onClick = onDismiss", scrim)
+        self.assertIn("onClick = { finishSelection(onDismiss) }", scrim)
         option = text.split('testTag("prompt-choice:$index").fillMaxWidth()', 1)[1].split("contentAlignment", 1)[0]
         self.assertIn(".clickable(onClick = select)", option)
         self.assertNotIn("clickFeedback = false", option)
-        self.assertIn('TextButton(text = "取消", onClick = onDismiss', text)
+        self.assertIn('TextButton(text = "取消", onClick = { finishSelection(onDismiss) }', text)
 
     def test_custom_semantics_links_and_slider_accessibility_are_covered(self):
         for file in ("ui/screens/settings/SettingsUiComponents.kt", "ui/screens/settings/WorkspaceSettingsScreen.kt", "ui/screens/settings/IconAppearanceEditor.kt", "ui/screens/chat/conversation/MessageMarkdown.kt"):
@@ -152,7 +152,7 @@ class TouchHapticsContractTest(unittest.TestCase):
         self.assertIn("TouchHaptics.action(view) { preview(index); commit(index) }", (SRC / "ui/components/subagent/ConversationThinkingPicker.kt").read_text())
         text = (SRC / "ui/components/subagent/ThinkingEffortPicker.kt").read_text()
         self.assertIn("CompositionLocalProvider(LocalConversationAgentStyle provides !mainChat)", text)
-        self.assertIn("ConversationThinkingPicker(show, effort, options, onDismiss, onEffortChange, description, speedMode, onCycleSpeed, speedEnabled)", text)
+        self.assertIn("ConversationThinkingPicker(show, effort, options, onDismiss, onEffortChange, speedMode, onCycleSpeed, speedEnabled)", text)
         self.assertNotIn("WindowDialog", text)
         self.assertNotIn("SliderDefaults", text)
 

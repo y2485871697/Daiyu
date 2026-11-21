@@ -222,7 +222,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertNotIn('drawn?.getLineBottom(', prepare)
         placed = clearance.split('fun placed(', 1)[1].split('val refreshAdmission', 1)[0]
         self.assertIn('prepareNextLine()', placed)
-        draw = clearance.split('.drawWithContent {', 1)[1]
+        draw = clearance.split('}.onGloballyPositioned(::placed).drawWithContent {', 1)[1]
         self.assertLess(draw.index('frame.drawn = actual'), draw.index('prepareNextLine()'))
         tail = (BASE / 'ChatMessageList.kt').read_text()
         body_end = tail.split('fun bodyEndInLeaf(', 1)[1].split('fun whollyAboveViewport', 1)[0]

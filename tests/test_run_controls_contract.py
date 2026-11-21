@@ -43,9 +43,9 @@ class RunControlsContractTest(unittest.TestCase):
     def test_live_stop_and_resume_do_not_commit_unaccepted_visual_state(self):
         screen = (APP / 'ui/screens/chat/conversation/ChatScreen.kt').read_text()
         stop = screen.split('onPrimaryLongPress = {', 1)[1].split('onSupplement =', 1)[0]
-        self.assertIn('if (runtimePhase == ComposerPhase.IDLE) presentation.finish()', stop)
+        self.assertIn('if (runtimePhase == ComposerPhase.IDLE) presentation.stopAtVisible()', stop)
         self.assertIn('else actions.onPrimaryLongPress()', stop)
-        self.assertIn('if (reply?.reasoningStopped == true) presentation.finish()', screen)
+        self.assertIn('if (reply?.reasoningStopped == true) presentation.stopAtVisible()', screen)
         self.assertNotIn('text -> presentation.finish(); actions.onSend(text)', screen)
         self.assertIn('if (queued) presentation.finish()', screen)
         controller = (APP / 'ChatController.kt').read_text()

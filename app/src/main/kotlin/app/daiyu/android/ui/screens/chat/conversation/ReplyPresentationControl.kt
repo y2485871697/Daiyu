@@ -42,10 +42,14 @@ internal class ReplyPresentationControl(
         else pendingLanes.remove(token)
     }
     fun pause(paused: Boolean) { if (!finished) pauseRequested = paused }
+    var stopped by mutableStateOf(false)
+        private set
+    fun stopAtVisible() { if (observedLive) stopped = true; finish() }
     fun finish() { finished = true; pauseRequested = false }
 }
 
 internal class ReplyTypingLane(val baseline: List<MarkdownTypingSource>) {
+    val inks = mutableMapOf<String, MarkdownInk>()
     val motion = MarkdownTypingState(baseline)
 }
 

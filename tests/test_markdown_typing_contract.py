@@ -115,7 +115,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertEqual('val before = shown shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end, streamSnapshot) { currentAdvance() } } if (currentAwaitPaintAdmission) publication.reserve(current, before, shown) value = MarkdownTypingFrame(current, shown)', ' '.join(callback.split()))
         self.assertIn('} finally {\n                    controlWakeups.cancel()\n                }', producer)
         self.assertEqual(1, producer.count('controlWakeups.cancel()'))
-        publication = self.typing.split("internal class MarkdownPaintPublication {", 1)[1].split("\ninternal val LocalMarkdownPaintPublication", 1)[0]
+        publication = self.typing.split("internal class MarkdownPaintPublication(", 1)[1].split("\ninternal val LocalMarkdownPaintPublication", 1)[0]
         self.assertIn("private val readyState = MutableStateFlow(true)", publication)
         self.assertIn("val readySignal = readyState.asStateFlow()", publication)
         self.assertIn("val ready: Boolean get() = pending.isEmpty() && installing.isEmpty()", publication)
@@ -133,7 +133,7 @@ class MarkdownTypingContract(unittest.TestCase):
             self.assertNotIn(forbidden, pending)
 
     def test_frontier_reservation_precedes_publish_and_requires_exact_installation(self):
-        publication = self.typing.split("internal class MarkdownPaintPublication {", 1)[1].split("\ninternal val LocalMarkdownPaintPublication", 1)[0]
+        publication = self.typing.split("internal class MarkdownPaintPublication(", 1)[1].split("\ninternal val LocalMarkdownPaintPublication", 1)[0]
         self.assertIn("private val installing = mutableStateMapOf<String, Int>()", publication)
         self.assertIn("if (installingTarget === target) return", publication)
         self.assertIn("if (installingTarget !== target || installing[id] != visible) return", publication)

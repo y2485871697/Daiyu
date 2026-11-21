@@ -185,7 +185,7 @@ internal fun DaiyuChatScreen(
     SideEffect {
         if (runtimePhase != ComposerPhase.IDLE || reply?.status == app.daiyu.android.domain.RunStatus.RUNNING)
             presentation.observeLive()
-        if (reply?.reasoningStopped == true) presentation.finish()
+        if (reply?.reasoningStopped == true) presentation.stopAtVisible()
         when (runtimePhase) {
             ComposerPhase.PAUSED -> presentation.pause(true)
             ComposerPhase.RUNNING -> presentation.pause(false)
@@ -208,7 +208,7 @@ internal fun DaiyuChatScreen(
             else actions.onPrimaryTap()
         },
         onPrimaryLongPress = {
-            if (runtimePhase == ComposerPhase.IDLE) presentation.finish()
+            if (runtimePhase == ComposerPhase.IDLE) presentation.stopAtVisible()
             else actions.onPrimaryLongPress()
         },
         onSupplement = { text -> actions.onSupplement(text).also { queued -> if (queued) presentation.finish() } },

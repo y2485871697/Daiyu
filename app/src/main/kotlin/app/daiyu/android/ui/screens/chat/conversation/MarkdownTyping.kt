@@ -33,8 +33,9 @@ internal class MarkdownReveal(
     exact: Boolean,
     budgets: MarkdownRevealBudgets = MarkdownRevealBudgets(derivedStateOf { target }, frame),
     internal val publication: MarkdownPaintPublication = MarkdownPaintPublication(),
-    val animateStreamSize: Boolean = false,
+    val inkEnabled: Boolean = false,
 ) {
+    fun inkFor(id: String) = publication.inks.getOrPut(id) { MarkdownInk(target?.let { it.limit(id, it.start) } ?: 0) }
     private val completion = derivedStateOf { exact && target != null && visible() >= target.total }
     val settled: Boolean get() = completion.value && publication.settled(target)
     fun applied(id: String, visible: Int) {
@@ -75,7 +76,9 @@ internal class MarkdownRevealBudgets(
     }
 }
 
-internal class MarkdownPaintPublication {
+internal class MarkdownPaintPublication(val inks: MutableMap<String, MarkdownInk> = mutableMapOf()) {
+    private val activeInk = mutableStateMapOf<Any, Unit>()
+    fun inkPending(owner: Any, busy: Boolean) { if (busy) activeInk[owner] = Unit else activeInk.remove(owner) }
     var active by mutableStateOf(false)
     private val pending = mutableStateMapOf<Any, Unit>()
     private val published = mutableStateMapOf<String, MarkdownTypingSource>()
@@ -119,7 +122,7 @@ internal class MarkdownPaintPublication {
     }
     fun presented(id: String, source: MarkdownTypingSource) { published[id] = source }
     fun settled(target: MarkdownTypingTarget?): Boolean = !active || target != null &&
-        ready && target.parts.all { it.length == 0 || published[it.source.id] == it.source }
+        activeInk.isEmpty() && ready && target.parts.all { it.length == 0 || published[it.source.id] == it.source }
 }
 
 internal val LocalMarkdownPaintPublication = staticCompositionLocalOf<MarkdownPaintPublication?> { null }
@@ -133,7 +136,7 @@ internal fun MarkdownTypingState.frame(target: MarkdownTypingTarget?): MarkdownT
     MarkdownTypingFrame(target, target?.let(::visible) ?: 0)
 
 internal fun markdownTypingCanAdvance(canAdvance: Boolean, playback: ReplyPlayback?): Boolean =
-    canAdvance && playback?.paused != true
+    canAdvance && playback?.paused != true && playback?.control?.stopped != true
 
 @Composable
 internal fun rememberMarkdownReveal(
@@ -229,13 +232,13 @@ internal fun rememberMarkdownReveal(
     val sourcesCompatible = remember(target, sources) {
         target?.let { markdownTypingAppends(it.parts.map { part -> part.source }, sources) } == true
     }
-    val finishImmediately = playback?.control?.finished == true
-    val canAdvance = enabled && sourcesCompatible && !typingPaused
+    val finishImmediately = playback?.control?.let { it.finished && !it.stopped } == true
+    val canAdvance = enabled && sourcesCompatible && !typingPaused && playback?.control?.stopped != true
     val currentCanAdvance by rememberUpdatedState(canAdvance)
     val currentPlayback by rememberUpdatedState(playback)
     val clearance = LocalStreamingTextClearance.current
     val textClearance by rememberUpdatedState(clearance)
-    val publication = remember(identity, resetEpoch, motion) { MarkdownPaintPublication() }
+    val publication = remember(identity, resetEpoch, motion) { MarkdownPaintPublication(retainedLane?.inks ?: mutableMapOf()) }
     val frame = produceState(motion.frame(target), target, canAdvance, advanceLimit, finishImmediately, streamSnapshot) {
         withContext(Dispatchers.Main.immediate) {
             val current = target ?: return@withContext
@@ -314,9 +317,8 @@ internal fun rememberMarkdownReveal(
         target.parts == parts && target.parts.map { it.source } == sources
     val currentTarget = rememberUpdatedState(target)
     val budgets = remember(identity, resetEpoch, frame, publication) { MarkdownRevealBudgets(currentTarget, frame, publication) }
-    val animateStreamSize = streamSnapshot && live
-    return remember(target, frame, exact, budgets, animateStreamSize) {
-        MarkdownReveal(target, frame, exact, budgets, budgets.publication, animateStreamSize)
+    return remember(target, frame, exact, budgets, streamSnapshot) {
+        MarkdownReveal(target, frame, exact, budgets, budgets.publication, streamSnapshot)
     }
 }
 

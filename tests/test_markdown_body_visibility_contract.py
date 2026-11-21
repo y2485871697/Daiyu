@@ -11,8 +11,8 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         leaf = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun markdownLineSpace', 1)[0]
         boundary = '}.graphicsLayer(), style, softWrap = softWrap, onTextLayout = {'
         self.assertIn(boundary, leaf)
-        draw = leaf.split('.drawWithContent {', 1)[1].split(boundary, 1)[0]
-        self.assertLess(draw.index('drawContent()'), draw.index('frame.drawn = actual'))
+        draw = leaf.split('}.onGloballyPositioned(::placed).drawWithContent {', 1)[1].split(boundary, 1)[0]
+        self.assertLess(draw.index('drawMarkdownInk(actual,'), draw.index('frame.drawn = actual'))
         self.assertNotIn('whollyAbove', draw)
         self.assertNotIn('drawText(', leaf)
         self.assertNotIn('CompositingStrategy.Offscreen', leaf)
@@ -32,8 +32,8 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
     def test_draw_observes_render_inputs_but_not_post_draw_feedback(self):
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         leaf = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun markdownLineSpace', 1)[0]
-        draw = leaf.split('.drawWithContent {', 1)[1].split('}.graphicsLayer(), style, softWrap = softWrap, onTextLayout = {', 1)[0]
-        inputs, feedback = draw.split('drawContent()', 1)
+        draw = leaf.split('}.onGloballyPositioned(::placed).drawWithContent {', 1)[1].split('}.graphicsLayer(), style, softWrap = softWrap, onTextLayout = {', 1)[0]
+        inputs, feedback = draw.split('drawMarkdownInk(actual, ink, inkOffset, inkBounds, inkControl?.stopped == true)', 1)
         self.assertNotIn('withoutReadObservation', inputs)
         for token in ('minOf(frame.availableHeight, clearance.availableHeight(frame.coordinates))',
                       'val frozen = playback?.paused == true',
@@ -73,8 +73,8 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
             'frame.layout = candidate frame.measureConstraints = candidate.layoutInput.constraints',
             ' '.join(measure.split()))
         self.assertIn('val drawn = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.drawn }', measure)
-        draw = leaf.split('.drawWithContent {', 1)[1]
-        self.assertIn('drawContent()\n                androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {\n                    frame.drawn = actual\n                    prepareNextLine()', draw)
+        draw = leaf.split('}.onGloballyPositioned(::placed).drawWithContent {', 1)[1]
+        self.assertIn('drawMarkdownInk(actual, ink, inkOffset, inkBounds, inkControl?.stopped == true)\n                androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {\n                    frame.drawn = actual\n                    prepareNextLine()', draw)
         self.assertIn('actual.size.height <= available + .01f', draw)
         self.assertIn('publication?.setPending(owner, !published())', draw)
 

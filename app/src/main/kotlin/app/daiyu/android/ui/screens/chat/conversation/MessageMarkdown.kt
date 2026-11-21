@@ -8,7 +8,6 @@ import android.text.style.StrikethroughSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
 import android.text.style.URLSpan
-import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -135,8 +134,9 @@ internal fun RevealedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?,
         publication.active = true
         if (sourceReady && blocks != null) reveal.presented(partId)
     }
-    CompositionLocalProvider(LocalMarkdownPaintPublication provides publication) {
-        val presented = if (reveal.animateStreamSize) modifier.animateContentSize() else modifier
+    val ink = rememberPartInk(reveal, partId)
+    CompositionLocalProvider(LocalMarkdownPaintPublication provides publication, LocalMarkdownInk provides ink) {
+        val presented = modifier
         if (deferBlockReveal) ProjectedMessageMarkdown(text, blocks, presented,
             generationComplete = generationComplete, visibility = reveal.visibility(partId), sourceWindow = sourceWindow,
             onCurrentBodyInstalled = { MarkdownPaintApplied(reveal, partId) })
@@ -231,8 +231,16 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     softWrap: Boolean = true, nextLineText: AnnotatedString? = null) {
     val clearance = LocalStreamingTextClearance.current
     val painted = LocalMarkdownPaintedText.current ?: remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }
+    val ink = LocalMarkdownInk.current
+    val inkControl = LocalReplyPlayback.current?.control
+    val inkOffset = paintOffset ?: LocalInkOffset.current
     if (clearance == null) {
-        BasicText(text, modifier, style, softWrap = softWrap)
+        var result by remember { mutableStateOf<TextLayoutResult?>(null) }
+        val bounds = remember(ink, text.text) { ink?.let { MarkdownTextBoundaries(text.text) } }
+        BasicText(text, modifier.drawWithContent {
+            val layout = result?.takeIf { it.layoutInput.text == text }
+            drawMarkdownInk(layout, ink, inkOffset, bounds, inkControl?.stopped == true)
+        }, style, softWrap = softWrap, onTextLayout = { result = it })
         return
     }
     val frame = remember(clearance, paintOffset) {
@@ -271,6 +279,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             }
         }
     }
+    val inkBounds = remember(ink, displayedText.text) { ink?.let { MarkdownTextBoundaries(displayedText.text) } }
     val candidateText = if (playback?.paused == true) displayedText else text
     val owner = remember(frame) { Any() }
     fun published(): Boolean = latestCandidateText.isEmpty() || frame.layout?.let { candidate ->
@@ -363,7 +372,8 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             }
             if (actual != null && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
                 actual.size.height <= available + .01f && (!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text)) {
-                drawContent()
+                if (actual.layoutInput.text.text != displayedText.text && ink != null) return@drawWithContent
+                drawMarkdownInk(actual, ink, inkOffset, inkBounds, inkControl?.stopped == true)
                 androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
                     frame.drawn = actual
                     prepareNextLine()
@@ -486,7 +496,9 @@ private fun MarkdownBlockBody(block: MarkdownBlock, openLink: (String) -> Unit, 
                 fontWeight = FontWeight.Bold, fontSize = size.sp, lineHeight = (size + 8).sp,
             ), visibility = visibility, paintOffset = paintOffset)
         }
-        is MarkdownBlock.Code -> MarkdownCodeBlock(block, visibility.value, generationComplete)
+        is MarkdownBlock.Code -> CompositionLocalProvider(LocalInkOffset provides paintOffset) {
+            MarkdownCodeBlock(block, visibility.value, generationComplete)
+        }
         is MarkdownBlock.Quote -> {
             val ruleColor = MiuixTheme.colorScheme.primary.copy(alpha = 0.5f)
             Column(Modifier.fillMaxWidth().drawBehind {

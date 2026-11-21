@@ -6,6 +6,22 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownRevealTest {
+    @Test fun inkCatchesUpWithoutFlushingAndStopPinsTheActualPaint() {
+        val ink = MarkdownInk(0)
+        var end = 0
+        repeat(60) { frame ->
+            end += 500
+            ink.advance(end, .016)
+            assertTrue(ink.position < end || frame > 0)
+            if (frame > 12) assertTrue(ink.position >= end - 6000)
+        }
+        val drawn = ink.paintPosition(0, end, false)
+        repeat(24) { ink.advance(end, .016) }
+        assertEquals(end.toDouble(), ink.position, .0001)
+        assertEquals(drawn, ink.paintPosition(0, end, true), .0001)
+        assertEquals(0.0, ink.paintPosition(end, 50, true), .0001)
+    }
+
     @Test fun onlyStrictBodyAppendInvalidatesMeasuredActionSlot() {
         val before = listOf(MarkdownTypingSource("preface", "Searching"), MarkdownTypingSource("answer", "A"))
         assertFalse(assistantActionSlotAppended(before, before))

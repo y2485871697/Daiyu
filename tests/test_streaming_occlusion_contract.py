@@ -106,10 +106,10 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertNotIn("frame.drawn =", publication)
         self.assertNotIn("painted[", publication)
         self.assertIn("!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text", leaf)
-        placed, drawn = leaf.split(".drawWithContent {", 1)
+        placed, drawn = leaf.split("}.onGloballyPositioned(::placed).drawWithContent {", 1)
         self.assertNotIn("painted[paintOffset] =", placed)
         self.assertNotIn("frame.drawn =", placed)
-        self.assertLess(drawn.index("drawContent()"), drawn.index("frame.drawn = actual"))
+        self.assertLess(drawn.index("drawMarkdownInk(actual,"), drawn.index("frame.drawn = actual"))
         self.assertLess(drawn.index("frame.drawn = actual"), drawn.index("publication?.setPending"))
         layout = drawn.split("onTextLayout = {", 1)[1]
         self.assertIn("frame.rendered = it", layout)

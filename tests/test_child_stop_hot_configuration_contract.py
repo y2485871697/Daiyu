@@ -66,7 +66,9 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
         self.assertIn("currentProfiles?.invoke() ?: profiles",tool)
     def test_hot_request_claim_rechecks_selection_and_shares_actual_pool(self):
         text = (DOMAIN / "ChildModelBatch.kt").read_text()
-        self.assertIn("selectedModel = awaitSelection()", text)
+        prepare = text.split("override fun prepareRequest() {", 1)[1].split("override fun open(", 1)[0]
+        self.assertLess(prepare.index("val candidate = awaitSelection()"), prepare.index("childContext?.prepare(candidate)"))
+        self.assertLess(prepare.index("childContext?.prepare(candidate)"), prepare.index("preparedModel = candidate"))
         self.assertIn("val selected = definition.current()", text)
         selection = text.split("fun awaitSelection(): ChildModelDefinition {", 1)[1].split("fun requireCurrentRole()", 1)[0]
         self.assertIn("sharedPool?.invoke(candidate)", selection)
@@ -79,9 +81,13 @@ class ChildStopHotConfigurationContractTest(unittest.TestCase):
         opening = text.split(
             "override fun open(history: List<Message>, definitions: List<app.daiyu.android.domain.ToolDefinition>): ModelSession {", 1,
         )[1].split("val cleanup = java.util.concurrent.CompletableFuture<Unit>()", 1)[0]
-        self.assertLess(opening.index("awaitTransportCleanup()"), opening.index("selectedModel = awaitSelection()"))
-        selected = opening.split("recordSelection(selectedModel)", 1)[1]
-        self.assertLess(selected.index("selectedModel.sameSelection(currentDefinition())"), selected.index("port.open(history, definitions)"))
+        claim = opening.index("val selectedModel = checkNotNull(preparedModel)")
+        self.assertLess(opening.index("awaitTransportCleanup()"), claim)
+        create = opening.index("val port = selectedModel.create()", claim)
+        recheck = "selectedModel.sameSelection(currentDefinition())"
+        self.assertLess(opening.index(recheck, claim), create)
+        self.assertLess(opening.index(recheck, create), opening.index("recordSelection(selectedModel)", create))
+        self.assertLess(opening.index("recordSelection(selectedModel)", create), opening.index("port.open(history, definitions)"))
         release = text.split("fun releaseItemIfReady() {", 1)[1].split("fun closeWaitingLeases()", 1)[0]
         self.assertIn("if (!workerFinished || !cleanupFinished || !toolsDrained || itemReleased) false", release)
         self.assertIn("if (!release) return", release)

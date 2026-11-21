@@ -382,7 +382,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             val histories = mutableListOf(top("tail"))
             val lengths = mutableListOf<Int>()
             val geometryFrames = mutableListOf<String>()
-            var paintedPartial = false
+            var paintedSnapshot = false
             val trace = java.util.ArrayDeque<String>(32)
             fun traceDraw(frame: Int, phase: String) {
                 val sample = paintDump("start-reply").lineSequence().filter {
@@ -395,8 +395,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             val typingClockStart = ui.mainClock.currentTime
             var received = first.take(5)
             var batchReached = false
-            var batchStart = 0
-            var batchTyped = false
+            var previousSnapshot = ""
             ui.runOnUiThread {
                 screen = screen.copy(turns = history + pending.copy(pending = false) +
                     ChatTurnUi.Assistant("start-reply", finalText = received, status = RunStatus.RUNNING, isStreaming = true))
@@ -414,10 +413,9 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             }
             repeat(90) { frame ->
                 if (frame == 30 || frame == 60) {
+                    assertTrue("The previous snapshot must reach the screen before the next delta", batchReached)
+                    previousSnapshot = received
                     received = if (frame == 30) first.take(13) else first
-                    assertTrue("Every received batch must expose a typed intermediate prefix: $lengths", batchTyped)
-                    batchStart = if (frame == 30) 5 else 13
-                    batchTyped = false
                     batchReached = false
                     ui.runOnUiThread {
                         screen = screen.copy(turns = history + pending.copy(pending = false) +
@@ -452,20 +450,21 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     "frame=$frame clock=${ui.mainClock.currentTime} lengths=$lengths received=${received.length} " +
                     "shown=${shown.length} geometry=${liveGeometry()}" +
                     if (received != shown) "\n${paintDump("start-reply")}\n${trace.joinToString("\n---\n")}" else "", received, shown)
-                if (shown.length in batchStart + 1 until received.length) batchTyped = true
+                assertTrue("Only received documents may appear: previous=$previousSnapshot received=$received shown=$shown",
+                    shown == previousSnapshot || shown == received)
                 lengths += shown.length
                 if (frame % 10 == 0 || frame == 89) geometryFrames += "frame=$frame ${liveGeometry()}"
                 val receivedPrefixNode = textNodes.firstOrNull { node ->
-                    node.config[SemanticsProperties.Text].any { it.text.length in batchStart + 1 until received.length && received.startsWith(it.text) }
+                    node.config[SemanticsProperties.Text].any { it.text == received && received.isNotEmpty() }
                 }
-                if (!paintedPartial && receivedPrefixNode != null) {
+                if (!paintedSnapshot && receivedPrefixNode != null) {
                     val origin = receivedPrefixNode.layoutInfo.coordinates.positionInRoot()
                     val size = receivedPrefixNode.layoutInfo.coordinates.size
                     if (origin.y + size.height <= composer.top - (10f + ChatTailClearance.value) * density + 1f) {
                         val clock = ui.mainClock.currentTime
                         val host = ui.onNodeWithTag("spacing-host")
                         val pixels = captureScreenNode(host, advanceAnimationClock = false).toPixelMap()
-                        assertEquals("A partial-body capture must not advance typing", clock, ui.mainClock.currentTime)
+                        assertEquals("A snapshot capture must not advance typing", clock, ui.mainClock.currentTime)
                         val hostOrigin = host.fetchSemanticsNode().layoutInfo.coordinates.positionInRoot()
                         val left = (origin.x - hostOrigin.x).toInt().coerceIn(0, pixels.width)
                         val top = (origin.y - hostOrigin.y).toInt().coerceIn(0, pixels.height)
@@ -473,19 +472,19 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                         val bottom = (origin.y - hostOrigin.y + size.height).toInt().coerceIn(top, pixels.height)
                         for (y in top until bottom) for (x in left until right) {
                             val pixel = pixels[x, y]
-                            if (pixel.red < .6f && pixel.green < .6f && pixel.blue < .6f) paintedPartial = true
+                            if (pixel.red < .6f && pixel.green < .6f && pixel.blue < .6f) paintedSnapshot = true
                         }
                     }
                 }
                 assertEquals("The real composer must remain anchored", composer,
                     ui.onNodeWithTag("chat-composer-surface").fetchSemanticsNode().boundsInRoot)
             }
-            assertTrue("The final received batch must expose a typed prefix: $lengths", batchTyped)
+            assertTrue("The final received document must be visible", batchReached)
             val userSteps = users.zipWithNext { before, after -> before - after }
             val historySteps = histories.zipWithNext { before, after -> before - after }
             assertEquals("First chunk must finish: lengths=$lengths userSteps=$userSteps " +
                 "historySteps=$historySteps geometry=$geometryFrames", first.length, lengths.last())
-            assertTrue("A partial prefix must actually paint inside the body ROI", paintedPartial)
+            assertTrue("A received snapshot must actually paint inside the body ROI", paintedSnapshot)
             ui.onNode(hasText(first) and hasAnyAncestor(hasTestTag("chat-turn:start-reply")),
                 useUnmergedTree = true).assertIsDisplayed()
             val reply = ui.onNodeWithTag("chat-turn:start-reply").fetchSemanticsNode().layoutInfo.coordinates

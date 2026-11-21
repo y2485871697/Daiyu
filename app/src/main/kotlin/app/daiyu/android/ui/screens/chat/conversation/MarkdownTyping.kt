@@ -34,6 +34,7 @@ internal class MarkdownReveal(
     budgets: MarkdownRevealBudgets = MarkdownRevealBudgets(derivedStateOf { target }, frame),
     internal val publication: MarkdownPaintPublication = MarkdownPaintPublication(),
     val inkEnabled: Boolean = false,
+    val onDocumentAdvance: () -> Unit = {},
 ) {
     fun displayText(id: String) = target?.parts?.firstOrNull { it.source.id == id }?.displayed.orEmpty()
     fun inkFor(id: String, stopped: Boolean): MarkdownInk {
@@ -288,7 +289,13 @@ internal fun rememberMarkdownReveal(
                                     motion.visible(current)
                                 }
                                 currentAwaitPaintAdmission && !publication.ready -> motion.visible(current)
-                                else -> motion.advance(current, frameNanos, end, streamSnapshot) { currentAdvance() }
+                                else -> motion.advance(current, frameNanos, end, streamSnapshot) {
+                                    // Document leaves report their own draw; other leaves still use the lane callback.
+                                    if (publication.answerPaint.isEmpty() || current.parts.any { part ->
+                                            val id = part.source.id
+                                            id !in publication.answerPaint && current.limit(id, end) > current.limit(id, before)
+                                        }) currentAdvance()
+                                }
                             }
                             if (currentAwaitPaintAdmission) publication.reserve(current, before, shown)
                             value = MarkdownTypingFrame(current, shown)
@@ -328,7 +335,7 @@ internal fun rememberMarkdownReveal(
     val currentTarget = rememberUpdatedState(target)
     val budgets = remember(identity, resetEpoch, frame, publication) { MarkdownRevealBudgets(currentTarget, frame, publication) }
     return remember(target, frame, exact, budgets, streamSnapshot) {
-        MarkdownReveal(target, frame, exact, budgets, budgets.publication, streamSnapshot)
+        MarkdownReveal(target, frame, exact, budgets, budgets.publication, streamSnapshot) { currentAdvance() }
     }
 }
 

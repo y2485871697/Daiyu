@@ -997,8 +997,29 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.beginTransaction()
         try {
             val result = MessageDisplayStore.read(db, id, before, limit, latestRunOnly = latestRunOnly)
+            // Read sidecars only for the physical rows in this bounded window. Ordinary text
+            // conversations keep the cheap display projection, with no original media IO.
+            val enriched = if (result.rows.isEmpty()) result else {
+                val ids = result.rows.map { it.second.id.value }
+                val placeholders = ids.joinToString(",") { "?" }
+                val videos = mutableMapOf<Pair<RunId, MessageId>, List<app.daiyu.android.media.video.MessageVideoReference>>()
+                db.rawQuery("SELECT message_id FROM message_video_inputs WHERE message_id IN ($placeholders)", ids.toTypedArray()).use { cursor ->
+                    while (cursor.moveToNext()) {
+                        val (message, inputs) = try {
+                            val row = storedMessage(db, id, cursor.getString(0), verifyVideoWitness = false)
+                            row to SQLiteMessageVideoStore.readVerified(db, row)
+                        } catch (failure: IllegalStateException) { continue }
+                        catch (failure: IllegalArgumentException) { continue }
+                        catch (failure: org.json.JSONException) { continue }
+                        inputs.forEach { input ->
+                            if (input.owner.conversationId == id.value) videos[message.runId to MessageId(input.owner.messageId)] = input.references
+                        }
+                    }
+                }
+                if (videos.isEmpty()) result else result.copy(videosByOwner = videos)
+            }
             db.setTransactionSuccessful()
-            return result
+            return enriched
         } finally { db.endTransaction() }
     }
     fun messages(id: ConversationId, before: Long = Long.MAX_VALUE, limit: Int = 50): List<Pair<Long,Message>> {

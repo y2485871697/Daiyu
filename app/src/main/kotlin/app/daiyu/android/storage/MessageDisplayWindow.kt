@@ -6,6 +6,7 @@ import app.daiyu.android.domain.*
 internal data class MessageDisplayWindow(
     val rows: List<Pair<Long, MessageDisplayRow>>,
     val deferredRows: Int = 0,
+    val videosByOwner: Map<Pair<RunId, MessageId>, List<app.daiyu.android.media.video.MessageVideoReference>> = emptyMap(),
 ) {
     init {
         require(deferredRows >= 0)

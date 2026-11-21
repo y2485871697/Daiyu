@@ -51,6 +51,16 @@ class MessageMediaOriginalProjectionTest : InstrumentationTestCase() {
         } finally { super.tearDown() }
     }
 
+    fun testColdAndExpandedDisplayWindowsKeepVerifiedVideo() {
+        for (latest in listOf(true, false)) {
+            val window = database.displayMessages(user.conversationId, latestRunOnly = latest)
+            val turn = ChatTurnMapper.mapDisplay(window).filterIsInstance<ChatTurnUi.User>().single()
+            val video = turn.content.filterIsInstance<MessageContentUi.Video>().single().video
+            assertEquals(reference, video.reference)
+            assertEquals(reference.owner, video.expectedOwner)
+        }
+    }
+
     fun testProjectionAndDownloadUsePhysicalSidecarOwnerAndExactOriginalBytes() {
         val snapshot = media.capture(user.conversationId) { false }
         val turn = ChatTurnMapper.map(listOf(user), messageVideos = snapshot::videos).single() as ChatTurnUi.User

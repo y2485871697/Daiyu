@@ -51,12 +51,15 @@ internal object ChatPageHostProbe {
 }
 
 private typealias PageContent = @Composable (Boolean, (Boolean) -> Unit) -> Unit
+internal val LocalPendingChatThumbnails = compositionLocalOf<MutableMap<Any, Unit>?> { null }
 private class ChatPageVisit(val owner: Any?, var content: PageContent) {
     var ready by mutableStateOf(false)
+    val pendingThumbnails = androidx.compose.runtime.mutableStateMapOf<Any, Unit>()
     var placed by mutableStateOf(false)
 }
 private class PageFrame {
     var recorded = false
+    var returning = false
     var imeBottom = Int.MIN_VALUE
 }
 
@@ -66,6 +69,7 @@ internal fun ChatPageHost(
     owner: Any?,
     modifier: Modifier = Modifier,
     motionInsets: WindowInsets = WindowInsets.ime,
+    routeVisible: Boolean = true,
     content: PageContent,
 ) {
     val density = LocalDensity.current
@@ -79,11 +83,11 @@ internal fun ChatPageHost(
     val wanted = front?.takeIf { it.owner == owner } ?: candidate
     val currentWanted by rememberUpdatedState(wanted)
     SideEffect { wanted.content = content }
-    val allowed = wanted.ready && (ChatPageHostProbe.observer?.allowReady?.invoke(owner) ?: true)
+    val allowed = wanted.ready && wanted.pendingThumbnails.isEmpty() && (ChatPageHostProbe.observer?.allowReady?.invoke(owner) ?: true)
     LaunchedEffect(wanted, allowed, wanted.placed, active) {
         if (!active || !allowed || !wanted.placed || wanted === committed) return@LaunchedEffect
         withFrameNanos { }
-        if (currentWanted === wanted && wanted.ready && wanted.placed &&
+        if (currentWanted === wanted && wanted.ready && wanted.pendingThumbnails.isEmpty() && wanted.placed &&
             (ChatPageHostProbe.observer?.allowReady?.invoke(owner) ?: true)) committed = wanted
     }
     val visits = if (front != null && front !== wanted) listOf(front, wanted) else listOf(wanted)
@@ -97,8 +101,9 @@ internal fun ChatPageHost(
             val report = remember(visit) { { value: Boolean -> visit.ready = value } }
             val layer = rememberGraphicsLayer()
             val frame = remember { PageFrame() }
+            SideEffect { if (!routeVisible) frame.returning = true }
             DisposableEffect(visit) { onDispose { ChatPageHostProbe.observer?.onDisposed?.invoke(visit) } }
-            CompositionLocalProvider(LocalChatPresentationActive provides authorized, LocalPageInputOwned provides inputOwned) {
+            CompositionLocalProvider(LocalPendingChatThumbnails provides visit.pendingThumbnails, LocalChatPresentationActive provides authorized, LocalPageInputOwned provides inputOwned) {
                 Box(Modifier.fillMaxSize().onPlaced {
                     visit.placed = true
                     ChatPageHostProbe.observer?.onPlaced?.invoke(visit.owner, it.size)
@@ -113,7 +118,10 @@ internal fun ChatPageHost(
                         if (drawn) {
                             val imeBottom = motionInsets.getBottom(density)
                             // Retain the old page, not a frozen keyboard position during its handoff.
-                            if (requested || !frame.recorded || active && parentAuthorized && frame.imeBottom != imeBottom) {
+                            if (!routeVisible) frame.returning = true
+                            val restoring = frame.returning && (!routeVisible || visit.pendingThumbnails.isNotEmpty())
+                            if (!frame.recorded || !restoring && (requested || active && parentAuthorized && frame.imeBottom != imeBottom)) {
+                                if (routeVisible) frame.returning = false
                                 layer.record { this@drawWithContent.drawContent() }
                                 frame.recorded = true
                                 frame.imeBottom = imeBottom

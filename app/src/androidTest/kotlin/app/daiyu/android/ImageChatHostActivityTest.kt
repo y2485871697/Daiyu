@@ -452,6 +452,34 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         assertEquals(1, documents.opens.get())
     }
 
+    fun testRestoredImageAcrossDrawerColdActivityAndSettings() = checkRestoredHistoryImage()
+
+    private fun checkRestoredHistoryImage() {
+        val image = sendImageToHistory()
+        val other = controller.database.create()
+        mainThread { activity.select(other) }
+        ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction()).performClick()
+        val tag = "drawer-conversation:${image.expectedOwner.conversationId}"
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
+        node(tag).performClick()
+        fun ready() = ui.waitUntil(10_000) {
+            ui.onAllNodesWithContentDescription("消息图片 1", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        ready()
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        finishHost()
+        activity = startMain()
+        ready()
+        ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction()).performClick()
+        node("drawer-dock-settings").performClick()
+        ui.waitForIdle()
+        assertNull(host().historyLoader)
+        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        ready()
+        assertEquals(1, calls.get())
+        assertEquals(1, documents.opens.get())
+    }
+
     fun testRealPageExitRevokesThumbnailRetainedWhileSidebarWasOpen() {
         val image = sendImageToHistory()
         val loader = checkNotNull(host().historyLoader)

@@ -111,7 +111,10 @@ object ChatTurnMapper {
         return mapRows(history, owners, { _, _ -> null }, { message, block -> receipt(message, block)?.state },
             { message, block -> dedicatedTool(WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value), block) },
             ::receipt, { timestamp(it.createdAt) }, boundariesAfter, { _, _ -> null }, presentations,
-            { emptyList() }, reconnects, childTaskNames)
+            { message ->
+                val owner = app.daiyu.android.media.video.MessageVideoOwner(message.conversationId.value, message.id.value)
+                window.videosByOwner[message.runId to message.id].orEmpty().filter { it.owner == owner }.map { MessageVideoUi(owner, it) }
+            }, reconnects, childTaskNames)
     }
 
     private data class RenderMessage(val id: app.daiyu.android.domain.MessageId,

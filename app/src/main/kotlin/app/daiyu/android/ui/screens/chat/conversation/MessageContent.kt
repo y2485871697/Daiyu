@@ -162,6 +162,13 @@ private fun MessageMediaGroup(
             }
         }
     }
+    val pending = LocalPendingChatThumbnails.current
+    val token = remember { Any() }
+    val loading = results.any { it === MessageImageLoadResult.Loading }
+    androidx.compose.runtime.DisposableEffect(pending, token, loading) {
+        if (loading) pending?.put(token, Unit)
+        onDispose { pending?.remove(token) }
+    }
     val aspects = results.map { it.decodedAspectRatio() }
     MessageMediaGrid(aspects, items.mapIndexed { offset, block -> block.workflowKey(range.first + offset) }, modifier) { offset ->
         when (val block = items[offset]) {

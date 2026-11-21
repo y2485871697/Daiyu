@@ -2578,7 +2578,7 @@ class MainActivity : ComponentActivity() {
                                 automaticCompression, automaticCompressionPending)
                             val pageActions = chatActions(completionReadAction())
                             val pageGeneration = editorGeneration
-                            val pageImageLoader = imageHost.historyLoader.takeIf { displayWindow == null }
+                            val pageImageLoader = imageHost.historyLoader
                             val pageAssistant = projectedAssistants.firstOrNull {
                                 it.id == (if (selected == null) activeAssistant else selected?.assistantId)
                             }
@@ -2591,7 +2591,7 @@ class MainActivity : ComponentActivity() {
                             val pageUserMessageEntrance = app.daiyu.android.ui.screens.chat.conversation.rememberUserMessageEntrance(
                                 pageState.userMessageEntrance, routeActive && !sidebarVisible, awaitPlacement = true)
                             app.daiyu.android.ui.screens.chat.conversation.ChatPageHost(
-                                owner = pageState.conversationKey, modifier = Modifier.fillMaxSize(),
+                                owner = pageState.conversationKey, modifier = Modifier.fillMaxSize(), routeVisible = routeActive && retainedPage == "chat",
                                 content = remember(
                                     chatPageState, pageState, pageCompression, pageActions, pageGeneration,
                                     pageImageLoader, pageAssistant, pageUserMessageEntrance,

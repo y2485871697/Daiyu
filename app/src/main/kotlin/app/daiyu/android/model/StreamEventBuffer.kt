@@ -8,6 +8,7 @@ internal class StreamEventBuffer(
     private val nanoTime: () -> Long = System::nanoTime,
     private val maxCharacters: Int = 512,
     private val maxNanos: Long = 250_000_000L,
+    private val immediateText: Boolean = true,
 ) {
     private var pending: ModelEvent? = null
     private var started = 0L
@@ -20,6 +21,11 @@ internal class StreamEventBuffer(
 
     fun accept(event: ModelEvent) {
         failure?.let { throw it }
+        if (immediateText && event is ModelEvent.TextDelta) {
+            flush() // earlier reasoning must reach the sink before the answer
+            emit(event)
+            return
+        }
         val previous = pending
         val merged = when {
             previous is ModelEvent.TextDelta && event is ModelEvent.TextDelta && previous.itemId == event.itemId ->

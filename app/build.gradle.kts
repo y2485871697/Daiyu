@@ -156,6 +156,7 @@ kotlin { jvmToolchain(27) }
 dependencies {
     compileOnly("io.github.libxposed:api:102.0.0")
     implementation(project(":core-domain"))
+    implementation("com.github.re-ovo.bettertext:markdown:v0.1.6")
     // Bounded RFC6455 decoding + one-shot HTTPS; licenses/API26 evidence in docs/P32-voice-network.md.
     implementation("org.java-websocket:Java-WebSocket:1.6.0")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

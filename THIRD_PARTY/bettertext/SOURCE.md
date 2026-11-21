@@ -1,0 +1,1 @@
+BetterText v0.1.6 (MIT), https://github.com/re-ovo/bettertext/tree/v0.1.6 . Linked as a Gradle dependency, not a source fork. Streaming answer integration follows RikkaHub 3.3.1 (AGPL-3.0), commit 2435dbdf4690fe26d424b8d1ab778bcde9c6cd75. See richtext/MaterialMarkdown.kt and bettertext/markdown/Markdown.kt.

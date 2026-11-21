@@ -95,27 +95,38 @@ class CandidateSourceTests(unittest.TestCase):
             target.unlink()
 
     def test_exact_prelaunch_infrastructure_migration_reuses_unchanged_candidate(self):
+        # c08310cbf predates per-scope script selection. Reconstruct its fixed
+        # invocation for this migration only; changing the selector is not approved.
+        lines = [line for line in self.current.splitlines() if 'script: bash -c' in line
+                 and 'test -s smoke/prelaunch-ready.txt && bash "$smoke_script"' in line]
+        self.assertEqual(len(lines), 1)
+        begin = lines[0].index('smoke_script=scripts/smoke_boot.sh;')
+        end = lines[0].index('test -s smoke/prelaunch-ready.txt', begin)
+        fixed = lines[0][:begin] + lines[0][end:].replace('bash "$smoke_script"', 'bash scripts/smoke_boot.sh')
+        historical = self.current.replace(lines[0], fixed)
+        with self.assertRaises(ValueError):
+            self.verify(source_workflow=historical, current_workflow=self.current)
         for snippet in (source.SMOKE_PRELAUNCH, source.SMOKE_HOST_DEPENDENCIES,
                         '          rm -f smoke/prelaunch-ready.txt\n',
                         'test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh'):
             with self.subTest(snippet=snippet):
-                self.assertEqual(self.current.count(snippet), 1)
-        previous = self.current.replace(source.SMOKE_PRELAUNCH, source.LEGACY_SMOKE_PRELAUNCH)
+                self.assertEqual(historical.count(snippet), 1)
+        previous = historical.replace(source.SMOKE_PRELAUNCH, source.LEGACY_SMOKE_PRELAUNCH)
         previous = previous.replace(source.SMOKE_HOST_DEPENDENCIES, '')
         previous = previous.replace('          rm -f smoke/prelaunch-ready.txt\n', '')
         previous = previous.replace('test -s smoke/prelaunch-ready.txt && bash scripts/smoke_boot.sh',
                                     'bash scripts/smoke_boot.sh')
-        self.verify(source_workflow=previous,
+        self.verify(source_workflow=previous, current_workflow=historical,
                     changed=['scripts/prepare_smoke_emulator.sh', '.github/workflows/build.yml'])
         for old, new in [('libpulse0', 'arbitrary-package'),
                          ('test -s smoke/prelaunch-ready.txt', 'true'),
                          ('rm -f smoke/prelaunch-ready.txt', 'rm -f smoke/unreviewed-marker.txt'),
                          ('prepare_smoke_emulator.sh', 'unknown.sh')]:
             with self.subTest(old=old), self.assertRaises(ValueError):
-                self.verify(source_workflow=previous, current_workflow=self.current.replace(old, new))
+                self.verify(source_workflow=previous, current_workflow=historical.replace(old, new))
         with self.assertRaises(ValueError):
             self.verify(source_workflow=previous.replace('"hw.lcd.density":"160"',
-                                                        '"hw.lcd.density":"525"'))
+                                                        '"hw.lcd.density":"525"'), current_workflow=historical)
 
     def test_uwb_transport_migration_keeps_backend_and_rejects_dropped_or_altered_device(self):
         self.assertEqual(self.current.count(source.SMOKE_UWB_TRANSPORT), 1)

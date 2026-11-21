@@ -9,8 +9,11 @@ def read(p): return (SRC / p).read_text()
 class UsageStatisticsPortContractTest(unittest.TestCase):
     def test_new_and_upgraded_databases_install_independent_accounting(self):
         source=read('storage/ConversationDatabase.kt')
-        self.assertIn('null, 30)', source)
-        self.assertIn('oldVersion in 1..29 && newVersion == 30', source)
+        version = int(re.search(r'SQLiteOpenHelper\(context, "conversations\.db", null, (\d+)\)', source).group(1))
+        self.assertGreaterEqual(version, 34)
+        self.assertIn(f'oldVersion in 1..{version - 1} && newVersion == {version}', source)
+        create = source.split('override fun onCreate', 1)[1].split('override fun onUpgrade', 1)[0]
+        self.assertIn('UsageStatisticsStore.install(db)', create)
         upgrade=source.split('override fun onUpgrade',1)[1]
         self.assertLess(upgrade.index('UsageStatisticsStore.install(db)'),upgrade.index('if (oldVersion >= 13) return'))
         self.assertLess(upgrade.index('ConversationUsageStore.backfill(db)'),upgrade.index('UsageStatisticsStore.install(db)'))

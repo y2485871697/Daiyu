@@ -29,7 +29,8 @@ class DoubaoProviderPortContractTest(unittest.TestCase):
         self.assertIn('DoubaoSpeech.catalogModels.map', save)
         self.assertIn('CatalogModelParameters.newModel(RemoteModel(id, label), CatalogModelSource.LOCAL)', save)
         self.assertIn('modelCatalog.replaceRegisteredProvider(initialModels)', save)
-        self.assertIn('if (speechOnly) modelCatalog.register(initialModels)', save)
+        self.assertIn('val initialModels = if (speechOnly)', save)
+        self.assertLess(save.index('modelCatalog.replaceRegisteredProvider(initialModels)'), save.index('catalogReplaced = true'))
         self.assertLess(save.index('catalogReplaced = true'), save.index('modelCatalog.register(initialModels)'))
         presets = source('voice/providers/DoubaoSpeech.kt')
         self.assertIn('"seed-tts-2.0" to "豆包语音合成 2.0"', presets)
@@ -59,7 +60,10 @@ class DoubaoProviderPortContractTest(unittest.TestCase):
         self.assertIn('if (worker.isInterrupted || isCancelled()) throw CancellationException', probe)
         self.assertIn('synthesis.cancel(); break', probe)
         self.assertIn('finally { cancellation.cancel() }', probe)
-        self.assertIn('invokeOnCancellation { call.cancel() }', source('voice/network/OkHttpVoiceTransport.kt'))
+        http = source('voice/network/OkHttpVoiceTransport.kt').split('override suspend fun execute(', 1)[1]
+        on_cancel = http.split('continuation.invokeOnCancellation {', 1)[1].split('}', 1)[0]
+        self.assertIn('call.cancel()', on_cancel)
+        self.assertLess(http.index('continuation.invokeOnCancellation'), http.index('call.enqueue('))
         self.assertIn('RemoteModelFailure.CANCELLED', probe)
 
     def test_speech_success_never_claims_catalog_or_playback(self):

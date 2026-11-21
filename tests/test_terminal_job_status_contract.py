@@ -29,7 +29,9 @@ class TerminalJobStatusContractTest(unittest.TestCase):
     def test_completion_is_observed_without_a_later_poll_and_preserves_uncertainty(self):
         registry = (TERMINAL / 'TerminalRegistry.kt').read_text()
         self.assertIn('job.pumpFinished = true', registry)
-        self.assertIn('synchronized(jobs) { releaseFinishedResources(job) }', registry)
+        pump = registry.split('private fun startLogPump', 1)[1].split('private fun poll(', 1)[0]
+        finished = pump.split('job.pumpFinished = true', 1)[1]
+        self.assertIn('synchronized(jobs) { releaseFinishedResources(job); forgetDrainedImageRead(job) }', finished)
         self.assertIn('it.execution == "executed" && it.exitCode != null', registry)
         self.assertIn('value.put("completion", JSONObject().put("format", 1)', registry)
         evidence = (TERMINAL / 'TerminalJobCompletionEvidence.kt').read_text()

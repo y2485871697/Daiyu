@@ -1382,6 +1382,8 @@ class MainActivity : ComponentActivity() {
     private class ChatReturnRefresh(val conversation: ConversationId?, val editor: Long, var full: Boolean)
     private var chatReturnRefresh by mutableStateOf<ChatReturnRefresh?>(null)
     private var retainedPageState by mutableStateOf("chat")
+    // Covered settings routes all have the same retained-chat ownership.
+    private val chatRouteSelected by derivedStateOf(structuralEqualityPolicy()) { retainedPageState == "chat" }
     private var offlineSpeechReturnPage = "chat"
     private var usageReturnPage = "chat"
     private var providersReturnPage = "chat"
@@ -2487,7 +2489,7 @@ class MainActivity : ComponentActivity() {
                     ConversationSidePaneScaffold(
                         controlsState = conversationDrawerControlsState,
                         listState = conversationDrawerListState,
-                        state = paneState, visible = retainedPage == "chat" && sidebarVisible, backHandlerEnabled = routeActive,
+                        state = paneState, visible = chatRouteSelected && sidebarVisible, backHandlerEnabled = routeActive,
                         assistants = projectedAssistants, selectedAssistantId = if (selected == null) activeAssistant else selected?.assistantId.orEmpty(),
                         onOpen = { openSidebar() }, onDismiss = { dismissSidebar() },
                         onSearchChange = { paneState = paneState.copy(searchQuery = it) },
@@ -2624,7 +2626,7 @@ class MainActivity : ComponentActivity() {
                                                 refreshFloatingCall()
                                             }
                                         },
-                                        menuAvailable = retainedPage == "chat" && !sidebarVisible,
+                                        menuAvailable = chatRouteSelected && !sidebarVisible,
                                         readAutomaticCompression = { pageCompression },
                                         dedicatedTool = { step -> DedicatedQuestion(step, routeActive && pageCurrent && presented) },
                                         toolContent = { step -> ToolTrustedContent(step, routeActive && pageCurrent && presented) },
@@ -3458,7 +3460,7 @@ class MainActivity : ComponentActivity() {
             editorMatches() && currentChatControlAvailable() && renderedOwner != null && it.id == renderedOwner.id && it.runId == renderedOwner.runId && it.conversationId == renderedOwner.conversationId
         }
         fun actionUnavailable() { toast("操作未完成，请稍后再试") }
-        val actionSnapshot = messageActionSnapshot?.takeIf {
+        val actionSnapshot = if (!chatRouteSelected || sidebarVisible) null else messageActionSnapshot?.takeIf {
             it.conversationId.value == renderedConversation && messageActionRenderedRevision.matches(it, shown.map { row -> row.second })
         }
         fun messageActionOwnerCurrent() = displayWindow == null && editorOwnerMatches() && draftRevision == renderedDraftRevision &&
@@ -3573,8 +3575,8 @@ class MainActivity : ComponentActivity() {
         val renderedSpeed = confirmedGptSpeed
         val renderedSpeedConversation = selected?.id?.value
         return ChatScreenActions(
-        messageActionsEnabled = controller.messageMutationsAvailable(),
-        messageBranchEnabled = controller.messageBranchAvailable(),
+        messageActionsEnabled = chatRouteSelected && !sidebarVisible && controller.messageMutationsAvailable(),
+        messageBranchEnabled = chatRouteSelected && !sidebarVisible && controller.messageBranchAvailable(),
         onOpenWorkspace = { if (currentChat()) openConversationWorkspace() },
         onReferenceShortcut = { trigger, expected ->
             if (editorMatches() && inlineMessageEditor == null && chatState.composer.enabled && draft == expected)
@@ -4093,7 +4095,7 @@ class MainActivity : ComponentActivity() {
                 acknowledgeCompletion(receipt, generation, revision)) receiptState.value = null
         }
     }
-    private fun completionPageReadable() = activityUsable() && voiceForeground && retainedPage == "chat" &&
+    private fun completionPageReadable() = chatRouteSelected && activityUsable() && voiceForeground &&
         !sidebarVisible && selectionReady && controller.ready && !controller.dataBusy &&
         controller.problem?.startsWith("会话恢复失败") != true
     private fun completionShown(receipt: app.daiyu.android.storage.ConversationCompletionMarkers.Receipt) =

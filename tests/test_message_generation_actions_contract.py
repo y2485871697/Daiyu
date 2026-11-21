@@ -22,8 +22,8 @@ class MessageGenerationActionsContract(unittest.TestCase):
 
     def test_host_projects_real_admission_and_blocks_old_mutation_gestures(self):
         activity = (SRC / "MainActivity.kt").read_text()
-        self.assertIn("messageActionsEnabled = controller.messageMutationsAvailable()", activity)
-        self.assertIn("messageBranchEnabled = controller.messageBranchAvailable()", activity)
+        self.assertIn("messageActionsEnabled = chatRouteSelected && !sidebarVisible && controller.messageMutationsAvailable()", activity)
+        self.assertIn("messageBranchEnabled = chatRouteSelected && !sidebarVisible && controller.messageBranchAvailable()", activity)
         self.assertIn("controller.loadMessageBranchSnapshot(owner)", activity)
         for gate in ("return@regenerate", "return@delete"):
             self.assertIn("if (!controller.messageMutationsAvailable()) " + gate, activity)

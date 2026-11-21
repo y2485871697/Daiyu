@@ -56,7 +56,7 @@ class PageBackGestureContractTest(unittest.TestCase):
 
     def test_prediction_runs_only_on_supported_resumed_pages(self):
         self.assertIn('predictiveBackEnabled && Build.VERSION.SDK_INT >= 34', self.host)
-        self.assertIn('callback.isEnabled = enabled && state.resumed', self.host)
+        self.assertIn('if (callback.isEnabled != currentEnabled) callback.isEnabled = currentEnabled', self.host)
         self.assertIn('if (!activeState.predictiveEnabled) return', self.host)
         self.assertIn('BackHandler(enabled, onBack)', self.host)
         self.assertIn('val currentEnabled by rememberUpdatedState(enabled && state.resumed)', self.host)
@@ -699,6 +699,11 @@ class PageBackGestureContractTest(unittest.TestCase):
         self.assertIn('compositingStrategy = CompositingStrategy.ModulateAlpha', target_layer)
         self.assertIn('drawPreview(target)', target_layer)
         self.assertNotIn('drawContent()', target_layer)
+
+    def test_return_alpha_fast_path_only_for_a_single_bitmap(self):
+        block = self.host.split('} else if (departure != null && showDeparture) {', 1)[1].split('} else translationX', 1)[0]
+        self.assertIn('if (departure.targetImage != null && !(retainedRootContent != null && retainedRootVisible))\n                            compositingStrategy = CompositingStrategy.ModulateAlpha', block)
+        self.assertIn('if (retainedRootContent != null && retainedRootVisible) null else departure.targetImage', self.host)
 
     def test_original_miuix_motion_is_full_width_with_parallax_and_independent_dimming(self):
         for token in ('kotlin.math.round(state.direction * size.width * visibleProgress)',

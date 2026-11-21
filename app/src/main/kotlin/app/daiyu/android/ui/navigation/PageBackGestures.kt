@@ -380,7 +380,7 @@ internal fun PageBackHandler(enabled: Boolean = true, previewEnabled: Boolean = 
         }
     }
     SideEffect {
-        callback.isEnabled = enabled && state.resumed
+        if (callback.isEnabled != currentEnabled) callback.isEnabled = currentEnabled
         if (!callback.isEnabled) session.invalidate()
     }
     DisposableEffect(state, callback) {
@@ -774,6 +774,9 @@ internal fun PageBackGestureHost(
                         val value = exit.value
                         translationX = -departure.direction * size.width * 0.25f * (1f - value)
                         alpha = 1f - 0.1f * (1f - value)
+                        // A single frozen bitmap needs no fullscreen offscreen alpha pass.
+                        if (departure.targetImage != null && !(retainedRootContent != null && retainedRootVisible))
+                            compositingStrategy = CompositingStrategy.ModulateAlpha
                     } else translationX = kotlin.math.round(state.direction * size.width * visibleProgress)
                 }.then(if ((target != null && state.previewAllowed && state.gestureVisualActive) ||
                     (showDeparture && departure?.forward == true)) {

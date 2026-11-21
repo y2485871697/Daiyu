@@ -62,7 +62,8 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
     def test_retained_overflow_loses_ownership_on_navigation_not_lifecycle_pause(self):
         activity = (APP / 'MainActivity.kt').read_text()
         call = activity.split('DaiyuChatScreen(pageState, pageActions,', 1)[1].split('readAutomaticCompression = {', 1)[0]
-        self.assertIn('menuAvailable = retainedPage == "chat" && !sidebarVisible', call)
+        self.assertIn('derivedStateOf(structuralEqualityPolicy()) { retainedPageState == "chat" }', activity)
+        self.assertIn('menuAvailable = chatRouteSelected && !sidebarVisible', call)
         self.assertNotIn('menuAvailable = routeActive', call)
         screen = (CHAT / 'ChatScreen.kt').read_text()
         self.assertIn('menuAvailable: Boolean = true', screen)
@@ -179,7 +180,7 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
         activity = (APP / 'MainActivity.kt').read_text()
         root = activity.split('val rootChatContent: @Composable (Boolean) -> Unit = { routeActive ->', 1)[1]
         call = root.split('ConversationSidePaneScaffold(', 1)[1].split('onOpen =', 1)[0]
-        self.assertIn('visible = retainedPage == "chat" && sidebarVisible', call)
+        self.assertIn('visible = chatRouteSelected && sidebarVisible', call)
         self.assertIn('backHandlerEnabled = routeActive', call)
         self.assertNotIn('visible = routeActive && sidebarVisible', call)
         # Pausing still revokes interaction; only the visual-intent wiring changes.

@@ -50,6 +50,7 @@ internal class ReplyPresentationControl(
 
 internal class ReplyTypingLane(val baseline: List<MarkdownTypingSource>) {
     val inks = mutableMapOf<String, MarkdownInk>()
+    val answerPaint = mutableMapOf<String, AnswerPaint>()
     val motion = MarkdownTypingState(baseline)
 }
 

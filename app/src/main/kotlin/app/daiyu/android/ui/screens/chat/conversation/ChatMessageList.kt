@@ -1628,7 +1628,7 @@ internal fun rememberAssistantTextBody(plainNarration: Set<String>, sources: Lis
             SideEffect { if (sourceReady) currentReveal.value.presented(text.itemId) }
             Text(displayed.take(end), modifier.fillMaxWidth(), color = conversationColors().muted,
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
-        } else if (streamAnswer && remember(text.itemId) { !currentComplete.value } && text.markdownWindow == null) {
+        } else if (streamAnswer && remember(text.itemId) { !currentComplete.value || text.itemId in currentReveal.value.publication.answerPaint } && text.markdownWindow == null) {
             StreamingAnswer(text.text, !currentComplete.value && index == currentSources.value.lastIndex,
                 text.itemId, currentReveal.value, modifier)
         } else RevealedMessageMarkdown(displayed, accepted?.blocksAt(index),

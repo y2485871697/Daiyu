@@ -17,14 +17,14 @@ import me.rerere.bettertext.markdown.rememberMarkdownDocument
 import me.rerere.bettertext.text.BetterSelectionContainer
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-private class AnswerPaint { var last: MarkdownDocument? = null }
+internal class AnswerPaint { var last: MarkdownDocument? = null }
 
 /** Same parser, document publisher and block renderer as the reference app. No local character queue. */
 @Composable
 internal fun StreamingAnswer(source: String, streaming: Boolean, id: String, reveal: MarkdownReveal, modifier: Modifier) {
     val playback = LocalReplyPlayback.current
-    val frozen = playback?.let { it.paused || it.control.stopped } == true
-    val receipt = remember(id) { AnswerPaint() }
+    val frozen = !LocalChatPresentationActive.current || playback?.let { it.paused || it.control.stopped } == true
+    val receipt = remember(id, reveal.publication) { reveal.publication.answerPaint.getOrPut(id) { AnswerPaint() } }
     val document = rememberMarkdownDocument(if (frozen) receipt.last?.source.orEmpty() else source, streaming = streaming)
     val shown = if (frozen) receipt.last else document
     val limit = reveal.limit(id)

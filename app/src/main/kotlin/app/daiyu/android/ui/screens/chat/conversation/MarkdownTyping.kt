@@ -36,7 +36,15 @@ internal class MarkdownReveal(
     val inkEnabled: Boolean = false,
 ) {
     fun displayText(id: String) = target?.parts?.firstOrNull { it.source.id == id }?.displayed.orEmpty()
-    fun inkFor(id: String) = publication.inks.getOrPut(id) { MarkdownInk(target?.let { it.limit(id, it.start) } ?: 0) }
+    fun inkFor(id: String, stopped: Boolean): MarkdownInk {
+        val start = target?.let { it.limit(id, it.start) } ?: 0
+        val part = target?.parts?.firstOrNull { it.source.id == id }
+        val previous = publication.inks[id]
+        val ink = if (previous != null && part != null) previous.forSource(part.source, start, stopped)
+            else previous ?: MarkdownInk(if (stopped) 0 else start, part?.source)
+        publication.inks[id] = ink
+        return ink
+    }
     private val completion = derivedStateOf { exact && target != null && visible() >= target.total }
     val settled: Boolean get() = completion.value && publication.settled(target)
     fun applied(id: String, visible: Int) {

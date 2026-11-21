@@ -28,6 +28,18 @@ class MarkdownRevealTest {
         assertEquals(.576, short.position, .00001)
     }
 
+    @Test fun replacementUsesItsBaselineButAppendAndStopKeepTheDrawnFrontier() {
+        val before = MarkdownTypingSource("id", "原文")
+        val ink = MarkdownInk(1, before)
+        ink.paintPosition(0, 2, false)
+        assertSame(ink, ink.forSource(before.copy(text = "原文续写"), 4, false))
+        assertEquals(1.0, ink.position, 0.0)
+        val replacement = before.copy(text = "后台替换")
+        assertSame(ink, ink.forSource(replacement, 4, true))
+        assertEquals(1.0, ink.paintPosition(0, 4, true), 0.0)
+        assertEquals(4.0, ink.forSource(replacement, 4, false).position, 0.0)
+    }
+
     @Test fun onlyStrictBodyAppendInvalidatesMeasuredActionSlot() {
         val before = listOf(MarkdownTypingSource("preface", "Searching"), MarkdownTypingSource("answer", "A"))
         assertFalse(assistantActionSlotAppended(before, before))

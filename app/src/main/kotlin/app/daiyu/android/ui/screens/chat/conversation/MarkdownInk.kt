@@ -9,7 +9,16 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.text.TextLayoutResult
 
 /** Position is a fractional UTF-16 offset for drawing; the clock spends graphemes, not code units. */
-internal class MarkdownInk(start: Int) {
+internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource? = null) {
+    fun forSource(next: MarkdownTypingSource, baseline: Int, stopped: Boolean): MarkdownInk {
+        if (stopped) return this
+        val previous = source
+        if (previous != null && previous != next && !markdownTypingAppends(listOf(previous), listOf(next)))
+            return MarkdownInk(baseline, next)
+        source = next
+        return this
+    }
+
     var position by mutableDoubleStateOf(start.toDouble()); private set
     private val paintedEnds = mutableMapOf<Int, Double>()
     fun paintPosition(offset: Int, length: Int, stopped: Boolean): Double {
@@ -65,7 +74,8 @@ internal fun rememberPartInk(reveal: MarkdownReveal, id: String): MarkdownInk? {
     val currentText by rememberUpdatedState(text)
     val currentBounds by rememberUpdatedState(bounds)
     val admission = reveal.visibility(id)
-    val ink = remember(reveal.publication, id) { reveal.inkFor(id) }
+    val stopped = LocalReplyPlayback.current?.control?.stopped == true
+    val ink = remember(reveal, id, stopped) { reveal.inkFor(id, stopped) }
     val paused = LocalReplyPlayback.current?.let { it.paused || it.control.stopped } == true || !LocalChatPresentationActive.current
     val busy by remember(ink, admission) { derivedStateOf { ink.position != admission.value.toDouble() } }
     val control = LocalReplyPlayback.current?.control

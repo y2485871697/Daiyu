@@ -35,7 +35,10 @@ class ChildTaskCardContractTest(unittest.TestCase):
         mapper = (CHAT / 'ChatTurnMapper.kt').read_text()
         display = mapper[mapper.index('internal fun mapDisplay('):mapper.index('private data class RenderMessage')]
         self.assertIn('childTaskNames: Map<ChildRunOwner, String>', display)
-        self.assertIn('{ emptyList() }, reconnects, childTaskNames)', display)
+        mapped = display.split('return mapRows(history, owners,', 1)[1]
+        self.assertIn('window.videosByOwner[message.runId to message.id]', mapped)
+        self.assertIn('filter { it.owner == owner }', mapped)
+        self.assertIn('}, reconnects, childTaskNames)', mapped)
         activity = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         self.assertIn('Snapshot.read(controller.database, rows, display)', activity)
         self.assertIn('childTaskNames = visibleChildNames', activity)

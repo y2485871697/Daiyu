@@ -1006,6 +1006,26 @@ class MarkdownRevealTest {
         assertEquals(first.length + 150, state.visible(target))
     }
 
+    @Test fun continuousBodyReceiptsStayWithinTwoShortPaintWindows() {
+        val state = MarkdownTypingState(emptyList())
+        var text = ""
+        var shown = 0
+        val receipts = mutableListOf<Int>()
+        repeat(48) { i ->
+            val time = 1_000_000_000L + i * 16_000_000L
+            if (i < 40) text += "字".repeat(if (i % 5 == 0) 240 else 3)
+            receipts += text.length
+            state.receive(listOf(source(text)), time)
+            val target = state.update(listOf(part(text)), 0, i < 40, i >= 40)!!
+            val previous = shown
+            shown = state.advance(target, time, target.total, true)
+            if (i == 0) assertEquals(1, shown)
+            if (i in 1..3) assertTrue(shown in (previous + 1) until text.length)
+            if (i >= 8) assertTrue("receipt from eight paints ago still queued at $i", shown >= receipts[i - 8])
+        }
+        assertEquals(text.length, shown)
+    }
+
     @Test fun adaptiveBodyDrainsFastUnicodeReceiptsWithoutSkippingTheAnimation() {
         val state = MarkdownTypingState(emptyList())
         val text = "字😀e\u0301".repeat(100)

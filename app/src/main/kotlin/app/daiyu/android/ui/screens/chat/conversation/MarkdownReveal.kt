@@ -210,6 +210,8 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
     private var position = 0.0
     private var lastFrame = 0L
     private var lastAdvanceFrame = Long.MIN_VALUE
+    private var bodyWindowEnd = 0
+    private var bodyPaintsLeft = 0
     private var receivedEnd = 0
     private var arrivalFrame = 0L
     private var arrivalSeconds = .12
@@ -287,6 +289,9 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         receivedEnd = if (previous != null && appending) {
             mappedMarkdownPosition(previous, parts, receivedEnd.toDouble()).toInt().coerceIn(start, total)
         } else start
+        if (previous != null && appending && bodyPaintsLeft > 0) {
+            bodyWindowEnd = mappedMarkdownPosition(previous, parts, bodyWindowEnd.toDouble()).toInt().coerceIn(start, total)
+        } else bodyPaintsLeft = 0
         if (!appending) {
             activeReceiptNanos = null
             rate = 0.0
@@ -366,10 +371,17 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
             val seconds = ((frameNanos - lastFrame).coerceIn(0L, 50_000_000L)) / 1_000_000_000.0
             rate += (desiredRate - rate) * (1.0 - exp(-seconds / .12))
             if (adaptiveBody) {
-                // Drain a burst over several painted frames; slow arrivals still use the receipt clock.
-                val remaining = end - previous
-                val budget = maxOf(rate, if (remaining >= 16) remaining / .18 else 0.0) * seconds
-                budget.coerceAtMost(maxOf(width.toDouble(), remaining / 3.0)) / width
+                // Finish the current slice even if more receipts arrive. Only successful
+                // paint admissions consume a slot; wall-clock stalls never buy a jump.
+                if (bodyPaintsLeft == 0 || bodyWindowEnd <= previous) {
+                    bodyWindowEnd = end
+                    bodyPaintsLeft = 4
+                }
+                bodyWindowEnd = minOf(bodyWindowEnd, end)
+                val distance = bodyWindowEnd - previous
+                val units = kotlin.math.ceil(distance.toDouble() / bodyPaintsLeft)
+                bodyPaintsLeft--
+                maxOf(width.toDouble(), units) / width
             } else (rate * seconds / width).coerceIn(0.0, 1.0)
         }
         activeReceiptNanos = null

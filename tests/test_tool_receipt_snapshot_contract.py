@@ -72,7 +72,8 @@ class ReceiptSnapshotContract(unittest.TestCase):
         mapper = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatTurnMapper.kt').read_text()
         display = mapper.split('internal fun mapDisplay(', 1)[1].split('private data class RenderMessage', 1)[0]
         self.assertIn('receipt(message, block)?.state', display)
-        self.assertIn('receipt(message, block)?.activity', display)
+        self.assertIn('::receipt, { timestamp', display)
+        self.assertIn('awaitingDispatch = !(projection?.dispatched', mapper)
         self.assertNotIn('Message(', display.replace('RenderMessage(', ''))
 
     def test_pane_prepares_matching_receipts_before_first_publish_and_retains_async_update_guards(self):

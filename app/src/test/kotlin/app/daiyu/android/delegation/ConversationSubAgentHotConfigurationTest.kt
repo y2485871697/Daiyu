@@ -119,6 +119,23 @@ class ConversationSubAgentHotConfigurationTest {
         assertTrue(binding.select(other.id, fallback.revision))
     }
 
+    @Test fun presetKeepsStableAgentEvenWhenPeerHasItsOldModel() {
+        val repository = ConversationSubAgentPreferences(HotConfigurationPreferences())
+        val a = profile.copy(id = "a", modelId = "x")
+        val b = a.copy(id = "b")
+        repository.update(owner) { it.copy(profiles = listOf(a)) }
+        val binding = CommittedProfileBinding(repository.openRuntime(owner), a)
+        val preset = repository.addPreset("stable")
+        repository.update(SubAgentConfigKey.Preset(preset.id)) { it.copy(profiles = listOf(b, a.copy(modelId = "y"))) }
+        repository.applyPreset(owner, preset.id)
+        val view = requireNotNull(binding.current())
+        assertEquals("y", view.profile.modelId)
+        assertEquals(listOf("a"), view.candidates.map { it.id })
+        assertFalse(binding.select("b", view.revision))
+        repository.update(owner) { it.copy(profiles = listOf(b)) }
+        assertEquals("b", requireNotNull(binding.current()).profile.id)
+    }
+
     @Test fun ordinaryEditsStayWithTheOriginalAgentAndOrphansCanUseAnAdmittedPeer() {
         val repository = ConversationSubAgentPreferences(HotConfigurationPreferences())
         val a = profile.copy(id = "a", modelId = "x")

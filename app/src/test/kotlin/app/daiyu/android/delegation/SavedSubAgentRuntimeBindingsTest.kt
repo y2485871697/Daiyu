@@ -432,6 +432,20 @@ class SavedSubAgentRuntimeBindingsTest {
             { _, _ -> error("deleted profile must not resolve credentials") }).isEmpty())
     }
 
+    @Test fun unavailableNeighborsCannotBlockAnAvailableProfileOrReadTheirCredentials() {
+        val offline = provider.copy(id = "offline", isEnabled = false)
+        val hidden = child.copy(id = "disabled-record", isEnabled = false)
+        val source = listOf(offline, provider.copy(models = listOf(child, hidden)))
+        val mixed = config.copy(profiles = listOf(profile.copy(id = "a", providerId = offline.id),
+            profile.copy(id = "b", modelId = hidden.id), profile.copy(id = "c", modelId = "missing"), profile))
+        val frozen = SavedSubAgentRuntimeBindings { error("must not open model") }.freeze(owner,
+            mixed.withAvailableModels(source), source, { slot, id ->
+                assertEquals(profile.providerId, slot); assertEquals(profile.modelId, id); saved
+            })
+        assertEquals(setOf(profile.id), frozen.keys)
+        assertTrue(mixed.withAvailableModels(emptyList()).profiles.isEmpty())
+    }
+
     @Test fun disabledAdmissionReturnsEmptyWithoutReadingCredentials() {
         val bindings = SavedSubAgentRuntimeBindings()
         listOf(config.copy(enabled = false), config.copy(profiles = emptyList())).forEach { selection ->

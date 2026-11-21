@@ -254,7 +254,15 @@ class ContentRecoveryWitnessContract(unittest.TestCase):
         runtime = (root / "app/src/main/kotlin/app/daiyu/android/diagnostics/RuntimeDiagnostics.kt").read_text()
         chat = (root / "app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatMessageList.kt").read_text()
         self.assertIn("ObserveChatRecovery(pageActive && scrollResumed)", chat)
-        witness = chat.split("ObserveChatRecovery(pageActive && scrollResumed)", 1)[1].split("// Read confirmation", 1)[0]
+        start = chat.index("ObserveChatRecovery(pageActive && scrollResumed) {")
+        body = chat.index("{", start)
+        depth = 1
+        for end in range(body + 1, len(chat)):
+            depth += (chat[end] == "{") - (chat[end] == "}")
+            if depth == 0:
+                break
+        self.assertEqual(0, depth, "unterminated recovery observer")
+        witness = chat[body + 1:end]
         for source in ("listState.layoutInfo", "positionInWindow()", "currentNestedTail.viewportOffset",
                        "currentNestedTail.scrollOffset", "currentNestedTail.contentHeight",
                        "ChatRecoveryGeometry.Item(it.index, it.offset, it.size)"):

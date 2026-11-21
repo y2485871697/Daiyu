@@ -1993,12 +1993,14 @@ class ChatController internal constructor(private val application:Application,
         val runtimeStart = childPreferences.openRuntime(key)
         val config = runtimeStart.config
         val lifetimes = config.profiles.associate { it.id to childPreferences.profileLifetime(key, it.id) }
-        val registryRevision = providers.snapshot().revision
+        val registry = providers.snapshot()
+        val registryRevision = registry.revision
         val availableConfig = config.copy(profiles = config.profiles.filterNot { it.isMedia || (it.providerId to it.modelId) in deletedCatalogModels })
         val selection = if (profileId == null) availableConfig else availableConfig.copy(enabled = true,
             profiles = availableConfig.profiles.filter { it.id == profileId })
         check(profileId == null || selection.profiles.size == 1) { "child_profile_removed_or_role_changed" }
-        val catalogRevisions = selection.profiles.filter { selection.enabled }.map { it.providerId }.distinct().associateWith { slot ->
+        val catalogRevisions = selection.profiles.filter { selection.enabled }.map { it.providerId }.distinct()
+            .filter { slot -> registry.providers.any { it.slotId == slot && it.enabled } }.associateWith { slot ->
             providers.withEditor(providers.editor(slot)) { store -> store.modelCatalog.readConfiguration { it } }
         }
         val bindingsCurrent = {
@@ -2010,7 +2012,9 @@ class ChatController internal constructor(private val application:Application,
                     providers.withEditor(providers.editor(slot)) { store -> store.modelCatalog.readConfiguration { it == revision } }
                 }
         }
-        return try { childBindings.freeze(key, selection, savedSubAgentProviders(), ::readSavedChildProviderModel, bindingsCurrent, runModel,
+        val projected = savedSubAgentProviders()
+        val admitted = if (profileId == null) selection.withAvailableModels(projected) else selection
+        return try { childBindings.freeze(key, admitted, projected, ::readSavedChildProviderModel, bindingsCurrent, runModel,
             latestConfig = if (hotUpdates) ({ childPreferences.snapshot(key) }) else null,
             latestModel = if (hotUpdates) ({ id -> freezeSavedChildModels(key, hotUpdates = false,
                 profileId = id, runModel = runModel).getValue(id) }) else null,

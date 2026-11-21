@@ -28,6 +28,10 @@ internal data class SubAgentProvider(
     val isEnabled: Boolean = true,
 )
 
+internal fun ConversationSubAgentConfig.withAvailableModels(providers: List<SubAgentProvider>) = copy(
+    profiles = profiles.filter { profile -> providers.singleOrNull { it.id == profile.providerId && it.isEnabled }
+        ?.models?.singleOrNull { it.id == profile.modelId }?.isEnabled == true })
+
 /** Capability information must come from the selected record, never from a fallback model. */
 internal data class SubAgentModel(
     val id: String,

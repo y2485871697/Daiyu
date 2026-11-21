@@ -27,17 +27,13 @@ internal class CommittedProfileBinding(start: ConversationSubAgentPreferences.Ru
                 val next = edge.after
                 if (next == null || edge.kind == ConversationSubAgentPreferences.CommitKind.RESET) revoked = true
                 else {
-                    val choices = if (edge.kind == ConversationSubAgentPreferences.CommitKind.APPLY_PRESET) {
+                    if (edge.kind == ConversationSubAgentPreferences.CommitKind.APPLY_PRESET)
                         admittedIds = next.profiles.map { it.id }.toSet()
-                        next.profiles.filter { it.role == role }
-                    } else {
-                        val replacement = next.profiles.singleOrNull { it.id == assigned.id && it.role == role }
-                        if (replacement != null) {
-                            // Editing a live same-role agent never lets a neighbour steal its task.
-                            preference = replacement
-                            listOf(replacement)
-                        } else next.profiles.filter { it.role == role && it.id in admittedIds }
-                    }
+                    val stable = next.profiles.singleOrNull { it.id == assigned.id && it.role == role }
+                    val choices = if (stable != null) {
+                        preference = stable
+                        listOf(stable)
+                    } else next.profiles.filter { it.role == role && it.id in admittedIds }
                     val preferred = preferred(choices, preference)
                     val replacement = preferred.firstOrNull { it.id == assigned.id } ?: preferred.firstOrNull()
                     if (replacement == null) revoked = true

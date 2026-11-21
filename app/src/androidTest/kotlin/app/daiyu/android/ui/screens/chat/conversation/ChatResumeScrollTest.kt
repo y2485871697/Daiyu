@@ -789,6 +789,36 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
     }
 
 
+    fun testScrollingAwayFromFinishedReplyKeepsComposerIdle() = checkFinishedHistoryScroll()
+
+    private fun checkFinishedHistoryScroll() {
+        val history = List(60) { ChatTurnUi.User("history-$it", "History row $it") }
+        val live = ChatTurnUi.Assistant("last-reply", status = RunStatus.RUNNING, isStreaming = true, finalText = "done")
+        var active by mutableStateOf(true)
+        mainThread {
+            activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    DaiyuChatScreen(ChatScreenState("history", conversationKey = "history-scroll",
+                        turns = history + if (active) live else live.copy(status = RunStatus.COMPLETED, isStreaming = false),
+                        composer = ComposerUi(phase = if (active) ComposerPhase.RUNNING else ComposerPhase.IDLE),
+                        scrollRequest = ChatScrollRequest(1)), ChatScreenActions())
+                }
+            }
+        }
+        ui.onNodeWithTag("chat-control").assertContentDescriptionEquals("暂停")
+        mainThread { active = false }
+        ui.waitUntil(10_000) { ui.onAllNodesWithTag("chat-send").fetchSemanticsNodes().size == 1 }
+        ui.onNodeWithText("done").assertIsDisplayed()
+        ui.onNodeWithTag("chat-messages").performScrollToIndex(0)
+        ui.onNodeWithText("History row 0").assertIsDisplayed()
+        ui.onNodeWithText("done").assertDoesNotExist()
+        ui.onNodeWithTag("chat-control").assertDoesNotExist()
+        ui.onNodeWithTag("chat-send").assertContentDescriptionEquals("发送")
+        ui.onNodeWithTag("chat-messages").performScrollToIndex(history.size)
+        ui.onNodeWithText("done").assertIsDisplayed()
+        ui.onNodeWithTag("chat-control").assertDoesNotExist()
+    }
+
     fun testPagedCompletedHistoryGetsASilentProductionScope() = verifyCompletedHistoryScope(asTail = false)
 
     fun testLateCompletedHistoryTailWithUnarmedControlStaysSilent() = verifyCompletedHistoryScope(asTail = true)

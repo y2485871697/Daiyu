@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.domain.RunStatus
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -26,7 +27,9 @@ internal class ReplyPresentationControl(
     fun pending(turn: ChatTurnUi.Assistant) = matches(turn) && observedLive && !finished && (settledTurn != turn || pendingLanes.isNotEmpty())
     fun setSettled(turn: ChatTurnUi.Assistant, settled: Boolean) {
         if (!matches(turn)) return
-        if (settled) settledTurn = turn else if (settledTurn == turn) settledTurn = null
+        if (settled) settledTurn = turn
+        // Removing a lazy row revokes its viewport readiness, not an already displayed terminal reply.
+        else if (turn.status == RunStatus.RUNNING && settledTurn == turn) settledTurn = null
     }
     fun lane(slot: Any, parser: MarkdownParserIdentity, epoch: Long, baseline: () -> List<MarkdownTypingSource>): ReplyTypingLane =
         lanes.getOrPut(LaneKey(slot, parser, epoch)) { ReplyTypingLane(baseline().toList()) }

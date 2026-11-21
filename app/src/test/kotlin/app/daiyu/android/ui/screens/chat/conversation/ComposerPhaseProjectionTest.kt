@@ -47,6 +47,19 @@ class ComposerPhaseProjectionTest {
         assertFalse(state.pending(terminal))
     }
 
+    @Test fun disposingASettledTerminalRowDoesNotRearmItsComposer() {
+        val live = turn()
+        val state = control(live)
+        val done = live.copy(status = RunStatus.COMPLETED, isStreaming = false, finalText = "done")
+        state.setSettled(done, true)
+        state.setSettled(done, false)
+        assertFalse(state.pending(done))
+        assertTrue(state.pending(done.copy(finalText = "done with more output")))
+        state.setSettled(live, true)
+        state.setSettled(live, false)
+        assertTrue(state.pending(live))
+    }
+
     @Test fun runtimePauseAlsoFreezesThePresentation() {
         val state = control(turn())
         assertTrue(ReplyPlayback(state, runtimePaused = true).paused)

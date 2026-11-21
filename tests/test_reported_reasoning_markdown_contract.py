@@ -16,10 +16,11 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
         self.assertIn("val sourceReady = reveal.ready(partId, text, sourceWindow)", leaf)
         self.assertIn(
             "if (deferBlockReveal) ProjectedMessageMarkdown(text, blocks, presented,\n"
-            "            generationComplete = generationComplete, visibility = reveal.visibility(partId), sourceWindow = sourceWindow)",
+            "            generationComplete = generationComplete, visibility = reveal.visibility(partId), sourceWindow = sourceWindow,\n"
+            "            onCurrentBodyInstalled = { MarkdownPaintApplied(reveal, partId) })",
             leaf,
         )
-        self.assertIn("else ProjectedMessageMarkdown(text, blocks, presented, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow)", leaf)
+        self.assertIn("else ProjectedMessageMarkdown(text, blocks, presented, reveal.limit(partId), generationComplete, sourceWindow = sourceWindow,\n            onCurrentBodyInstalled = { MarkdownPaintApplied(reveal, partId) })", leaf)
         self.assertIn("projection?.blocksAt(0)", source)
         self.assertNotRegex(source, r"\bText\(it\.text")
         self.assertNotIn("MarkdownParser.parse", source)

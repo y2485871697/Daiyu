@@ -28,6 +28,7 @@ import app.daiyu.android.ui.app.AgentAppTheme
 import top.yukonga.miuix.kmp.basic.Text
 
 class ChatResumeScrollTest : WiredActivityTestCase() {
+    override val requiresWindowDraw: Boolean = true
     private class Owner : LifecycleOwner {
         val registry = LifecycleRegistry(this)
         override val lifecycle: Lifecycle get() = registry
@@ -725,9 +726,11 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
                         frontier = lane.motion.visible(target)
                     }
                 }
-                if (frontier == initial.length) break
+                if (frontier == initial.length && lane.inks["final"]?.position == initial.length.toDouble()) break
             }
             assertEquals("The received snapshot must be shown before disposal", initial.length, frontier)
+            assertEquals("Wait for the actual visible prefix, not only admission", initial.length.toDouble(),
+                checkNotNull(lane.inks["final"]).position, 0.0)
             assertTrue(advances.get() > 0)
             assertSame(oldControl, suppliedControl)
             ui.onNodeWithTag("chat-messages").performTouchInput { click(center) }
@@ -762,7 +765,10 @@ class ChatResumeScrollTest : WiredActivityTestCase() {
             val remounted = restored.motion.target!!.let(restored.motion::visible)
             assertTrue("The shown prefix must never rewind", remounted >= frozen)
             if (partial) {
-                repeat(60) { tick() }
+                ui.waitUntil(5_000) {
+                    tick()
+                    restored.inks["final"]?.position == (text.length + suffix.length).toDouble()
+                }
                 assertEquals("Offscreen growth is one new snapshot, not a replay of history", beforeDisposal + 1, advances.get())
                 assertEquals(text.length + suffix.length, restored.motion.target!!.let(restored.motion::visible))
                 assertEquals("The offscreen suffix must enter the production target", text.length + suffix.length,

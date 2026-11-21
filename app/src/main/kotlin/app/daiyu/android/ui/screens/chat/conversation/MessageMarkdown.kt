@@ -239,7 +239,10 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     val ink = LocalMarkdownInk.current.takeIf { paintOffset != null || LocalInkOffset.current >= 0 }
     val inkControl = LocalReplyPlayback.current?.control
     val inkOffset = paintOffset ?: LocalInkOffset.current
-    fun inkHeight(layout: TextLayoutResult): Int = ink?.visibleHeight(layout, inkOffset, inkControl?.stopped == true) ?: layout.size.height
+    // The input is already bounded to the current grapheme. Reserve a real trailing blank
+    // line as well: BasicText places it even when the last character is a newline.
+    fun inkHeight(layout: TextLayoutResult): Int = if (ink != null && inkControl?.stopped == true)
+        ink.visibleHeight(layout, inkOffset, true) else layout.size.height
     if (clearance == null) {
         var result by remember { mutableStateOf<TextLayoutResult?>(null) }
         val bounds = remember(ink, text.text) { ink?.let { MarkdownTextBoundaries(text.text) } }

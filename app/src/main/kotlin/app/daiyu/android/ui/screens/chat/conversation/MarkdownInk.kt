@@ -13,7 +13,7 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
     fun forSource(next: MarkdownTypingSource, baseline: Int, stopped: Boolean): MarkdownInk {
         if (stopped) return this
         val previous = source
-        if (previous != null && previous != next && !markdownTypingAppends(listOf(previous), listOf(next)))
+        if (previous == null || previous != next && !markdownTypingAppends(listOf(previous), listOf(next)))
             return MarkdownInk(baseline, next)
         source = next
         return this
@@ -88,6 +88,10 @@ internal fun rememberPartInk(reveal: MarkdownReveal, id: String): MarkdownInk? {
     val control = LocalReplyPlayback.current?.control
     val playback = LocalReplyPlayback.current
     val currentPlayback by rememberUpdatedState(playback)
+    val clearance = LocalStreamingTextClearance.current
+    val following = busy && !paused
+    SideEffect { clearance?.setTypingPending(ink, following) }
+    DisposableEffect(ink, clearance) { onDispose { clearance?.setTypingPending(ink, false) } }
     SideEffect { reveal.publication.inkPending(ink, busy && control?.stopped != true); control?.reportPending(ink, busy) }
     DisposableEffect(ink, control) { onDispose { reveal.publication.inkPending(ink, false); control?.reportPending(ink, false) } }
     LaunchedEffect(ink, admission, busy, paused) {

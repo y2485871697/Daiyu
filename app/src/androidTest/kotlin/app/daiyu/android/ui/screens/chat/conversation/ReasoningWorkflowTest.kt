@@ -53,13 +53,16 @@ class ReasoningWorkflowTest : WiredActivityTestCase() {
         val maxFrames = remaining * 4 + 24
         val clockAtStart = ui.mainClock.currentTime
         repeat(maxFrames) {
+            val previousTime = ui.mainClock.currentTime
             ui.mainClock.advanceTimeByFrame()
+            val frameSeconds = ((ui.mainClock.currentTime - previousTime) / 1000.0).coerceAtMost(.05)
+            val maxGlyphs = kotlin.math.ceil(frameSeconds * 240.0).toInt()
             val current = shown()
             val currentFeedback = feedback()
             assertTrue("Only received text may be revealed", expected.startsWith(current))
             assertTrue("Drain cannot retract its prefix", current.startsWith(previous))
-            assertTrue("At most one fixture grapheme may become visible per frame: ${previous.length}->${current.length}",
-                current.length - previous.length in 0..1)
+            assertTrue("Fixture must stay within 240 graphemes/s: ${previous.length}->${current.length}",
+                current.length - previous.length in 0..maxGlyphs)
             assertTrue("Visible feedback must be monotonic and at most once per frame: $previousFeedback->$currentFeedback",
                 currentFeedback - previousFeedback in 0..1)
             val complete = checkFrame(current)

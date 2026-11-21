@@ -173,6 +173,8 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             release.countDown()
             await { advances > 0 }
             awaitTyped(pending)
+            // The last glyph enters the native node while it is still fading in.
+            await { ui.onAllNodesWithText("已思考").fetchSemanticsNodes().isNotEmpty() }
             ui.onNodeWithText("正在显示…").assertDoesNotExist()
             ui.onNodeWithText("已思考").assertExists()
             ui.onNodeWithTag("reasoning-step-state:r", useUnmergedTree = true)

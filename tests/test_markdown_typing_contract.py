@@ -205,6 +205,7 @@ class MarkdownTypingContract(unittest.TestCase):
             "        lanes.getOrPut(LaneKey(slot, parser, epoch)) { ReplyTypingLane(baseline().toList()) }",
             "internal class ReplyTypingLane(val baseline: List<MarkdownTypingSource>) {\n"
             "    val inks = mutableMapOf<String, MarkdownInk>()\n"
+            "    val answerPaint = mutableMapOf<String, AnswerPaint>()\n"
             "    val motion = MarkdownTypingState(baseline)\n"
             "}",
         ]:

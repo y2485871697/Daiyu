@@ -210,8 +210,6 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
     private var position = 0.0
     private var lastFrame = 0L
     private var lastAdvanceFrame = Long.MIN_VALUE
-    private var bodyWindowEnd = 0
-    private var bodyPaintsLeft = 0
     private var receivedEnd = 0
     private var arrivalFrame = 0L
     private var arrivalSeconds = .12
@@ -289,9 +287,6 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         receivedEnd = if (previous != null && appending) {
             mappedMarkdownPosition(previous, parts, receivedEnd.toDouble()).toInt().coerceIn(start, total)
         } else start
-        if (previous != null && appending && bodyPaintsLeft > 0) {
-            bodyWindowEnd = mappedMarkdownPosition(previous, parts, bodyWindowEnd.toDouble()).toInt().coerceIn(start, total)
-        } else bodyPaintsLeft = 0
         if (!appending) {
             activeReceiptNanos = null
             rate = 0.0
@@ -331,10 +326,10 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
     }
 
     fun advance(expected: MarkdownTypingTarget, frameNanos: Long, limit: Int = expected.total, onAdvance: () -> Unit = {}): Int {
-        return advance(expected, frameNanos, limit, adaptiveBody = false, onAdvance = onAdvance)
+        return advance(expected, frameNanos, limit, streamSnapshot = false, onAdvance = onAdvance)
     }
 
-    fun advance(expected: MarkdownTypingTarget, frameNanos: Long, limit: Int, adaptiveBody: Boolean,
+    fun advance(expected: MarkdownTypingTarget, frameNanos: Long, limit: Int, streamSnapshot: Boolean,
         onAdvance: () -> Unit = {}): Int {
         if (target !== expected) return expected.start
         val previous = position.toInt()
@@ -344,6 +339,13 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
             activeReceiptNanos = null
             lastFrame = 0L
             return previous
+        }
+        if (streamSnapshot) {
+            // A body snapshot is already paced by its producer, not by a second character clock.
+            position = end.toDouble()
+            lastAdvanceFrame = frameNanos
+            onAdvance()
+            return end
         }
         val arrived = (end - receivedEnd).coerceAtLeast(0)
         if (arrived > 0) {
@@ -370,30 +372,12 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
         } else {
             val seconds = ((frameNanos - lastFrame).coerceIn(0L, 50_000_000L)) / 1_000_000_000.0
             rate += (desiredRate - rate) * (1.0 - exp(-seconds / .12))
-            if (adaptiveBody) {
-                // Finish the current slice even if more receipts arrive. Only successful
-                // paint admissions consume a slot; wall-clock stalls never buy a jump.
-                if (bodyPaintsLeft == 0 || bodyWindowEnd <= previous) {
-                    bodyWindowEnd = end
-                    bodyPaintsLeft = 4
-                }
-                bodyWindowEnd = minOf(bodyWindowEnd, end)
-                val distance = bodyWindowEnd - previous
-                val units = kotlin.math.ceil(distance.toDouble() / bodyPaintsLeft)
-                bodyPaintsLeft--
-                maxOf(width.toDouble(), units) / width
-            } else (rate * seconds / width).coerceIn(0.0, 1.0)
+            (rate * seconds / width).coerceIn(0.0, 1.0)
         }
         activeReceiptNanos = null
         // Keep subcharacter phase, never whole-character catch-up credit.
         val phase = position % 1.0 + step
-        position = if (adaptiveBody && phase >= 1.0) {
-            // The budget is in UTF-16 units. Snap its destination once, even across parts.
-            val destination = (next + (phase - 1.0) * width).coerceAtMost(end.toDouble())
-            val frontier = expected.boundary(destination.toInt())
-            frontier.toDouble() + if (frontier < end)
-                (destination - frontier) / (expected.next(frontier) - frontier) else 0.0
-        } else if (phase >= 1.0) {
+        position = if (phase >= 1.0) {
             next.toDouble() + if (next < end) phase - 1.0 else 0.0
         } else previous.toDouble() + phase
         lastFrame = frameNanos

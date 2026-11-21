@@ -43,7 +43,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("val listHeight: Int, val viewportTop: Float, val viewportHeight: Int", source)
         self.assertIn("if (attached) list!!.localPositionOf(viewport!!, Offset.Zero).y", source)
         typing = (CHAT.parent / "MarkdownTyping.kt").read_text()
-        self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end, adaptiveBody) { currentAdvance() } }', " ".join(typing.split()))
+        self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end, streamSnapshot) { currentAdvance() } }', " ".join(typing.split()))
         markdown = (CHAT.parent / "MessageMarkdown.kt").read_text()
         for token in ("remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }",
                       "clearance.fits(coordinates, candidate.size.height)", "painted[paintOffset] = actual",

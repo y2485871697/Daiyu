@@ -33,6 +33,7 @@ internal class MarkdownReveal(
     exact: Boolean,
     budgets: MarkdownRevealBudgets = MarkdownRevealBudgets(derivedStateOf { target }, frame),
     internal val publication: MarkdownPaintPublication = MarkdownPaintPublication(),
+    val animateStreamSize: Boolean = false,
 ) {
     private val completion = derivedStateOf { exact && target != null && visible() >= target.total }
     val settled: Boolean get() = completion.value && publication.settled(target)
@@ -181,7 +182,7 @@ internal fun rememberMarkdownReveal(
     initialBaseline: List<MarkdownTypingSource>? = null,
     presentationLane: Any? = null,
     awaitPaintAdmission: Boolean = false,
-    adaptiveBody: Boolean = false,
+    streamSnapshot: Boolean = false,
 ): MarkdownReveal {
     val currentAdvance by rememberUpdatedState(onVisibleAdvance)
     val currentAwaitPaintAdmission by rememberUpdatedState(awaitPaintAdmission)
@@ -235,7 +236,7 @@ internal fun rememberMarkdownReveal(
     val clearance = LocalStreamingTextClearance.current
     val textClearance by rememberUpdatedState(clearance)
     val publication = remember(identity, resetEpoch, motion) { MarkdownPaintPublication() }
-    val frame = produceState(motion.frame(target), target, canAdvance, advanceLimit, finishImmediately, adaptiveBody) {
+    val frame = produceState(motion.frame(target), target, canAdvance, advanceLimit, finishImmediately, streamSnapshot) {
         withContext(Dispatchers.Main.immediate) {
             val current = target ?: return@withContext
             publication.start(current)
@@ -274,7 +275,7 @@ internal fun rememberMarkdownReveal(
                                     motion.visible(current)
                                 }
                                 currentAwaitPaintAdmission && !publication.ready -> motion.visible(current)
-                                else -> motion.advance(current, frameNanos, end, adaptiveBody) { currentAdvance() }
+                                else -> motion.advance(current, frameNanos, end, streamSnapshot) { currentAdvance() }
                             }
                             if (currentAwaitPaintAdmission) publication.reserve(current, before, shown)
                             value = MarkdownTypingFrame(current, shown)
@@ -313,7 +314,10 @@ internal fun rememberMarkdownReveal(
         target.parts == parts && target.parts.map { it.source } == sources
     val currentTarget = rememberUpdatedState(target)
     val budgets = remember(identity, resetEpoch, frame, publication) { MarkdownRevealBudgets(currentTarget, frame, publication) }
-    return remember(target, frame, exact, budgets) { MarkdownReveal(target, frame, exact, budgets, budgets.publication) }
+    val animateStreamSize = streamSnapshot && live
+    return remember(target, frame, exact, budgets, animateStreamSize) {
+        MarkdownReveal(target, frame, exact, budgets, budgets.publication, animateStreamSize)
+    }
 }
 
 internal fun markdownTypingBaselineLength(

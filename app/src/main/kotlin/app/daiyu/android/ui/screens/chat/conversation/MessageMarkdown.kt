@@ -8,6 +8,7 @@ import android.text.style.StrikethroughSpan
 import android.text.style.StyleSpan
 import android.text.style.TypefaceSpan
 import android.text.style.URLSpan
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -135,7 +136,7 @@ internal fun RevealedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?,
         if (sourceReady && blocks != null) reveal.presented(partId)
     }
     CompositionLocalProvider(LocalMarkdownPaintPublication provides publication) {
-        val presented = modifier
+        val presented = if (reveal.animateStreamSize) modifier.animateContentSize() else modifier
         if (deferBlockReveal) ProjectedMessageMarkdown(text, blocks, presented,
             generationComplete = generationComplete, visibility = reveal.visibility(partId), sourceWindow = sourceWindow,
             onCurrentBodyInstalled = { MarkdownPaintApplied(reveal, partId) })

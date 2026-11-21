@@ -18,7 +18,7 @@ class StreamingPreparationContract(unittest.TestCase):
         self.assertIn("target.parts.map { it.source } == sources", source)
         self.assertEqual(1, source.count("withFrameNanos { frameNanos ->"))
         frame = source.split("withFrameNanos { frameNanos ->", 1)[1].split("} finally", 1)[0]
-        self.assertLess(frame.index("currentAwaitPaintAdmission && !publication.ready"), frame.index("motion.advance(current, frameNanos, end, adaptiveBody)"))
+        self.assertLess(frame.index("currentAwaitPaintAdmission && !publication.ready"), frame.index("motion.advance(current, frameNanos, end, streamSnapshot)"))
         self.assertEqual(1, frame.count("motion.advance("))
 
     def test_committed_fallback_does_not_invalidate_its_own_composition(self):

@@ -1489,7 +1489,7 @@ internal fun AssistantTurn(
         terminal = generationComplete, resetEpoch = revealResetEpoch,
         onVisibleAdvance = onVisibleAdvance, enabled = ordered.leading.isNotEmpty() || reasoningReady, blockedSources = blockedSources,
         live = turn.status == RunStatus.RUNNING || ordered.pending.isNotEmpty(), paceTerminal = true,
-        initialBaseline = initialBaseline, presentationLane = "body:${turn.listKey}", awaitPaintAdmission = true, adaptiveBody = true)
+        initialBaseline = initialBaseline, presentationLane = "body:${turn.listKey}", awaitPaintAdmission = true, streamSnapshot = true)
     SideEffect { if (canReleaseWithoutWorkflow && ordered.body.isNotEmpty()) answerReleased = true }
     val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true
     SideEffect { onContentReady(contentReady) }

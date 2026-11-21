@@ -65,7 +65,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
     protected override val requiresWindowDraw: Boolean
         get() = name == "testLargeReceivedChunkPaintsAtMostOneWholeCharacterPerFrame" ||
             name == "testNativePaintReceiptDoesNotRepeatTextPlacement" || name == "testLinkedPrefixReceivesNativePaint" ||
-            name == "testFastBodyReceiptsKeepIntermediatePaints"
+            name == "testBodyPaintReflectsEachReceivedSnapshot"
     private val opened = CopyOnWriteArrayList<String>()
     private val uriHandler = object : UriHandler {
         override fun openUri(uri: String) { opened += uri }
@@ -2117,10 +2117,10 @@ class MessageMarkdownTest : WiredActivityTestCase() {
     @OptIn(androidx.compose.runtime.InternalComposeApi::class)
     fun testLargeReceivedChunkPaintsAtMostOneWholeCharacterPerFrame() = verifyChunkPaint(false)
 
-    fun testFastBodyReceiptsKeepIntermediatePaints() = verifyChunkPaint(true)
+    fun testBodyPaintReflectsEachReceivedSnapshot() = verifyChunkPaint(true)
 
     @OptIn(androidx.compose.runtime.InternalComposeApi::class)
-    private fun verifyChunkPaint(adaptive: Boolean) {
+    private fun verifyChunkPaint(snapshot: Boolean) {
         val initial = "字".repeat(80)
         val full = initial + "后".repeat(80)
         val parser: (String) -> List<MarkdownBlock> = { MarkdownParser.parse(it) }
@@ -2146,7 +2146,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                     val projection = rememberMarkdownProjection(listOf(text))
                     val reveal = rememberMarkdownReveal(listOf(MarkdownTypingSource("final", text)), projection,
                         streaming = true, terminal = false, initialBaseline = emptyList(),
-                        presentationLane = "bounded-paint", awaitPaintAdmission = true, adaptiveBody = adaptive)
+                        presentationLane = "bounded-paint", awaitPaintAdmission = true, streamSnapshot = snapshot)
                     Column(Modifier.width(320.dp).testTag("bounded-paint")) {
                         RevealedMessageMarkdown(text, projection?.blocks?.get(text), reveal, "final")
                     }
@@ -2176,19 +2176,20 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                 ui.waitForIdle()
                 val shown = painted()
                 assertTrue("Actual drawn frontier must be monotonic: $previous -> $shown", shown >= previous)
-                if (adaptive) {
+                if (snapshot) {
                     if (shown - previous > 1) grouped = true
                 } else assertTrue("One paint frame must not release a received backlog: $previous -> $shown", shown - previous <= 1)
                 previous = shown
                 return shown
             }
             ui.runOnUiThread { text = initial }
-            if (adaptive) {
-                for (frame in 0..24) { if (sampleFrame() > 0) break }
+            if (snapshot) {
+                for (frame in 0..24) { if (sampleFrame() == initial.length) break }
             } else repeat(24) { sampleFrame() }
             val frozen = previous
             assertTrue("The fixture must mount the real clearance paint path: $paintDump", sawPaintFrame)
-            assertTrue("The received chunk must have real intermediate painted frames: frozen=$frozen\n$paintDump",
+            if (snapshot) assertEquals("First received body snapshot must paint without a synthetic queue", initial.length, frozen)
+            else assertTrue("The received chunk must have real intermediate painted frames: frozen=$frozen\n$paintDump",
                 frozen in 1 until initial.length)
             ui.runOnUiThread { control.pause(true); text = full }
             repeat(8) { assertEquals("Pause must freeze actual paint", frozen, sampleFrame()) }
@@ -2200,7 +2201,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
             ui.runOnUiThread { presentationActive = true }
             repeat(full.length * 4 + 12) { sampleFrame() }
             assertEquals(full.length, previous)
-            if (adaptive) assertTrue("Fast body arrivals must actually paint grouped prefixes", grouped)
+            if (snapshot) assertTrue("Fast body arrivals must actually paint grouped prefixes", grouped)
         } finally { ui.mainClock.autoAdvance = true }
     }
 

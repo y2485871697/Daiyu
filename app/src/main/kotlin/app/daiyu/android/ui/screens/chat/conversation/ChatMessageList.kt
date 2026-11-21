@@ -1119,40 +1119,53 @@ internal fun ChatMessageList(
     }
     LaunchedEffect(listState, imageLoader, pageActive, scrollResumed) {
         val loader = imageLoader ?: return@LaunchedEffect
-        val prefetch = MessageVideoThumbnailPrefetch(this) { video ->
-            if (loader.cachedVideo(video.expectedOwner, video.reference, 1024) == null) {
-                withContext(Dispatchers.IO) { loadMessageVideo(video, loader, 1024) }
+        val prefetch = MessageThumbnailPrefetch<MessageContentUi>(this) { block ->
+            withContext(Dispatchers.IO) {
+                when (block) {
+                    is MessageContentUi.Image -> if (loader.cached(block.image.expectedOwner, block.image.reference, 1024) == null) {
+                        loadMessageImage(block.image, loader, 384)
+                    } else Unit
+                    is MessageContentUi.Video -> if (loader.cachedVideo(block.video.expectedOwner, block.video.reference, 1024) == null) {
+                        loadMessageVideo(block.video, loader, 1024)
+                    } else Unit
+                    else -> Unit
+                }
             }
         }
-        snapshotFlow {
+        val window by derivedStateOf(androidx.compose.runtime.structuralEqualityPolicy<IntRange>()) {
             val layout = listState.layoutInfo
             val current = currentTurns
-            val visibleBottom = layout.viewportEndOffset - currentOcclusionPx
-            val visible = if (!pageActive || !scrollResumed || currentRetainingRows) emptyList() else
-                layout.visibleItemsInfo.filter { item ->
-                    val turn = current.getOrNull(item.index)
-                    turn != null && turn.listKey == item.key && item.size > 0 &&
-                        item.offset < visibleBottom && item.offset + item.size > layout.viewportStartOffset
+            var first = -1
+            var last = -1
+            if (presentationActive && pageActive && scrollResumed && !currentRetainingRows) {
+                val bottom = layout.viewportEndOffset - currentOcclusionPx
+                for (item in layout.visibleItemsInfo) {
+                    if (item.size <= 0 || item.offset >= bottom || item.offset + item.size <= layout.viewportStartOffset ||
+                        current.getOrNull(item.index)?.listKey != item.key) continue
+                    if (first == -1) first = item.index
+                    last = item.index
                 }
-            val first = visible.minOfOrNull { it.index }
-            val last = visible.maxOfOrNull { it.index }
-            if (first == null || last == null) emptyList() else buildList {
-                val indexes = visible.map { it.index } + (1..2).flatMap { distance ->
-                    listOf(first - distance, last + distance)
-                }
-                for (index in indexes) {
-                    val turn = current.getOrNull(index) ?: continue
-                    val blocks = when (turn) {
-                        is ChatTurnUi.User -> turn.content
-                        is ChatTurnUi.Assistant -> turn.content
-                    }
-                    for (block in blocks) {
-                        if (size >= 4) break
-                        if (block is MessageContentUi.Video) add(block.video)
+            }
+            if (first == -1) IntRange.EMPTY else first..last
+        }
+        snapshotFlow {
+            val visible = window
+            buildList<MessageContentUi> {
+                if (!visible.isEmpty()) for (distance in 1..4) {
+                    for (index in listOf(visible.first - distance, visible.last + distance)) {
+                        val turn = currentTurns.getOrNull(index) ?: continue
+                        val blocks = when (turn) {
+                            is ChatTurnUi.User -> turn.content
+                            is ChatTurnUi.Assistant -> turn.content
+                        }
+                        for (block in blocks) {
+                            if ((block is MessageContentUi.Image || block is MessageContentUi.Video) && block !in this) add(block)
+                            if (size == 4) return@buildList
+                        }
                     }
                 }
             }
-        }.collect { videos -> prefetch.update(videos) }
+        }.collect { prefetch.update(it) }
     }
     // Read confirmation observes existing measured layout only; it never changes follow/scroll.
     LaunchedEffect(listState) {

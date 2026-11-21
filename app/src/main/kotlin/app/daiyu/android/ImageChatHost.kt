@@ -474,10 +474,11 @@ internal class PreviewLease(private val controller: ChatController, val conversa
         draftThumbnails.evictAll(); messageThumbnails.evictAll(); videoThumbnails.evictAll()
     }
     private val draftThumbnails = android.util.LruCache<ImageAttachment, androidx.compose.ui.graphics.ImageBitmap>(8)
+    private data class ImageThumbnail(val bitmap: androidx.compose.ui.graphics.ImageBitmap, val requestedEdge: Int)
     private val messageThumbnails = object : android.util.LruCache<app.daiyu.android.domain.MessageImageReference,
-        androidx.compose.ui.graphics.ImageBitmap>(8 * 1024 * 1024) {
+        ImageThumbnail>(8 * 1024 * 1024) {
         override fun sizeOf(key: app.daiyu.android.domain.MessageImageReference,
-            value: androidx.compose.ui.graphics.ImageBitmap) = value.width * value.height * 4
+            value: ImageThumbnail) = value.bitmap.width * value.bitmap.height * 4
     }
 
     private data class VideoThumbnail(val bitmap: androidx.compose.ui.graphics.ImageBitmap, val requestedEdge: Int)
@@ -505,7 +506,7 @@ internal class PreviewLease(private val controller: ChatController, val conversa
         Map<app.daiyu.android.domain.MessageImageReference, androidx.compose.ui.graphics.ImageBitmap>) {
         if (!open.get()) return
         thumbnails.forEach { (reference, bitmap) ->
-            if (reference.owner.conversationId == conversation) messageThumbnails.put(reference, bitmap)
+            if (reference.owner.conversationId == conversation) messageThumbnails.put(reference, ImageThumbnail(bitmap, 0))
         }
     }
 
@@ -618,7 +619,8 @@ internal class PreviewLease(private val controller: ChatController, val conversa
                     app.daiyu.android.ui.screens.chat.conversation.MessageVideoUi(owner, ref), maxEdge) {
                     !open.get() || !context.isActive
                 } }.also { bitmap -> synchronized(this@PreviewLease) {
-                    if (open.get()) videoThumbnails.put(ref, VideoThumbnail(bitmap, maxEdge))
+                    if (open.get() && (videoThumbnails.get(ref)?.requestedEdge ?: 0) <= maxEdge)
+                        videoThumbnails.put(ref, VideoThumbnail(bitmap, maxEdge))
                 } }
             } catch (cancelled: CancellationException) { throw cancelled }
             catch (failure: Exception) {
@@ -631,7 +633,7 @@ internal class PreviewLease(private val controller: ChatController, val conversa
             ref: app.daiyu.android.domain.MessageImageReference, maxEdge: Int): androidx.compose.ui.graphics.ImageBitmap? =
             synchronized(this@PreviewLease) {
                 if (!open.get() || maxEdge <= 0 || conversation == null || owner.conversationId != conversation ||
-                    owner != ref.owner) null else messageThumbnails.get(ref)?.takeIf {
+                    owner != ref.owner) null else messageThumbnails.get(ref)?.bitmap?.takeIf {
                     it.width <= maxEdge && it.height <= maxEdge
                 }
             }
@@ -641,15 +643,24 @@ internal class PreviewLease(private val controller: ChatController, val conversa
             if (conversation == null || owner.conversationId != conversation || owner != ref.owner) return null
             // The synchronous handoff is display-only; refinement still revalidates the persisted asset.
             return try {
-                decode {
-                    val previews = AndroidMessageImagePreviews(controller.messageImageResolver(ConversationId(conversation)))
-                    previews.decodePreview(app.daiyu.android.media.MessageImageOwner(owner.conversationId, owner.messageId),
-                        app.daiyu.android.media.MessageImageReference(
-                            app.daiyu.android.media.MessageImageOwner(ref.owner.conversationId, ref.owner.messageId),
-                            ref.id, ref.mime, ref.bytes, ref.sha256, ref.width, ref.height), maxEdge)
-                }.also { bitmap -> synchronized(this@PreviewLease) {
-                    if (open.get()) messageThumbnails.put(ref, bitmap)
-                } }
+                val resolver = controller.messageImageResolver(ConversationId(conversation))
+                val mediaOwner = app.daiyu.android.media.MessageImageOwner(owner.conversationId, owner.messageId)
+                val reference = app.daiyu.android.media.MessageImageReference(mediaOwner, ref.id, ref.mime,
+                    ref.bytes, ref.sha256, ref.width, ref.height)
+                val retained = synchronized(this@PreviewLease) {
+                    messageThumbnails.get(ref)?.takeIf { it.requestedEdge == maxEdge }
+                }
+                if (retained != null) {
+                    // Recheck the source before reusing pixels, just as for a retained video cover.
+                    resolver.read(mediaOwner, reference)
+                    currentCoroutineContext().ensureActive()
+                    if (!open.get()) throw CancellationException("Image page left")
+                    retained.bitmap
+                } else decode { AndroidMessageImagePreviews(resolver).decodePreview(mediaOwner, reference, maxEdge) }
+                    .also { bitmap -> synchronized(this@PreviewLease) {
+                        if (open.get() && (messageThumbnails.get(ref)?.requestedEdge ?: 0) <= maxEdge)
+                            messageThumbnails.put(ref, ImageThumbnail(bitmap, maxEdge))
+                    } }
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (failure: Exception) {

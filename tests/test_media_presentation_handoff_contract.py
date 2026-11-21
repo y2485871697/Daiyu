@@ -110,12 +110,13 @@ class MediaSubmissionHandoffContract(unittest.TestCase):
         self.assertIn('loader.loadVideo(video.expectedOwner, video.reference, 1024)', host)
         conversation = SRC / 'ui/screens/chat/conversation'
         listing = (conversation / 'ChatMessageList.kt').read_text()
-        self.assertIn('loadMessageVideo(video, loader, 1024)', listing)
-        self.assertIn('prefetch.update(videos)', listing)
+        self.assertIn('loadMessageVideo(block.video, loader, 1024)', listing)
+        self.assertIn('loadMessageImage(block.image, loader, 384)', listing)
+        self.assertIn('prefetch.update(it)', listing)
         scheduler = (conversation / 'MessageVideoThumbnailPrefetch.kt').read_text()
-        self.assertIn('videos.distinct().take(4).toSet()', scheduler)
+        self.assertIn('items.distinct().take(4).toSet()', scheduler)
         self.assertIn('jobs.keys.filter { it !in wanted }', scheduler)
-        self.assertIn('jobs.getOrPut(video)', scheduler)
+        self.assertIn('jobs.getOrPut(item)', scheduler)
 
 if __name__ == '__main__':
     unittest.main()

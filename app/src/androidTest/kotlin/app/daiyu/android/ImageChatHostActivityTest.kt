@@ -286,6 +286,23 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         assertNull(loader.cached(image.expectedOwner, image.reference, 1024))
     }
 
+    fun testRevisitingHistoryReusesVerifiedImagePixels() = checkRevisitedHistoryImage()
+
+    private fun checkRevisitedHistoryImage() {
+        val image = sendImageToHistory()
+        val lease = PreviewLease(controller, image.expectedOwner.conversationId)
+        try {
+            kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) {
+                val loader = lease.historyLoader
+                val preview = checkNotNull(loader.load(image.expectedOwner, image.reference, 384))
+                assertSame(preview, loader.cached(image.expectedOwner, image.reference, 1024))
+                val refined = checkNotNull(loader.load(image.expectedOwner, image.reference, 1024))
+                assertSame(refined, loader.load(image.expectedOwner, image.reference, 1024))
+                assertNull(loader.cached(image.expectedOwner.copy(messageId = "other"), image.reference, 1024))
+            }
+        } finally { lease.close() }
+    }
+
     fun testAcceptedDraftThumbnailTransfersBeforeAnyPersistedHistoryDecode() {
         pick(1); waitImages(1)
         val attachment = host().session.attachments.state.value.ready.single().attachment

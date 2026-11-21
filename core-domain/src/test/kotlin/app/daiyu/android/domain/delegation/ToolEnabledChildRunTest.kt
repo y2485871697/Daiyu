@@ -189,7 +189,8 @@ class ToolEnabledChildRunTest {
             override val windowTokens = 1000L
             override val pressureThresholdTokens = 800L
             override fun headerIdentity(tools: List<ToolDefinition>) = "test-child"
-            override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L
+            override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) =
+                if (history.firstOrNull()?.id == MessageId("compacted-child-history")) 100L else 650L
             override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
                 request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
                 admit: () -> Unit, cancelled: () -> Boolean): List<Message> {

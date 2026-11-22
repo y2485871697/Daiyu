@@ -512,7 +512,7 @@ internal fun ChatMessageList(
     val currentDensity by rememberUpdatedState(density.density)
     val currentOcclusionPx by rememberUpdatedState(occlusionPx)
     val waveOwner = (turns.lastOrNull() as? ChatTurnUi.Assistant)?.takeIf { tail ->
-        tailCompressions.isEmpty() && tail.status == RunStatus.RUNNING && tail.isStreaming && !tail.reasoningStopped &&
+        tailCompressions.isEmpty() && tail.status == RunStatus.RUNNING && tail.isStreaming && !tail.stopRequested && !tail.reasoningStopped &&
             tail.workProcess?.running != true && tail.hasBodyTextActions() && replyPlayback?.control?.stopped != true
     }?.listKey
     val tailClearance = if (waveOwner != null) ReplyWaveGap else ChatTailClearance

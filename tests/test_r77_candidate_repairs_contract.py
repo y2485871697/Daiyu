@@ -47,7 +47,7 @@ class R77CandidateRepairsContract(unittest.TestCase):
     def test_spacing_keeps_original_wait_and_geometry_oracle_with_last_sample_diagnostics(self):
         source = (TEST / 'ui/screens/chat/conversation/ChatMessageSpacingTest.kt').read_text()
         self.assertIn('ui.waitUntil(5_000)', source)
-        self.assertIn('!tailTurn.stopRequested) 6f else 8f', source)
+        self.assertIn('!tailTurn.stopRequested) 10f else 8f', source)
         self.assertRegex(source, r'displayed && actionsDisplayed &&\s+gap in \(expectedGap - 2f\)\.\.\(expectedGap \+ 2f\)')
         self.assertEqual(2, source.count('val composerOuterTop = surface.top - 10f * density'))
         self.assertEqual(2, source.count('val gap = (composerOuterTop - fullTailBottom) / density'))

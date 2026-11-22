@@ -267,17 +267,20 @@ internal fun rememberMarkdownReveal(
             if (shown < end) {
                 val controlWakeups = launch(start = CoroutineStart.UNDISPATCHED) {
                     snapshotFlow {
-                        !currentAwaitPaintAdmission ||
-                            !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) || textClearance?.held == true
+                        Triple(currentAwaitPaintAdmission, markdownTypingCanAdvance(currentCanAdvance, currentPlayback), textClearance?.held == true)
                     }.collect { publication.wake() }
                 }
                 try {
                     while (shown < end) {
-                        while (currentAwaitPaintAdmission && !publication.ready &&
-                            markdownTypingCanAdvance(currentCanAdvance, currentPlayback) && textClearance?.held != true) {
+                        var waitedForGeometry = false
+                        while (markdownTypingCanAdvance(currentCanAdvance, currentPlayback) &&
+                            (textClearance?.held == true || currentAwaitPaintAdmission && !publication.ready)) {
+                            if (textClearance?.held == true) waitedForGeometry = true
                             publication.awaitWakeup()
                         }
                         withFrameNanos { frameNanos ->
+                            // Blocked wall time is not playback credit on the first free frame.
+                            if (waitedForGeometry) motion.hold(current, frameNanos)
                             val before = shown
                             shown = when {
                                 !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> {

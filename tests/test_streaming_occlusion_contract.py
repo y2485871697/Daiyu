@@ -304,7 +304,7 @@ class StreamingOcclusionContract(unittest.TestCase):
             self.assertIn(token, viewport)
         self.assertNotIn("BottomFollowMotion()", viewport)
         self.assertNotIn("listState.layoutInfo", viewport)
-        self.assertIn("val tailClearance = if (waveOwner != null) ReplyWaveGap else ChatTailClearance", source)
+        self.assertIn("val tailClearance = if (liveDocumentOwner != null) 28.dp else ChatTailClearance", source)
         migration = source.split("// Unwrap only after terminal", 1)[1].split("val requestedIndex", 1)[0]
         for token in ("revealedTurns[tail.listKey] != tail", "while (followBottom && (disclosureViewport.active != null ||",
                       "stopScroll(MutatePriority.PreventUserInput)",

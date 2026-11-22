@@ -18,7 +18,7 @@ class TypewriterHapticsContract(unittest.TestCase):
         self.assertLess(motion.index("if (target !== expected)"), motion.index("onAdvance()"))
         document = (CHAT / "StreamingAnswer.kt").read_text()
         self.assertLess(document.index("drawContent()"), document.index("reveal.onDocumentAdvance()"))
-        self.assertIn("!frozen && shown.source.isNotEmpty() && previous?.source != shown.source", document)
+        self.assertIn("receipt.record(shown) && !frozen", document)
         self.assertIn("{ currentAdvance() }", typing)
 
     def test_latest_viewport_lifecycle_and_occlusion_gate_are_in_callback(self):

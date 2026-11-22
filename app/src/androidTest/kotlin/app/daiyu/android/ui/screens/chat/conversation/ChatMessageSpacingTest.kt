@@ -162,7 +162,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         awaitImeFrame(ui.onNodeWithTag("spacing-host"), visible = false)
         // The reserved composer includes its 10dp outer top padding; the surface does not.
         val tailTurn = screen.turns.lastOrNull() as? ChatTurnUi.Assistant
-        val expectedGap = if (tailTurn?.status == RunStatus.RUNNING && tailTurn.isStreaming && !tailTurn.stopRequested) 10f else 8f
+        val expectedGap = if (tailTurn?.status == RunStatus.RUNNING && tailTurn.isStreaming && !tailTurn.stopRequested) 28f else 8f
         var lastGeometry = "marker not sampled"
         try {
             ui.waitUntil(5_000) {
@@ -208,17 +208,16 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testOutputWaveFollowsBodyAndKeepsItsSlotWhilePaused() {
+    fun testReplyKeepsTextPositionWithoutOutputIndicator() {
         show(1f, running = true)
         val wave = ui.onNodeWithTag("reply-output-wave", useUnmergedTree = true)
-        val bounds = wave.assertIsDisplayed().fetchSemanticsNode().boundsInRoot
-        assertEquals(8f * density, bounds.height, 1f)
-        val body = ui.onNodeWithText("初始末尾", substring = true, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-        assertEquals("Wave starts below the last paragraph", 10f * density, bounds.top - body.bottom, 2f)
-        ui.onAllNodesWithTag("reply-output-wave", useUnmergedTree = true).assertCountEquals(1)
+        val text = ui.onNodeWithText("初始末尾", substring = true, useUnmergedTree = true)
+        val before = text.assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        wave.assertDoesNotExist()
         mainThread { screen = screen.copy(composer = screen.composer.copy(phase = ComposerPhase.PAUSED)) }
         ui.waitForIdle()
-        assertEquals(bounds, wave.fetchSemanticsNode().boundsInRoot)
+        assertEquals(before, text.fetchSemanticsNode().boundsInRoot)
+        wave.assertDoesNotExist()
         mainThread {
             val tail = screen.turns.last() as ChatTurnUi.Assistant
             screen = screen.copy(turns = screen.turns.dropLast(1) + tail.copy(stopRequested = true))

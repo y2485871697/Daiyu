@@ -87,7 +87,8 @@ internal class MarkdownRevealBudgets(
 }
 
 internal class MarkdownPaintPublication(val inks: MutableMap<String, MarkdownInk> = mutableMapOf(),
-    val answerPaint: MutableMap<String, AnswerPaint> = mutableMapOf()) {
+    val answerPaint: MutableMap<String, AnswerPaint> = mutableMapOf(),
+    val initialSources: List<MarkdownTypingSource> = emptyList()) {
     private val activeInk = mutableStateMapOf<Any, Unit>()
     fun inkPending(owner: Any, busy: Boolean) { if (busy) activeInk[owner] = Unit else activeInk.remove(owner) }
     var active by mutableStateOf(false)
@@ -249,7 +250,7 @@ internal fun rememberMarkdownReveal(
     val currentPlayback by rememberUpdatedState(playback)
     val clearance = LocalStreamingTextClearance.current
     val textClearance by rememberUpdatedState(clearance)
-    val publication = remember(identity, resetEpoch, motion) { MarkdownPaintPublication(retainedLane?.inks ?: mutableMapOf(), retainedLane?.answerPaint ?: mutableMapOf()) }
+    val publication = remember(identity, resetEpoch, motion) { MarkdownPaintPublication(retainedLane?.inks ?: mutableMapOf(), retainedLane?.answerPaint ?: mutableMapOf(), baseline) }
     val frame = produceState(motion.frame(target), target, canAdvance, advanceLimit, finishImmediately, streamSnapshot) {
         withContext(Dispatchers.Main.immediate) {
             val current = target ?: return@withContext

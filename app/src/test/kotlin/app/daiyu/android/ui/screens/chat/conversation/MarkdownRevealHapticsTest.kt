@@ -5,6 +5,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownRevealHapticsTest {
+    @Test fun documentFeedbackOnlyOnNewPaintedContent() {
+        val parser = me.rerere.bettertext.markdown.MarkdownStreamParser()
+        val receipt = AnswerPaint("已有")
+        fun draw(text: String) = receipt.record(parser.parse(text, streaming = true))
+        assertFalse(draw("已有"))
+        assertTrue(draw("已有新字"))
+        assertFalse(draw("已有新字"))
+        assertFalse(draw("已有新字\n"))
+        assertFalse(draw("更正后的段落"))
+        assertTrue(draw("更正后的段落。"))
+        assertTrue(AnswerPaint().record(parser.parse("首字", streaming = true)))
+    }
+
     private class Fixture {
         var now = 1000L
         val requests = mutableListOf<HapticRequest>()

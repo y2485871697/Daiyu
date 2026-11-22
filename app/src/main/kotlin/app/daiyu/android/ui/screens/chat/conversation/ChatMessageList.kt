@@ -511,11 +511,11 @@ internal fun ChatMessageList(
     val occlusionPx = with(density) { composerBottomInset.roundToPx() }
     val currentDensity by rememberUpdatedState(density.density)
     val currentOcclusionPx by rememberUpdatedState(occlusionPx)
-    val waveOwner = (turns.lastOrNull() as? ChatTurnUi.Assistant)?.takeIf { tail ->
+    val liveDocumentOwner = (turns.lastOrNull() as? ChatTurnUi.Assistant)?.takeIf { tail ->
         tailCompressions.isEmpty() && tail.status == RunStatus.RUNNING && tail.isStreaming && !tail.stopRequested && !tail.reasoningStopped &&
             tail.workProcess?.running != true && tail.hasBodyTextActions() && replyPlayback?.control?.stopped != true
     }?.listKey
-    val tailClearance = if (waveOwner != null) ReplyWaveGap else ChatTailClearance
+    val tailClearance = if (liveDocumentOwner != null) 28.dp else ChatTailClearance
     val currentFollowClearancePx by rememberUpdatedState(with(density) { tailClearance.roundToPx() })
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
@@ -1338,10 +1338,6 @@ internal fun ChatMessageList(
                                 onContentReady = { ready ->
                                     if (ready) readyTurns[turn.listKey] = turn else readyTurns.remove(turn.listKey)
                                 })
-                            if (turn.listKey == waveOwner) StreamingReplyWave(
-                                moving = LocalChatPresentationActive.current && playback?.paused != true,
-                                modifier = Modifier.align(Alignment.CenterHorizontally),
-                            )
                             turnExtras(turn)
                         } }
                         }
@@ -1369,7 +1365,7 @@ internal fun ChatMessageList(
                             protectClearance = { turn.listKey == assistantOwnerKey && followBottom },
                             viewportHeight = tailViewportHeight,
                             preserveTextClearance = turn.listKey == currentTailKey,
-                            documentFollow = turn.listKey == waveOwner,
+                            documentFollow = turn.listKey == liveDocumentOwner,
                             listViewportHeight = { viewportHeightPx.intValue },
                             initialContent = initialQuestionContent,
                             followIntent = { turn.listKey == assistantOwnerKey && followBottom },

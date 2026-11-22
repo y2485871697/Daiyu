@@ -17,14 +17,30 @@ import me.rerere.bettertext.markdown.rememberMarkdownDocument
 import me.rerere.bettertext.text.BetterSelectionContainer
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
-internal class AnswerPaint { var last: MarkdownDocument? = null }
+internal class AnswerPaint(private val initialSource: String = "") {
+    var last: MarkdownDocument? = null
+        private set
+
+    fun record(document: MarkdownDocument): Boolean {
+        val previous = last
+        if (previous === document) return false
+        last = document
+        val before = previous?.source ?: initialSource
+        val next = document.source
+        if (next.length <= before.length || !next.startsWith(before) || document.blocks.isEmpty() ||
+            previous?.blocks == document.blocks) return false
+        return (before.length until next.length).any { !next[it].isWhitespace() }
+    }
+}
 
 /** Same parser, document publisher and block renderer as the reference app. No local character queue. */
 @Composable
 internal fun StreamingAnswer(source: String, streaming: Boolean, id: String, reveal: MarkdownReveal, modifier: Modifier) {
     val playback = LocalReplyPlayback.current
     val frozen = !LocalChatPresentationActive.current || playback?.let { it.paused || it.control.stopped } == true
-    val receipt = remember(id, reveal.publication) { reveal.publication.answerPaint.getOrPut(id) { AnswerPaint() } }
+    val receipt = remember(id, reveal.publication) { reveal.publication.answerPaint.getOrPut(id) {
+        AnswerPaint(reveal.publication.initialSources.firstOrNull { it.id == id }?.text.orEmpty())
+    } }
     val document = rememberMarkdownDocument(if (frozen) receipt.last?.source.orEmpty() else source, streaming = streaming)
     val shown = if (frozen) receipt.last else document
     val limit = reveal.limit(id)
@@ -38,9 +54,7 @@ internal fun StreamingAnswer(source: String, streaming: Boolean, id: String, rev
     if (shown != null) BetterSelectionContainer(modifier) {
         Markdown(document = shown, modifier = bodySize.padding(horizontal = 4.dp).drawWithContent {
                 drawContent()
-                val previous = receipt.last
-                receipt.last = shown
-                if (!frozen && shown.source.isNotEmpty() && previous?.source != shown.source) reveal.onDocumentAdvance()
+                if (receipt.record(shown) && !frozen) reveal.onDocumentAdvance()
             },
             style = MiuixTheme.textStyles.body1.copy(color = conversationColors().text, fontSize = 16.sp, lineHeight = 26.sp),
             onLinkClick = { if (MarkdownText.isSafeLink(it)) runCatching { uri.openUri(it) }; Unit })

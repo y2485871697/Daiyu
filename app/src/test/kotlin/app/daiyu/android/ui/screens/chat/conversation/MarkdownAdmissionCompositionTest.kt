@@ -92,6 +92,23 @@ class MarkdownAdmissionCompositionTest {
         } finally { waiter.cancelAndJoin() }
     }
 
+    @Test fun unchangedPaintReceiptDoesNotWakeTheProducerDuringScroll() = runBlocking {
+        val publication = MarkdownPaintPublication()
+        val owner = Any()
+        var resumed = false
+        val waiter = launch(kotlinx.coroutines.Dispatchers.Unconfined, start = CoroutineStart.UNDISPATCHED) {
+            publication.awaitWakeup()
+            resumed = true
+        }
+        try {
+            repeat(120) { publication.setPending(owner, false) }
+            assertFalse("Repositioning an already painted leaf must not wake the producer", resumed)
+            publication.setPending(owner, true)
+            publication.setPending(owner, false)
+            assertTrue("The actual draw must wake the producer immediately", resumed)
+        } finally { waiter.cancelAndJoin() }
+    }
+
     @Test fun cancelledPaintWaiterDoesNotCloseTheNextProducerWakeup() = runBlocking {
         val publication = MarkdownPaintPublication()
         val owner = Any()

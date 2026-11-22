@@ -129,8 +129,10 @@ internal class MarkdownPaintPublication(val inks: MutableMap<String, MarkdownInk
     }
     fun setPending(owner: Any, value: Boolean) {
         androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
-            if (value) pending[owner] = Unit else pending.remove(owner)
-            refreshReady()
+            if (pending.containsKey(owner) != value) {
+                if (value) pending[owner] = Unit else pending.remove(owner)
+                refreshReady()
+            }
         }
     }
     fun presented(id: String, source: MarkdownTypingSource) { published[id] = source }

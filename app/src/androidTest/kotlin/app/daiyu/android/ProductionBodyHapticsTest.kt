@@ -9,28 +9,49 @@ import java.util.concurrent.CopyOnWriteArrayList
 class ProductionBodyHapticsTest : WiredActivityTestCase() {
     override val requiresWindowDraw = true
 
-    fun testActualSendPaintsBodyAndDeliversGenerationTicksToMotorPort() {
+    private val times = CopyOnWriteArrayList<Long>()
+    private val prefs = "body-port-${System.nanoTime()}"
+    private val runtimeField = ChatApplication::class.java.getDeclaredField("hapticsRuntime").apply { isAccessible = true }
+    private var original: HapticsRuntime? = null
+    private var recording: HapticsRuntime? = null
+
+    override fun createFixture(): RunControlFixture {
         val context = instrumentation.targetContext
-        val prefs = "body-port-${System.nanoTime()}"
-        val times = CopyOnWriteArrayList<Long>()
-        val field = MainActivity::class.java.getDeclaredField("hapticsHost").apply { isAccessible = true }
-        val session = fixture.session("结束", holdSeconds = 120)
-        var runtime: HapticsRuntime? = null
-        try {
-            mainThread {
-                (field.get(activity) as HapticsActivityHost).close()
-                val testRuntime = HapticsRuntime(LocalHapticSettingsStore(context.getSharedPreferences(prefs, 0))) {
-                    object : HapticPort {
-                        override fun play(request: HapticRequest): HapticDelivery {
-                            if (request.generation && request.kind == HapticKind.TICK) times.add(android.os.SystemClock.uptimeMillis())
-                            return HapticDelivery.PLAYED
-                        }
-                        override fun cancel() = Unit
+        val app = context.applicationContext as ChatApplication
+        mainThread {
+            original = app.hapticsRuntime
+            val runtime = HapticsRuntime(LocalHapticSettingsStore(context.getSharedPreferences(prefs, 0))) {
+                object : HapticPort {
+                    override fun play(request: HapticRequest): HapticDelivery {
+                        if (request.generation && request.kind == HapticKind.TICK) times.add(android.os.SystemClock.uptimeMillis())
+                        return HapticDelivery.PLAYED
                     }
+                    override fun cancel() = Unit
                 }
-                runtime = testRuntime
-                field.set(activity, HapticsActivityHost(testRuntime, activity.window.decorView, activity, fixture.controller))
             }
+            recording = runtime
+            runtime.installForeground(app)
+            runtimeField.set(app, runtime)
+        }
+        return super.createFixture()
+    }
+
+    override fun cleanupFixture() {
+        try { super.cleanupFixture() } finally {
+            val context = instrumentation.targetContext
+            mainThread {
+                original?.let { runtimeField.set(context.applicationContext, it) }
+                original = null
+                recording?.close()
+                recording = null
+            }
+            context.deleteSharedPreferences(prefs)
+        }
+    }
+
+    fun testActualSendPaintsBodyAndDeliversGenerationTicksToMotorPort() {
+        val session = fixture.session("结束", holdSeconds = 120)
+        try {
             val draft = "正文触感验证"
             setDraft(draft)
             assertDraft(draft)
@@ -63,8 +84,6 @@ class ProductionBodyHapticsTest : WiredActivityTestCase() {
             assertTrue("Four separately painted bursts must reach the motor", times.size >= 8)
         } finally {
             session.release.countDown()
-            mainThread { (field.get(activity) as? HapticsActivityHost)?.close(); field.set(activity, null); runtime?.close() }
-            context.deleteSharedPreferences(prefs)
         }
     }
 }

@@ -32,6 +32,20 @@ class MarkdownRevealTest {
         assertEquals(.576, short.position, .00001)
     }
 
+    @Test fun blockedInkWaitsForItsOwnPaintAndStillAcceptsAShorterLimit() {
+        val ink = MarkdownInk(0)
+        val text = "ab"
+        assertFalse(ink.canStep(text, 2))
+        ink.paintPosition(1, 1, false)
+        assertFalse(ink.canStep(text, 2))
+        ink.paintPosition(0, 1, false)
+        assertTrue(ink.canStep(text, 2))
+        ink.advance(text, MarkdownTextBoundaries(text), 2, .016)
+        assertFalse(ink.canStep(text, 2))
+        assertTrue(ink.canStep(text, 0))
+        assertTrue(MarkdownInk(0).canStep("\uFFFC", 1))
+    }
+
     @Test fun replacementUsesItsBaselineButAppendAndStopKeepTheDrawnFrontier() {
         val before = MarkdownTypingSource("id", "原文")
         val ink = MarkdownInk(1, before)

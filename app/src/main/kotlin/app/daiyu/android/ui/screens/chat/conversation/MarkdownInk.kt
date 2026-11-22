@@ -1,6 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.runtime.*
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
@@ -39,7 +40,10 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
         tickFrontier = end
         onGlyphDrawn?.invoke()
     }
-    private var lastDrawnProgress = -1.0
+    private var lastDrawnProgress by mutableDoubleStateOf(-1.0)
+
+    fun canStep(text: String, limit: Int): Boolean = position >= limit ||
+        lastDrawnProgress == position || text.getOrNull(position.toInt()) == '\uFFFC'
 
     // Layout may include the first glyph to bootstrap draw, never an entire unpainted batch.
     fun layoutEnd(admitted: Int, stopped: Boolean): Int {
@@ -62,7 +66,7 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
         val end = boundaries.floor(limit.coerceIn(0, text.length))
         if (position >= end) { position = end.toDouble(); return }
         // A delayed first layout or a blocked draw cannot spend invisible animation time.
-        if (lastDrawnProgress != position && text[position.toInt()] != '\uFFFC') return
+        if (!canStep(text, end)) return
         var start = boundaries.floor(position.toInt())
         var next = boundaries.next(start)
         val fraction = (position - start) / (next - start)
@@ -119,10 +123,19 @@ internal fun rememberPartInk(reveal: MarkdownReveal, id: String, bodyPaintFeedba
     LaunchedEffect(ink, admission, busy, paused) {
         if (busy && !paused) {
             var before = withFrameNanos { it }
+            var reanchoring = false
             while (ink.position != admission.value.toDouble()) {
+                // When layout has not painted this position, a new clock frame cannot advance it.
+                if (!ink.canStep(currentText, admission.value)) {
+                    snapshotFlow { ink.canStep(currentText, admission.value) }.first { it }
+                    if (ink.position == admission.value.toDouble()) break
+                    reanchoring = true
+                }
                 withFrameNanos { now ->
-                    if (currentPlayback?.let { it.paused || it.control.stopped } != true)
-                        ink.advance(currentText, currentBounds, admission.value, (now - before) / 1e9)
+                    val delta = now - before
+                    if ((!reanchoring || delta <= 50_000_000L) && currentPlayback?.let { it.paused || it.control.stopped } != true)
+                        ink.advance(currentText, currentBounds, admission.value, delta / 1e9)
+                    reanchoring = false
                     before = now
                 }
             }

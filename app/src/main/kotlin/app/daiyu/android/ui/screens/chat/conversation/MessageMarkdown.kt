@@ -494,7 +494,9 @@ private fun MarkdownInlineText(
         else annotateMarkdownSpans(MarkdownText.renderInline(content), linkColor, openLink)
     }
     val ink = LocalMarkdownInk.current
-    val needsWordLayout = remember(body) { body.text.any { it.isLatinLetter() } }
+    val needsWordLayout = remember(ink, paintOffset, body) {
+        ink != null && paintOffset + body.length > ink.baselineEnd && body.text.any { it.isLatinLetter() }
+    }
     if (ink != null && needsWordLayout) {
         androidx.compose.foundation.layout.BoxWithConstraints(modifier, propagateMinConstraints = true) {
             val width = constraints.maxWidth

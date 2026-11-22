@@ -93,7 +93,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
 
     def test_text_leaf_pairs_each_accepted_source_with_its_own_ast(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()
-        for token in ('rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete, streamAnswer = true, liveAnswer = turn.status == RunStatus.RUNNING)',
+        for token in ('rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete, streamAnswer = true)',
                       'rememberAssistantTextBody(plainNarration, textSources, narration.projection, narration.reveal, generationComplete)',
                       'currentSources.value.indexOfFirst { it.id == text.itemId }',
                       'accepted?.sources?.getOrNull(index)?.takeIf { text.text.startsWith(it) }',
@@ -101,16 +101,14 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
                       'generationComplete = currentComplete.value && displayed == text.text'):
             self.assertIn(token, chat)
 
-    def test_streaming_answer_uses_the_upstream_document_not_a_second_ink_clock(self):
-        body = (BASE / 'StreamingAnswer.kt').read_text()
-        self.assertIn('rememberMarkdownDocument(', body)
-        self.assertIn('Markdown(document = shown', body)
-        self.assertIn('if (frozen) receipt.last else document', body)
-        self.assertNotIn('rememberPartInk(', body)
-        self.assertNotIn('withFrameNanos', body)
-        self.assertIn('if (following) Modifier else Modifier.animateContentSize()', body)
-        self.assertIn('bodySize.padding(horizontal = 4.dp)', body)
-        self.assertIn('currentLive.value && index == currentSources.value.lastIndex', (BASE / 'ChatMessageList.kt').read_text())
+    def test_running_body_shares_the_ink_and_word_layout_path(self):
+        leaf = (BASE / 'ChatMessageList.kt').read_text().split('internal fun rememberAssistantTextBody(', 1)[1].split('private fun AssistantWorkflow', 1)[0]
+        self.assertNotIn('StreamingAnswer(', leaf)
+        self.assertIn('else RevealedMessageMarkdown(displayed, accepted?.blocksAt(index)', leaf)
+        self.assertIn('bodyPaintFeedback = streamAnswer', leaf)
+        inline = (BASE / 'MessageMarkdown.kt').read_text()
+        self.assertIn('paintOffset + body.length > ink.baselineEnd', inline)
+        self.assertIn('StreamingWordWrap()', inline)
 
     def test_hidden_answer_and_typewriter_share_the_same_release_gate(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()

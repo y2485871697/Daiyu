@@ -37,7 +37,7 @@ class MarkdownStreamProgressContract(unittest.TestCase):
         assistant = chat.split('private fun AssistantTextContent(', 1)[1].split(
             '\n@Composable\ninternal fun UserMessageText', 1)[0]
         for token in [
-            'val textBody = rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete)',
+            'val textBody = rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete, streamAnswer = true)',
             'work?.let { AssistantWorkflow(it, ordered.steps, turn.listKey,',
             'MessageContent(ordered.body, actions, imageLoader, markdown = true',
         ]:

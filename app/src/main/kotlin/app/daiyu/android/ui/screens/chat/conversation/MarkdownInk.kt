@@ -19,6 +19,7 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
         return this
     }
 
+    val baselineEnd = start
     var position by mutableDoubleStateOf(start.toDouble()); private set
     private val paintedEnds = mutableMapOf<Int, Double>()
     fun paintPosition(offset: Int, length: Int, stopped: Boolean): Double {

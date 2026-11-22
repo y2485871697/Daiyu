@@ -1597,7 +1597,7 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, ordered: AssistantW
         WorkflowEntrances(if (reasoningReady) ordered.body.mapIndexed { index, item -> item.workflowKey(index) } else emptyList())
     }
     val observedLive = remember(turn.listKey) { turn.status == RunStatus.RUNNING }
-    val textBody = rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete, streamAnswer = true, liveAnswer = turn.status == RunStatus.RUNNING)
+    val textBody = rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete, streamAnswer = true)
     val answerPending = ordered.body.isNotEmpty()
     val currentVisibleAdvance = rememberUpdatedState(onVisibleAdvance)
     val notifyVisibleAdvance = remember { { currentVisibleAdvance.value() } }
@@ -1644,12 +1644,11 @@ private fun UserMessageBody(text: String, modifier: Modifier = Modifier) {
 /** Projection and reveal updates are consumed only by text leaves, not the workflow host. */
 @Composable
 internal fun rememberAssistantTextBody(plainNarration: Set<String>, sources: List<MarkdownTypingSource>, projection: MarkdownProjection?,
-    reveal: MarkdownReveal, generationComplete: Boolean, streamAnswer: Boolean = false, liveAnswer: Boolean = false): @Composable (MessageContentUi.Text, Modifier) -> Unit {
+    reveal: MarkdownReveal, generationComplete: Boolean, streamAnswer: Boolean = false): @Composable (MessageContentUi.Text, Modifier) -> Unit {
     val currentSources = rememberUpdatedState(sources)
     val currentProjection = rememberUpdatedState(projection)
     val currentReveal = rememberUpdatedState(reveal)
     val currentComplete = rememberUpdatedState(generationComplete)
-    val currentLive = rememberUpdatedState(liveAnswer)
     return remember(plainNarration, streamAnswer) { { text, modifier ->
         val index = currentSources.value.indexOfFirst { it.id == text.itemId }
         val accepted = currentProjection.value
@@ -1662,11 +1661,8 @@ internal fun rememberAssistantTextBody(plainNarration: Set<String>, sources: Lis
             SideEffect { if (sourceReady) currentReveal.value.presented(text.itemId) }
             Text(displayed.take(end), modifier.fillMaxWidth(), color = conversationColors().muted,
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
-        } else if (streamAnswer && (currentLive.value || text.itemId in currentReveal.value.publication.answerPaint) && text.markdownWindow == null) {
-            StreamingAnswer(text.text, currentLive.value && index == currentSources.value.lastIndex,
-                text.itemId, currentReveal.value, modifier)
         } else RevealedMessageMarkdown(displayed, accepted?.blocksAt(index),
-            currentReveal.value, text.itemId, modifier,
+            currentReveal.value, text.itemId, if (streamAnswer && text.markdownWindow == null) modifier.padding(horizontal = 4.dp) else modifier,
             generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true,
             sourceWindow = accepted?.windows?.getOrNull(index) ?: text.markdownWindow, bodyPaintFeedback = streamAnswer)
     } }

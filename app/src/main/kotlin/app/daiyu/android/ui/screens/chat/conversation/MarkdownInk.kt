@@ -28,6 +28,7 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
         paintedEnds[offset] = visible
         return visible
     }
+    fun paintPositionForWrap(offset: Int): Double = paintedEnds[offset] ?: 0.0
     fun paintedLength(offset: Int): Int = (paintedEnds[offset] ?: 0.0).toInt()
     private var tickFrontier = start
     var onGlyphDrawn: (() -> Unit)? = null

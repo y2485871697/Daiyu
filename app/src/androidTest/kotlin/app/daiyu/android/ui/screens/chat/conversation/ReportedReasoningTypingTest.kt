@@ -184,7 +184,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             ui.onNodeWithTag("work-process-header").assert(
                 SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开"))
             release.countDown()
-            await { advances > 0 }
+            await { advances >= 3 }
             awaitTyped(pending)
             // The last glyph enters the native node while it is still fading in.
             await { ui.onAllNodesWithText("已思考").fetchSemanticsNodes().isNotEmpty() }

@@ -141,6 +141,31 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         assertTrue("The probe must still see a real placement change", placements.get() > before)
     }
 
+    fun testActuallyIfKeepsItsPaintedLetterAcrossWrapAndAppend() {
+        show {
+            val measurer = rememberTextMeasurer()
+            SideEffect {
+                val style = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 16.sp)
+                val start = "Actually "
+                val width = measurer.measure(AnnotatedString(start + "i"), style).size.width
+                fun measure(s: AnnotatedString) = measurer.measure(s, style, constraints = Constraints(maxWidth = width))
+                val first = AnnotatedString(start + "i")
+                val whole = AnnotatedString(start + "if she broke it")
+                val i = start.length
+                assertTrue(measure(first).getLineForOffset(i) < measure(whole).getLineForOffset(i))
+                val known = StreamingWordWrap().plan(whole, 0, ::measure)
+                val partial = known.subSequence(0, i + 1)
+                assertEquals(first.text, partial.text)
+                assertEquals(measure(known).getBoundingBox(i), measure(partial).getBoundingBox(i))
+                val split = StreamingWordWrap()
+                val before = split.plan(first, 0, ::measure)
+                val after = split.plan(whole, first.length, ::measure)
+                assertEquals(whole.text, after.text)
+                assertEquals(measure(before).getBoundingBox(i), measure(after).getBoundingBox(i))
+            }
+        }
+    }
+
     fun testNextLineBudgetUsesOnlyTheNextNativeLayoutHeight() {
         show {
             val measurer = rememberTextMeasurer(cacheSize = 0)

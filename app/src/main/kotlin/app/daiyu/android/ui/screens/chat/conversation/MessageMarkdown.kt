@@ -493,6 +493,27 @@ private fun MarkdownInlineText(
         if (plain != null) AnnotatedString(plain.text)
         else annotateMarkdownSpans(MarkdownText.renderInline(content), linkColor, openLink)
     }
+    val ink = LocalMarkdownInk.current
+    val needsWordLayout = remember(body) { body.text.any { it.isLatinLetter() } }
+    if (ink != null && needsWordLayout) {
+        androidx.compose.foundation.layout.BoxWithConstraints(modifier, propagateMinConstraints = true) {
+            val width = constraints.maxWidth
+            val measurer = rememberTextMeasurer(cacheSize = 1)
+            val direction = LocalLayoutDirection.current
+            val density = LocalDensity.current
+            val plan = remember(ink, width, style, direction, density.density, density.fontScale, measurer) { StreamingWordWrap() }
+            val planned = remember(plan, body) {
+                plan.plan(body, kotlin.math.ceil(ink.paintPositionForWrap(paintOffset)).toInt()) {
+                    measurer.measure(it, style, constraints = Constraints(maxWidth = width))
+                }
+            }
+            MarkdownInlinePrefix(planned, limit, paintOffset, Modifier, style)
+        }
+    } else MarkdownInlinePrefix(body, limit, paintOffset, modifier, style)
+}
+
+@Composable
+private fun MarkdownInlinePrefix(body: AnnotatedString, limit: Int, paintOffset: Int, modifier: Modifier, style: TextStyle) {
     val originalConfiguration = LocalViewConfiguration.current
     val preciseLinkConfiguration = remember(originalConfiguration) {
         object : ViewConfiguration by originalConfiguration {

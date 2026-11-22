@@ -110,7 +110,7 @@ class ReasoningTypewriterContract(unittest.TestCase):
         self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end, streamSnapshot) {', ' '.join(typing.split()))
         self.assertIn('val currentPlayback by rememberUpdatedState(playback)', typing)
         self.assertIn('canAdvance && playback?.paused != true', typing)
-        self.assertEqual(2, typing.count('motion.hold(current, frameNanos)'))
+        self.assertEqual(1, typing.count('motion.hold(current, frameNanos)'))
         self.assertIn('rememberUpdatedState(onVisibleAdvance)', typing)
 
 if __name__ == '__main__':

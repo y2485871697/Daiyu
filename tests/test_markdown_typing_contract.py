@@ -107,13 +107,12 @@ class MarkdownTypingContract(unittest.TestCase):
         waiting, callback = loop.split('withFrameNanos { frameNanos ->', 1)
         callback = callback.split('\n                        }', 1)[0]
         self.assertEqual(' '.join(waiting.split()),
-                         'var waitedForGeometry = false while (markdownTypingCanAdvance(currentCanAdvance, currentPlayback) && '
-                         '(textClearance?.held == true || currentAwaitPaintAdmission && !publication.ready)) { '
-                         'if (textClearance?.held == true) waitedForGeometry = true publication.awaitWakeup() }')
+                         'while (markdownTypingCanAdvance(currentCanAdvance, currentPlayback) && '
+                         '(if (textClearance?.held == true) streamSnapshot else currentAwaitPaintAdmission && !publication.ready)) { '
+                         'publication.awaitWakeup() }')
         for forbidden in ('motion.advance(', 'motion.pause(', 'motion.hold(', 'value =', 'withFrameNanos'):
             self.assertNotIn(forbidden, waiting)
-        self.assertIn('if (waitedForGeometry) motion.hold(current, frameNanos)', callback)
-        compact = 'val before = shown ' + ' '.join(callback.split('val before = shown', 1)[1].split())
+        compact = ' '.join(callback.split())
         self.assertTrue(compact.startswith('val before = shown shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end, streamSnapshot) {'))
         self.assertTrue(compact.endswith('if (currentAwaitPaintAdmission) publication.reserve(current, before, shown) value = MarkdownTypingFrame(current, shown)'))
         self.assertIn('} finally {\n                    controlWakeups.cancel()\n                }', producer)
@@ -163,7 +162,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end, streamSnapshot) {', " ".join(callback.split()))
         self.assertEqual(1, callback.count("motion.advance("))
         self.assertEqual(1, callback.count("motion.pause("))
-        self.assertEqual(2, callback.count("motion.hold("))
+        self.assertEqual(1, callback.count("motion.hold("))
         paint_wait = callback.split("currentAwaitPaintAdmission && !publication.ready ->", 1)[1].split("else ->", 1)[0]
         self.assertEqual("motion.visible(current)", paint_wait.strip())
         self.assertIn("value = MarkdownTypingFrame(current, shown)", callback)

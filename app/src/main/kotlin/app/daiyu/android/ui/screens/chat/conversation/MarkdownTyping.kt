@@ -272,15 +272,11 @@ internal fun rememberMarkdownReveal(
                 }
                 try {
                     while (shown < end) {
-                        var waitedForGeometry = false
                         while (markdownTypingCanAdvance(currentCanAdvance, currentPlayback) &&
-                            (textClearance?.held == true || currentAwaitPaintAdmission && !publication.ready)) {
-                            if (textClearance?.held == true) waitedForGeometry = true
+                            (if (textClearance?.held == true) streamSnapshot else currentAwaitPaintAdmission && !publication.ready)) {
                             publication.awaitWakeup()
                         }
                         withFrameNanos { frameNanos ->
-                            // Blocked wall time is not playback credit on the first free frame.
-                            if (waitedForGeometry) motion.hold(current, frameNanos)
                             val before = shown
                             shown = when {
                                 !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> {

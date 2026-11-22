@@ -28,13 +28,15 @@ internal fun StreamingAnswer(source: String, streaming: Boolean, id: String, rev
     val document = rememberMarkdownDocument(if (frozen) receipt.last?.source.orEmpty() else source, streaming = streaming)
     val shown = if (frozen) receipt.last else document
     val limit = reveal.limit(id)
+    val following = LocalStreamingTextClearance.current != null && LocalChatBottomFollowIntent.current
+    val bodySize = if (following) Modifier else Modifier.animateContentSize()
     val uri = LocalUriHandler.current
     SideEffect {
         reveal.publication.active = true
         if (shown?.source == source) { reveal.applied(id, limit); reveal.presented(id) }
     }
     if (shown != null) BetterSelectionContainer(modifier) {
-        Markdown(document = shown, modifier = Modifier.animateContentSize().padding(horizontal = 4.dp).drawWithContent {
+        Markdown(document = shown, modifier = bodySize.padding(horizontal = 4.dp).drawWithContent {
                 drawContent()
                 val previous = receipt.last
                 receipt.last = shown

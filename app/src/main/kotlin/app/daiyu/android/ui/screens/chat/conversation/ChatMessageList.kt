@@ -1059,8 +1059,10 @@ internal fun ChatMessageList(
                 }
                 // Reveal may be waiting for this very movement to clear its next line.
                 val alignment = resumeFollowPending && !currentNestedTail.textClearance.pacedFollowing
-                var delta = if (alignment) followDistance else 0f
-                if (!alignment) {
+                val documentOverflow = tail?.listKey == currentTailKey && tail?.isStreaming == true &&
+                    tail.hasBodyTextActions() && tail.workProcess?.running != true && last.size >= layout.viewportSize.height - currentOcclusionPx
+                var delta = if (alignment || documentOverflow) followDistance else 0f
+                if (!alignment && !documentOverflow) {
                     // Keep one cancellable frame loop alive while measured overflow remains.
                     // A settled LazyColumn may not emit another layout snapshot after the first
                     // zero-velocity sample, so the next frame must be sampled here directly.

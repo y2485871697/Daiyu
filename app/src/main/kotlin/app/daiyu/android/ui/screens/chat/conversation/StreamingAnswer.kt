@@ -4,6 +4,16 @@ import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberUpdatedState
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import java.text.BreakIterator
+import java.util.Locale
+import me.rerere.bettertext.markdown.MarkdownInline
+import me.rerere.bettertext.markdown.MarkdownBlock
+import me.rerere.bettertext.markdown.plainText
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -21,15 +31,47 @@ internal class AnswerPaint(private val initialSource: String = "") {
     var last: MarkdownDocument? = null
         private set
 
-    fun record(document: MarkdownDocument): Boolean {
+    private val boundaries by lazy { BreakIterator.getCharacterInstance(Locale.ROOT) }
+
+    fun record(document: MarkdownDocument): Int {
         val previous = last
-        if (previous === document) return false
+        if (previous === document) return 0
         last = document
         val before = previous?.source ?: initialSource
         val next = document.source
         if (next.length <= before.length || !next.startsWith(before) || document.blocks.isEmpty() ||
-            previous?.blocks == document.blocks) return false
-        return (before.length until next.length).any { !next[it].isWhitespace() }
+            previous?.blocks == document.blocks) return 0
+        val oldTail = previous?.blocks?.lastOrNull()
+        val tail = document.blocks.last()
+        fun List<MarkdownInline>.characters() = (singleOrNull() as? MarkdownInline.Text)?.text ?: plainText()
+        fun textOf(block: MarkdownBlock?) = when (block) {
+            is MarkdownBlock.Paragraph -> block.content.characters()
+            is MarkdownBlock.Heading -> block.content.characters()
+            is MarkdownBlock.CodeBlock -> block.code
+            else -> null
+        }
+        val sameBlock = previous != null && previous.blocks.size == document.blocks.size
+        val rendered = textOf(tail)
+        val oldText = if (sameBlock) textOf(oldTail) else null
+        val text: String
+        val start: Int
+        if (rendered != null && oldText != null) {
+            if (!rendered.startsWith(oldText)) return 0
+            text = rendered; start = oldText.length
+        } else if (rendered != null && previous == null && before.isEmpty()) {
+            text = rendered; start = 0
+        } else {
+            text = next; start = before.length
+        }
+        if (start >= text.length) return 0
+        boundaries.setText(text)
+        var i = if (boundaries.isBoundary(start)) start else boundaries.following(start)
+        var count = 0
+        while (i in 0 until text.length && count < ReplyCharacterTicks.BURST) {
+            if (!text[i].isWhitespace()) count++
+            i = boundaries.following(i)
+        }
+        return count
     }
 }
 
@@ -51,10 +93,20 @@ internal fun StreamingAnswer(source: String, streaming: Boolean, id: String, rev
         reveal.publication.active = true
         if (shown?.source == source) { reveal.applied(id, limit); reveal.presented(id) }
     }
+    val latestAdvance = rememberUpdatedState(reveal.onDocumentAdvance)
+    val ticks = remember(receipt, streaming, frozen) {
+        val handler = Handler(Looper.getMainLooper())
+        ReplyCharacterTicks(SystemClock::uptimeMillis, { task, time -> handler.postAtTime(task, time) },
+            { handler.removeCallbacks(it) }) {
+            if (!frozen && playback?.let { it.paused || it.control.stopped } != true) latestAdvance.value()
+        }
+    }
+    DisposableEffect(ticks) { onDispose { ticks.close() } }
     if (shown != null) BetterSelectionContainer(modifier) {
         Markdown(document = shown, modifier = bodySize.padding(horizontal = 4.dp).drawWithContent {
                 drawContent()
-                if (receipt.record(shown) && !frozen) reveal.onDocumentAdvance()
+                val added = receipt.record(shown)
+                if (!frozen && added > 0) ticks.offer(if (streaming) added else 1)
             },
             style = MiuixTheme.textStyles.body1.copy(color = conversationColors().text, fontSize = 16.sp, lineHeight = 26.sp),
             onLinkClick = { if (MarkdownText.isSafeLink(it)) runCatching { uri.openUri(it) }; Unit })

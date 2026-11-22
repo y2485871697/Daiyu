@@ -9,13 +9,26 @@ class MarkdownRevealHapticsTest {
         val parser = me.rerere.bettertext.markdown.MarkdownStreamParser()
         val receipt = AnswerPaint("已有")
         fun draw(text: String) = receipt.record(parser.parse(text, streaming = true))
-        assertFalse(draw("已有"))
-        assertTrue(draw("已有新字"))
-        assertFalse(draw("已有新字"))
-        assertFalse(draw("已有新字\n"))
-        assertFalse(draw("更正后的段落"))
-        assertTrue(draw("更正后的段落。"))
-        assertTrue(AnswerPaint().record(parser.parse("首字", streaming = true)))
+        assertEquals(0, draw("已有"))
+        assertEquals(2, draw("已有新字"))
+        assertEquals(0, draw("已有新字"))
+        assertEquals(0, draw("已有新字\n"))
+        assertEquals(0, draw("更正后的段落"))
+        assertEquals(1, draw("更正后的段落。"))
+        assertEquals(2, AnswerPaint().record(parser.parse("首字", streaming = true)))
+    }
+
+    @Test fun slowCharactersPulseSeparatelyAndFastOutputCannotBuildUpDebt() {
+        var time = 0L
+        var next: Pair<Runnable, Long>? = null
+        val pulses = mutableListOf<Long>()
+        val pacer = ReplyCharacterTicks({ time }, { r, at -> assertNull(next); next = r to at }, { next = null }) { pulses += time }
+        fun fire() { val (r, at) = checkNotNull(next); next = null; time = maxOf(time, at); r.run() }
+        pacer.offer(1); fire(); time = 120; pacer.offer(1); fire()
+        time = 250; repeat(300) { pacer.offer(10) }; fire(); fire(); fire(); assertNull(next)
+        assertEquals(listOf(0L, 120L, 250L, 300L, 350L), pulses)
+        pacer.offer(20); time += 500; fire(); assertNull(next); assertEquals(5, pulses.size)
+        pacer.offer(2); pacer.close(); assertNull(next)
     }
 
     private class Fixture {

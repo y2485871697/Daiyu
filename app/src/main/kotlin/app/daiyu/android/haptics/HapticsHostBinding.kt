@@ -52,7 +52,7 @@ class HapticsHostBinding(
     }
 
     /** False while this host has no actually visible typewriter; Activity resume alone is not enough. */
-    fun setVisibleOutput(value: Boolean) { checkMain(); visibleOutput = value; publishLifecycle() }
+    fun setVisibleOutput(value: Boolean) { checkMain(); if (visibleOutput == value) return; visibleOutput = value; publishLifecycle() }
 
     /** Revocation, e.g. owner/config replacement. Re-enabling never resurrects the previous run. */
     fun setEnabled(value: Boolean) {

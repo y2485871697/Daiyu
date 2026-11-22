@@ -72,8 +72,10 @@ class ControllerHapticsObserver(
             is MessageBlock.Text -> {
                 val old = text.put(block.itemId, block.text).orEmpty()
                 // Snapshot replacement/truncation is not newly generated output.
-                if (!seed && block.text.startsWith(old) && block.text.length > old.length) {
-                    activeRun.output((graphemes(block.text) - graphemes(old)).coerceAtLeast(0))
+                if (!seed && block.text.length > old.length) {
+                    activeRun.output(reasoning = false) {
+                        if (block.text.startsWith(old)) (graphemes(block.text) - graphemes(old)).coerceAtLeast(0) else 0
+                    }
                 }
             }
             is MessageBlock.Tool -> if (tools.add(block.invocation.id.value) && !seed) {

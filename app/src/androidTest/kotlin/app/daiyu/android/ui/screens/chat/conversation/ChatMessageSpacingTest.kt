@@ -112,7 +112,8 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
     private fun answer(marker: String, lines: Int = 60) =
         List(lines) { "正文第${it + 1}行，检查长回复末尾与输入区的间距。" }.joinToString("\n") + "\n\n$marker"
 
-    private fun show(scale: Float, dark: Boolean = false, running: Boolean = false, plainText: Boolean = false) {
+    private fun show(scale: Float, dark: Boolean = false, running: Boolean = false, plainText: Boolean = false,
+        replyActions: ChatScreenActions = ChatScreenActions()) {
         mainThread {
             attachmentHeight = 0.dp
             liveGeometry = { "not sampled" }
@@ -129,7 +130,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                     val currentDensity = LocalDensity.current.density
                     SideEffect { density = currentDensity }
                     Box(Modifier.requiredWidth(320.dp).fillMaxHeight().testTag("spacing-host")) {
-                        DaiyuChatScreen(screen, ChatScreenActions(), hasTurnExtras = { !plainText }, turnExtras = { turn ->
+                        DaiyuChatScreen(screen, replyActions, hasTurnExtras = { !plainText }, turnExtras = { turn ->
                             if (turn.id == "tail" || turn.id == "start-reply") paintSlots.Capture(turn.id)
                             if (turn.id == "start-reply" || turn.id == "tail") {
                                 val viewport = LocalWorkflowDisclosureContext.current?.viewport
@@ -206,6 +207,26 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         assertTrue("Visible tail includes the outer composer padding: gap=${visibleGap}dp", visibleGap in (expectedGap + 8f)..(expectedGap + 12f))
         ui.onNodeWithContentDescription("上一条用户消息").assertDoesNotExist()
         assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPaintedCharactersEmitBoundedTicksWithoutReplayingHistory() {
+        val pulses = java.util.concurrent.CopyOnWriteArrayList<Long>()
+        show(1f, running = true, replyActions = ChatScreenActions(onVisibleTextAdvance = {
+            pulses.add(android.os.SystemClock.uptimeMillis())
+        }))
+        assertTrue("Mounting the existing paragraph is silent", pulses.isEmpty())
+        fun append(suffix: String) = mainThread {
+            val tail = screen.turns.last() as ChatTurnUi.Assistant
+            screen = screen.copy(turns = screen.turns.dropLast(1) + tail.copy(finalText = tail.finalText + suffix))
+        }
+        append("甲")
+        ui.waitUntil(5_000) { pulses.size == 1 }
+        append("乙丙丁戊己庚辛壬癸")
+        ui.waitUntil(5_000) { pulses.size >= 4 }
+        assertEquals(4, pulses.size)
+        assertTrue("No burst of immediate motor callbacks: $pulses", pulses.zipWithNext().all { (a, b) -> b - a >= 45L })
+        assertCompactTail("初始末尾")
+        assertEquals(4, pulses.size)
     }
 
     fun testReplyKeepsTextPositionWithoutOutputIndicator() {

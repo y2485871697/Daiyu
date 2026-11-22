@@ -17,8 +17,12 @@ class TypewriterHapticsContract(unittest.TestCase):
         self.assertIn("if (shown > previous) onAdvance()", motion)
         self.assertLess(motion.index("if (target !== expected)"), motion.index("onAdvance()"))
         document = (CHAT / "StreamingAnswer.kt").read_text()
-        self.assertLess(document.index("drawContent()"), document.index("reveal.onDocumentAdvance()"))
-        self.assertIn("receipt.record(shown) && !frozen", document)
+        self.assertLess(document.index("drawContent()"), document.index("ticks.offer("))
+        self.assertIn("if (!frozen && added > 0)", document)
+        self.assertIn('val latestAdvance = rememberUpdatedState(reveal.onDocumentAdvance)', document)
+        observer = (APP / 'haptics/ControllerHapticsObserver.kt').read_text()
+        self.assertIn('activeRun.output(reasoning = false) {', observer)
+        self.assertNotIn('activeRun.output((graphemes', observer)
         self.assertIn("{ currentAdvance() }", typing)
 
     def test_latest_viewport_lifecycle_and_occlusion_gate_are_in_callback(self):

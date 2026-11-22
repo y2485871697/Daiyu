@@ -192,24 +192,41 @@ private class WorkflowPaintFrame {
     var availableHeight by mutableStateOf(0f)
 }
 
+private class WorkflowSurfaceOutline {
+    private val path = Path()
+    private var lastSize = Size.Zero
+    private var lastCorner = -1f
+    fun pathFor(surfaceSize: Size, corner: Float): Path {
+        if (lastSize != surfaceSize || lastCorner != corner) {
+            path.reset()
+            path.addRoundRect(RoundRect(0f, 0f, surfaceSize.width, surfaceSize.height, CornerRadius(corner)))
+            lastSize = surfaceSize
+            lastCorner = corner
+        }
+        return path
+    }
+}
+
 /** Keep the measured extent while closing the visible surface inside the safe edge. */
 @Composable
 internal fun Modifier.streamingWorkflowSurface(background: Color, border: Color, radius: Dp,
     highlight: Color? = null, headerHeight: (() -> Int)? = null): Modifier {
     val clearance = LocalStreamingTextClearance.current
     val frame = remember(clearance) { WorkflowPaintFrame() }
+    val outline = remember { WorkflowSurfaceOutline() }
     fun positioned(coordinates: LayoutCoordinates) {
         frame.coordinates = coordinates
         frame.availableHeight = clearance?.availableHeight(coordinates) ?: Float.POSITIVE_INFINITY
     }
-    return onPlaced(::positioned).onGloballyPositioned(::positioned).drawWithContent {
-        val available = minOf(frame.availableHeight, clearance?.availableHeight(frame.coordinates) ?: Float.POSITIVE_INFINITY)
+    val tracked = if (clearance == null) this else onPlaced(::positioned).onGloballyPositioned(::positioned)
+    return tracked.drawWithContent {
+        val available = if (clearance == null) Float.POSITIVE_INFINITY else minOf(frame.availableHeight, clearance.availableHeight(frame.coordinates))
         val height = minOf(size.height, available)
         val header = headerHeight?.invoke()
         if (height > 0f && (header == null || header > 0 && height + .01f >= header)) {
             val surfaceSize = Size(size.width, height)
             val corner = minOf(radius.toPx(), surfaceSize.width / 2f, surfaceSize.height / 2f)
-            val path = Path().apply { addRoundRect(RoundRect(0f, 0f, surfaceSize.width, surfaceSize.height, CornerRadius(corner))) }
+            val path = outline.pathFor(surfaceSize, corner)
             clipRect(bottom = height) { clipPath(path) {
                 drawRoundRect(background, size = surfaceSize, cornerRadius = CornerRadius(corner))
                 this@drawWithContent.drawContent()
@@ -228,6 +245,7 @@ internal fun Modifier.streamingWorkflowSurface(background: Color, border: Color,
 internal fun Modifier.workflowInkClearance(): Modifier {
     val clearance = LocalStreamingTextClearance.current
     val item = LocalWorkflowItemLayout.current
+    if (clearance == null && item == null) return this
     val frame = remember(clearance, item) { WorkflowPaintFrame() }
     fun positioned(coordinates: LayoutCoordinates) {
         frame.coordinates = coordinates

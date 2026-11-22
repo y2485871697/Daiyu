@@ -66,8 +66,8 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
     def test_reply_identity_waits_for_content_without_blocking_readiness(self):
         source = (CHAT / "ChatMessageList.kt").read_text()
         assistant = source.split("internal fun AssistantTurn(", 1)[1].split("private fun AssistantTextContent", 1)[0]
-        self.assertIn("if (turn.hasVisibleResponse() || showActions && actionTurn !== turn || holdActionSlot)", assistant)
-        gate = assistant.index("if (turn.hasVisibleResponse() || showActions && actionTurn !== turn || holdActionSlot)")
+        self.assertIn("if (turn.hasVisibleResponse() || actionsVisible || showActions && actionTurn !== turn || holdActionSlot)", assistant)
+        gate = assistant.index("if (turn.hasVisibleResponse() || actionsVisible || showActions && actionTurn !== turn || holdActionSlot)")
         self.assertLess(assistant.index("SideEffect { onContentReady(contentReady) }"), gate)
         self.assertLess(assistant.index("SideEffect { onContentDisplayed(hasDisplayBody || contentReady) }"), gate)
         self.assertLess(gate, assistant.index('Modifier.testTag("reply-identity:'))

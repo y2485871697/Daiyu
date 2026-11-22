@@ -219,7 +219,7 @@ internal fun ReportedReasoningCard(
                             RevealedMessageMarkdown(
                                 displayed, projection?.blocksAt(0), display.reveal, summary.itemId, Modifier.fillMaxWidth(),
                                 generationComplete = generationComplete && projection != null && displayed == summary.text,
-                                deferBlockReveal = true,
+                                deferBlockReveal = true, bodyPaintFeedback = isThinking && !paused && !stopped && parentExpanded && !manuallyCollapsed,
                                 sourceWindow = projection?.windows?.singleOrNull() ?: LocalReasoningSourceWindows.current[summary.itemId],
                             )
                         }

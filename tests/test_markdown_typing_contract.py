@@ -257,7 +257,7 @@ class MarkdownTypingContract(unittest.TestCase):
         assistant = self.chat.split("internal fun AssistantTurn(", 1)[1].split(
             "private fun AssistantTextContent(", 1)[0]
         self.assertIn(
-            "    val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && generationComplete && revealSettled\n",
+            "    val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && (stoppedFooter || generationComplete && revealSettled)\n",
             assistant)
         self.assertIn(
             "        if (actionsVisible) {\n"
@@ -265,7 +265,7 @@ class MarkdownTypingContract(unittest.TestCase):
             "            MessageActionBar(actionTurn.actionKey, actions, timestamp = actionTurn.timestamp,\n",
             assistant)
         reconnect = (BASE / "ReconnectedAssistantTurn.kt").read_text()
-        self.assertIn("val actionsReady = parts.parts.all { ready[it.turn.listKey] == it && settled[it.turn.listKey] == it }", reconnect)
+        self.assertIn("val actionsReady = turn.status == app.daiyu.android.domain.RunStatus.STOPPED || LocalReplyPlayback.current?.control?.stopped == true || parts.parts.all { ready[it.turn.listKey] == it && settled[it.turn.listKey] == it }", reconnect)
         self.assertIn("showActions = index == parts.parts.lastIndex && actionsReady, actionTurn = turn", reconnect)
 
     def test_received_frontier_and_stale_target_guards_are_present(self):

@@ -33,7 +33,7 @@ class MessageTimestampStyleContractTest(unittest.TestCase):
         self.assertIn('val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true', assistant)
         self.assertIn('val generationComplete = turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady', assistant)
         self.assertIn(
-            '    val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && generationComplete && revealSettled\n',
+            '    val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && (stoppedFooter || generationComplete && revealSettled)\n',
             assistant)
         self.assertIn(
             '        if (actionsVisible) {\n'

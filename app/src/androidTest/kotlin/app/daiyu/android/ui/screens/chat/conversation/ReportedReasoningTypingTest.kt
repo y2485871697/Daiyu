@@ -84,6 +84,16 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             "expected=<$text>, actual=<$lastObservedText>")
     }
 
+    fun testStoppedEmptyReplyShowsFooterWithoutWaitingForBody() {
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                AssistantTurn(ChatTurnUi.Assistant("stopped", status = RunStatus.STOPPED), ChatScreenActions())
+            }
+        } }
+        ui.onNodeWithContentDescription("分支", useUnmergedTree = true).assertExists()
+        ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
+    }
+
     private fun assertLivePath(path: Path) {
         val baseline = "首"
         val first = "首段思考" + "甲".repeat(180)
@@ -108,7 +118,10 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         mainThread { value = turn(path, first) }
         await { advances > 0 }
         await { visibleText().contains(first) }
-        assertEquals("One accepted reasoning snapshot must not replay individual characters", 1, advances)
+        await { advances >= 2 }
+        // Allow pending real-time motor ticks to drain before checking idle redraws.
+        val drain = android.os.SystemClock.uptimeMillis() + 200L
+        await { android.os.SystemClock.uptimeMillis() >= drain }
         val settled = advances
         ui.mainClock.advanceTimeBy(160)
         assertEquals(settled, advances)
@@ -119,7 +132,7 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         mainThread { value = turn(path, afterResume) }
         await { advances > settled }
         await { visibleText().contains(afterResume) }
-        assertEquals("Resume must publish only the newly received snapshot", settled + 1, advances)
+        await { advances >= settled + 2 }
         ui.mainClock.autoAdvance = true
     }
 

@@ -159,7 +159,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         surface = workflow.split("internal fun Modifier.streamingWorkflowSurface", 1)[1].split("internal fun Modifier.workflowInkClearance", 1)[0]
         self.assertIn("clipRect(bottom = height)", surface)
         self.assertIn("val surfaceSize = Size(size.width, height)", surface)
-        self.assertIn("surfaceSize.width, surfaceSize.height, CornerRadius(corner)", surface)
+        self.assertIn("surfaceSize.width, surfaceSize.height, CornerRadius(corner)", workflow)
         self.assertIn("drawRoundRect(background, size = surfaceSize", surface)
         self.assertIn("Size(surfaceSize.width - stroke, surfaceSize.height - stroke)", surface)
         self.assertNotIn("Size(size.width - stroke, size.height - stroke)", surface)
@@ -190,7 +190,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn('LocalChatBottomFollowIntent = staticCompositionLocalOf { true }', source)
         self.assertIn('LocalChatBottomFollowIntent provides followBottom', source)
         self.assertIn('val followIntent = LocalChatBottomFollowIntent.current', assistant)
-        self.assertIn('val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && generationComplete && revealSettled', assistant)
+        self.assertIn('val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && (stoppedFooter || generationComplete && revealSettled)', assistant)
         self.assertIn('val appended = assistantActionSlotAppended(previousActionSlotSources, actionSlotSources)', assistant)
         self.assertIn('val retainDetachedSlot = appended && actionSlotOwner && !followIntent && actionSlotHeightPx > 0', assistant)
         self.assertIn('if (appended && !retainDetachedSlot) actionSlotHeightPx = 0', assistant)

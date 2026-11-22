@@ -39,7 +39,7 @@ internal fun ReconnectedAssistantTurn(
         onContentDisplayed(parts.parts.all { displayed[it.turn.listKey] == it })
         onRevealSettled(parts.parts.all { settled[it.turn.listKey] == it })
     }
-    val actionsReady = parts.parts.all { ready[it.turn.listKey] == it && settled[it.turn.listKey] == it }
+    val actionsReady = turn.status == app.daiyu.android.domain.RunStatus.STOPPED || LocalReplyPlayback.current?.control?.stopped == true || parts.parts.all { ready[it.turn.listKey] == it && settled[it.turn.listKey] == it }
     val identityIndex = parts.parts.indexOfFirst { it.turn.hasVisibleResponse() }.coerceAtLeast(0)
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         parts.parts.forEachIndexed { index, part -> key(part.turn.listKey) {

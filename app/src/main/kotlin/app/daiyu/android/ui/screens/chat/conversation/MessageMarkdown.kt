@@ -221,6 +221,13 @@ internal fun ParsedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, m
 
 private val LocalMarkdownPaintedText = staticCompositionLocalOf<MutableMap<Int, TextLayoutResult>?> { null }
 private class MarkdownTextFrame {
+    private var boundsText: String? = null
+    private var cachedBounds: MarkdownTextBoundaries? = null
+    fun boundaries(text: String): MarkdownTextBoundaries {
+        cachedBounds?.let { if (text === boundsText || text == boundsText) return it }
+        boundsText = text
+        return MarkdownTextBoundaries(text).also { cachedBounds = it }
+    }
     var coordinates by mutableStateOf<LayoutCoordinates?>(null)
     var availableHeight by mutableStateOf(0f)
     var nextAdvance = 0
@@ -293,7 +300,6 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             }
         }
     }
-    val inkBounds = remember(ink, displayedText.text) { ink?.let { MarkdownTextBoundaries(displayedText.text) } }
     val candidateText = if (playback?.paused == true) displayedText else text
     val owner = remember(frame) { Any() }
     fun published(): Boolean = latestCandidateText.isEmpty() || frame.layout?.let { candidate ->
@@ -386,7 +392,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             }
             if (actual != null && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
                 inkHeight(actual) <= available + .01f && (!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text)) {
-                if (actual.layoutInput.text.text != displayedText.text && ink != null) return@drawWithContent
+                val inkBounds = if (ink == null) null else frame.boundaries(actual.layoutInput.text.text)
                 drawMarkdownInk(actual, ink, inkOffset, inkBounds, inkControl?.stopped == true)
                 androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
                     frame.drawn = actual
@@ -435,6 +441,7 @@ internal fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boo
         previous.softWrap != current.softWrap ||
         previous.density.density != current.density.density ||
         previous.density.fontScale != current.density.fontScale || previous.layoutDirection != current.layoutDirection) return false
+    if (previous.text === current.text) return true
     val prefix = current.text.subSequence(0, previous.text.length)
     return previous.text == prefix
 }

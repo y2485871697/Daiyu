@@ -1536,7 +1536,8 @@ internal fun AssistantTurn(
         mutableStateOf(actionSlotSources)
     }
     val followIntent = LocalChatBottomFollowIntent.current
-    val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && generationComplete && revealSettled
+    val stoppedFooter = actionTurn.status == RunStatus.STOPPED || LocalReplyPlayback.current?.control?.stopped == true
+    val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && (stoppedFooter || generationComplete && revealSettled)
     if (previousActionSlotSources != actionSlotSources) {
         val appended = assistantActionSlotAppended(previousActionSlotSources, actionSlotSources)
         val retainDetachedSlot = appended && actionSlotOwner && !followIntent && actionSlotHeightPx > 0
@@ -1553,7 +1554,7 @@ internal fun AssistantTurn(
             if (customAvatar != null) value = withContext(Dispatchers.IO) { runCatching { identity?.avatarBitmap() } }
         }
     }
-    if (turn.hasVisibleResponse() || showActions && actionTurn !== turn || holdActionSlot) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    if (turn.hasVisibleResponse() || actionsVisible || showActions && actionTurn !== turn || holdActionSlot) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (showIdentity) Row(Modifier.testTag("reply-identity:${turn.listKey}").workflowInkClearance().drawWithContent {
             if (customAvatar == null || avatar.value != null) drawContent()
         }.padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,

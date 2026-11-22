@@ -89,6 +89,7 @@ internal class MarkdownRevealBudgets(
 internal class MarkdownPaintPublication(val inks: MutableMap<String, MarkdownInk> = mutableMapOf(),
     val answerPaint: MutableMap<String, AnswerPaint> = mutableMapOf(),
     val initialSources: List<MarkdownTypingSource> = emptyList()) {
+    val bodyInkIds = mutableSetOf<String>()
     private val activeInk = mutableStateMapOf<Any, Unit>()
     fun inkPending(owner: Any, busy: Boolean) { if (busy) activeInk[owner] = Unit else activeInk.remove(owner) }
     var active by mutableStateOf(false)
@@ -291,9 +292,9 @@ internal fun rememberMarkdownReveal(
                                 currentAwaitPaintAdmission && !publication.ready -> motion.visible(current)
                                 else -> motion.advance(current, frameNanos, end, streamSnapshot) {
                                     // Document leaves report their own draw; other leaves still use the lane callback.
-                                    if (publication.answerPaint.isEmpty() || current.parts.any { part ->
+                                    if (publication.answerPaint.isEmpty() && publication.bodyInkIds.isEmpty() || current.parts.any { part ->
                                             val id = part.source.id
-                                            id !in publication.answerPaint && current.limit(id, end) > current.limit(id, before)
+                                            id !in publication.bodyInkIds && id !in publication.answerPaint && current.limit(id, end) > current.limit(id, before)
                                         }) currentAdvance()
                                 }
                             }

@@ -1662,7 +1662,7 @@ internal fun rememberAssistantTextBody(plainNarration: Set<String>, sources: Lis
         } else RevealedMessageMarkdown(displayed, accepted?.blocksAt(index),
             currentReveal.value, text.itemId, modifier,
             generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true,
-            sourceWindow = accepted?.windows?.getOrNull(index) ?: text.markdownWindow)
+            sourceWindow = accepted?.windows?.getOrNull(index) ?: text.markdownWindow, bodyPaintFeedback = streamAnswer)
     } }
 }
 

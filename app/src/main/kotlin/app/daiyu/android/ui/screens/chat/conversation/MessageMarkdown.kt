@@ -127,6 +127,7 @@ internal fun RevealedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?,
     partId: String, modifier: Modifier = Modifier, generationComplete: Boolean = true,
     deferBlockReveal: Boolean = false,
     sourceWindow: app.daiyu.android.MarkdownSourceWindow? = null,
+    bodyPaintFeedback: Boolean = false,
 ) {
     val publication = reveal.publication
     val sourceReady = reveal.ready(partId, text, sourceWindow)
@@ -134,7 +135,7 @@ internal fun RevealedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?,
         publication.active = true
         if (sourceReady && blocks != null) reveal.presented(partId)
     }
-    val ink = rememberPartInk(reveal, partId)
+    val ink = rememberPartInk(reveal, partId, bodyPaintFeedback)
     CompositionLocalProvider(LocalMarkdownPaintPublication provides publication, LocalMarkdownInk provides ink) {
         val presented = modifier
         if (deferBlockReveal) ProjectedMessageMarkdown(text, blocks, presented,

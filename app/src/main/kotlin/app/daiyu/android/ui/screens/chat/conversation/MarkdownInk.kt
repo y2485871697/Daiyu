@@ -28,6 +28,14 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
         paintedEnds[offset] = visible
         return visible
     }
+    private var tickFrontier = start
+    var onGlyphDrawn: (() -> Unit)? = null
+    fun reportDraw(offset: Int, whole: Int) {
+        val end = offset + whole
+        if (end <= tickFrontier) return
+        tickFrontier = end
+        onGlyphDrawn?.invoke()
+    }
     private var lastDrawnProgress = -1.0
 
     // Layout may include the first glyph to bootstrap draw, never an entire unpainted batch.
@@ -74,7 +82,7 @@ internal val LocalMarkdownInk = staticCompositionLocalOf<MarkdownInk?> { null }
 internal val LocalInkOffset = staticCompositionLocalOf { -1 }
 
 @Composable
-internal fun rememberPartInk(reveal: MarkdownReveal, id: String): MarkdownInk? {
+internal fun rememberPartInk(reveal: MarkdownReveal, id: String, bodyPaintFeedback: Boolean = false): MarkdownInk? {
     if (!reveal.inkEnabled) return null
     val text = reveal.displayText(id)
     val bounds = remember(text) { MarkdownTextBoundaries(text) }
@@ -89,6 +97,17 @@ internal fun rememberPartInk(reveal: MarkdownReveal, id: String): MarkdownInk? {
     val playback = LocalReplyPlayback.current
     val currentPlayback by rememberUpdatedState(playback)
     val clearance = LocalStreamingTextClearance.current
+    val latestFeedback by rememberUpdatedState(reveal.onDocumentAdvance)
+    if (bodyPaintFeedback) DisposableEffect(ink, paused, reveal.publication, id) {
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        val ticks = ReplyCharacterTicks(android.os.SystemClock::uptimeMillis,
+            { task, time -> handler.postAtTime(task, time) }, { handler.removeCallbacks(it) }) {
+            if (!paused && currentPlayback?.let { it.paused || it.control.stopped } != true) latestFeedback()
+        }
+        reveal.publication.bodyInkIds.add(id)
+        ink.onGlyphDrawn = if (paused) null else { { ticks.offer(1) } }
+        onDispose { ticks.close(); ink.onGlyphDrawn = null; reveal.publication.bodyInkIds.remove(id) }
+    }
     val following = busy && !paused
     SideEffect { clearance?.setTypingPending(ink, following) }
     DisposableEffect(ink, clearance) { onDispose { clearance?.setTypingPending(ink, false) } }
@@ -115,7 +134,7 @@ internal fun ContentDrawScope.drawMarkdownInk(layout: TextLayoutResult?, ink: Ma
     if (layout == null) return
     val end = layout.layoutInput.text.length
     val p = ink.paintPosition(offset, end, stopped)
-    if (p >= end) { drawContent(); return }
+    if (p >= end) { drawContent(); if (!stopped && end > 0) ink.reportDraw(offset, end); return }
     val whole = boundaries.floor(p.toInt())
     val scope = this
     if (whole > 0) clipPath(layout.getPathForRange(0, whole)) { scope.drawContent() }
@@ -125,4 +144,5 @@ internal fun ContentDrawScope.drawMarkdownInk(layout: TextLayoutResult?, ink: Ma
         canvas.saveLayer(Rect(Offset.Zero, size), Paint().apply { alpha = ((p - whole) / (next - whole)).toFloat() })
         try { scope.drawContent() } finally { canvas.restore() }
     }
+    if (!stopped && whole > 0) ink.reportDraw(offset, whole)
 }

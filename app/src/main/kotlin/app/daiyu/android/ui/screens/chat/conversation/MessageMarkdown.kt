@@ -258,15 +258,8 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     val ink = LocalMarkdownInk.current.takeIf { paintOffset != null || LocalInkOffset.current >= 0 }
     val inkControl = LocalReplyPlayback.current?.control
     val inkOffset = paintOffset ?: LocalInkOffset.current
-    val inkFinished = ink?.let { current ->
-        androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
-            inkControl?.stopped != true && nextLineText == null && current.position >= inkOffset + text.length
-        }
-    } == true
-    // Settled history uses the native text path. The clearance/paint state is only needed
-    // while a leaf is still revealing or reserving its next line; otherwise every history
-    // scroll would re-run coordinate conversion for each old text leaf.
-    if ((ink == null && nextLineText == null) || inkFinished) {
+    // Only unprotected, non-animated text has no outstanding draw receipt.
+    if (clearance == null && ink == null) {
         BasicText(text, modifier, style, softWrap = softWrap)
         return
     }

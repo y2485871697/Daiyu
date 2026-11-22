@@ -40,8 +40,10 @@ class ProductionBodyHapticsTest : WiredActivityTestCase() {
                 val marker = "正文第${n}段"
                 val before = times.size
                 send(ModelEvent.TextDelta("body", "\n\n" + "实验文字".repeat(16) + marker))
-                ui.waitUntil(10_000) { ui.onAllNodesWithText(marker, substring = true, useUnmergedTree = true)
-                    .fetchSemanticsNodes().isNotEmpty() }
+                try { ui.waitUntil(10_000) { ui.onAllNodesWithText(marker, substring = true, useUnmergedTree = true)
+                    .fetchSemanticsNodes().isNotEmpty() } } catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
+                    throw AssertionError("Missing burst $n, ticks=${times.size}, tree=${ui.onRoot(useUnmergedTree = true).printToString(maxDepth = 24)}", failure)
+                }
                 ui.waitUntil(5_000) { times.size >= before + 2 }
             }
             assertTrue("Four separately painted bursts must reach the motor", times.size >= 8)

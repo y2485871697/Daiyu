@@ -255,10 +255,13 @@ private class MarkdownTextFrame {
 internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: Modifier, style: TextStyle,
     softWrap: Boolean = true, nextLineText: AnnotatedString? = null) {
     val clearance = LocalStreamingTextClearance.current
-    val painted = LocalMarkdownPaintedText.current ?: remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }
     val ink = LocalMarkdownInk.current.takeIf { paintOffset != null || LocalInkOffset.current >= 0 }
     val inkControl = LocalReplyPlayback.current?.control
     val inkOffset = paintOffset ?: LocalInkOffset.current
+    if (clearance == null && (ink == null || inkControl == null && inkOffset >= 0 && inkOffset + text.length <= ink.baselineEnd)) {
+        BasicText(text, modifier, style, softWrap = softWrap)
+        return
+    }
     // The input is already bounded to the current grapheme. Reserve a real trailing blank
     // line as well: BasicText places it even when the last character is a newline.
     fun inkHeight(layout: TextLayoutResult): Int = if (ink != null && inkControl?.stopped == true)
@@ -276,6 +279,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
         }, style, softWrap = softWrap, onTextLayout = { result = it })
         return
     }
+    val painted = LocalMarkdownPaintedText.current ?: remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }
     val frame = remember(clearance, paintOffset) {
         MarkdownTextFrame().apply {
             committed = paintOffset?.let { painted[it] }?.takeIf { previous ->
@@ -495,7 +499,7 @@ private fun MarkdownInlineText(
     }
     val ink = LocalMarkdownInk.current
     val needsWordLayout = remember(ink, paintOffset, body) {
-        ink != null && paintOffset + body.length > ink.baselineEnd && body.text.any { it.isLatinLetter() }
+        ink != null && paintOffset + body.length > ink.baselineEnd
     }
     if (ink != null && needsWordLayout) {
         androidx.compose.foundation.layout.BoxWithConstraints(modifier, propagateMinConstraints = true) {

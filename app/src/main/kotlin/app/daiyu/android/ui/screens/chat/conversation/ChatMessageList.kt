@@ -1353,9 +1353,9 @@ internal fun ChatMessageList(
                             label = "${activity.agentLabel} • ${if (activity.waiting) "等待压缩，当前调用结束后执行" else "正在压缩上下文"}") }
                     }
                 }
-                Column(Modifier.testTag("chat-turn:${turn.id}").onGloballyPositioned { coordinates ->
-                    if (coordinates.isAttached && turn.listKey == currentTailKey) correctFollowClearance()
-                }) {
+                Column(Modifier.testTag("chat-turn:${turn.id}").then(if (turn.listKey == currentTailKey) Modifier.onGloballyPositioned { coordinates ->
+                    if (coordinates.isAttached) correctFollowClearance()
+                } else Modifier)) {
                     val viewportState = nestedStates[turn.listKey]
                     if (turn is ChatTurnUi.Assistant && viewportState != null) {
                         val tailViewportHeight = {

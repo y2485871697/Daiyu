@@ -10,7 +10,8 @@ internal class StreamingWordWrap {
     private var breaks = emptyList<Int>()
 
     fun plan(body: AnnotatedString, painted: Int, measure: (AnnotatedString) -> TextLayoutResult): AnnotatedString {
-        val anchor = if (body.text.startsWith(previous)) painted.coerceIn(0, previous.length) else 0
+        val graphemes = MarkdownTextBoundaries(body.text)
+        val anchor = if (body.text.startsWith(previous)) graphemes.end(painted.coerceIn(0, previous.length)) else 0
         val locked = breaks.takeWhile { it < anchor }.toMutableList()
         fun annotated(cuts: List<Int>): AnnotatedString {
             if (cuts.isEmpty()) return body
@@ -22,7 +23,7 @@ internal class StreamingWordWrap {
         fun boundaries(input: AnnotatedString): List<Int> {
             val layout = measure(input)
             return (1 until layout.lineCount).map { layout.getLineStart(it) }.filter { i ->
-                i in 1 until body.length && body[i - 1] != '\n' && body[i].isLatinLetter()
+                i in 1 until body.length && body[i - 1] != '\n' && graphemes.floor(i) == i
             }
         }
         var natural = boundaries(annotated(locked))
@@ -36,5 +37,3 @@ internal class StreamingWordWrap {
         return annotated(breaks)
     }
 }
-
-internal fun Char.isLatinLetter(): Boolean = this in 'A'..'Z' || this in 'a'..'z'

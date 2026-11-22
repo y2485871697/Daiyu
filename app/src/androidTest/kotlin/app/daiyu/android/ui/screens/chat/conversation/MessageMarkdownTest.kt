@@ -166,6 +166,28 @@ class MessageMarkdownTest : WiredActivityTestCase() {
         }
     }
 
+    fun testMixedScriptPrefixesKeepGraphemesOnTheirPlannedLines() {
+        show {
+            val measurer = rememberTextMeasurer()
+            SideEffect {
+                val style = TextStyle(fontSize = 16.sp)
+                val width = measurer.measure(AnnotatedString("中文混排"), style).size.width
+                fun measure(s: AnnotatedString) = measurer.measure(s, style, constraints = Constraints(maxWidth = width))
+                for (raw in listOf("中文换行，标点跟随。", "价格 1234567 元", "中文😀e\u0301和文字", "текст слово тест")) {
+                    val full = StreamingWordWrap().plan(AnnotatedString(raw), 0, ::measure)
+                    val layout = measure(full)
+                    val bounds = MarkdownTextBoundaries(raw)
+                    var at = 0
+                    while (at < raw.length) {
+                        val end = bounds.next(at)
+                        assertEquals("$raw at $at", layout.getLineForOffset(at), measure(full.subSequence(0, end)).getLineForOffset(at))
+                        at = end
+                    }
+                }
+            }
+        }
+    }
+
     fun testNextLineBudgetUsesOnlyTheNextNativeLayoutHeight() {
         show {
             val measurer = rememberTextMeasurer(cacheSize = 0)

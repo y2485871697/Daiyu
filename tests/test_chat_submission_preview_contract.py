@@ -155,7 +155,7 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
         rows = (CHAT / 'ChatMessageList.kt').read_text()
         for token in ('private val ChatTurnSpacing = 26.dp', 'val pendingReplyGap =',
                       'lastUser.matchesKey(it.key) || lastUser.matchesKey(it.messageId)',
-                      'composerBottomInset + ChatTailClearance + pendingReplyGap',
+                      'composerBottomInset + tailClearance + pendingReplyGap',
                       'Arrangement.spacedBy(ChatTurnSpacing)',
                       'initialPositionPending || userMessageEntrance?.request?.claimed == false',
                       '(!followBottom || !listState.canScrollForward)',

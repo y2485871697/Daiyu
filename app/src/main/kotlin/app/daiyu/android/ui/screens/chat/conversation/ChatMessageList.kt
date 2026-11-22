@@ -503,7 +503,12 @@ internal fun ChatMessageList(
     val occlusionPx = with(density) { composerBottomInset.roundToPx() }
     val currentDensity by rememberUpdatedState(density.density)
     val currentOcclusionPx by rememberUpdatedState(occlusionPx)
-    val currentFollowClearancePx by rememberUpdatedState(with(density) { ChatTailClearance.roundToPx() })
+    val waveOwner = (turns.lastOrNull() as? ChatTurnUi.Assistant)?.takeIf { tail ->
+        tailCompressions.isEmpty() && tail.status == RunStatus.RUNNING && tail.isStreaming && !tail.reasoningStopped &&
+            tail.workProcess?.running != true && tail.hasBodyTextActions() && replyPlayback?.control?.stopped != true
+    }?.listKey
+    val tailClearance = if (waveOwner != null) ReplyWaveGap else ChatTailClearance
+    val currentFollowClearancePx by rememberUpdatedState(with(density) { tailClearance.roundToPx() })
     val currentDragging by rememberUpdatedState(dragging)
     val currentTurns by rememberUpdatedState(turns)
     val assistantTurns = remember(turns) { turns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey } }
@@ -669,7 +674,7 @@ internal fun ChatMessageList(
             if (nestedTail.textClearance.pacedFollowing && !viewportCorrection) return
             val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey &&
                 nestedTail.contentHeight > 0 && nestedTail.contentHeight <= layout.viewportSize.height -
-                currentOcclusionPx - with(density) { 11.dp.roundToPx() + ChatTailClearance.roundToPx() }
+                currentOcclusionPx - with(density) { 11.dp.roundToPx() + currentFollowClearancePx }
             val boundedTerminalReveal = nestedTail.bounded && currentTailKey == assistantOwnerKey &&
                 activeTail != null && activeTail.status != RunStatus.RUNNING && !activeTail.isStreaming &&
                 readyTurns[activeTail.listKey] == activeTail &&
@@ -1268,7 +1273,7 @@ internal fun ChatMessageList(
                 disclosureViewport.pointerUp()
             }
         },
-            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 11.dp, bottom = composerBottomInset + ChatTailClearance + pendingReplyGap),
+            contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 11.dp, bottom = composerBottomInset + tailClearance + pendingReplyGap),
             verticalArrangement = Arrangement.spacedBy(ChatTurnSpacing)) {
             items(turns, key = { it.listKey }, contentType = { if (it is ChatTurnUi.User) "user" else "assistant" }) { turn ->
                 val turnContent: @Composable () -> Unit = {
@@ -1312,6 +1317,10 @@ internal fun ChatMessageList(
                                 onContentReady = { ready ->
                                     if (ready) readyTurns[turn.listKey] = turn else readyTurns.remove(turn.listKey)
                                 })
+                            if (turn.listKey == waveOwner) StreamingReplyWave(
+                                moving = LocalChatPresentationActive.current && playback?.paused != true,
+                                modifier = Modifier.align(Alignment.CenterHorizontally),
+                            )
                             turnExtras(turn)
                         } }
                         }
@@ -1330,7 +1339,7 @@ internal fun ChatMessageList(
                     val viewportState = nestedStates[turn.listKey]
                     if (turn is ChatTurnUi.Assistant && viewportState != null) {
                         val tailViewportHeight = {
-                            viewportHeightPx.intValue - currentOcclusionPx - with(density) { 11.dp.roundToPx() + ChatTailClearance.roundToPx() }
+                            viewportHeightPx.intValue - currentOcclusionPx - with(density) { 11.dp.roundToPx() + currentFollowClearancePx }
                         }
                         StreamingTailContainer(viewportState, { clearanceLayout.coordinates }, turn.listKey,
                             userScrollEnabled = pageActive && !initialPositionPending && !retainingRows && presentationActive,

@@ -261,8 +261,8 @@ class StreamingOcclusionContract(unittest.TestCase):
         follow = source.split("// Keep a single motion", 1)[1].split("// Read confirmation", 1)[0]
         self.assertIn("val visibleBottom = layout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx", follow)
         self.assertIn("val frameVisibleBottom = frameLayout.viewportEndOffset - currentOcclusionPx - currentFollowClearancePx", follow)
-        self.assertIn("val currentFollowClearancePx by rememberUpdatedState(with(density) { ChatTailClearance.roundToPx() })", source)
-        self.assertIn("bottom = composerBottomInset + ChatTailClearance", source)
+        self.assertIn("val currentFollowClearancePx by rememberUpdatedState(with(density) { tailClearance.roundToPx() })", source)
+        self.assertIn("bottom = composerBottomInset + tailClearance", source)
         self.assertIn("val obscuredTail = (last.offset + last.size - visibleBottom).coerceAtLeast(0)", follow)
         self.assertIn("(last.offset + last.size - visibleBottom).coerceAtLeast(0)", follow)
         self.assertIn("(frameLast.offset + frameLast.size - frameVisibleBottom).coerceAtLeast(0)", follow)
@@ -304,7 +304,7 @@ class StreamingOcclusionContract(unittest.TestCase):
             self.assertIn(token, viewport)
         self.assertNotIn("BottomFollowMotion()", viewport)
         self.assertNotIn("listState.layoutInfo", viewport)
-        self.assertIn("ChatTailClearance.roundToPx()", source)
+        self.assertIn("val tailClearance = if (waveOwner != null) ReplyWaveGap else ChatTailClearance", source)
         migration = source.split("// Unwrap only after terminal", 1)[1].split("val requestedIndex", 1)[0]
         for token in ("revealedTurns[tail.listKey] != tail", "while (followBottom && (disclosureViewport.active != null ||",
                       "stopScroll(MutatePriority.PreventUserInput)",
@@ -419,7 +419,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         source = CHAT.read_text()
         correction = source.split("fun correctFollowClearance() {", 1)[1].split("val requestedIndex", 1)[0]
         for token in ("val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey",
-                      "nestedTail.contentHeight <= layout.viewportSize.height", "11.dp.roundToPx() + ChatTailClearance.roundToPx()",
+                      "nestedTail.contentHeight <= layout.viewportSize.height", "11.dp.roundToPx() + currentFollowClearancePx",
                       "val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal || viewportCorrection",
                       "if (!protectMeasuredTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return",
                       "val tailClearance = currentFollowClearancePx",

@@ -1061,6 +1061,13 @@ internal fun ChatMessageList(
                 val alignment = resumeFollowPending && !currentNestedTail.textClearance.pacedFollowing
                 val documentOverflow = tail?.listKey == currentTailKey && tail?.isStreaming == true &&
                     tail.hasBodyTextActions() && tail.workProcess?.running != true && last.size >= layout.viewportSize.height - currentOcclusionPx
+                // With a document there is no queued character motion. At the physical end,
+                // wait for a new measured extent instead of polling the same last pixel.
+                if (documentOverflow && !listState.canScrollForward) {
+                    resumeFollowPending = false
+                    motion.reset()
+                    return@collect
+                }
                 var delta = if (alignment || documentOverflow) followDistance else 0f
                 if (!alignment && !documentOverflow) {
                     // Keep one cancellable frame loop alive while measured overflow remains.
@@ -1098,6 +1105,10 @@ internal fun ChatMessageList(
                     val consumed = listState.scrollBy(delta)
                     if (clearanceLayout.viewportLoss.owner == scrollOwner) clearanceLayout.viewportLoss.consume(consumed)
                     currentNestedTail.followDiagnostic = "distance=$followDistance,delta=$delta,consumed=$consumed"
+                    if (documentOverflow && !alignment) {
+                        motion.reset()
+                        return@collect
+                    }
                     if (consumed <= 0f) {
                         // A fractional step or pending item measure is not a settled boundary.
                         withFrameNanos { }

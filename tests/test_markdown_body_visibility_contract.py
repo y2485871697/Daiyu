@@ -272,7 +272,9 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
                           'publication?.setPending', 'painted[paintOffset] ='):
             self.assertNotIn(forbidden, native_input)
         self.assertIn('BasicText(displayedText', clearance)
-        self.assertIn('clearance.fits(coordinates, inkHeight(candidate))', clearance)
+        placed = clearance.split('fun placed(coordinates: LayoutCoordinates) {', 1)[1].split('val refreshAdmission', 1)[0]
+        self.assertIn('frame.availableHeight = clearance.availableHeight(coordinates)', placed)
+        self.assertIn('inkHeight(candidate) <= frame.availableHeight + .01f -> candidate', placed)
         self.assertIn('clearance.fits(frame.coordinates, inkHeight(actual))', clearance)
         self.assertIn('publication?.setPending(owner, false)', clearance)
         self.assertNotIn('drawText(', clearance)

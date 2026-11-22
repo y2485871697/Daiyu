@@ -46,7 +46,8 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn('shown = when { !markdownTypingCanAdvance(currentCanAdvance, currentPlayback) -> { motion.pause(current) motion.visible(current) } textClearance?.held == true -> { motion.hold(current, frameNanos) motion.visible(current) } currentAwaitPaintAdmission && !publication.ready -> motion.visible(current) else -> motion.advance(current, frameNanos, end, streamSnapshot) {', " ".join(typing.split()))
         markdown = (CHAT.parent / "MessageMarkdown.kt").read_text()
         for token in ("remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }",
-                      "clearance.fits(coordinates, inkHeight(candidate))", "painted[paintOffset] = actual",
+                      "frame.availableHeight = clearance.availableHeight(coordinates)",
+                      "inkHeight(candidate) <= frame.availableHeight + .01f -> candidate", "painted[paintOffset] = actual",
                       "inkHeight(actual) <= available + .01f", "frame.committed",
                       'BasicText(displayedText',
                       "paintOffset + offset", "paintOffset + offsets[column]",
@@ -560,7 +561,9 @@ class StreamingOcclusionContract(unittest.TestCase):
                       "last.offset + last.size - visibleBottom", "dispatchRawDelta", "forceRemeasure()",
                       "finally", "clearanceLayout.correcting = false"):
             self.assertIn(token, correction)
-        self.assertIn("coordinates.isAttached && turn.listKey == currentTailKey", source)
+        tail = " ".join(source.split('Modifier.testTag("chat-turn:${turn.id}")', 1)[1].split('val viewportState', 1)[0].split())
+        self.assertIn(".then(if (turn.listKey == currentTailKey) Modifier.onGloballyPositioned { coordinates -> "
+                      "if (coordinates.isAttached) correctFollowClearance() } else Modifier)", tail)
         self.assertIn("status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running", (DEVICE.parent / "ChatMessageSpacingTest.kt").read_text())
         device = ' '.join(DEVICE.read_text().split())
         self.assertIn("status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running && !waiting", device)

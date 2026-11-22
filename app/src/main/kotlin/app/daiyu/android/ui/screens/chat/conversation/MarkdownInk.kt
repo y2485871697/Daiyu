@@ -5,8 +5,6 @@ import kotlinx.coroutines.flow.first
 import androidx.compose.ui.graphics.Paint
 import androidx.compose.ui.graphics.drawscope.ContentDrawScope
 import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.text.TextLayoutResult
 
 /** Position is a fractional UTF-16 offset for drawing; the clock spends graphemes, not code units. */
@@ -33,12 +31,19 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
     fun paintPositionForWrap(offset: Int): Double = paintedEnds[offset] ?: 0.0
     fun paintedLength(offset: Int): Int = (paintedEnds[offset] ?: 0.0).toInt()
     private var tickFrontier = start
-    var onGlyphDrawn: (() -> Unit)? = null
-    fun reportDraw(offset: Int, whole: Int) {
+    var onGlyphDrawn: ((Int) -> Unit)? = null
+    fun reportDraw(offset: Int, whole: Int, boundaries: MarkdownTextBoundaries) {
         val end = offset + whole
         if (end <= tickFrontier) return
+        var start = (tickFrontier - offset).coerceAtLeast(0)
         tickFrontier = end
-        onGlyphDrawn?.invoke()
+        val notify = onGlyphDrawn ?: return
+        var count = 0
+        while (start < whole && count < ReplyCharacterTicks.BURST) {
+            start = boundaries.next(start)
+            count++
+        }
+        if (count > 0) notify(count)
     }
     private var lastDrawnProgress by mutableDoubleStateOf(-1.0)
 
@@ -112,7 +117,7 @@ internal fun rememberPartInk(reveal: MarkdownReveal, id: String, bodyPaintFeedba
             if (!paused && currentPlayback?.let { it.paused || it.control.stopped } != true) latestFeedback()
         }
         reveal.publication.bodyInkIds.add(id)
-        ink.onGlyphDrawn = if (paused) null else { { ticks.offer(1) } }
+        ink.onGlyphDrawn = if (paused) null else ticks::offer
         onDispose { ticks.close(); ink.onGlyphDrawn = null; reveal.publication.bodyInkIds.remove(id) }
     }
     val following = busy && !paused
@@ -150,15 +155,18 @@ internal fun ContentDrawScope.drawMarkdownInk(layout: TextLayoutResult?, ink: Ma
     if (layout == null) return
     val end = layout.layoutInput.text.length
     val p = ink.paintPosition(offset, end, stopped)
-    if (p >= end) { drawContent(); if (!stopped && end > 0) ink.reportDraw(offset, end); return }
+    if (p >= end) { drawContent(); if (!stopped && end > 0) ink.reportDraw(offset, end, boundaries); return }
     val whole = boundaries.floor(p.toInt())
     val scope = this
     if (whole > 0) clipPath(layout.getPathForRange(0, whole)) { scope.drawContent() }
     val next = boundaries.next(whole).coerceAtMost(end)
-    if (p > whole && next > whole) clipPath(layout.getPathForRange(whole, next)) {
-        val canvas = drawContext.canvas
-        canvas.saveLayer(Rect(Offset.Zero, size), Paint().apply { alpha = ((p - whole) / (next - whole)).toFloat() })
-        try { scope.drawContent() } finally { canvas.restore() }
+    if (p > whole && next > whole) {
+        val glyph = layout.getPathForRange(whole, next)
+        clipPath(glyph) {
+            val canvas = drawContext.canvas
+            canvas.saveLayer(glyph.getBounds(), Paint().apply { alpha = ((p - whole) / (next - whole)).toFloat() })
+            try { scope.drawContent() } finally { canvas.restore() }
+        }
     }
-    if (!stopped && whole > 0) ink.reportDraw(offset, whole)
+    if (!stopped && whole > 0) ink.reportDraw(offset, whole, boundaries)
 }

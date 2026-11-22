@@ -100,7 +100,10 @@ internal suspend fun projectMarkdown(
                 blocks[source] = reuseMarkdownBlocks(old, parsed)
             }
         }
-        MarkdownProjection(sources.toList(), blocks, parser, windows = if (windowed) windows.toList() else emptyList(), windowBlocks = windowBlocks)
+        val display = blocks.mapValues { (source, ast) ->
+            cached?.displayText?.get(source) ?: predecessor?.displayText?.get(source) ?: markdownBlocksDisplayText(ast)
+        }
+        MarkdownProjection(sources.toList(), blocks, parser, display, windows = if (windowed) windows.toList() else emptyList(), windowBlocks = windowBlocks)
     }
     currentCoroutineContext().ensureActive()
     cache.put(projection)

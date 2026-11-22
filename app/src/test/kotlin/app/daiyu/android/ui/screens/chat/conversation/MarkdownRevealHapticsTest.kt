@@ -18,6 +18,18 @@ class MarkdownRevealHapticsTest {
         assertEquals(2, AnswerPaint().record(parser.parse("首字", streaming = true)))
     }
 
+    @Test fun batchedDrawCountsNewGraphemesOnlyAndNeverReplaysHistory() {
+        val ink = MarkdownInk(2)
+        val boundaries = MarkdownTextBoundaries("历史😀abc更多")
+        val bursts = mutableListOf<Int>()
+        ink.onGlyphDrawn = { bursts.add(it) }
+        ink.reportDraw(0, 2, boundaries)
+        ink.reportDraw(0, 5, boundaries)
+        ink.reportDraw(0, 9, boundaries)
+        ink.reportDraw(0, 9, boundaries)
+        assertEquals(listOf(2, 3), bursts)
+    }
+
     @Test fun slowCharactersPulseSeparatelyAndFastOutputCannotBuildUpDebt() {
         var time = 0L
         var next: Pair<Runnable, Long>? = null

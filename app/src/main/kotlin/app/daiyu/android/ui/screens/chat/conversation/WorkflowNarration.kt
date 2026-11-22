@@ -13,8 +13,8 @@ internal class WorkflowNarration(val projection: MarkdownProjection?, val reveal
     val entryVisible: (String) -> Boolean = { true })
 
 /** Kept outside lazy items: an already admitted tool never disappears after remount. */
-internal class WorkflowVisualAdmissions(initialOwners: Set<String>) {
-    private val scopes = initialOwners.associateWith { WorkflowVisualScope(true) }.toMutableMap()
+internal class WorkflowVisualAdmissions(initialOwners: Set<String>, sentReplyKey: String? = null) {
+    private val scopes = initialOwners.associateWith { WorkflowVisualScope(it != sentReplyKey) }.toMutableMap()
     fun scope(owner: String, baseline: Boolean, live: Boolean = true) =
         scopes.getOrPut(owner) { WorkflowVisualScope(baseline || !live) }
     fun retain(owners: Set<String>) { scopes.keys.retainAll(owners) }

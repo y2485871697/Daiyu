@@ -48,7 +48,7 @@ class WorkflowNarrationContract(unittest.TestCase):
         chat = (BASE / 'ChatMessageList.kt').read_text()
         content = (BASE / 'MessageContent.kt').read_text()
         typing = (BASE / 'MarkdownTyping.kt').read_text()
-        self.assertIn('WorkflowVisualAdmissions(assistantTurns.keys)', chat)
+        self.assertIn('WorkflowVisualAdmissions(assistantTurns.keys, sentReplyKey)', chat)
         self.assertIn('val visualScope = workflowAdmissions.scope(turn.listKey, initialPositionPending)', chat)
         self.assertIn('LocalWorkflowVisualScope provides visualScope', chat)
         self.assertIn('workflowAdmissions.scope(turn.listKey, initialPositionPending).retainReplyControl(playback.control)', chat)

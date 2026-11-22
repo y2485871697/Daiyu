@@ -396,6 +396,15 @@ class WorkflowNarrationCompositionTest {
         assertEquals(sources, owners.scope("restoring", true).bodyBaseline("body", sources))
     }
 
+    @Test fun acceptedSendInFirstLayoutIsNotRestoredHistory() {
+        val entries = WorkflowVisualAdmissions(setOf("old", "new"), sentReplyKey = "new")
+        val text = listOf(MarkdownTypingSource("body", "首段"))
+        val live = entries.scope("new", baseline = true)
+        assertTrue(live.bodyBaseline("body", text).isEmpty())
+        assertEquals(text, live.bodyBaseline("body", text))
+        assertEquals(text, entries.scope("old", baseline = true).bodyBaseline("body", text))
+    }
+
     @Test fun restoredAndTerminalOwnersHaveSilentBaselinesAndSurviveLazyRemount() {
         val text = MessageContentUi.Text("text", "already visible")
         val tool = MessageContentUi.Tool(WorkStepUi("tool", "lookup", "done", WorkStepState.OK))

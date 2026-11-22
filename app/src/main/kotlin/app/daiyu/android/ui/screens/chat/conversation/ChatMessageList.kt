@@ -524,9 +524,15 @@ internal fun ChatMessageList(
     val currentTurns by rememberUpdatedState(turns)
     val assistantTurns = remember(turns) { turns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey } }
     val currentAssistants by rememberUpdatedState(assistantTurns)
-    val workflowAdmissions = remember(revealResetEpoch) { WorkflowVisualAdmissions(assistantTurns.keys) }
+    val sentReplyKey = (turns.lastOrNull() as? ChatTurnUi.Assistant)?.takeIf { tail ->
+        val request = userMessageEntrance?.request
+        val user = turns.getOrNull(turns.lastIndex - 1) as? ChatTurnUi.User
+        tail.status == RunStatus.RUNNING && request != null && user != null &&
+            (user.matchesKey(request.messageId) || user.matchesKey(request.key))
+    }?.listKey
+    val workflowAdmissions = remember(revealResetEpoch) { WorkflowVisualAdmissions(assistantTurns.keys, sentReplyKey) }
     assistantTurns.values.forEach { turn ->
-        workflowAdmissions.scope(turn.listKey, initialPositionPending,
+        workflowAdmissions.scope(turn.listKey, initialPositionPending && turn.listKey != sentReplyKey,
             live = turn.status == RunStatus.RUNNING || replyPlayback?.control?.pending(turn) == true)
     }
     replyPlayback?.let { playback ->
@@ -550,7 +556,7 @@ internal fun ChatMessageList(
         val key = outputRow ?: return@LaunchedEffect
         snapshotFlow {
             val layout = listState.layoutInfo
-            presentationActive && pageActive && scrollResumed && !currentRetainingRows &&
+            presentationActive && pageActive && scrollResumed && !initialPositionPending && !currentRetainingRows &&
                 layout.visibleItemsInfo.any { it.key == key && it.size > 0 &&
                     it.offset < layout.viewportEndOffset - currentOcclusionPx &&
                     it.offset + it.size > layout.viewportStartOffset }

@@ -3450,6 +3450,7 @@ class MainActivity : ComponentActivity() {
         val turns = chatState.turns
         val renderedRevealTurns = remember(turns) { turns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey } }
         val renderedRevealAdvance = hapticsHost?.revealAdvance(renderedConversation)
+        val renderedViewport = hapticsHost?.outputViewport(renderedConversation)
         val renderedEditorGeneration = editorGeneration
         val renderedContextEntryEpoch = contextManagementEntryEpoch
         val renderedDraftRevision = draftRevision
@@ -3589,6 +3590,15 @@ class MainActivity : ComponentActivity() {
         },
         onCycleGptSpeed = { cycleChatGptSpeed(renderedSpeed, renderedSpeedConversation) },
         onVisibleCompleted = onVisibleCompleted,
+        hasCompletionToRead = onVisibleCompleted !== noCompletionToRead,
+        onOutputRowVisibility = { key, visible ->
+            val active = controller.active
+            if (active != null && renderedRevealOwner != null && active.id == renderedRevealOwner.id && active.runId == renderedRevealOwner.runId &&
+                active.conversationId.value == renderedConversation && active.id.value == renderedRevealTurns[key]?.ownerMessageId &&
+                selected?.id?.value == renderedConversation && retainedPage == "chat" && !sidebarVisible && controller.isRunUnfenced(active)) {
+                renderedViewport?.invoke(visible)
+            }
+        },
         onVisibleTextAdvance = { key ->
             val active = controller.active
             val turn = renderedRevealTurns[key]
@@ -4076,6 +4086,7 @@ class MainActivity : ComponentActivity() {
                 universalEditor == ChatController.TextSendOwner(selected?.id, editorGeneration, draftRevision))
     }
 
+    private val noCompletionToRead: (Set<String>) -> Unit = {}
     @Composable private fun completionReadAction(): (Set<String>) -> Unit {
         val generation = editorGeneration
         val revision = controller.dataRevision
@@ -4095,8 +4106,9 @@ class MainActivity : ComponentActivity() {
         // An earlier segment of the same physical owner is not its newly completed final segment.
         val finalKey = receipt?.let { expected -> chatState.turns.filterIsInstance<ChatTurnUi.Assistant>()
             .lastOrNull { it.ownerMessageId == expected.messageId && it.status == RunStatus.COMPLETED }?.listKey }
+        if (receipt == null || finalKey == null) return noCompletionToRead
         return { visibleKeys ->
-            if (receipt != null && finalKey != null && finalKey in visibleKeys &&
+            if (finalKey in visibleKeys &&
                 acknowledgeCompletion(receipt, generation, revision)) receiptState.value = null
         }
     }

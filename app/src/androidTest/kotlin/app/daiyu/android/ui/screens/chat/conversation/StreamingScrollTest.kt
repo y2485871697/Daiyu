@@ -29,6 +29,30 @@ class StreamingScrollTest : WiredActivityTestCase() {
     fun testNetworkBodyAppendsKeepScrollingWithoutReparsingOnDragFrames() = verifyNetworkScroll(false)
     fun testNetworkThoughtAppendsKeepScrollingWithoutReparsingOnDragFrames() = verifyNetworkScroll(true)
 
+    fun testScrollingToPreviousMessagesHandsOffOutputAndReturningReclaimsIt() {
+        val reports = java.util.concurrent.CopyOnWriteArrayList<Pair<String, Boolean>>()
+        val turns = (0..25).map { ChatTurnUi.Assistant("previous-$it", status = RunStatus.COMPLETED,
+            finalText = "previous paragraph $it") } + ChatTurnUi.Assistant("live", status = RunStatus.RUNNING,
+            isStreaming = true, finalText = "live tail")
+        val liveKey = turns.last().listKey
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                Box(Modifier.size(320.dp, 360.dp)) {
+                    ChatMessageList(turns, ChatScreenActions(onOutputRowVisibility = { key, visible ->
+                        reports.add(key to visible)
+                    }), scrollRequest = ChatScrollRequest(1))
+                }
+            }
+        } }
+        val list = ui.onNodeWithTag("chat-messages")
+        ui.waitUntil(5_000) { reports.lastOrNull() == (liveKey to true) }
+        list.performTouchInput { swipeDown() }
+        list.performScrollToIndex(0)
+        ui.waitUntil(5_000) { reports.lastOrNull() == (liveKey to false) }
+        list.performScrollToIndex(turns.lastIndex)
+        ui.waitUntil(5_000) { reports.lastOrNull() == (liveKey to true) }
+    }
+
     private fun readingAnchorY(): Float = ui.onNode(
         hasText("paragraph 15", substring = true) and
             SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult),

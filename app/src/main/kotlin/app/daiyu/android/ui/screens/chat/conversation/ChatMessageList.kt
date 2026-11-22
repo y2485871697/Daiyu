@@ -544,6 +544,18 @@ internal fun ChatMessageList(
         (scrollRequest?.messageId != null || scrollRequest?.listKey != null) && touchEpoch == requestTouchEpoch)
     val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
     val tailAssistant = turns.lastOrNull() as? ChatTurnUi.Assistant
+    val outputRow = tailAssistant?.takeIf { it.status == RunStatus.RUNNING }?.listKey
+    val notifyOutputVisibility by rememberUpdatedState(actions.onOutputRowVisibility)
+    LaunchedEffect(listState, outputRow) {
+        val key = outputRow ?: return@LaunchedEffect
+        snapshotFlow {
+            val layout = listState.layoutInfo
+            presentationActive && pageActive && scrollResumed && !currentRetainingRows &&
+                layout.visibleItemsInfo.any { it.key == key && it.size > 0 &&
+                    it.offset < layout.viewportEndOffset - currentOcclusionPx &&
+                    it.offset + it.size > layout.viewportStartOffset }
+        }.collect { visible -> notifyOutputVisibility(key, visible) }
+    }
     val nestedStates = remember { mutableMapOf<String, StreamingTailViewport>() }
     val initialQuestionContent = initialPositionPending || resumeFollowPending || !pageActive || !scrollResumed ||
         !presentationActive || retainingRows
@@ -1197,7 +1209,8 @@ internal fun ChatMessageList(
         }.collect { prefetch.update(it) }
     }
     // Read confirmation observes existing measured layout only; it never changes follow/scroll.
-    LaunchedEffect(listState) {
+    LaunchedEffect(listState, actions.hasCompletionToRead) {
+        if (!actions.hasCompletionToRead) return@LaunchedEffect
         snapshotFlow {
             val layout = listState.layoutInfo
             val visibleBottom = layout.viewportEndOffset - currentOcclusionPx

@@ -120,6 +120,8 @@ data class ChatScreenActions(
     val onOpenWorkspace: () -> Unit = {},
     /** Actual typewriter growth in a visible row, never a network chunk or recomposition. */
     val onVisibleTextAdvance: (String) -> Unit = {},
+    val onOutputRowVisibility: (String, Boolean) -> Unit = { _, _ -> },
+    val hasCompletionToRead: Boolean = true,
 )
 
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)

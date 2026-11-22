@@ -33,8 +33,7 @@ class ProductionBodyHapticsTest : WiredActivityTestCase() {
                 field.set(activity, HapticsActivityHost(testRuntime, activity.window.decorView, activity, fixture.controller))
             }
             setDraft("正文触感验证")
-            mainThread { retainedControls(activity).onSend("正文触感验证") }
-            awaitTextSendResult(activity)
+            node("chat-send").performClick()
             assertTrue(session.entered.await(10, TimeUnit.SECONDS))
             val send = checkNotNull(session.sink.get())
             repeat(4) { n ->

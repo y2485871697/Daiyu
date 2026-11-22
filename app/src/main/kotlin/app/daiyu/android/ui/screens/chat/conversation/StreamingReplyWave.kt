@@ -19,7 +19,7 @@ import androidx.compose.ui.unit.dp
 import kotlin.math.PI
 import kotlin.math.sin
 
-internal val ReplyWaveGap = 2.dp
+internal val ReplyWaveGap = 6.dp
 
 @Composable
 internal fun StreamingReplyWave(moving: Boolean, modifier: Modifier = Modifier) {

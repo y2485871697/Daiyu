@@ -270,6 +270,7 @@ internal fun StreamingTailContainer(
     followIntent: () -> Boolean = follows,
     drawClearance: () -> Int = clearance,
     preserveTextClearance: Boolean = false,
+    documentFollow: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     val questionArrival = remember(state, initialContent) {
@@ -371,6 +372,13 @@ internal fun StreamingTailContainer(
             val q = if (!state.bounded) {
                 state.scrollOffset = 0f
                 0
+            } else if (documentFollow && following && origin != null) {
+                // Move the viewport along the item, not the glyphs inside the item.
+                // Its placement and the inverse content translation cancel exactly.
+                val placed = (-origin.roundToInt()).coerceIn(0, maximum)
+                state.scrollOffset = placed.toFloat()
+                state.followCatchup = false
+                placed
             } else {
                 if (following && state.followCatchup && origin?.let {
                         it + state.contentHeight <= currentListHeight - clearance() + 1f
@@ -1348,6 +1356,7 @@ internal fun ChatMessageList(
                             protectClearance = { turn.listKey == assistantOwnerKey && followBottom },
                             viewportHeight = tailViewportHeight,
                             preserveTextClearance = turn.listKey == currentTailKey,
+                            documentFollow = turn.listKey == waveOwner,
                             listViewportHeight = { viewportHeightPx.intValue },
                             initialContent = initialQuestionContent,
                             followIntent = { turn.listKey == assistantOwnerKey && followBottom },

@@ -162,7 +162,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
         awaitImeFrame(ui.onNodeWithTag("spacing-host"), visible = false)
         // The reserved composer includes its 10dp outer top padding; the surface does not.
         val tailTurn = screen.turns.lastOrNull() as? ChatTurnUi.Assistant
-        val expectedGap = if (tailTurn?.status == RunStatus.RUNNING && tailTurn.isStreaming && !tailTurn.stopRequested) 2f else 8f
+        val expectedGap = if (tailTurn?.status == RunStatus.RUNNING && tailTurn.isStreaming && !tailTurn.stopRequested) 6f else 8f
         var lastGeometry = "marker not sampled"
         try {
             ui.waitUntil(5_000) {
@@ -297,6 +297,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
             val originalComposer = ui.onNodeWithTag("chat-composer-surface").fetchSemanticsNode().boundsInRoot
             ui.mainClock.autoAdvance = false
             try {
+                var previousOrigin: Float? = null
                 fun assertLiveClearance(marker: String): Boolean {
                     val textNodes = ui.onAllNodes(
                         SemanticsMatcher.keyIsDefined(SemanticsProperties.Text) and
@@ -304,6 +305,10 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                         useUnmergedTree = true,
                     ).fetchSemanticsNodes()
                     assertTrue("Running reply must expose actual text", textNodes.isNotEmpty())
+                    val oldParagraph = textNodes.single { node -> node.config[SemanticsProperties.Text].any { it.text.contains("初始末尾") } }
+                    val origin = oldParagraph.layoutInfo.coordinates.positionInRoot().y
+                    previousOrigin?.let { before -> assertTrue("Previously drawn paragraph rebounded: $before -> $origin", origin <= before + 1f) }
+                    previousOrigin = origin
                     val lastTextBottom = textNodes.maxOf { node ->
                         val coordinates = node.layoutInfo.coordinates
                         coordinates.positionInRoot().y + coordinates.size.height
@@ -514,7 +519,7 @@ class ChatMessageSpacingTest : WiredActivityTestCase() {
                 useUnmergedTree = true).assertIsDisplayed()
             val reply = ui.onNodeWithTag("chat-turn:start-reply").fetchSemanticsNode().layoutInfo.coordinates
             assertTrue("The completed first chunk must retain the original outer-composer clearance",
-                reply.positionInRoot().y + reply.size.height <= composer.top - (10f + 2f) * density + 1f)
+                reply.positionInRoot().y + reply.size.height <= composer.top - (10f + 6f) * density + 1f)
             assertTrue("A live reply must not pay its entire new height in one frame: $userSteps",
                 userSteps.all { it <= 14f * density + 1f })
             assertTrue("Following must not reverse the sent row: $userSteps", userSteps.all { it >= -1f })

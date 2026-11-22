@@ -6,7 +6,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.platform.LocalUriHandler
@@ -29,15 +28,13 @@ internal fun StreamingAnswer(source: String, streaming: Boolean, id: String, rev
     val document = rememberMarkdownDocument(if (frozen) receipt.last?.source.orEmpty() else source, streaming = streaming)
     val shown = if (frozen) receipt.last else document
     val limit = reveal.limit(id)
-    val followTail = LocalStreamingTextClearance.current != null && LocalChatBottomFollowIntent.current
-    val alignment = if (followTail) Alignment.BottomStart else Alignment.TopStart
     val uri = LocalUriHandler.current
     SideEffect {
         reveal.publication.active = true
         if (shown?.source == source) { reveal.applied(id, limit); reveal.presented(id) }
     }
     if (shown != null) BetterSelectionContainer(modifier) {
-        Markdown(document = shown, modifier = Modifier.animateContentSize(alignment = alignment).padding(horizontal = 4.dp).drawWithContent {
+        Markdown(document = shown, modifier = Modifier.animateContentSize().padding(horizontal = 4.dp).drawWithContent {
                 drawContent()
                 val previous = receipt.last
                 receipt.last = shown

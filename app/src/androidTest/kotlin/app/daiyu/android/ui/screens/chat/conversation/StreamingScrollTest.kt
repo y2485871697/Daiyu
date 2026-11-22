@@ -36,25 +36,30 @@ class StreamingScrollTest : WiredActivityTestCase() {
         var tail by mutableStateOf(ChatTurnUi.Assistant("live", status = RunStatus.RUNNING,
             isStreaming = true, finalText = "live tail"))
         val liveKey = tail.listKey
+        val viewportReady = java.util.concurrent.atomic.AtomicBoolean(false)
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 Box(Modifier.size(320.dp, 360.dp)) {
                     ChatMessageList(history + tail, ChatScreenActions(onVisibleTextAdvance = { ticks.add(it) }),
-                        scrollRequest = ChatScrollRequest(1))
+                        scrollRequest = ChatScrollRequest(1), onViewportReady = viewportReady::set)
                 }
             }
         } }
         val list = ui.onNodeWithTag("chat-messages")
-        ui.waitUntil(5_000) { ui.onAllNodesWithText("live tail", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        val oldText = ui.onNodeWithText("previous paragraph 0", useUnmergedTree = true)
+        val liveRow = ui.onNodeWithTag("chat-turn:live", useUnmergedTree = true)
+        ui.waitUntil(5_000) { viewportReady.get() && liveRow.isDisplayed() }
         list.performTouchInput { swipeDown() }
-        list.performScrollToIndex(0)
-        ui.onNodeWithText("previous paragraph 0", useUnmergedTree = true).assertIsDisplayed()
+        list.performScrollToKey(history.first().listKey)
+        ui.waitUntil(5_000) { oldText.isDisplayed() && !liveRow.isDisplayed() }
         val before = ticks.size
         ui.runOnUiThread { tail = tail.copy(finalText = "live tail while reading") }
         ui.waitForIdle()
+        oldText.assertIsDisplayed()
+        assertFalse(liveRow.isDisplayed())
         assertEquals(before, ticks.size)
-        list.performScrollToIndex(history.size)
-        ui.waitForIdle()
+        list.performScrollToKey(liveKey)
+        ui.waitUntil(5_000) { ui.onNodeWithText("live tail while reading", useUnmergedTree = true).isDisplayed() }
         val returned = ticks.size
         ui.runOnUiThread { tail = tail.copy(finalText = "live tail while reading then a fresh visible phrase") }
         ui.waitUntil(5_000) { ticks.size > returned }

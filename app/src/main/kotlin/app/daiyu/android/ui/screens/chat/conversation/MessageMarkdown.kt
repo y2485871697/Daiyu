@@ -523,12 +523,13 @@ private fun MarkdownInlineText(
 @Composable
 private fun MarkdownInlinePrefix(body: AnnotatedString, limit: Int, paintOffset: Int, modifier: Modifier, style: TextStyle) {
     val end = if (limit >= body.length) body.length else {
-        remember(body.text) { MarkdownTextBoundaries(body.text) }.end(limit)
+        val boundaries = remember(body.text) { MarkdownTextBoundaries(body.text) }
+        boundaries.end(limit)
     }
     val visible = remember(body, end) { if (end == body.length) body else body.subSequence(0, end) }
-    val nextLine = body.takeIf { end < it.length }
+    val nextLineText = if (end < body.length) body else null
     if (remember(body) { body.getLinkAnnotations(0, body.length).isEmpty() }) {
-        ClearanceText(visible, paintOffset, modifier, style, nextLineText = nextLine)
+        ClearanceText(visible, paintOffset, modifier, style, nextLineText = nextLineText)
         return
     }
     val originalConfiguration = LocalViewConfiguration.current
@@ -538,7 +539,7 @@ private fun MarkdownInlinePrefix(body: AnnotatedString, limit: Int, paintOffset:
         }
     }
     CompositionLocalProvider(LocalViewConfiguration provides preciseLinkConfiguration) {
-        ClearanceText(visible, paintOffset, modifier, style, nextLineText = nextLine)
+        ClearanceText(visible, paintOffset, modifier, style, nextLineText = nextLineText)
     }
 }
 

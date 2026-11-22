@@ -288,7 +288,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         for token in ('verifyScroll(false)', 'verifyScroll(true)', 'ChatMessageList(',
                       'down(Offset(', 'moveTo(Offset(', 'performTouchInput { up() }',
                       'advances.get() > beforeAdvances', 'beforeWalks, walks.get()',
-                      'beforeParses, parses.get()', 'scrollValue() < beforeScroll'):
+                      'beforeParses, parses.get()', 'readingAnchorY() > beforeScroll + 1f', 'readingAnchorY() >= afterDrag - 1f'):
             self.assertIn(token, source)
 
     def test_scroll_fixture_does_not_collapse_the_clickable_thought_body_before_dragging(self):

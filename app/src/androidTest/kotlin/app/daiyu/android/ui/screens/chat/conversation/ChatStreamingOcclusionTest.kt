@@ -418,6 +418,40 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         } finally { ui.mainClock.autoAdvance = true }
     }
 
+    fun testFollowingDocumentWindowReachesSafeBottomWithoutMovingBody() {
+        val state = StreamingTailViewport(initiallyBounded = true)
+        var host: LayoutCoordinates? = null
+        var body: LayoutCoordinates? = null
+        var edge = 0
+        var origin = 0
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) {
+            val d = LocalDensity.current
+            val height = with(d) { 360.dp.roundToPx() }
+            val clearance = with(d) { 60.dp.roundToPx() }
+            val topPadding = with(d) { 11.dp.roundToPx() }
+            edge = height - clearance
+            origin = edge - with(d) { 520.dp.roundToPx() }
+            Box(Modifier.size(320.dp, 360.dp).clipToBounds().onPlaced { host = it }) {
+                Box(Modifier.offset { IntOffset(0, origin) }.wrapContentHeight(Alignment.Top, unbounded = true)) {
+                    StreamingTailContainer(state, { host }, "follow-window", false, { true }, { clearance },
+                        viewportHeight = { edge - topPadding }, listViewportHeight = { height },
+                        preserveTextClearance = true, documentFollow = true) {
+                        Box(Modifier.fillMaxWidth().height(520.dp).onPlaced { body = it })
+                    }
+                }
+            }
+        } }
+        ui.waitForIdle()
+        ui.runOnUiThread {
+            val list = checkNotNull(host)
+            val viewport = checkNotNull(state.viewportCoordinates)
+            assertEquals("The clip must reach the last safe pixel", edge.toFloat(),
+                list.localPositionOf(viewport, Offset.Zero).y + viewport.size.height, 1f)
+            assertEquals("Moving the clip must not move the document", origin.toFloat(),
+                list.localPositionOf(checkNotNull(body), Offset.Zero).y, 1f)
+        }
+    }
+
     fun testShortTextDrawClearancePreservesGlyphButStopsAtSurface() {
         val state = StreamingTailViewport(initiallyBounded = true)
         var hostCoordinates: LayoutCoordinates? = null
@@ -684,7 +718,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var sawLong = false
         val prefixes = mutableSetOf<String>()
         fun verify(force: Boolean = false) {
-            val safe = inkRect(host, "ink-editor").top - kotlin.math.round(ChatTailClearance.value * density)
+            val safe = inkRect(host, "ink-editor").top - kotlin.math.round((if (live) 28f else ChatTailClearance.value) * density)
             val h = ui.onNodeWithTag(host).fetchSemanticsNode().positionInRoot
             val viewportTop = maxOf(0f, inkRect(host, "chat-stream-viewport:ink-wire-tail").top)
             val glyphs = ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().map { node ->

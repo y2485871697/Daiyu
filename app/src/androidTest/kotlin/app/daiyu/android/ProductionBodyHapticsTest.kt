@@ -43,7 +43,10 @@ class ProductionBodyHapticsTest : WiredActivityTestCase() {
                     .fetchSemanticsNodes().isNotEmpty() } } catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
                     throw AssertionError("Missing burst $n, ticks=${times.size}, tree=${ui.onAllNodes(isRoot(), useUnmergedTree = true).printToString(maxDepth = 24)}", failure)
                 }
-                ui.waitUntil(5_000) { times.size >= before + 2 }
+                try { ui.waitUntil(5_000) { times.size >= before + 2 } }
+                catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
+                    throw AssertionError("Burst $n reached its marker but motor ticks went from $before to ${times.size}", failure)
+                }
             }
             assertTrue("Four separately painted bursts must reach the motor", times.size >= 8)
         } finally {

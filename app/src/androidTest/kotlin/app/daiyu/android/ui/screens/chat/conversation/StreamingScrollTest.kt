@@ -9,7 +9,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.MarkdownBlock
@@ -29,6 +28,11 @@ class StreamingScrollTest : WiredActivityTestCase() {
 
     fun testNetworkBodyAppendsKeepScrollingWithoutReparsingOnDragFrames() = verifyNetworkScroll(false)
     fun testNetworkThoughtAppendsKeepScrollingWithoutReparsingOnDragFrames() = verifyNetworkScroll(true)
+
+    private fun readingAnchorY(): Float = ui.onNode(
+        hasText("paragraph 15", substring = true) and
+            SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult),
+        useUnmergedTree = true).fetchSemanticsNode().positionInRoot.y
 
     private fun verifyNetworkScroll(thought: Boolean) {
         val baseline = (0..17).joinToString("\n\n") { "Stable **paragraph $it** with selectable text." } + "\n\nTAIL network"
@@ -65,8 +69,7 @@ class StreamingScrollTest : WiredActivityTestCase() {
         list.performTouchInput { down(Offset(width * .5f, height * .25f)) }
         ui.mainClock.autoAdvance = false
         try {
-            fun scrollValue(): Float = list.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
-            val beforeScroll = scrollValue()
+            val beforeScroll = readingAnchorY()
             val beforeAdvances = advances.get()
             repeat(6) { index ->
                 val next = baseline + " incoming".repeat(30 * (index + 1))
@@ -85,10 +88,10 @@ class StreamingScrollTest : WiredActivityTestCase() {
             list.performTouchInput { up() }
             ui.mainClock.advanceTimeBy(32)
             ui.waitForIdle()
-            assertTrue("Continuous incoming text must yield to the drag", scrollValue() < beforeScroll)
-            val afterDrag = scrollValue()
+            assertTrue("Continuous incoming text must yield to the drag", readingAnchorY() > beforeScroll + 1f)
+            val afterDrag = readingAnchorY()
             repeat(8) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
-            assertTrue("Network appends cannot pull a fling back to the tail", scrollValue() <= afterDrag)
+            assertTrue("Network appends cannot pull a fling back to the tail", readingAnchorY() >= afterDrag - 1f)
             assertTrue("New text continues revealing throughout network/drag updates", advances.get() > beforeAdvances)
             assertTrue("Cold network snapshots must actually be parsed", parses.get() >= 7)
             assertTrue("Network parsing must remain off the main thread", offMain.get())
@@ -146,8 +149,7 @@ class StreamingScrollTest : WiredActivityTestCase() {
             val beforeWalks = walks.get()
             val beforeParses = parses.get()
             val beforeAdvances = advances.get()
-            fun scrollValue(): Float = list.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange].value()
-            val beforeScroll = scrollValue()
+            val beforeScroll = readingAnchorY()
             repeat(6) { frame ->
                 list.performTouchInput { moveTo(Offset(width * .5f, height * (.40f + frame * .07f)), delayMillis = 16) }
                 ui.mainClock.advanceTimeByFrame()
@@ -156,10 +158,10 @@ class StreamingScrollTest : WiredActivityTestCase() {
             list.performTouchInput { up() }
             ui.mainClock.advanceTimeBy(32)
             ui.waitForIdle()
-            assertTrue("A live reply must yield to the drag", scrollValue() < beforeScroll)
-            val afterDrag = scrollValue()
+            assertTrue("A live reply must yield to the drag", readingAnchorY() > beforeScroll + 1f)
+            val afterDrag = readingAnchorY()
             repeat(12) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
-            assertTrue("Output must not pull the fling back to the bottom", scrollValue() <= afterDrag)
+            assertTrue("Output must not pull the fling back to the bottom", readingAnchorY() >= afterDrag - 1f)
             assertTrue("Text must continue revealing while the reader scrolls", advances.get() > beforeAdvances)
             assertEquals("Dragging and reveal frames cannot rewalk the Markdown document", beforeWalks, walks.get())
             assertEquals("Dragging and reveal frames cannot reparse Markdown", beforeParses, parses.get())

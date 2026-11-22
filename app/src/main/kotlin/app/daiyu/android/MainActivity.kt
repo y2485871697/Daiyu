@@ -3450,7 +3450,6 @@ class MainActivity : ComponentActivity() {
         val turns = chatState.turns
         val renderedRevealTurns = remember(turns) { turns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey } }
         val renderedRevealAdvance = hapticsHost?.revealAdvance(renderedConversation)
-        val renderedViewport = hapticsHost?.outputViewport(renderedConversation)
         val renderedEditorGeneration = editorGeneration
         val renderedContextEntryEpoch = contextManagementEntryEpoch
         val renderedDraftRevision = draftRevision
@@ -3591,14 +3590,6 @@ class MainActivity : ComponentActivity() {
         onCycleGptSpeed = { cycleChatGptSpeed(renderedSpeed, renderedSpeedConversation) },
         onVisibleCompleted = onVisibleCompleted,
         hasCompletionToRead = onVisibleCompleted !== noCompletionToRead,
-        onOutputRowVisibility = { key, visible ->
-            val active = controller.active
-            if (active != null && renderedRevealOwner != null && active.id == renderedRevealOwner.id && active.runId == renderedRevealOwner.runId &&
-                active.conversationId.value == renderedConversation && active.id.value == renderedRevealTurns[key]?.ownerMessageId &&
-                selected?.id?.value == renderedConversation && retainedPage == "chat" && !sidebarVisible && controller.isRunUnfenced(active)) {
-                renderedViewport?.invoke(visible)
-            }
-        },
         onVisibleTextAdvance = { key ->
             val active = controller.active
             val turn = renderedRevealTurns[key]

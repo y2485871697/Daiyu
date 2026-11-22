@@ -31,9 +31,21 @@ class ProductionBodyHapticsTest : WiredActivityTestCase() {
                 runtime = testRuntime
                 field.set(activity, HapticsActivityHost(testRuntime, activity.window.decorView, activity, fixture.controller))
             }
-            setDraft("正文触感验证")
-            node("chat-send").performClick()
-            ui.waitUntil(10_000) { session.entered.count == 0L }
+            val draft = "正文触感验证"
+            setDraft(draft)
+            assertDraft(draft)
+            val button = node("chat-send")
+            awaitNodeWindowFocus(button)
+            button.assertIsDisplayed().assertIsEnabled().assertContentDescriptionEquals("发送").performClick()
+            try {
+                ui.waitUntil(10_000) { session.entered.count == 0L }
+            } catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
+                val pending = fixture.controller.textSendState()
+                throw AssertionError("Send clicked with matching draft and enabled button; " +
+                    "ready=${fixture.controller.ready}, preparing=${pending != null}, " +
+                    "receipt=${pending?.result?.javaClass?.simpleName}, active=${fixture.controller.active != null}, " +
+                    "modelOpens=${fixture.opens.get()}, persistedDraftMatches=${fixture.database.draft() == draft}", failure)
+            }
             val send = checkNotNull(session.sink.get())
             repeat(4) { n ->
                 val marker = "正文第${n}段"

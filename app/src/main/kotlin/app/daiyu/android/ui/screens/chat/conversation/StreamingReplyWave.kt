@@ -1,9 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.withInfiniteAnimationFrameNanos
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -23,19 +21,20 @@ internal val ReplyWaveGap = 6.dp
 
 @Composable
 internal fun StreamingReplyWave(moving: Boolean, modifier: Modifier = Modifier) {
-    val phase = remember { Animatable(0f) }
+    val phase = remember { mutableFloatStateOf(0f) }
     LaunchedEffect(moving) {
-        if (moving) {
-            val start = phase.value % 1f
-            phase.snapTo(start)
-            phase.animateTo(start + 1f, infiniteRepeatable(tween(1200, easing = LinearEasing)))
+        if (!moving) return@LaunchedEffect
+        val start = phase.floatValue
+        val epoch = withInfiniteAnimationFrameNanos { it }
+        while (true) withInfiniteAnimationFrameNanos { now ->
+            phase.floatValue = (start + ((now - epoch) % 1_200_000_000L) / 1_200_000_000f) % 1f
         }
     }
     val tint = conversationColors().accent
     val path = remember { Path() }
     Canvas(modifier.padding(top = ReplyWaveGap).size(30.dp, 8.dp).testTag("reply-output-wave")) {
         val stroke = 1.5.dp.toPx()
-        val pos = phase.value
+        val pos = phase.floatValue
         path.reset()
         for (i in 0..48) {
             val t = i / 48f

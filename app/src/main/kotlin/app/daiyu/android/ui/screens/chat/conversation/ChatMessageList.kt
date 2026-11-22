@@ -271,6 +271,7 @@ internal fun StreamingTailContainer(
     drawClearance: () -> Int = clearance,
     preserveTextClearance: Boolean = false,
     documentFollow: Boolean = false,
+    trackViewport: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val questionArrival = remember(state, initialContent) {
@@ -291,7 +292,7 @@ internal fun StreamingTailContainer(
     LaunchedEffect(follows(), state.bounded) {
         if (follows() || !state.bounded) innerScroll.stopScroll(MutatePriority.PreventUserInput)
     }
-    Layout(modifier = Modifier.onPlaced { coordinates ->
+    Layout(modifier = if (!trackViewport) Modifier else Modifier.onPlaced { coordinates ->
         val list = listCoordinates()
         if (list != null && list.isAttached && coordinates.isAttached) {
             state.itemOrigin = list.localPositionOf(coordinates, Offset.Zero).y
@@ -304,6 +305,7 @@ internal fun StreamingTailContainer(
             }
         }, modifier = Modifier
             .testTag("chat-stream-viewport:$itemKey")
+            .then(if (!trackViewport) Modifier else Modifier
             .onPlaced { viewport ->
                 state.placedViewport(viewport, listCoordinates())
                 val followingCatchup = state.bounded && state.followCatchup && followIntent()
@@ -330,6 +332,7 @@ internal fun StreamingTailContainer(
                 val clipBottom = if (protect && !followingCatchup) minOf(size.height, bottom) else bottom
                 clipRect(bottom = clipBottom) { this@drawWithContent.drawContent() }
             }
+            )
             .scrollable(innerScroll, Orientation.Vertical, enabled = userScrollEnabled && state.bounded)
             .semantics {
                 verticalScrollAxisRange = ScrollAxisRange(
@@ -1366,6 +1369,8 @@ internal fun ChatMessageList(
                             viewportHeight = tailViewportHeight,
                             preserveTextClearance = turn.listKey == currentTailKey,
                             documentFollow = turn.listKey == liveDocumentOwner,
+                            trackViewport = viewportState.bounded || viewportState.migrating ||
+                                turn.listKey == currentTailKey || turn.listKey == assistantOwnerKey,
                             listViewportHeight = { viewportHeightPx.intValue },
                             initialContent = initialQuestionContent,
                             followIntent = { turn.listKey == assistantOwnerKey && followBottom },

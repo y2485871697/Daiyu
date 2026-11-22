@@ -65,6 +65,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
@@ -220,6 +221,17 @@ internal fun ParsedMessageMarkdown(text: String, blocks: List<MarkdownBlock>?, m
 }
 
 private val LocalMarkdownPaintedText = staticCompositionLocalOf<MutableMap<Int, TextLayoutResult>?> { null }
+internal fun TextLayoutResult.completePaintBottom(available: Float, painted: Int): Float {
+    if (available <= 0f || painted <= 0 || lineCount == 0 || layoutInput.text.isEmpty()) return 0f
+    val last = minOf(getLineForOffset((painted - 1).coerceAtMost(layoutInput.text.length - 1)),
+        getLineForVerticalPosition(available.coerceAtMost(size.height.toFloat())))
+    for (line in last downTo 0) {
+        val bottom = getLineBottom(line)
+        if (bottom <= available && getLineEnd(line) <= painted) return bottom
+    }
+    return 0f
+}
+
 private class MarkdownTextFrame {
     private var boundsText: String? = null
     private var cachedBounds: MarkdownTextBoundaries? = null
@@ -390,8 +402,20 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                 result.layoutInput.text == selected?.layoutInput?.text ||
                     (!frozen && selected?.let { result.canPaintPrefixOf(it) } == true)
             }
-            if (actual != null && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
-                inkHeight(actual) <= available + .01f && (!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text)) {
+            val completePaint = actual != null && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
+                inkHeight(actual) <= available + .01f && (!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text)
+            // A pending tail line must not erase earlier, already painted lines when the edge moves.
+            if (!completePaint) {
+                val previous = frame.drawn
+                val native = frame.rendered
+                if (previous != null && native != null && previous.canPaintPrefixOf(native) &&
+                    frame.layout?.let { native.canPaintPrefixOf(it) } == true) {
+                    val limit = minOf(previous.layoutInput.text.length, ink?.paintedLength(inkOffset) ?: Int.MAX_VALUE)
+                    val bottom = native.completePaintBottom(available, limit)
+                    if (bottom > 0f) clipRect(bottom = bottom) { this@drawWithContent.drawContent() }
+                }
+            }
+            if (completePaint && actual != null) {
                 val inkBounds = if (ink == null) null else frame.boundaries(actual.layoutInput.text.text)
                 drawMarkdownInk(actual, ink, inkOffset, inkBounds, inkControl?.stopped == true)
                 androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {

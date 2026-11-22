@@ -266,7 +266,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 val d = LocalDensity.current
                 hostPx = with(d) { 360.dp.roundToPx() }
                 clearancePx = with(d) { (96.dp + ChatTailClearance).roundToPx() }
-                Box(Modifier.size(320.dp, 360.dp).onPlaced { hostCoordinates = it }) {
+                Box(Modifier.size(320.dp, 360.dp).background(Color.White).testTag("fixed-prefix-host").onPlaced { hostCoordinates = it }) {
                     Box(Modifier.offset(y = origin)) {
                         StreamingTailContainer(state, { hostCoordinates }, "fixed-prefix",
                             userScrollEnabled = false, follows = { true }, clearance = { clearancePx },
@@ -294,6 +294,16 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         ui.waitForIdle()
         ui.onNodeWithTag("fixed-prefix-text").assertTextEquals(text)
         assertFalse("Moving outside the edge must not falsely acknowledge paint", publication.ready)
+        // Keep one complete line above the edge but not the full two-line leaf.
+        mainThread { origin = 216.dp }
+        ui.waitForIdle()
+        val pixels = ui.onNodeWithTag("fixed-prefix-host").captureToImage().toPixelMap()
+        val bounds = inkRect("fixed-prefix-host", "fixed-prefix-text")
+        val firstY = bounds.top.toInt().coerceAtLeast(0)
+        val safeY = hostPx - clearancePx
+        assertTrue("An already painted safe line disappeared with the blocked next line",
+            (firstY until safeY).any { y -> (0 until pixels.width).any { x -> inkDark(pixels[x,y]) } })
+        assertFalse("Partial paint cannot release the entire paragraph", publication.ready)
         mainThread { origin = 0.dp }
         ui.waitUntil(5_000) { publication.ready }
         ui.onNodeWithTag("fixed-prefix-text").assertTextEquals(text)

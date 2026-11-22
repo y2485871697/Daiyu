@@ -258,7 +258,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     val ink = LocalMarkdownInk.current.takeIf { paintOffset != null || LocalInkOffset.current >= 0 }
     val inkControl = LocalReplyPlayback.current?.control
     val inkOffset = paintOffset ?: LocalInkOffset.current
-    if (clearance == null && (ink == null || inkControl == null && inkOffset >= 0 && inkOffset + text.length <= ink.baselineEnd)) {
+    if (clearance == null && ink == null) {
         BasicText(text, modifier, style, softWrap = softWrap)
         return
     }
@@ -327,6 +327,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     } == true
     fun prepareNextLine() {
         if (playback?.paused == true) return
+        if (frame.nextAdvance <= 0) { clearance.prepareLine(owner, 0); return }
         val candidate = frame.layout
         val drawn = frame.drawn?.takeIf {
             candidate != null && it.canPaintPrefixOf(candidate) && it.layoutInput.text.isNotEmpty()
@@ -343,7 +344,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             val previous = frame.committed ?: paintOffset?.let { painted[it] }
             val accepted = when {
                 playback?.paused == true -> frame.drawn
-                clearance.fits(coordinates, inkHeight(candidate)) -> candidate
+                inkHeight(candidate) <= frame.availableHeight + .01f -> candidate
                 previous?.canPaintPrefixOf(candidate) == true -> previous
                 else -> null
             }

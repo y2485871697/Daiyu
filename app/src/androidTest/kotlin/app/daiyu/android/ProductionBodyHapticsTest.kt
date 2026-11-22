@@ -5,7 +5,6 @@ import app.daiyu.android.domain.ModelEvent
 import app.daiyu.android.domain.haptics.*
 import app.daiyu.android.haptics.*
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.TimeUnit
 
 class ProductionBodyHapticsTest : WiredActivityTestCase() {
     override val requiresWindowDraw = true
@@ -34,7 +33,7 @@ class ProductionBodyHapticsTest : WiredActivityTestCase() {
             }
             setDraft("正文触感验证")
             node("chat-send").performClick()
-            assertTrue(session.entered.await(10, TimeUnit.SECONDS))
+            ui.waitUntil(10_000) { session.entered.count == 0L }
             val send = checkNotNull(session.sink.get())
             repeat(4) { n ->
                 val marker = "正文第${n}段"
@@ -42,7 +41,7 @@ class ProductionBodyHapticsTest : WiredActivityTestCase() {
                 send(ModelEvent.TextDelta("body", "\n\n" + "实验文字".repeat(16) + marker))
                 try { ui.waitUntil(10_000) { ui.onAllNodesWithText(marker, substring = true, useUnmergedTree = true)
                     .fetchSemanticsNodes().isNotEmpty() } } catch (failure: androidx.compose.ui.test.ComposeTimeoutException) {
-                    throw AssertionError("Missing burst $n, ticks=${times.size}, tree=${ui.onRoot(useUnmergedTree = true).printToString(maxDepth = 24)}", failure)
+                    throw AssertionError("Missing burst $n, ticks=${times.size}, tree=${ui.onAllNodes(isRoot(), useUnmergedTree = true).printToString(maxDepth = 24)}", failure)
                 }
                 ui.waitUntil(5_000) { times.size >= before + 2 }
             }

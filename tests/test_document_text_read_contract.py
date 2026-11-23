@@ -44,7 +44,9 @@ class DocumentTextReadContract(unittest.TestCase):
             self.assertIn(token, source)
         smoke = (ROOT / 'scripts/smoke_boot.sh').read_text()
         self.assertIn('file_text_sources if file_text_only else', smoke)
-        self.assertIn('discovery_scope="targeted" if file_text_only or', smoke)
+        scope = re.search(r'discovery_scope="targeted" if ([^\n]+) else "full"', smoke)
+        self.assertIsNotNone(scope)
+        self.assertIn('file_text_only', scope.group(1).split(' or '))
 
     def test_two_reader_classes_allow_four_shards_without_unrelated_discovery(self):
         from test_speech_platform_discovery import SpeechPlatformDiscoveryTest

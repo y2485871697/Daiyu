@@ -3,6 +3,7 @@ import io
 import itertools
 import json
 import os
+import re
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -45,7 +46,9 @@ class ComposerActionScopeTest(unittest.TestCase):
         classes = ','.join(recorder.COMPOSER_ACTION_PLATFORM_CLASSES)
         expected = ("${{ inputs.mode == 'smoke' && inputs.smoke_classes == '"
                     + classes + "' && '-composer-action-motion' || '' }}")
-        self.assertTrue(groups[0].endswith(expected), groups[0])
+        expressions = re.findall(r"\$\{\{.*?\}\}", groups[0])
+        self.assertEqual([expected], [expr for expr in expressions if suffix in expr])
+        self.assertEqual(1, sum(classes in expr for expr in expressions))
         self.assertEqual(1, workflow.count(suffix))
         self.assertIn('  cancel-in-progress: false', workflow)
 

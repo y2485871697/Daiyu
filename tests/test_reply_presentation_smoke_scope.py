@@ -76,7 +76,7 @@ class ReplyPresentationSmokeScopeTest(unittest.TestCase):
         suffix = ("${{ inputs.smoke_classes == '" + ",".join(CLASSES) +
                   "' && '-reply-presentation' || '' }}")
         self.assertEqual(1, group.count(suffix))
-        self.assertTrue(group.endswith(suffix))
+        self.assertTrue(group.endswith(suffix + "${{ inputs.test_method != '' && format('-diagnostic-{0}-{1}-{2}', inputs.smoke_classes, inputs.test_method, inputs.smoke_api) || '' }}"))
         self.assertTrue(group.startswith("  group: daiyu-test-refresh-${{ github.ref }}"))
         self.assertIn("\n  cancel-in-progress: false\n", workflow)
 

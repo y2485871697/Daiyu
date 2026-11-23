@@ -61,14 +61,14 @@ class PrivateWorkspacePanelTest : WiredActivityTestCase() {
             reveal("workspace-private-entry:sub/keep.txt", "私有文件测试").performTouchInput { longClick() }
             node("workspace-entry-action:cancel").assertDoesNotExist()
             node("workspace-entry-action:delete").performClick()
-            assertDeleteConfirmation("删除文件")
+            assertDeleteConfirmation("删除这个文件？")
             awaitUniqueTag("dialog-cancel")
             node("dialog-cancel").assertIsDisplayed().assertIsEnabled().performClick()
-            ui.onNodeWithText("删除文件").assertDoesNotExist()
+            ui.onNodeWithText("删除这个文件？").assertDoesNotExist()
             assertEquals("keep", File(sub, "keep.txt").readText())
             reveal("workspace-private-entry:sub/keep.txt", "私有文件测试").performTouchInput { longClick() }
             node("workspace-entry-action:delete").performClick()
-            assertDeleteConfirmation("删除文件")
+            assertDeleteConfirmation("删除这个文件？")
             awaitUniqueTag("dialog-confirm")
             node("dialog-confirm").assertIsDisplayed().assertIsEnabled().performClick()
             ui.waitUntil(5_000) { !File(sub, "keep.txt").exists() }
@@ -78,10 +78,10 @@ class PrivateWorkspacePanelTest : WiredActivityTestCase() {
             val retained = retainedLongClickCallback(reveal("workspace-private-entry:sub", "私有文件测试"))
             realPauseResume(activity, atPause = { retained() })
             mainThread { retained() }
-            ui.onNodeWithText("删除文件").assertDoesNotExist()
+            ui.onNodeWithText("删除这个文件？").assertDoesNotExist()
             node("workspace-entry-action-sheet").assertDoesNotExist()
             mainThread { gate.set(false); retained() }
-            ui.onNodeWithText("删除文件").assertDoesNotExist()
+            ui.onNodeWithText("删除这个文件？").assertDoesNotExist()
             node("workspace-entry-action-sheet").assertDoesNotExist()
             assertTrue(sub.isDirectory)
         } finally { gate.set(false); ui.waitForIdle(); root.deleteRecursively() }

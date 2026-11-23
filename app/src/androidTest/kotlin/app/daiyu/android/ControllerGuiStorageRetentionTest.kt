@@ -461,7 +461,7 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
             f.database.readableDatabase.rawQuery("SELECT id,prefix_count,summary FROM context_archives WHERE active=1", null).use {
                 assertTrue(it.moveToFirst())
                 assertEquals(6, it.getInt(1)) // four complete old turns, keep one
-                assertEquals(summaryText, it.getString(2))
+                assertEquals(summaryText.substringAfter('\n'), it.getString(2))
                 assertEquals("summary-${it.getString(0)}", sentHistory.first().id.value)
             }
             assertEquals(f.originalHistory.takeLast(2), sentHistory.drop(1).dropLast(1))

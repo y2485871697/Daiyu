@@ -42,7 +42,7 @@ class ComposerContextStyleContractTest(unittest.TestCase):
     def test_toolbar_graphics_are_optically_sized_inside_unchanged_touch_slots(self):
         attach = self.text.split('ChatIconButton(ChatPreviewIcons.Attach,', 1)[1].split('Box(Modifier.size(32.dp).testTag("chat-reasoning")', 1)[0]
         thought = 'Box(Modifier.size(32.dp).testTag("chat-reasoning")' + self.text.split('Box(Modifier.size(32.dp).testTag("chat-reasoning")', 1)[1].split('Box(Modifier.size(32.dp).testTag("chat-assistant")', 1)[0]
-        assistant = self.text.split('Box(Modifier.size(32.dp).testTag("chat-assistant")', 1)[1].split('key(state.controlOwnerKey)', 1)[0]
+        assistant = self.text.split('Box(Modifier.size(32.dp).testTag("chat-assistant")', 1)[1].split('val primaryMotion = rememberChatActionMotion()', 1)[0]
         self.assertIn('Modifier.size(32.dp)', attach)
         self.assertIn('iconSize = 22.5.dp', attach)
         self.assertIn('Modifier.size(32.dp).testTag("chat-reasoning")', thought)
@@ -52,12 +52,14 @@ class ComposerContextStyleContractTest(unittest.TestCase):
         self.assertIn('onClick = actions.onOpenAssistant', assistant)
 
     def test_balance_moves_left_by_layout_spacing_not_a_visual_offset(self):
-        controls = self.text.split('key(state.controlOwnerKey)', 1)[1].split('SpeechMorphButton(', 1)[0]
+        controls = self.text.split('val primaryMotion = rememberChatActionMotion()', 1)[1].split('SpeechMorphButton(', 1)[0]
         self.assertIn('Arrangement.spacedBy(15.dp)', controls)
         self.assertIn('.widthIn(max = 72.dp)', controls)
         self.assertIn('animateChanges = true, iconSize = 16.dp', controls)
         self.assertIn('fontSize = 14.sp, lineHeight = 28.sp', controls)
-        self.assertIn('Modifier.size(32.dp).testTag(if (textAction', controls)
+        self.assertIn('Modifier.size(32.dp).testTag(when {', controls)
+        self.assertIn('textAction || state.phase == ComposerPhase.IDLE -> "chat-send"', controls)
+        self.assertIn('else -> "chat-control"', controls)
         self.assertNotIn('.offset(', controls)
 
     def test_fraction_and_icon_contracts_are_unchanged(self):

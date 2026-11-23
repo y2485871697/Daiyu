@@ -27,7 +27,8 @@ class CollaborationDoneCompletionContractTest(unittest.TestCase):
     def test_touch_ready_keeps_enter_focus_and_native_stability(self):
         base = SOURCE.with_name('ComposeActivityTestCase.kt').read_text(encoding='utf-8')
         helper = base.split('protected fun awaitDialogTouchReady(target: SemanticsNodeInteraction) {', 1)[1].split('\n    }\n', 1)[0]
-        self.assertLess(helper.index('awaitDialogEnter(target)'), helper.index('awaitNodeWindowFocus(target)'))
+        self.assertLess(helper.index('awaitDialogEnter(target)'), helper.index('awaitNodeTouchReady(target)'))
+        helper = base.split('protected fun awaitNodeTouchReady(target: SemanticsNodeInteraction) {', 1)[1].split('\n    }\n', 1)[0]
         self.assertLess(helper.index('awaitNodeWindowFocus(target)'), helper.index('awaitStableWindowFrame(view)'))
         self.assertLess(helper.index('awaitStableWindowFrame(view)'), helper.index('target.assertIsDisplayed().assertIsEnabled()'))
         for required in ('view.windowToken != token', '!current.layoutInfo.isPlaced',

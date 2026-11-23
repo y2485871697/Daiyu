@@ -46,11 +46,13 @@ class AsrCompactTabsContract(unittest.TestCase):
         for token in ['labels = listOf("本机识别", "豆包识别")',
                       'selectedIndex = if (draft.dictation == "DOUBAO") 1 else 0',
                       'enabled = !busy', 'if (current() && !busy)',
-                      'save((saved ?: VoiceConfiguration()).copy(dictation = method))']:
+                      'save((saved ?: VoiceConfiguration()).copy(dictation = method),']:
             self.assertIn(token, self.asr)
         self.assertNotIn('Color(', self.asr)
         self.assertNotIn('fontSize', self.asr)
         self.assertIn('val profile = if (section == "CONVERSATION") VoiceProfile.CONVERSATION else VoiceProfile.READ_ALOUD', self.panel)
+
+        self.assertIn('onFailed = { changeDraft(draft.copy(dictation = previousMethod)) }', self.asr)
 
     def test_real_reading_and_conversation_regressions_verify_compact_geometry(self):
         text = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceSettingsStructureActivityTest.kt').read_text()

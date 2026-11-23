@@ -51,9 +51,11 @@ class AsrWorkspaceColorContract(unittest.TestCase):
         tabs = self.asr.split('SettingsSegmentedTabs(', 1)[1].split('if (draft.dictation == "DOUBAO") {', 1)[0]
         for token in ['selectedIndex = if (draft.dictation == "DOUBAO") 1 else 0',
                       'if (current() && !busy)', 'changeDraft(draft.copy(dictation = method))',
-                      'save((saved ?: VoiceConfiguration()).copy(dictation = method))']:
+                      'save((saved ?: VoiceConfiguration()).copy(dictation = method),']:
             self.assertIn(token, tabs)
         self.assertNotIn('save(draft', tabs)
+
+        self.assertIn('onFailed = { changeDraft(draft.copy(dictation = previousMethod)) }', tabs)
 
     def test_real_recognition_selection_test_checks_fill_and_white_text(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/VoiceSettingsStructureActivityTest.kt').read_text()

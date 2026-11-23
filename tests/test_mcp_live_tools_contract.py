@@ -38,12 +38,16 @@ class McpLiveToolsContractTest(unittest.TestCase):
         self.assertIn('ToolDispatcher(currentCatalog(), session, ledger)', source)
         self.assertIn('val catalog = currentCatalog()', source)
         self.assertIn('catalog.advertisements(session)', source)
-        self.assertIn('snapshot.withAdditional(it.registeredTools())', text(APP / 'integration/tools/RunCatalogTools.kt'))
+        live = text(APP / 'integration/tools/RunCatalogTools.kt').split('val result = CatalogModelBridge(snapshot, capabilities, ledger', 1)[1].split('result.bindOwner', 1)[0]
+        self.assertIn('val additional = liveMcp?.registeredTools().orEmpty() +', live)
+        self.assertIn('snapshot.withAdditional(additional)', live)
+        self.assertIn('allowedToolNames?.let(latest::restrictedTo) ?: latest', live)
 
     def test_only_new_requests_refresh_and_all_production_wrappers_forward(self):
         source = text(DOMAIN / 'ChatRunner.kt')
         self.assertIn('if (attempt == 0 && tool is CatalogTool) {\n                                    active.updateToolDefinitions(requestDefinitions)', source)
-        self.assertIn('val local = runtime.localTokens(effectiveHistory(), requestDefinitions)', source)
+        self.assertIn('fun meterHistory(message: Message = current): List<Message> = effectiveHistory(message)', source)
+        self.assertIn('val local = runtime.localTokens(meterHistory(), requestDefinitions)', source)
         self.assertIn('active.updateToolDefinitions(requestDefinitions)', source)
         self.assertIn('val sideEffect = requestDefinitions.firstOrNull', source)
         for name in ['ResponsesModel', 'MessagesModel', 'NativeCompletionModel']:

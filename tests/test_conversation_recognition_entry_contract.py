@@ -36,7 +36,7 @@ class ConversationRecognitionEntryContract(unittest.TestCase):
         self.assertEqual(body(recognition, marker), body(self.conversation, marker))
         entry = body(self.conversation, marker)
         for token in ['SettingsRow("识别方式", tag = "voice-recognition-method"',
-                      'saved?.dictation == "DOUBAO"', 'showChevron = true',
+                      'draft.dictation == "DOUBAO"', 'showChevron = true',
                       'onClick = if (busy) null', 'if (current() && stopAudio())', 'child = "ASR"']:
             self.assertIn(token, entry)
         self.assertIn('if (section == "CONVERSATION") item { SettingsCard(', self.conversation)
@@ -56,9 +56,11 @@ class ConversationRecognitionEntryContract(unittest.TestCase):
         self.assertIn('runtime.save(next, target)', save)
         child = body(self.panel, 'if (child == "ASR")')
         self.assertIn('LinuxSettingsTheme { SettingsSegmentedTabs(', child)
-        self.assertIn('save((saved ?: VoiceConfiguration()).copy(dictation = method))', child)
+        self.assertIn('save((saved ?: VoiceConfiguration()).copy(dictation = method),', child)
         self.assertIn('save(recognitionConfiguration().copy(asrKey = draft.asrKey.trim()))', child)
         self.assertIn('fun leaveChild() = leavePage { child = null; notice = "" }', self.panel)
+
+        self.assertIn('onFailed = { changeDraft(draft.copy(dictation = previousMethod)) }', child)
 
     def test_removed_inline_path_does_not_leave_background_autosave_or_dead_dialog(self):
         self.assertNotIn('conversationAsrDirty', self.panel)

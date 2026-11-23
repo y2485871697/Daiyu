@@ -53,9 +53,22 @@ class PersonalCascadeProductionDeviceTest : InstrumentationTestCase() {
         override fun close() { }
     }
 
-    fun testProfilesAreIndependentlyEncryptedAndMissingConversationNeverFallsBack() = runBlocking {
+    fun testFreshConversationKeepsSystemSpeechWhenReadAloudHasCloudCredentials() = runBlocking {
         val runtime = ControllerVoiceRuntime(context)
         runtime.save(config())
+        val conversation = runtime.prepareSpeech(VoicePlaybackProfile.CONVERSATION).configuration
+        assertEquals("SYSTEM", conversation.engine)
+        assertEquals("", conversation.key)
+        assertEquals("", conversation.voice)
+        assertEquals(config().voice, runtime.prepareSpeech().configuration.voice)
+    }
+
+    fun testProfilesAreIndependentlyEncryptedAndMissingConversationNeverFallsBack() = runBlocking {
+        val vault = ModelSettingsStore(context, "voice-api-key", "voice-credentials-v1")
+        val onlyReadAloud = VoiceProfileEnvelope(mapOf(VoicePlaybackProfile.READ_ALOUD to config()))
+        vault.save(ModelSettings("https://voice-credentials.invalid/v1/responses", "voice-credential", onlyReadAloud.encode(), false))
+        val runtime = ControllerVoiceRuntime(context)
+        runtime.load()
         val manual = runtime.prepareSpeech()
         try { runtime.prepareSpeech(VoicePlaybackProfile.CONVERSATION); fail("must not inherit read aloud") }
         catch (_: IllegalStateException) { }

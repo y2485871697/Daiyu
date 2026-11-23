@@ -36,7 +36,10 @@ class TaskConfigurationAdmissionContractTest(unittest.TestCase):
 
     def test_reasoning_is_saved_only_under_its_conversation_gate(self):
         text = (SRC / 'MainActivity.kt').read_text()
-        body = text.split('onEffortChange = { effort ->', 1)[1].split('controller.observe(listener)', 1)[0]
+        surface = text.split('private fun ChatThinkingPickerSurface() {', 1)[1].split('\n    }', 1)[0]
+        self.assertIn('val thinkingOwner = chatState.conversationKey', surface)
+        body = surface.split('onEffortChange = { effort ->', 1)[1]
+        self.assertIn('selected?.id?.value == thinkingOwner', body)
         self.assertIn('allowTaskConfigurationChange(thinkingOwner?.let(::ConversationId))', body)
         self.assertIn('controller.setChatReasoning(thinkingOwner, effort)', body)
         self.assertNotIn('reasoningPreference.set(', body)

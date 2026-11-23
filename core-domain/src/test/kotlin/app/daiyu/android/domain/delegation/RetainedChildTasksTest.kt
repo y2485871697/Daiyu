@@ -353,18 +353,20 @@ class RetainedChildTasksTest {
         } finally { model.release.countDown(); drained(supervisor) }
     }
 
-    @Test fun timeoutRetainsPoolAndCloseResponsibilityUntilTransportExits() {
-        val model = HeldModel(); val parent = Parent(); val supervisor = RetainedChildTasks(Journal(), timeoutMillis = 200)
+    @Test fun warningDoesNotCancelAndExplicitStopStillDrainsOnlyAfterTransportExits() {
+        val model = HeldModel(); val parent = Parent(); val journal = Journal(); val supervisor = RetainedChildTasks(journal, warningMillis = 100)
         val binding = parent.bind(supervisor, mapOf("p" to definition(model)))
         try {
-            submit(supervisor, binding, parent, "p"); assertTrue(model.entered.await(3, TimeUnit.SECONDS))
+            val task = submit(supervisor, binding, parent, "p").tasks.single(); assertTrue(model.entered.await(3, TimeUnit.SECONDS))
+            await("soft warning") { journal.list("conversation").single().detail?.contains("仍在执行") == true }
+            assertEquals(1L, model.cancelled.count); assertEquals(ChildTaskStatus.RUNNING, journal.list("conversation").single().status)
+            supervisor.stop(binding, task.owner)
             assertTrue(model.cancelled.await(3, TimeUnit.SECONDS))
             assertFalse(supervisor.snapshots(binding).single().settled)
             val idle = CountDownLatch(1); supervisor.closeWhenIdle { idle.countDown() }; assertEquals(1L, idle.count)
             model.release.countDown(); assertTrue(idle.await(3, TimeUnit.SECONDS))
             val record = supervisor.snapshots(binding).single().record
             assertEquals(ChildTaskStatus.UNKNOWN, record.status)
-            assertTrue(record.detail.orEmpty().startsWith("child_batch_timeout;"))
             assertEquals(1, model.opens.get())
         } finally { model.release.countDown(); drained(supervisor) }
     }

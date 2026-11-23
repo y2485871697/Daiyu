@@ -170,7 +170,7 @@ class ChildModelBatchTest {
         }
     }
 
-    @Test fun timeoutRequestsCancelButDrainsOnlyAfterRealExit() {
+    @Test fun softWarningAllowsCompletionBeyondThresholdWithoutReopening() {
         val entered = CountDownLatch(1); val release = CountDownLatch(1); val cancelled = CountDownLatch(1); val idle = CountDownLatch(1)
         val child = object : ModelPort {
             override fun open(history: List<Message>) = object : ModelSession {
@@ -184,11 +184,11 @@ class ChildModelBatchTest {
         val result = AtomicReference<ExecutionReceipt>(); val failure = AtomicReference<Throwable>()
         val thread = Thread { try { result.set(batch.execute(context(), listOf(ChildModelTask("one", "task")))) } catch (e: Throwable) { failure.set(e) } }
         try {
-            thread.start(); assertTrue(entered.await(3, TimeUnit.SECONDS)); thread.join(2000)
-            assertFalse(thread.isAlive); assertNull(failure.get()); assertTrue(result.get() is ExecutionReceipt.Unknown)
-            batch.closeWhenIdle { idle.countDown() }
-            assertTrue(cancelled.await(3, TimeUnit.SECONDS)); assertEquals(1L, idle.count)
-            release.countDown(); assertTrue(idle.await(3, TimeUnit.SECONDS))
+            thread.start(); assertTrue(entered.await(3, TimeUnit.SECONDS)); thread.join(400)
+            assertTrue(thread.isAlive); assertNull(failure.get()); assertEquals(1L, cancelled.count)
+            release.countDown(); thread.join(2000); assertFalse(thread.isAlive)
+            assertTrue(result.get() is ExecutionReceipt.Confirmed)
+            batch.closeWhenIdle { idle.countDown() }; assertTrue(idle.await(3, TimeUnit.SECONDS))
         } finally { release.countDown(); batch.close(); thread.join(3000) }
     }
 

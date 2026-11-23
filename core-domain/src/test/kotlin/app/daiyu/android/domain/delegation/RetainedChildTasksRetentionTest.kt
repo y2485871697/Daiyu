@@ -370,11 +370,11 @@ class RetainedChildTasksRetentionTest {
     }
 
     @Test fun returnedNextDoesNotReleaseCapacityPoolOrBindingUntilBlockingCancelFinallyReturns() {
-        for (outcome in listOf("stop", "timeout", "complete")) {
+        for (outcome in listOf("stop", "warning", "complete")) {
             val completes = outcome == "complete"
             val store = Journal(); val model = BlockingCancelModel(); val fast = Model()
             val parent = Parent("cleanup-$outcome"); val next = Parent("next-$outcome")
-            val supervisor = RetainedChildTasks(store, timeoutMillis = if (outcome == "timeout") 500 else 120_000,
+            val supervisor = RetainedChildTasks(store, warningMillis = if (outcome == "warning") 500 else 120_000,
                 maxRetainedTasks = 1)
             val a = parent.bind(supervisor, model)
             val idle = CountDownLatch(1); val callbacks = AtomicInteger()
@@ -383,6 +383,10 @@ class RetainedChildTasksRetentionTest {
                 assertTrue(model.entered.await(3, TimeUnit.SECONDS))
                 if (outcome == "stop") supervisor.stop(a, accepted.tasks.single().owner)
                 supervisor.finishParent(a)
+                if (outcome == "warning") {
+                    assertFalse(model.cancelEntered.await(650, TimeUnit.MILLISECONDS))
+                    supervisor.stop(a, accepted.tasks.single().owner)
+                }
                 if (completes) model.returnNext.countDown()
                 assertTrue(model.cancelEntered.await(3, TimeUnit.SECONDS))
                 model.returnNext.countDown()

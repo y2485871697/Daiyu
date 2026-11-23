@@ -201,7 +201,7 @@ class RetainedChildTasksPauseTest {
         val journal = Journal(); val model = Model(fail = false); val parent = Parent("initial")
         val started = CountDownLatch(1); val releaseStarted = CountDownLatch(1)
         journal.onStarted = { started.countDown(); check(releaseStarted.await(5, TimeUnit.SECONDS)) }
-        val supervisor = RetainedChildTasks(journal, timeoutMillis = 1_000, maxRetainedTasks = 1)
+        val supervisor = RetainedChildTasks(journal, warningMillis = 1_000, maxRetainedTasks = 1)
         val binding = parent.bind(supervisor, model)
         try {
             val child = owner(supervisor, binding, parent)

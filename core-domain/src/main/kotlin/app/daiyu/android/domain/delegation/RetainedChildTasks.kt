@@ -14,7 +14,6 @@ import java.util.UUID
 import java.util.WeakHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.Semaphore
-import java.util.concurrent.TimeUnit
 
 sealed interface ChildTaskAdmission {
     data class Accepted(val tasks: List<ChildTaskRecord>) : ChildTaskAdmission
@@ -80,7 +79,7 @@ class ChildTaskBinding internal constructor(
     internal val recent = linkedMapOf<String, RetainedChildTask>()
 }
 
-internal const val RETAINED_CHILD_BUDGET_MS = 15 * 60_000L
+internal const val CHILD_WARN_MS = 360_000L
 
 /** Controller-lifetime execution; durable records remain owned by the existing runtime store.
  * maxRetainedTasks bounds live reservations (including draining transports), not lifetime admissions.
@@ -88,7 +87,7 @@ internal const val RETAINED_CHILD_BUDGET_MS = 15 * 60_000L
  * maxRequestsPerBinding (1..4096, default 1024) independently bounds replay tombstones.
  * They are never evicted to admit work: new calls fail with child_request_budget_exhausted at the limit.
  */
-class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutMillis: Long = RETAINED_CHILD_BUDGET_MS,
+class RetainedChildTasks(private val store: ChildTaskStore, private val warningMillis: Long = CHILD_WARN_MS,
     private val maxRetainedTasks: Int = 64, private val usageRecorder: ChildUsageRecorder? = null,
     private val diagnostics: ChildTaskDiagnostics? = null,
     private val maxRequestsPerBinding: Int = 1024) : AutoCloseable {
@@ -97,7 +96,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
         var bindings = 0
     }
     private class Task(val binding: ChildTaskBinding, val request: ChildTaskRequest,
-        val initial: ChildTaskRecord, val invocation: ToolInvocation, val deadline: Long,
+        val initial: ChildTaskRecord, val invocation: ToolInvocation,
         val pause: ChildTaskPauseControl, val source: ChildTaskRecord? = null,
         definition: ChildModelDefinition, val toolPin: AutoCloseable? = null) {
         val assignment = ChildModelAssignment(initial.assignedProfileId, definition)
@@ -130,7 +129,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     private var closed = false
 
     init {
-        require(timeoutMillis in 1..RETAINED_CHILD_BUDGET_MS); require(maxRetainedTasks in 1..256)
+        require(warningMillis > 0); require(maxRetainedTasks in 1..256)
         require(maxRequestsPerBinding in 1..4096) { "invalid_child_request_budget" }
     }
 
@@ -201,7 +200,6 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             val group = childTaskCallGroup(binding.owner.conversationId.value, binding.owner.runId.value,
                 binding.owner.assistantMessageId.value, context.invocation.name, context.invocation.id.value)
             val epoch = Math.incrementExact(generation).also { generation = it }
-            val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
             request = ChildTaskRequest(fingerprint, inputSnapshot.size)
             val staged = mutableListOf<Task>()
             try { inputSnapshot.forEachIndexed { index, inputTask ->
@@ -213,7 +211,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                     originalRole = resources.models.getValue(inputTask.profileId).role,
                     access = if (resources.models.getValue(inputTask.profileId).role == ChildModelRole.IMPLEMENTATION)
                         checkNotNull(resources.toolAssembly) { "child_execution_tools_unavailable" }.restrict(resources.session, inputTask.access) else ChildToolAccess.NONE)
-                Task(binding, request, record, context.invocation, deadline,
+                Task(binding, request, record, context.invocation,
                     ChildTaskPauseControl { notifyChanged(binding) }, definition = resources.models.getValue(inputTask.profileId),
                     toolPin = if (resources.models.getValue(inputTask.profileId).role == ChildModelRole.IMPLEMENTATION) resources.toolAssembly?.retain() else null).also(staged::add)
             } } catch (_: Exception) {
@@ -423,7 +421,6 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
                         checkNotNull(binding.resources?.toolAssembly) { "child_execution_tools_unavailable" }
                             .restrict(checkNotNull(binding.resources).session, source.access) else ChildToolAccess.NONE)
                 Task(binding, ChildTaskRequest(fingerprint.toByteArray(), 1), record, invocation,
-                    System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis),
                     ChildTaskPauseControl { notifyChanged(binding) }, source,
                     definition, if (definition.role == ChildModelRole.IMPLEMENTATION) binding.resources?.toolAssembly?.retain() else null).also {
                     it.admitting = true
@@ -699,8 +696,8 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             val source = task.source
             if (source != null) {
                 while (synchronized(gate) { tasks.containsKey(source.owner.childRunId) } &&
-                    !stopped(task) && System.nanoTime() < task.deadline) Thread.sleep(25)
-                if (stopped(task) || System.nanoTime() >= task.deadline) {
+                    !stopped(task)) Thread.sleep(25)
+                if (stopped(task)) {
                     finishUnsent(task, "child_source_not_drained"); return
                 }
             }
@@ -711,12 +708,11 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
             if (task.initial.commandKind == ChildTaskCommandKind.APPEND && preceding?.status != ChildTaskStatus.COMPLETED) {
                 finishUnsent(task, "child_append_source_unconfirmed"); return
             }
-            if (stopped(task) || System.nanoTime() >= task.deadline) {
+            if (stopped(task)) {
                 finishUnsent(task, "child_not_sent")
                 return
             }
-            val remaining = TimeUnit.NANOSECONDS.toMillis(task.deadline - System.nanoTime()).coerceAtLeast(1)
-            batch = ChildModelBatch(mapOf(task.initial.profileId to definition), remaining, journal(task), usageRecorder,
+            batch = ChildModelBatch(mapOf(task.initial.profileId to definition), warningMillis, journal(task), usageRecorder,
                 onProgress = { _, text -> progress(task, text) }, toolAssembly = resources.toolAssembly, diagnostics = diagnostics,
                 sharedPool = { selected -> synchronized(gate) {
                     check(!task.settled && task.binding.resources === resources)

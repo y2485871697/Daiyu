@@ -1,5 +1,6 @@
 """检查助手页面导航的源码连接。"""
 from pathlib import Path
+import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,7 +60,7 @@ class AssistantNavigationContractTest(unittest.TestCase):
         self.assertIn('dismissSidebar()', close)
         self.assertIn('val returnPage = if (retainedPage == "assistant-edit") assistantEditReturnPage else retainedPage', close)
         self.assertLess(close.index('val returnPage ='), close.index('assistantEditReturnPage = "chat"'))
-        self.assertIn('if (returnPage == "chat") returnToChat() else retainedPage = returnPage', close)
+        self.assertIn('if (returnPage == "chat") returnToChat() else {\n            dismissSidebar()\n            retainedPage = returnPage', close)
         self.assertEqual(1, close.count('returnToChat()'))
 
     def test_picker_reopens_with_fresh_owner_instead_of_child_state(self):
@@ -91,7 +92,7 @@ class AssistantNavigationContractTest(unittest.TestCase):
         self.assertIn('testTag("assistant-avatar-name")', self.editor[avatar:name])
         self.assertIn('picker.launch(PickVisualMediaRequest', self.editor[avatar:name])
         self.assertNotIn('labelAction =', self.editor)
-        self.assertEqual(1, self.editor.count('AssistantAvatar('))
+        self.assertEqual(1, len(re.findall(r'\bAssistantAvatar\(', self.editor)))
 
     def test_skills_legend_has_no_opaque_mask(self):
         section = self.shell.split('internal fun AssistantPreviewSection(', 1)[1]

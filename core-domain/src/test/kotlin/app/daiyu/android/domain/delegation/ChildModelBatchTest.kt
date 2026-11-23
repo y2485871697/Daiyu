@@ -172,22 +172,28 @@ class ChildModelBatchTest {
 
     @Test fun softWarningAllowsCompletionBeyondThresholdWithoutReopening() {
         val entered = CountDownLatch(1); val release = CountDownLatch(1); val cancelled = CountDownLatch(1); val idle = CountDownLatch(1)
+        val warnings = AtomicInteger(); val opens = AtomicInteger(); val warned = CountDownLatch(1)
         val child = object : ModelPort {
             override fun open(history: List<Message>) = object : ModelSession {
+                init { opens.incrementAndGet() }
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                     entered.countDown(); check(release.await(3, TimeUnit.SECONDS)); sink(ModelEvent.TextFinal("t", "late"))
                 }
                 override fun cancel() { cancelled.countDown() }
             }
         }
-        val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1) { child }), 200))
+        val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 1) { child }), warningMillis = 100,
+            diagnostics = ChildTaskDiagnostics { event ->
+                if (event.phase == ChildTaskDiagnosticPhase.EXECUTION_SOFT_WARNING) { warnings.incrementAndGet(); warned.countDown() }
+            }))
         val result = AtomicReference<ExecutionReceipt>(); val failure = AtomicReference<Throwable>()
         val thread = Thread { try { result.set(batch.execute(context(), listOf(ChildModelTask("one", "task")))) } catch (e: Throwable) { failure.set(e) } }
         try {
-            thread.start(); assertTrue(entered.await(3, TimeUnit.SECONDS)); thread.join(400)
+            thread.start(); assertTrue(entered.await(3, TimeUnit.SECONDS)); assertTrue(warned.await(2, TimeUnit.SECONDS)); thread.join(250)
             assertTrue(thread.isAlive); assertNull(failure.get()); assertEquals(1L, cancelled.count)
             release.countDown(); thread.join(2000); assertFalse(thread.isAlive)
             assertTrue(result.get() is ExecutionReceipt.Confirmed)
+            assertEquals(1, warnings.get()); assertEquals(1, opens.get())
             batch.closeWhenIdle { idle.countDown() }; assertTrue(idle.await(3, TimeUnit.SECONDS))
         } finally { release.countDown(); batch.close(); thread.join(3000) }
     }

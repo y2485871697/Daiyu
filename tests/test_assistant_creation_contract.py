@@ -10,7 +10,7 @@ class AssistantCreationContractTest(unittest.TestCase):
     def test_create_event_is_required_and_forwarded_at_both_boundaries(self):
         picker = (SOURCE / 'ui/screens/assistants/AssistantPickerDialogs.kt').read_text()
         self.assertEqual(2, picker.count('    onCreate: () -> Unit,'))
-        self.assertIn('AssistantPreviewButton(stringResource(R.string.assistant_new), onCreate,', picker)
+        self.assertIn('AssistantPreviewButton(stringResource(R.string.assistant_new), { finishSelection(onCreate) },', picker)
         self.assertIn('onCreate = { if (canMutate()) onCreate() }', picker)
         self.assertNotIn('Creation remains a visual placeholder', picker)
         self.assertNotIn('AssistantPreviewButton(stringResource(R.string.assistant_new), {},', picker)

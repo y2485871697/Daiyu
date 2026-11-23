@@ -32,8 +32,8 @@ class ResponsesTest:InstrumentationTestCase() {
     private fun reasoning(vararg summaries:String, id:String="rs", encrypted:String="synthetic-encrypted-content")=
         event("reasoning","id" to id,"encrypted_content" to encrypted,
             "summary" to JSONArray(summaries.map {event("summary_text","text" to it)}))
-    private fun reasoningDelta(index:Int,text:String,id:String="rs",sequence:Int=1)=
-        event("response.reasoning_summary_text.delta","item_id" to id,"output_index" to 0,
+    private fun reasoningDelta(index:Int,text:String,id:String="rs",sequence:Int=1,outputIndex:Int=0)=
+        event("response.reasoning_summary_text.delta","item_id" to id,"output_index" to outputIndex,
             "summary_index" to index,"sequence_number" to sequence,"delta" to text)
     private fun reasoningDone(index:Int,text:String,id:String="rs",sequence:Int=2)=
         event("response.reasoning_summary_text.done","item_id" to id,"output_index" to 0,
@@ -141,6 +141,15 @@ class ResponsesTest:InstrumentationTestCase() {
             assertEquals(RunStatus.COMPLETED,result.status);assertEquals(1,opened);assertTrue(connection.disconnected)
         }
     }
+    private fun assertReportedFailure(reason: ModelFailure, result: Message, httpStatus: Int? = null) {
+        assertEquals(RunStatus.FAILED, result.status)
+        val report = checkNotNull(result.error)
+        val expected = ModelRequestException(reason, httpStatus?.let { ModelRequestDiagnostic(it) })
+        assertEquals(expected.userMessage, report.substringBefore("\n\n"))
+        assertEquals(listOf("本地错误码：${reason.name}"), report.lines().filter { it.startsWith("本地错误码：") })
+        assertFalse(report.contains("synthetic-secret"))
+        assertFalse(report.contains(settings.apiKey))
+    }
     fun testHttpFailureCategoriesAndMimeAreSafe() {
         val expected=mapOf(401 to ModelFailure.AUTHENTICATION,403 to ModelFailure.PERMISSION,
             404 to ModelFailure.ENDPOINT,405 to ModelFailure.ENDPOINT,302 to ModelFailure.REDIRECT,
@@ -148,13 +157,13 @@ class ResponsesTest:InstrumentationTestCase() {
         for((code,failure) in expected) {
             val result=run(listOf(Connection("synthetic-secret",code)))
             assertEquals(RunStatus.FAILED,result.status)
-            assertEquals(ModelRequestException(failure, ModelRequestDiagnostic(code)).userMessage,result.error)
+            assertReportedFailure(failure, result, code)
             assertFalse(result.error!!.contains("synthetic-secret"))
         }
         assertEquals(RunStatus.COMPLETED,run(listOf(Connection(frames(completed(message("answer"))),200,"Text/Event-Stream; charset=UTF-8"))).status)
-        assertEquals(ModelFailure.PROTOCOL.userMessage,run(listOf(Connection("{}",200,"text/event-streamXYZ"))).error)
-        assertEquals(ModelFailure.PROTOCOL.userMessage,run(listOf(Connection(frames(JSONObject().put("choices",JSONArray()))))).error)
-        assertEquals(ModelFailure.NETWORK.userMessage,run(listOf(Connection("data: [DONE]\n\n"))).error)
+        assertReportedFailure(ModelFailure.PROTOCOL,run(listOf(Connection("{}",200,"text/event-streamXYZ"))))
+        assertReportedFailure(ModelFailure.PROTOCOL,run(listOf(Connection(frames(JSONObject().put("choices",JSONArray()))))))
+        assertReportedFailure(ModelFailure.NETWORK,run(listOf(Connection("data: [DONE]\n\n"))))
     }
     fun testTransportFailuresAreClassifiedWithoutRetriesOrLeaks() {
         for ((exception, expected) in listOf(
@@ -175,7 +184,7 @@ class ResponsesTest:InstrumentationTestCase() {
             val result=ChatRunner(ResponsesModel(settings) {opened++;connection},
                 object:ConversationStore {override fun save(message:Message) {}},BatteryTool {error("unused")},{})
                 .run(initial(),emptyList())
-            assertEquals(RunStatus.FAILED,result.status);assertEquals(expected.userMessage,result.error)
+            assertEquals(RunStatus.FAILED,result.status);assertReportedFailure(expected, result)
             assertEquals(1,opened);assertTrue(disconnected);assertFalse(result.error!!.contains("synthetic-secret"))
         }
     }
@@ -188,15 +197,15 @@ class ResponsesTest:InstrumentationTestCase() {
             val result=ChatRunner(ResponsesModel(settings) {opened++;throw exception},
                 object:ConversationStore {override fun save(message:Message) {}},BatteryTool {error("unused")},{})
                 .run(initial(),emptyList())
-            assertEquals(expected.userMessage,result.error);assertEquals(1,opened)
+            assertReportedFailure(expected, result);assertEquals(1,opened)
         }
         for(event in listOf(
             event("response.output_text.delta","content_index" to 0,"delta" to "x"),
             delta(-1,"x"),delta(0,"x").put("sequence_number","bad"),
             event("response.completed","response" to JSONObject().put("status","completed")))) {
-            assertEquals(ModelFailure.PROTOCOL.userMessage,run(listOf(Connection(frames(event)))).error)
+            assertReportedFailure(ModelFailure.PROTOCOL,run(listOf(Connection(frames(event)))))
         }
-        assertEquals(ModelFailure.NETWORK.userMessage,run(listOf(Connection("data: ${completed()}"))).error)
+        assertReportedFailure(ModelFailure.NETWORK,run(listOf(Connection("data: ${completed()}"))))
     }
     fun testSinkIoFailuresKeepTheirIdentity() {
         for(exception in listOf(java.io.IOException("sink"),java.net.SocketTimeoutException("sink"),javax.net.ssl.SSLException("sink"))) {
@@ -375,7 +384,7 @@ class ResponsesTest:InstrumentationTestCase() {
             reasoningDelta(1,text,sequence=2),completed(reasoning(text,text))))))
         assertEquals(RunStatus.FAILED,parts.status)
         val items=run(listOf(Connection(frames(reasoningDelta(0,text,id="first",sequence=1),
-            reasoningDelta(0,text,id="second",sequence=2),completed()))))
+            reasoningDelta(0,text,id="second",sequence=2,outputIndex=1),completed()))))
         assertEquals(RunStatus.FAILED,items.status)
     }
     fun testEmptyOrMissingFinalSummaryDoesNotResetObservedWindow() {
@@ -433,7 +442,7 @@ class ResponsesTest:InstrumentationTestCase() {
     fun testSummarySnapshotOrderAndItemIsolationDirectly() {
         val snapshots=mutableListOf<ModelEvent.ReasoningDelta>()
         val body=frames(reasoningDelta(1,"second",sequence=1),reasoningDelta(0,"first",sequence=2),
-            reasoningDelta(0,"other",id="other-item",sequence=3),completed())
+            reasoningDelta(0,"other",id="other-item",sequence=3,outputIndex=1),completed())
         ResponsesStream.read(body.byteInputStream().bufferedReader(),{false}) {
             assertFalse(it is ModelEvent.TextDelta || it is ModelEvent.TextFinal)
             if(it is ModelEvent.ReasoningDelta) snapshots.add(it)
@@ -534,7 +543,7 @@ class ResponsesTest:InstrumentationTestCase() {
             var validations = 0
             val result = run(listOf(connection)) { validations++; error("protocol-invalid call must not execute") }
             assertEquals(RunStatus.FAILED, result.status)
-            assertEquals(ModelFailure.PROTOCOL.userMessage, result.error)
+            assertReportedFailure(ModelFailure.PROTOCOL, result)
             assertEquals(0, validations)
             assertTrue(result.blocks.filterIsInstance<MessageBlock.Tool>().isEmpty())
         }

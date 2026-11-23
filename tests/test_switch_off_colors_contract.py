@@ -65,9 +65,10 @@ class SwitchOffColorsContractTest(unittest.TestCase):
 
     def test_independent_subagent_accent_colors_are_also_normalized(self):
         text = (SRC / 'ui/SubAgentSettingsScreen.kt').read_text()
-        self.assertIn('colors = daiyuSwitchColors(SwitchDefaults.colors(', text)
-        self.assertIn('if (editor.enabled) { editor.updateProfile(profile.id)', text)
-        self.assertIn('modifier = Modifier.scale(0.7f)', text)
+        self.assertNotIn('Switch(', text)
+        fixture = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/SubAgentSettingsProfileSheetTest.kt').read_text()
+        self.assertIn('formSwitch().assertDoesNotExist()', fixture)
+        self.assertIn('fun testSettingsEditUsesSharedSheetWithoutEnableSwitchAndOutsideDiscardsAllChanges()', fixture)
 
     def test_default_material_controls_keep_callbacks_and_custom_palette_authority(self):
         text = (SRC / 'ui/haptics/material/HapticMaterialControls.kt').read_text()

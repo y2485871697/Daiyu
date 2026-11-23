@@ -93,7 +93,7 @@ class ProviderVisualContractTest(unittest.TestCase):
         self.assertIn('text = if (onOAuthLogin != null) "创建" else "保存配置"', provider)
         self.assertIn('onClick = submit', provider)
         self.assertIn('enabled = enabled', provider)
-        self.assertIn('padding(horizontal = 20.dp, vertical = 4.dp)', provider)
+        self.assertIn('padding(horizontal = 28.dp, vertical = 4.dp)', provider)
         for fragment in ('TextButton(', 'text = "保存"', 'onClick = submit',
                          'colors = ButtonDefaults.textButtonColorsPrimary()',
                          'enabled = enabled',
@@ -117,7 +117,7 @@ class ProviderVisualContractTest(unittest.TestCase):
                          'if (latestEnabled && latestDraft === draft)',
                          'connection.cancel(); balance.cancel(); onDelete()',
                          'colors = deletionButtonColors()',
-                         'testTag("provider-delete").padding(horizontal = 20.dp, vertical = 4.dp)'):
+                         'testTag("provider-delete").padding(horizontal = 28.dp, vertical = 4.dp)'):
             self.assertIn(fragment, delete)
 
     def test_anthropic_keeps_ai_mark_in_the_same_fixed_slot(self):

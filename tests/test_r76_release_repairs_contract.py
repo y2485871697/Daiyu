@@ -65,7 +65,7 @@ class R76ReleaseRepairsContractTest(unittest.TestCase):
                       'field(activity, "offlineSpeechSessionFactory", factory)',
                       'field(activity, "offlineSpeechReady", ready)',
                       'field(activity, "offlineMicrophonePermissionOwner", host)',
-                      'activity_rq#4', 'activity.onRequestPermissionsResult',
+                      'getDeclaredField("offlineMicrophonePermission")', 'val key = candidateKeys.single { map[it] is Int }', 'launched.add(key)', 'activity.onRequestPermissionsResult',
                       'assertEquals(0, platform.creates)', 'assertEquals(0, fixture.opens.get())',
                       'assertDraft("leftmiddletail")', 'assertSelection(10, 10)',
                       'assertSame(processGate, gateField.get(activity))',

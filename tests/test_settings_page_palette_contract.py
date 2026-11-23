@@ -28,8 +28,9 @@ class SettingsPagePaletteContractTest(unittest.TestCase):
         host = read('ui/GenerationSettingsHost.kt')
         self.assertIn('SettingsScaffoldPage(title = "独立生成模型设置"', host)
         self.assertNotIn('MiuixScaffoldPage', host)
+        self.assertIn('SettingsScaffoldPage(', read('ui/screens/settings/BackupScreen.kt'))
         main = read('MainActivity.kt')
-        self.assertIn('else app.daiyu.android.ui.screens.settings.SettingsScaffoldPage("旧版兼容资料库"', main)
+        self.assertIn('"legacy-library" -> retainedPage = "backup"', main)
 
     def test_linux_and_workspace_opt_in_without_restyling_normal_terminal(self):
         main = read('MainActivity.kt')

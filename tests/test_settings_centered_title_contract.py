@@ -43,7 +43,7 @@ class SettingsCenteredTitleContract(unittest.TestCase):
 
     def test_loading_and_unavailable_settings_do_not_revert_to_large_titles(self):
         main = read('MainActivity.kt')
-        self.assertIn('onBack = { retainedPage = "backup" }, compactTitle = true)', main)
+        self.assertIn('"legacy-library" -> retainedPage = "backup"', main)
         self.assertIn('title = if (route == "chat-workspace") "工作区" else "Linux 工具环境", compactTitle = true, settingsStyle = true)', main)
         loading = main.split('@Composable private fun TerminalLoadingPage(', 1)[1].split('private fun openLinuxSettings', 1)[0]
         self.assertIn('compactTitle: Boolean = false', loading)

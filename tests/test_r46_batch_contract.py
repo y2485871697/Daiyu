@@ -19,7 +19,7 @@ class R46BatchContract(unittest.TestCase):
         self.assertIn('if (ancestor is DialogWindowProvider) return ancestor.window', text)
         self.assertIn('(findViewTreeLifecycleOwner() as? Activity) ?: context.inputActivity()', text)
         self.assertIn('isAttachedToWindow && it.decorView.windowToken == windowToken', text)
-        self.assertIn('entry.view.findViewTreeLifecycleOwner()?.lifecycle', text)
+        self.assertIn('val owner = entries.firstOrNull()?.view?.findViewTreeLifecycleOwner()', text)
 
     def test_pause_uses_real_framework_cycle_and_positive_compose_root(self):
         source = (TEST / 'ContextManagementEntryActivityTest.kt').read_text()
@@ -27,17 +27,14 @@ class R46BatchContract(unittest.TestCase):
         self.assertIn('realPauseResume(activity, atPause = {', text)
         self.assertNotIn('callActivityOnPause', text)
         self.assertIn('assertFalse(old.state.value.confirmingCompression)', text)
-        self.assertIn('assertPausedContextRoute()', text)
-        self.assertIn('val next = continueAndAwait()', text)
+        self.assertIn('assertNoVisit()', text)
+        self.assertIn('val next = restoredAndAwait()', text)
         self.assertIn('assertEquals(before, fixture.database.exportBackup())', text)
         self.assertIn('assertEquals(0, fixture.opens.get())', text)
-        paused = source.split('private fun assertPausedContextRoute()', 1)[1].split('private fun continueAndAwait()', 1)[0]
-        for token in ('assertEquals("context-management", getter.apply { isAccessible = true }.invoke(activity))',
-                      'assertNoVisit()', 'awaitUniqueTag("context-management-paused")',
-                      'node("context-compression-confirmation").assertDoesNotExist()'):
-            self.assertIn(token, paused)
-        continued = source.split('private fun continueAndAwait()', 1)[1].split('private fun stopped(', 1)[0]
-        for token in ('node("context-management-resume").performClick()', 'awaitUniqueTag("context-management")',
+        self.assertIn('assertSame(next, adapter())', text)
+        continued = source.split('private fun restoredAndAwait()', 1)[1].split('return result', 1)[0]
+        for token in ('node("context-management-paused").assertDoesNotExist()', 'awaitUniqueTag("context-management")',
+                      'result.state.value.operation == null && result.state.value.snapshot != null',
                       'assertFalse(result.state.value.confirmingCompression)'):
             self.assertIn(token, continued)
 
@@ -77,7 +74,7 @@ class R46BatchContract(unittest.TestCase):
 
     def test_caret_comparison_and_dialog_window_evidence_are_preserved(self):
         text = (TEST / 'ManagedInputActivityTest.kt').read_text()
-        for token in ['.systemBarsPadding().imePadding()', 'node(tag).scrollToVisible()',
+        for token in ['.systemBarsPadding().imePadding()', 'hasScrollAction().matches(it) }) interaction.scrollToVisible()',
                       'hidden.contentEquals(unfocused)', 'Visible IME must show the caret to this test',
                       'awaitDialogImeFrame(node(tag), visible)', 'awaitImeFrame(node(tag), visible)']:
             self.assertIn(token, text)

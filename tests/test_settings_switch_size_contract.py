@@ -49,9 +49,10 @@ class SettingsSwitchSizeContractTest(unittest.TestCase):
 
     def test_existing_compact_subagent_switch_and_nonsettings_controls_are_untouched(self):
         subagent = (SRC / 'ui/SubAgentSettingsScreen.kt').read_text()
-        self.assertIn('modifier = Modifier.scale(0.7f)', subagent)
+        self.assertNotIn('Switch(', subagent)
+        self.assertIn('SubAgentProfileRow(profile, providers, enabled = editable', subagent)
         self.assertNotIn('SettingsSwitch(', subagent)
-        self.assertIn('import app.daiyu.android.ui.haptics.material.Switch', subagent)
+        self.assertNotIn('import app.daiyu.android.ui.haptics.material.Switch', subagent)
         visual = (SRC / 'ui/components/subagent/ConversationAgentStyle.kt').read_text()
         self.assertIn('Modifier.size(36.dp, 22.dp)', visual)
         for path in (SRC / 'ui/haptics', SRC / 'ui/screens/chat', SRC / 'ui/screens/assistants'):

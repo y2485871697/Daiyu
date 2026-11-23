@@ -90,20 +90,18 @@ class R67FixtureContract(unittest.TestCase):
         self.assertLess(enabled, method.index('mount(capturePreviousPage = true)'))
         self.assertLess(method.index('finally'), method.index('setDrawingEnabled(false)'))
         production = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/navigation/PageBackGestures.kt').read_text()
-        for token in ('import androidx.compose.ui.layout.layout',
-                      'frame.size = IntSize(placeable.width, placeable.height)',
-                      'placeable.placeWithLayer(x = 0, y = 0, layer = frame.layer)'):
-            self.assertIn(token, production)
-        for token in ('frame.layer.record', 'this@drawWithContent.drawContent()', 'DaiyuBackRecord'):
-            self.assertNotIn(token, production)
-
+        for site in ('if (frame.frozen) drawContent()', 'if (captureFromContent || frame.frozen) drawContent()'):
+            draw = production.split(site, 1)[1].split('frame.recorded(', 1)[0]
+            self.assertLess(draw.index('frame.layer.record { this@drawWithContent.drawContent() }'), draw.index('drawLayer(frame.layer)'))
+        self.assertIn('frame.recorded(IntSize(size.width.toInt(), size.height.toInt()))', production)
         horizontal = source.split('fun testHorizontalSwipeCommitsTheRecordedDepartureWithPredictionDisabled()', 1)[1].split('fun testHorizontalSwipeWithPredictionEnabled', 1)[0]
         for token in ('mount(capturePreviousPage = true)', 'swipe previous page must be red',
                       'assertDimmedPreviousPage(backdrop,', 'swipe departure must be blue',
                       'outgoing.blue > 0.9f && outgoing.red < 0.1f'):
             self.assertIn(token, horizontal)
         self.assertNotIn('Build.VERSION.SDK_INT', horizontal)
-        self.assertIn('departure.frame.capture?.join()', production)
+        layers = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/navigation/PageBackPreviewLayers.kt').read_text()
+        self.assertIn('departure.frame.capture?.join()', layers)
 
         for token in ('logPreviewPixels("source", sourceImage)', 'logPreviewPixels("target", previewImage)',
                       'page-back-$phase.png', 'DaiyuBackPreview'):

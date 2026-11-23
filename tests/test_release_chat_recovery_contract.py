@@ -7,11 +7,11 @@ DEVICE = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/co
 class ReleaseChatRecoveryContract(unittest.TestCase):
     def test_completed_prefix_stays_in_its_parsed_coordinate_space(self):
         source = (CHAT / 'MarkdownTyping.kt').read_text()
-        self.assertIn('val acceptsProjection = projection?.let { isMarkdownAppend(it.sources.take(requested.size), requested) } == true', source)
+        self.assertIn('val acceptsProjection = projection?.let { isMarkdownAppend(it.sources.take(requested.size), requested) &&\n        markdownWindowsAppend(it.windows.take(requested.size), requestedWindows) } == true', source)
         self.assertIn('val prefixProjection = remember(projection, requested.size, acceptsProjection)', source)
         self.assertIn('projection?.takeIf { acceptsProjection }?.let { parsed ->', source)
         self.assertIn('if (requested.size >= parsed.sources.size) parsed', source)
-        self.assertIn('else MarkdownProjection(parsed.sources.take(requested.size), parsed.blocks, parsed.parser, parsed.displayText)', source)
+        self.assertIn('else MarkdownProjection(parsed.sources.take(requested.size), parsed.blocks, parsed.parser, parsed.displayText,\n                parsed.windows.take(requested.size), parsed.windowBlocks, parsed.windowDisplayText)', source)
         self.assertNotIn('text.all { it in parsed.blocks }', source)
         self.assertIn('projection?.sources == sources.map { it.text }', source)
         test = (DEVICE / 'ChatResumeScrollTest.kt').read_text()
@@ -25,15 +25,16 @@ class ReleaseChatRecoveryContract(unittest.TestCase):
         workflow = (CHAT / 'AssistantWorkflowContent.kt').read_text()
         self.assertIn('is MessageContentUi.Text -> "text:$itemId"', workflow)
         self.assertIn('is MessageContentUi.Reasoning -> "reasoning:${reported.itemId}"', workflow)
-        self.assertIn('is MessageContentUi.Tool -> "tool:${step.toolCallId}"', workflow)
+        self.assertIn('is MessageContentUi.Tool -> "tool:${step.renderKey}"', workflow)
         self.assertIn('image.expectedOwner != image.reference.owner', source)
         test = (DEVICE / 'MessageMarkdownTest.kt').read_text()
         self.assertIn('"text updates must not restart the keyed image load", 1, requests.size', test)
         self.assertIn('testReorderedMixedTextKeepsEachPublishedBodyWithItsItemIdentity', test)
     def test_reasoning_sessions_rebaseline_only_at_visibility_boundaries(self):
         source = (CHAT / 'ReportedReasoningCard.kt').read_text()
-        self.assertIn('val revealEnabled = !manuallyCollapsed && (!stopped || currentOverride == true) && hasReportedReasoningText(text)', source)
-        self.assertIn('val reveal = key(revealEnabled)', source)
+        self.assertIn('val revealGate = parentExpanded && !manuallyCollapsed && (!stopped || currentOverride == true)', source)
+        self.assertIn('val revealEnabled = arrived && revealGate && hasReportedReasoningText(text)', source)
+        self.assertIn('val reveal = key(revealGate)', source)
         self.assertIn('streaming = isThinking && revealEnabled', source)
         self.assertIn('enabled = revealEnabled', source)
         self.assertIn('allowBaselinePrefix = false', source)
@@ -67,10 +68,10 @@ class ReleaseChatRecoveryContract(unittest.TestCase):
         self.assertIn('assertEquals(0, fixture.opens.get())', shortcut)
     def test_answer_waits_for_outer_closure_and_stays_released(self):
         source = (CHAT / 'ChatMessageList.kt').read_text()
-        self.assertIn('val ordered = rememberAssistantWorkflowContent(displayedTurn)', source)
-        self.assertIn('val workReasoning = remember(ordered.steps) { ordered.steps.filterIsInstance<MessageContentUi.Reasoning>().map { it.reported } }', source)
-        self.assertIn('val reasoningReady = turn.reasoningStopped || handoff.ready(workReasoning)', source)
-        self.assertIn('var answerReleased by rememberSaveable(turn.listKey)', source)
+        self.assertIn('val sourceWorkflow = workflowContent ?: rememberAssistantWorkflowContent(turn)', source)
+        self.assertIn('val reportedReasoning = remember(ordered.steps) {\n        ordered.steps.filterIsInstance<MessageContentUi.Reasoning>().map { it.reported }', source)
+        self.assertIn('val reasoningReady = turn.reasoningStopped || handoff.ready(reportedReasoning)', source)
+        self.assertIn('var answerReleased by rememberSaveable(turn.listKey, ordered.work != null)', source)
         self.assertIn('mutableStateOf(ordered.work == null && reasoningReady && ordered.body.isNotEmpty())', source)
         self.assertIn('val answerPending = ordered.body.isNotEmpty()', source)
         self.assertNotIn('workReasoning.isEmpty()', source)
@@ -86,19 +87,22 @@ class ReleaseChatRecoveryContract(unittest.TestCase):
         self.assertIn('MessageContent(ordered.body, actions, imageLoader, markdown = true,', source)
         self.assertNotIn('answerReleased = false', source)
         ordered = (CHAT / 'AssistantWorkflowContent.kt').read_text()
-        self.assertIn('val body = if (finalText.isBlank()) emptyList() else listOf(MessageContentUi.Text("final", finalText))', ordered)
-        self.assertIn('return AssistantWorkflowContent(work, steps, content.drop(lastStep + 1))', ordered)
+        self.assertIn('if (finalText.isBlank()) emptyList() else listOf(MessageContentUi.Text("final", finalText))', ordered)
+        self.assertIn('if (work.running) AssistantWorkflowContent(work, steps, emptyList(), pending = tail, leading = leading)', ordered)
+        self.assertIn('val tail = content.drop(split)', ordered)
+        self.assertIn('else AssistantWorkflowContent(work, steps, tail, leading = leading)', ordered)
         android = (DEVICE / 'ReasoningWorkflowTest.kt').read_text()
         for name in ('testTerminalAutoCollapseAndManualReopenDoNotBlockTheAnswer',
-                     'testLiveAnswerWaitsForOuterWorkflowExitWithoutWaitingForTurnEnd',
+                     'testLiveAnswerStaysPendingUntilTurnEndAndOuterWorkflowExit',
                      'testToolOnlyAnswerWaitsForOuterExitInBothContentPaths'):
             self.assertIn('fun ' + name, android)
         self.assertNotIn('testDefaultOpenWorkflowReleasesTheAnswerWhileTheTurnIsStillRunning', android)
-        cases = android.split('fun testLiveAnswerWaitsForOuterWorkflowExitWithoutWaitingForTurnEnd', 1)[1].split(
+        cases = android.split('fun testLiveAnswerStaysPendingUntilTurnEndAndOuterWorkflowExit', 1)[1].split(
             'fun testStopImmediatelyRemoves', 1)[0]
         self.assertIn('ui.mainClock.autoAdvance = false', cases)
         self.assertIn('ui.mainClock.advanceTimeBy(48)', cases)
-        self.assertIn('assertEquals(RunStatus.RUNNING, source.status)', cases)
+        self.assertLess(cases.index('ui.onNodeWithText("answer").assertDoesNotExist()'), cases.index('source.copy(status = RunStatus.COMPLETED)'))
+        self.assertIn('assertEquals(RunStatus.COMPLETED, source.status)', cases)
         self.assertIn('for (mixed in listOf(false, true))', cases)
         self.assertIn('androidx.compose.runtime.key(id)', cases)
         self.assertGreaterEqual(cases.count('ui.onNodeWithText("answer").assertDoesNotExist()'), 6)

@@ -21,11 +21,13 @@ class ResumeLayoutContractTest(unittest.TestCase):
             self.assertNotIn(workaround, row)
 
     def test_all_audited_temporary_actions_keep_their_existing_chevron_slot(self):
-        expected = {'ui/screens/settings/BackupScreen.kt': 2, 'ui/screens/settings/CompressionSettingsForm.kt': 1, 'ui/screens/settings/LinuxSettingsScreen.kt': 2, 'ui/screens/settings/PetSettingsScreen.kt': 1, 'ui/screens/settings/BrowserSettingsScreen.kt': 1, 'ui/screens/settings/IndependentModelScreen.kt': 1, 'ui/screens/settings/OfflineSpeechSettingsScreen.kt': 1, 'ui/screens/settings/ModelSettingsScreen.kt': 1, 'ui/screens/settings/GuiSettingsPanel.kt': 4, 'ui/screens/settings/McpSettingsScreen.kt': 2, 'ui/screens/settings/SettingsHomeScreen.kt': 1, 'ui/screens/settings/SettingsDiagnosticsHost.kt': 2, 'ui/screens/settings/RequestBodyFieldsEditor.kt': 1, 'ui/screens/settings/ProviderDirectoryPage.kt': 4, 'title/TitleModelSettingsPanel.kt': 1, 'VoiceAccountPanel.kt': 10, 'VoiceSettingsPanel.kt': 14, 'VoiceSettingsPreview.kt': 1}
+        expected = {'ui/screens/settings/BackupScreen.kt': 2, 'ui/screens/settings/CompressionSettingsForm.kt': 1, 'ui/screens/settings/LinuxSettingsScreen.kt': 2, 'ui/screens/settings/PetSettingsScreen.kt': 1, 'ui/screens/settings/BrowserSettingsScreen.kt': 1, 'ui/screens/settings/IndependentModelScreen.kt': 1, 'ui/screens/settings/OfflineSpeechSettingsScreen.kt': 1, 'ui/screens/settings/ModelSettingsScreen.kt': 1, 'ui/screens/settings/GuiSettingsPanel.kt': 4, 'ui/screens/settings/McpSettingsScreen.kt': 2, 'ui/screens/settings/SettingsHomeScreen.kt': 1, 'ui/screens/settings/SettingsDiagnosticsHost.kt': 2, 'ui/screens/settings/RequestBodyFieldsEditor.kt': 1, 'ui/screens/settings/ProviderDirectoryPage.kt': 4, 'title/TitleModelSettingsPanel.kt': 1, 'VoiceAccountPanel.kt': 11, 'VoiceSettingsPanel.kt': 14, 'VoiceSettingsPreview.kt': 1}
         for path, count in expected.items():
             with self.subTest(path=path):
                 text = (SRC / path).read_text()
                 actual = text.count("showChevron = true, onClick = if")
+                if path.endswith("PetSettingsScreen.kt"):
+                    actual += text.count('settingsDisclosureRotation(expanded).testTag("pet-options-chevron")')
                 if path.endswith("OfflineSpeechSettingsScreen.kt"):
                     actual += text.count("showChevron = !pack.ready, onClick = if")
                 self.assertEqual(count, actual)
@@ -96,8 +98,8 @@ class ResumeLayoutContractTest(unittest.TestCase):
         self.assertIn("source.refreshAll {", collaboration)
         self.assertIn("refreshScope.cancel()", collaboration)
         search = (tests / "SearchHistoryDialogTest.kt").read_text()
-        self.assertIn("hasTestTag(tag) and hasClickAction()", search)
-        self.assertIn("fun assertRetainedGeometry()", search)
+        self.assertIn("node(target).assertIsDisplayed().assertHasClickAction()", search)
+        self.assertIn("assertEquals(bounds, node(target).fetchSemanticsNode().boundsInRoot)", search)
 
     def test_global_font_density_and_refresh_rate_are_not_frozen(self):
         theme = (SRC / "ui/app/AgentAppTheme.kt").read_text()

@@ -108,9 +108,10 @@ class RegressionCompletionBarriersContractTest(unittest.TestCase):
 
     def test_empty_projection_cannot_replace_the_first_pending_body(self):
         text = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatMessageList.kt').read_text()
-        body = text.split('val displayedTurn = remember(turn, projection) {', 1)[1].split('var hasProjectedBody', 1)[0]
-        self.assertIn('if (projection == null || projection.sources.none { it.isNotBlank() }) turn', body)
-        self.assertLess(body.index('projection.sources.none'), body.index('turn.copy(finalText = projection.sources.single())'))
+        self.assertIn('val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true', text)
+        self.assertIn('val contentReady = projection?.sources == sources &&', text)
+        self.assertIn('onContentDisplayed(hasDisplayBody || contentReady)', text)
+        self.assertIn('val generationComplete = turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady', text)
         test = (TESTS / 'ui/screens/chat/conversation/MessageMarkdownTest.kt').read_text()
         method = test.split('fun testEmptyProjectionDoesNotCountAsPreviouslyDisplayedBody()', 1)[1].split('fun testColdPendingTurnReplacement', 1)[0]
         for oracle in ('MarkdownProjection(listOf(""),', 'entered.count == 0L',

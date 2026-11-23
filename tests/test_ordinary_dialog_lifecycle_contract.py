@@ -14,7 +14,8 @@ class OrdinaryDialogLifecycleContract(unittest.TestCase):
   pause=self.section('override fun onPause()', 'override fun onStop()')
   stop=self.section('override fun onStop()', 'override fun onDestroy()')
   self.assertIn('suspendOrdinaryDialogActions()',pause)
-  for source in (pause,stop):
+  self.assertEqual(1, pause.count('if (voiceCallModelPicker) dismissChatModels()'))
+  for source in (pause.replace('if (voiceCallModelPicker) dismissChatModels()', ''),stop):
    for forbidden in ('revokeWorkspaceVisit()', 'dismissChatModels()', 'revokeTerminalJobsVisit()', 'composerShortcutPick = null'):
     self.assertNotIn(forbidden,source)
   self.assertIn('preserveShortcut = true',pause)
@@ -81,7 +82,10 @@ class OrdinaryDialogLifecycleContract(unittest.TestCase):
    self.assertNotIn(key,save)
  def test_shared_exit_animation_is_cancelled_at_pause_not_delivered_to_new_lease(self):
   motion=(APP/'ui/components/DialogMotion.kt').read_text()
-  self.assertIn('if (event == Lifecycle.Event.ON_PAUSE) motion.dismissSource = null',motion)
+  self.assertIn('if (event == Lifecycle.Event.ON_PAUSE) motion.cancelDismiss()',motion)
+  cancel=motion.split('fun cancelDismiss() {',1)[1].split('}',1)[0]
+  self.assertIn('dismissSource = null',cancel)
+  self.assertIn('dismissAction = null',cancel)
   self.assertIn('lifecycle.removeObserver(observer)',motion)
   self.assertIn('rememberUpdatedState(onDismiss)',motion)
   lease=(APP/'ui/components/DialogActionLease.kt').read_text()

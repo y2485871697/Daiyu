@@ -26,7 +26,7 @@ class StreamRefreshCostContract(unittest.TestCase):
     def test_read_failure_and_stale_result_guards_remain(self):
         body = (SOURCE / "MainActivity.kt").read_text().split("private fun loadRefreshedHistory", 1)[1].split("private fun loadAcceptedHistory", 1)[0]
         self.assertIn("streamingHistoryRefresh.invalidate()", body)
-        self.assertIn("if (refreshed != shown)", body)
+        self.assertIn("if (!historyWindowReady || capturedDisplay != null || refreshed != shown)", body)
         for guard in ("editorGeneration != generation", "acceptedRequest != historyRequestSerial", "content != chatState.contentRevision", "owner != loadedHistoryOwner(id)", "refreshHistoryPending", "Dispatchers.IO"):
             self.assertIn(guard, body)
 

@@ -8,7 +8,7 @@ NAV = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/navigation/PageBackGestur
 class R62BatchContract(unittest.TestCase):
     def test_commit_lock_uses_surviving_host_scope_and_keeps_one_frame_guard(self):
         source = NAV.read_text()
-        state = source.split('private class PageBackGestureState(', 1)[1].split('private class PageBackCallbackSession', 1)[0]
+        state = source.split('internal class PageBackGestureState(', 1)[1].split('private class PageBackCallbackSession', 1)[0]
         for token in ('private val scope: kotlinx.coroutines.CoroutineScope', 'fun commitBack(back: () -> Unit)',
                       'committing = true', 'scope.launch { try { withFrameNanos { } } finally { committing = false } }'):
             self.assertIn(token, state)
@@ -16,7 +16,7 @@ class R62BatchContract(unittest.TestCase):
         self.assertNotIn('rememberCoroutineScope()', handler)
         self.assertIn('activeState.commitBack { currentBack() }', handler)
         self.assertIn('val scope = rememberCoroutineScope()', host)
-        self.assertIn('PageBackGestureState(predictiveBackEnabled && Build.VERSION.SDK_INT >= 34, resumed, if (layoutDirection == LayoutDirection.Ltr) 1f else -1f, scope)', host)
+        self.assertIn('PageBackGestureState(predictiveBackEnabled && Build.VERSION.SDK_INT >= 34, resumed, if (layoutDirection == LayoutDirection.Ltr) 1f else -1f, scope, diagnosticOwner,', host)
         method = (TEST / 'ui/navigation/PageBackGesturesActivityTest.kt').read_text().split('fun testSwipeCommitsOnceThroughTheInnermostHandlerAndTheSwitchAppliesImmediately()', 1)[1].split('fun testShort', 1)[0]
         self.assertIn('assertEquals(1, nestedCount)', method)
         self.assertEqual(3, method.count('assertEquals(1, backCount)'))

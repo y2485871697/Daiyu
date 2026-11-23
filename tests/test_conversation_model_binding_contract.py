@@ -56,7 +56,9 @@ class ConversationModelBindingContractTest(unittest.TestCase):
         picker = host.split("private fun reloadChatModels",1)[1].split("private fun gatewayCurrent",1)[0]
         self.assertIn("controller.database.modelBinding(conversation)", picker)
         self.assertIn("it.settings.localIdentity == binding?.localModelIdentity", picker)
-        self.assertIn("conversation = selected?.id", picker)
+        self.assertIn("chatModelConversation = if (forVoiceCall) voiceCallConversation?.id else selected?.id", host)
+        self.assertIn("(if (voiceCallModelPicker) voiceCallConversation?.id else selected?.id) == conversation", host)
+        self.assertIn("!chatModelVisitCurrent(conversation) || editorGeneration != generation", picker)
     def test_assistant_selection_and_new_creation_follow_the_current_conversation(self):
         host = text("MainActivity.kt")
         helper = host.split("private fun selectCurrentConversationAssistant",1)[1].split("private fun assistantOwnerMatches",1)[0]

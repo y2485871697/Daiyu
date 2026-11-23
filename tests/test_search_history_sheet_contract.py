@@ -13,9 +13,11 @@ class SearchHistorySheetContract(unittest.TestCase):
         keys, body = page.split('content = remember(', 1)[1].split(') {', 1)
         self.assertEqual({key.strip() for key in keys.split(',') if key.strip()}, {
             'chatPageState', 'pageState', 'pageCompression', 'pageActions', 'pageGeneration',
-            'pageImageLoader', 'pageAssistant', 'pageCallUi', 'pageCallActions',
+            'pageImageLoader', 'pageAssistant', 'pageUserMessageEntrance',
             'mediaGallery', 'speechMessageId', 'speechPreparingMessageId', 'routeActive',
         })
+        self.assertIn('suppliedUserMessageEntrance = pageUserMessageEntrance', body)
+        self.assertIn('call.sessionKey == floatingCallMotionKey', body)
         self.assertIn('@Composable { presented, onReady ->', body)
         self.assertIn('chatPageState.SaveableStateProvider(pageState.conversationKey ?: "new-chat")', body)
         self.assertIn('pageState.conversationKey == chatState.conversationKey && pageGeneration == editorGeneration', body)

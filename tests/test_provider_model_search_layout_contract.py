@@ -11,11 +11,11 @@ class ProviderModelSearchLayoutContractTest(unittest.TestCase):
     def test_catalog_search_heads_the_model_list_after_its_title(self):
         source = (UI / 'LocalCatalogModelsScreen.kt').read_text()
         layout = source.split('        headerContent()', 1)[1]
-        title = 'SettingsSectionTitle("模型列表（共 ${snapshot?.models?.size ?: 0} 个）")'
+        title = 'SettingsSectionTitle(if (loaded && !catalog.failed) "模型列表（共 ${snapshot?.models?.size ?: 0} 个）" else "模型列表")'
         self.assertEqual(1, layout.count(SEARCH))
         self.assertLess(layout.index('ProviderModelManagementCard('), layout.index(title))
         self.assertLess(layout.index(title), layout.index(SEARCH))
-        self.assertLess(layout.index(SEARCH), layout.index('if (loaded && snapshot?.models.isNullOrEmpty())'))
+        self.assertLess(layout.index(SEARCH), layout.index('if (loaded && !catalog.failed && snapshot?.models.isNullOrEmpty())'))
         self.assertLess(layout.index(SEARCH), layout.index('item("local-model:${model.id}")'))
         self.assertIn('query.isBlank() || it.id.contains(query.trim(), true) || it.displayName.contains(query.trim(), true)', layout)
 

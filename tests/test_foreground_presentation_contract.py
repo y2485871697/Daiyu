@@ -9,17 +9,20 @@ class ForegroundPresentationContract(unittest.TestCase):
         host = (SRC / 'ui/navigation/PageBackGestures.kt').read_text()
         keys = host.split('val layers = remember(', 1)[1].split(') {', 1)[0]
         self.assertNotIn('resumed', keys)
-        for actual_change in ('graphics', 'themeKey', 'configuration', 'insetsKey', 'density', 'layoutDirection', 'previewScopeKey'):
+        for actual_change in ('graphics', 'themeKey', 'configuration', 'density', 'layoutDirection', 'previewScopeKey'):
             self.assertIn(actual_change, keys)
         self.assertIn('predictiveBackEnabled, resumed, layers', host)
-        self.assertIn('Lifecycle.Event.ON_PAUSE) layers.clearPreviews()', host)
+        self.assertNotIn('insetsKey', keys)
+        self.assertIn('layers.setActive(false)', host.split('if (event == Lifecycle.Event.ON_PAUSE) {', 1)[1].split('}', 1)[0])
         self.assertIn('onDispose { layers.close() }', host)
         self.assertIn('key(contentKey)', host)
 
     def test_suspension_clears_previews_not_the_live_graphics_layer(self):
         source = (SRC / 'ui/navigation/PageBackPreviewLayers.kt').read_text()
-        body = source.split('fun clearPreviews()', 1)[1].split('fun close()', 1)[0]
-        for kept in ('previewEpoch++', 'pending = null', 'it.capture?.cancel()', 'it.image = null', 'it.holdingForChild = false'):
+        body = source.split('fun setActive(value: Boolean)', 1)[1].split('\n    }', 1)[0]
+        self.assertIn('frames[currentKey]?.let { frame ->', body)
+        self.assertIn('if (frame.key == currentKey || !frame.navigationFrozen)', body)
+        for kept in ('frame.captureEpoch++', 'pending = null', 'frame.captures.toList().forEach { it.cancel() }', 'frame.image = null', 'frame.holdingForChild = false'):
             self.assertIn(kept, body)
         for destroyed in ('release(', 'releaseGraphicsLayer', 'frames.clear()', 'closed = true'):
             self.assertNotIn(destroyed, body)

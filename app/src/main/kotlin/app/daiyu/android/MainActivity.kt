@@ -271,7 +271,9 @@ class MainActivity : ComponentActivity() {
         }
     }
     private var chatModelConversation: ConversationId? = null
-    private fun voiceCallModelOwner(): ConversationId? = chatModelConversation
+    private fun chatModelVisitCurrent(conversation: ConversationId?): Boolean =
+        chatModelConversation == conversation &&
+            (if (voiceCallModelPicker) voiceCallConversation?.id else selected?.id) == conversation
     private fun clearVoiceCallConversation() {
         voiceCallModelResume = null
         voiceCallModelSelectionReady = false
@@ -8155,7 +8157,8 @@ class MainActivity : ComponentActivity() {
     private fun reloadChatModels(owner: Any, retainPresentation: Boolean = false) {
         if (!activityUsable() || retainedPage != "chat" || chatModelOwner !== owner) return
         chatModelCancelled.set(true)
-        val conversation = voiceCallModelOwner()
+        val conversation = chatModelConversation
+        if (!chatModelVisitCurrent(conversation)) return
         val generation = editorGeneration
         val cancelled = AtomicBoolean(false); chatModelCancelled = cancelled
         if (!retainPresentation) {
@@ -8189,7 +8192,7 @@ class MainActivity : ComponentActivity() {
                 ChatModelCatalogLoad(binding?.providerSlotId?.let { id -> choices[id]?.editor }, choices, groups)
             } }
             if (!activityUsable() || retainedPage != "chat" || chatModelOwner !== owner ||
-                cancelled.get() || chatModelCancelled !== cancelled || voiceCallModelOwner() != conversation || editorGeneration != generation) return@launch
+                cancelled.get() || chatModelCancelled !== cancelled || !chatModelVisitCurrent(conversation) || editorGeneration != generation) return@launch
             val result = loaded.getOrNull()
             chatModelProviderChoices = result?.choices.orEmpty()
             chatModelProviderEditor = result?.activeEditor
@@ -8224,8 +8227,8 @@ class MainActivity : ComponentActivity() {
         if (owner == null || chatModelOwner !== owner || chatModelSession !== session) return
         val picker = chatModelPicker ?: return
         if (picker.switching) return
-        val conversation = voiceCallModelOwner()
-        if (voiceCallModelPicker && (voiceCallConversation?.id != conversation ||
+        val conversation = chatModelConversation
+        if (!chatModelVisitCurrent(conversation) || (voiceCallModelPicker &&
                 voiceCallPresentation.state?.presentation == DoubaoCallPresentation.CLOSING)) { dismissChatModels(); return }
         if (voiceCallModelPicker && voiceCallHasDialogue) { voiceConfigurationToast("仅对话前可更改"); return }
         if (voiceCallModelPicker && controller.taskConfigurationBusy(conversation)) {

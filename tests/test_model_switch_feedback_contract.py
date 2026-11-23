@@ -45,8 +45,11 @@ class ModelSwitchFeedbackContractTest(unittest.TestCase):
         self.assertLess(pending, method.index("controller.selectActiveProviderCatalogModel("))
         self.assertIn("!controller.taskConfigurationBusy(conversation) && !controller.dataBusy", method)
         self.assertIn("chatModelOwner === owner && chatModelSession === session", method)
-        self.assertIn("if (success) { reloadChatModels(owner, retainPresentation = true); refresh() }", method)
-        self.assertNotIn("dismissChatModels()", method)
+        completion = method.split("completed = { success ->", 1)[1]
+        current = completion.split("chatModelSession === session && retainedPage == \"chat\") {", 1)[1]
+        success = current.split("if (success) {", 1)[1].split("else {", 1)[0]
+        self.assertIn("reloadChatModels(owner, retainPresentation = true); refresh()", success)
+        self.assertNotIn("dismissChatModels()", completion)
 
     def test_success_reload_retains_switching_without_loading_or_reenabling_old_tickets(self):
         text = (SRC / "MainActivity.kt").read_text()
@@ -55,7 +58,7 @@ class ModelSwitchFeedbackContractTest(unittest.TestCase):
         self.assertIn("loading = !selectionPending, enabled = false, switching = selectionPending", reload)
         self.assertIn('?: ChatModelPickerState("", emptyList(), loading = true, enabled = false)', reload)
         for guard in ("chatModelOwner !== owner", "cancelled.get()", "chatModelCancelled !== cancelled",
-                      "selected?.id != conversation", "editorGeneration != generation"):
+                      "!chatModelVisitCurrent(conversation)", "editorGeneration != generation"):
             self.assertIn(guard, reload)
         self.assertIn("chatModelSession = session", reload)
         self.assertIn(".copy(loading = false, enabled = result != null", reload)

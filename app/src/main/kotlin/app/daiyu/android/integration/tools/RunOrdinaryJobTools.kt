@@ -14,7 +14,7 @@ internal class RunOrdinaryJobTools(private val context: Context, owner: RunExecu
     private val jobs = linkedMapOf<String, TerminalJobSession>()
     override val tools = listOf(object : RegisteredTool {
         override val definition = ToolDefinition(TerminalJobSession.START, 1,
-            "启动当前工作区的一条async/daemon命令。job派发不等于完成，UNKNOWN不重发，使用原job_id诊断。daemon保留于原会话。Android Shizuku不支持async/daemon，明确拒绝且不降级；显式Linux保持绑定后端。",
+            "启动当前工作区的一条async/daemon命令。job派发不等于完成，UNKNOWN不重发，使用原job_id诊断。daemon保留于原会话。Android Shizuku不支持async/daemon，明确拒绝且不降级；Android root 和不支持 daemon 的 Linux 后端请对有限时长命令使用 async；不会自动切换模式。显式Linux保持绑定后端。",
             TerminalJobSession.CAPABILITY, ToolEffect.WRITE, ToolSchema(listOf(
                 ArgumentField("command", ArgumentType.Text(32768, minimumLength = 1)),
                 ArgumentField("environment", ArgumentType.Text(choices = configurations.keys)),
@@ -26,14 +26,18 @@ internal class RunOrdinaryJobTools(private val context: Context, owner: RunExecu
             require(command.isNotBlank() && '\u0000' !in command)
             // A launch is captured by the trusted host before advertisement, never by model paths.
             val frozen = configurations.getValue(environment)
-            if (frozen.backend == "shizuku") {
-                val refused = ExecutionReceipt.NotExecuted("android_shizuku_jobs_not_supported")
+            val unsupported = when {
+                frozen.backend == "shizuku" -> "android_shizuku_jobs_not_supported"
+                mode == "daemon" && frozen.root -> "android_root_daemon_not_supported"
+                mode == "daemon" && environment != "android" && frozen.linux?.rootScope == null -> "linux_daemon_not_supported"
+                else -> null
+            }
+            if (unsupported != null) {
+                val refused = ExecutionReceipt.NotExecuted(unsupported)
                 return PreparedTool.approvedWrite(
                     TerminalJobPlan.effectFor(owner.conversationId, owner.runId, frozen, command, mode),
                     approve = { null }, admit = { denial(it) ?: refused }, execute = { refused })
             }
-            require(mode != "daemon" || !frozen.root) { "android_root_daemon_not_supported" }
-            require(mode != "daemon" || environment == "android" || frozen.linux?.rootScope != null) { "linux_daemon_not_supported" }
             val effect = TerminalJobPlan.effectFor(owner.conversationId, owner.runId, frozen, command, mode)
             return write(effect) { context ->
                 val real = launch(environment) ?: return@write ExecutionReceipt.NotExecuted("terminal_environment_unavailable")

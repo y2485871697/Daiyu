@@ -178,7 +178,7 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
     private val observers = mutableListOf<() -> Unit>()
 
     init {
-        require(timeoutMillis in 1..120_000); require(this.models.keys.all { it.isNotBlank() && it.length <= 200 })
+        require(timeoutMillis in 1..RETAINED_CHILD_BUDGET_MS); require(this.models.keys.all { it.isNotBlank() && it.length <= 200 })
         require(this.models.values.groupBy { it.poolKey }.values.all { entries ->
             entries.map { it.parallelLimit }.distinct().size == 1
         }) { "child_pool_limit_conflict" }
@@ -254,12 +254,14 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
         val started = AtomicBoolean(false)
         val completions = LinkedBlockingQueue<Pair<Int, Completion?>>()
         val failures = AtomicBoolean(false)
+        val deadlineCancelled = AtomicBoolean(false)
         val childPauses = snapshot.map { pause ?: ChildTaskPauseControl(onProfilesChanged) }
         val pausedAtStart = childPauses.maxOf { it.excludedNanos() }
         val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis)
         fun beforeDeadline(): Boolean = System.nanoTime() - (childPauses.maxOf { it.excludedNanos() } - pausedAtStart) < deadline
         fun cancelled() = synchronized(gate) { closed || generation != current } || context.cancelled()
         fun uncertain(code: String): ExecutionReceipt {
+            if (code == "child_batch_timeout") deadlineCancelled.set(true)
             close()
             return if (started.get()) ExecutionReceipt.Unknown(code) else ExecutionReceipt.NotExecuted(code)
         }
@@ -744,7 +746,8 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val tim
                                 if (result != null) store?.finished(record, result.status, result.text, result.detail)
                                 else store?.finished(record,
                                     if (requestStarted) ChildTaskStatus.UNKNOWN else ChildTaskStatus.NOT_EXECUTED,
-                                    detail = diagnostics.detail(if (requestStarted) requestFailure?.userMessage ?: "child_result_unconfirmed" else "child_not_sent",
+                                    detail = diagnostics.detail(if (!requestStarted) "child_not_sent" else if (deadlineCancelled.get()) "child_batch_timeout"
+                                        else requestFailure?.userMessage ?: "child_result_unconfirmed",
                                         failureStage, executionFailure))
                             } catch (_: Exception) {
                                 completion = null

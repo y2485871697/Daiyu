@@ -362,7 +362,9 @@ class RetainedChildTasksTest {
             assertFalse(supervisor.snapshots(binding).single().settled)
             val idle = CountDownLatch(1); supervisor.closeWhenIdle { idle.countDown() }; assertEquals(1L, idle.count)
             model.release.countDown(); assertTrue(idle.await(3, TimeUnit.SECONDS))
-            assertEquals(ChildTaskStatus.UNKNOWN, supervisor.snapshots(binding).single().record.status)
+            val record = supervisor.snapshots(binding).single().record
+            assertEquals(ChildTaskStatus.UNKNOWN, record.status)
+            assertTrue(record.detail.orEmpty().startsWith("child_batch_timeout;"))
             assertEquals(1, model.opens.get())
         } finally { model.release.countDown(); drained(supervisor) }
     }

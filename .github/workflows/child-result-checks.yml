@@ -110,6 +110,7 @@ jobs:
             --tests 'app.daiyu.android.diagnostics.DiagnosticLogStoreTest' \
             --tests 'app.daiyu.android.integration.tools.RunChildModelsTest' \
             --tests 'app.daiyu.android.integration.tools.RunChildTasksTest' \
+            --tests 'app.daiyu.android.integration.tools.RunOrdinaryJobToolsTest' \
             --tests 'app.daiyu.android.integration.tools.RunChildTaskAccessTest' \
             --tests 'app.daiyu.android.integration.tools.RunOrdinaryGenerationToolsTest' \
             --tests 'app.daiyu.android.ui.screens.chat.conversation.ChildTaskCardPresentationTest' \
@@ -133,7 +134,7 @@ jobs:
                   'RunnerReceiptBatchTest', 'RunnerToolBoundaryTest', 'ChildUsagePipelineTest'} <= names, names
           assert {s.attrib['name'].rsplit('.', 1)[-1] for s in app} == {'SubAgentStatusRowsTest', 'LargeChildTaskBackupTest', 'RecordedUsageProjectionTest', 'SubAgentDescriptorTest',
               'SavedSubAgentRuntimeBindingsTest', 'ConversationSubAgentPreferencesTest', 'ConversationSubAgentHotConfigurationTest', 'ChildTaskRuntimeDiagnosticsTest', 'DiagnosticLogStoreTest', 'RunChildModelsTest', 'RunChildTasksTest',
-              'RunChildTaskAccessTest', 'RunOrdinaryGenerationToolsTest',
+              'RunChildTaskAccessTest', 'RunOrdinaryJobToolsTest', 'RunOrdinaryGenerationToolsTest',
               'ChildTaskCardPresentationTest', 'ToolBodyLayoutTest', 'ToolRichDetailsTest', 'ToolCardPresentationTest', 'ChildTaskPresentationTest', 'BatchDelegationPresentationTest', 'ToolCardChildControlTest'}
           suites = domain + app
           required_methods = {'configurationQueryNeverReadsTasksOrRunsThem',

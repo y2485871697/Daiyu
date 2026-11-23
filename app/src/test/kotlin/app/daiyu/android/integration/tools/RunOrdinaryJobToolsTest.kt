@@ -33,6 +33,18 @@ class RunOrdinaryJobToolsTest {
             assertEquals(0, launches); assertEquals(0, pins); assertEquals(0, retained)
         }
     }
+    @Test fun unsupportedDaemonReturnsBackendReasonWithoutStartingOrSwitchingModes() {
+        for ((environment, configuration, expected) in listOf(
+            Triple("android", TerminalConfiguration(root = true, workingDirectory = File("/fixed")), "android_root_daemon_not_supported"),
+            Triple("linux", TerminalConfiguration(backend = "linux", workingDirectory = File("/fixed")), "linux_daemon_not_supported"))) {
+            val registry = ToolRegistry().also { r -> scope(mapOf(environment to configuration)).tools.forEach { r.register(it) } }
+            val dispatcher = ToolDispatcher(registry.snapshot(), capabilities, ToolLedger(InMemoryToolLedgerStore()))
+            val result = dispatcher.dispatchOwned(auth, listOf(ToolInvocation(ToolCallId(environment), TerminalJobSession.START,
+                arguments(environment, "daemon"))), owner).single().outcome as DispatchOutcome.NotExecuted
+            assertEquals(expected, result.code)
+            assertEquals(0, launches); assertEquals(0, pins); assertEquals(0, retained)
+        }
+    }
     @Test fun explicitLinuxAndNormalRootAndroidAsyncStillPrepareWithoutOpeningBackends() {
         for (configuration in listOf(TerminalConfiguration(workingDirectory = File("/fixed")),
             TerminalConfiguration(root = true, workingDirectory = File("/fixed")),

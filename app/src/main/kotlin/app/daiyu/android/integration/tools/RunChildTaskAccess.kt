@@ -42,7 +42,7 @@ internal class RunChildTaskAccess(
         }
     }, object : RegisteredTool {
         override val definition = ToolDefinition("inspect_child_tasks", 1,
-            "查询本会话已有子任务的总数和状态汇总，附近期任务的完整身份供定向读取或控制。总数与状态覆盖完整会话，不限身份列表的近期窗口。snapshot_available=false表示没有可用运行快照，available_actions为空时仅可读取历史，不要反复停止或自动重派。不能据此确认远端请求已停止。不返回子代理配置，配置使用list_subagents；不读取单任务进度、结果正文或诊断详情，这些内容使用get_child_task。无参数，只读，不自动继续或重派。",
+            "查询本会话已有子任务的总数和状态汇总，附近期任务的完整身份供定向读取或控制。总数与状态覆盖完整会话，不限身份列表的近期窗口。snapshot_available=false表示没有可用运行快照，available_actions为空时仅可读取历史，不要反复停止或自动重派。不能据此确认远端请求已停止。parent_next_step=continue_independent_work_no_replay 时不等待此记录，不要求用户重跑；主代理继续无重叠的工作，只对依赖旧任务副作用的步骤核对回执。不返回子代理配置，配置使用list_subagents；不读取单任务进度、结果正文或诊断详情，这些内容使用get_child_task。无参数，只读，不自动继续或重派。",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(emptyList()))
         override fun prepare(arguments: ToolArguments) = PreparedTool.contextual { context ->
             if (context.owner.conversationId.value != conversationId || context.cancelled())
@@ -62,6 +62,10 @@ internal class RunChildTaskAccess(
                     state.queueState == ChildTaskQueueState.PENDING || state.record.status == ChildTaskStatus.QUEUED -> "QUEUED"
                     else -> "RUNNING"
                 }
+            }
+            // An old running/queued row without a live owner is not evidence of current activity.
+            statuses.entries.forEach { entry ->
+                if (entry.key !in active && entry.value in setOf("QUEUED", "RUNNING")) entry.setValue("UNKNOWN")
             }
             val rows = (active.values.map { it.record } + records()).filter { it.owner.conversationId == conversationId }
                 .distinctBy { it.owner }.take(20)
@@ -141,7 +145,7 @@ internal class RunChildTaskAccess(
         }
     }, object : RegisteredTool {
         override val definition = ToolDefinition("get_child_task", 1,
-            "按完整身份精确读取本会话任意已有子任务的具体进度、结果正文和诊断详情（不限总览20条）。当前可用子代理配置使用list_subagents，任务总数和状态汇总使用inspect_child_tasks。配置变更、暂停或停止不影响读取；offset为字符偏移，可分页读取结果和当前进程保留的进度。max_chars为可选正整数，默认结果、进度和诊断详情各4096字符；超过4096时按4096读取，使用返回的next偏移继续分页。",
+            "按完整身份精确读取本会话任意已有子任务的具体进度、结果正文和诊断详情（不限总览20条）。当前可用子代理配置使用list_subagents，任务总数和状态汇总使用inspect_child_tasks。配置变更、暂停或停止不影响读取；offset为字符偏移，可分页读取结果和当前进程保留的进度。max_chars为可选正整数，默认结果、进度和诊断详情各4096字符；超过4096时按4096读取，使用返回的next偏移继续分页。若 parent_next_step=continue_independent_work_no_replay，读取已有结果后继续无重叠的主任务，不等待、不重派、不重放副作用。",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("parent_run_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("task_group_id", ArgumentType.Text(200, minimumLength = 1)),
@@ -190,8 +194,11 @@ internal class RunChildTaskAccess(
         }
         put("control_unavailable_reason", reason ?: JSONObject.NULL)
         if (reason != null) put("available_actions", JSONArray())
-        put("execution_unconfirmed", row.status == ChildTaskStatus.UNKNOWN || state?.journalUnconfirmed == true ||
-            (state == null && row.status in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING)))
+        val unconfirmed = row.status == ChildTaskStatus.UNKNOWN || state?.journalUnconfirmed == true ||
+            (state == null && row.status in setOf(ChildTaskStatus.QUEUED, ChildTaskStatus.RUNNING))
+        put("execution_unconfirmed", unconfirmed)
+        if (unconfirmed && (state == null || state.settled))
+            put("parent_next_step", "continue_independent_work_no_replay")
         return this
     }
     companion object { const val CAPABILITY = "delegation.text.retained_control" }

@@ -80,13 +80,15 @@ class ChildTaskBinding internal constructor(
     internal val recent = linkedMapOf<String, RetainedChildTask>()
 }
 
+internal const val RETAINED_CHILD_BUDGET_MS = 15 * 60_000L
+
 /** Controller-lifetime execution; durable records remain owned by the existing runtime store.
  * maxRetainedTasks bounds live reservations (including draining transports), not lifetime admissions.
  * Terminal snapshots are a bounded UI cache per handle; complete history belongs to ChildTaskStore.
  * maxRequestsPerBinding (1..4096, default 1024) independently bounds replay tombstones.
  * They are never evicted to admit work: new calls fail with child_request_budget_exhausted at the limit.
  */
-class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutMillis: Long = 120_000,
+class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutMillis: Long = RETAINED_CHILD_BUDGET_MS,
     private val maxRetainedTasks: Int = 64, private val usageRecorder: ChildUsageRecorder? = null,
     private val diagnostics: ChildTaskDiagnostics? = null,
     private val maxRequestsPerBinding: Int = 1024) : AutoCloseable {
@@ -128,7 +130,7 @@ class RetainedChildTasks(private val store: ChildTaskStore, private val timeoutM
     private var closed = false
 
     init {
-        require(timeoutMillis in 1..120_000); require(maxRetainedTasks in 1..256)
+        require(timeoutMillis in 1..RETAINED_CHILD_BUDGET_MS); require(maxRetainedTasks in 1..256)
         require(maxRequestsPerBinding in 1..4096) { "invalid_child_request_budget" }
     }
 

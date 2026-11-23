@@ -176,7 +176,8 @@ class RunChildTaskAccessTest {
         val args = arguments().apply { remove("parent_message_id"); remove("parent_owner_id"); remove("expected_revision"); remove("action") }
         val result = invoke(access, owner, "get_child_task", args.toString()) as DispatchOutcome.Confirmed
         val body = JSONObject(result.payload)
-        assertFalse(body.getBoolean("live_state_available")); assertTrue(body.isNull("settled")); assertTrue(body.isNull("journal_unconfirmed"))
+        assertFalse(body.getBoolean("live_state_available")); assertEquals("continue_independent_work_no_replay", body.getString("parent_next_step"))
+            assertTrue(body.isNull("settled")); assertTrue(body.isNull("journal_unconfirmed"))
         assertEquals("RUNNING", body.getString("status")); assertEquals("partial", body.getString("progress"))
     }
 
@@ -375,6 +376,7 @@ class RunChildTaskAccessTest {
             assertEquals(0, body.getJSONArray("available_actions").length())
             assertTrue(body.getBoolean("execution_unconfirmed"))
             assertFalse(body.getBoolean("live_state_available"))
+            assertEquals("continue_independent_work_no_replay", body.getString("parent_next_step"))
             assertTrue(body.isNull("settled")); assertTrue(body.isNull("journal_unconfirmed"))
             assertEquals("UNKNOWN", body.getString("status"))
         }
@@ -385,6 +387,17 @@ class RunChildTaskAccessTest {
         val detailed = JSONObject((invoke(access, owner, "get_child_task", queryArguments().toString()) as DispatchOutcome.Confirmed).payload)
         assertEquals("", detailed.getString("text"))
         assertEquals("saved partial", detailed.getString("progress"))
+    }
+
+    @Test fun staleRunningJournalDoesNotAdvertiseRunnableWork() {
+        val stale = old.copy(status = ChildTaskStatus.RUNNING)
+        val access = RunChildTaskAccess("conversation", { listOf(stale) }, { stale }, { emptyList() }, { "" },
+            { error("no resume") }, { error("no pause") }, { error("no stop") }, { emptySet() })
+        val summary = JSONObject((invoke(access, caller("conversation"), "inspect_child_tasks", "{}") as DispatchOutcome.Confirmed).payload)
+        assertEquals(1, summary.getJSONObject("status_counts").getInt("UNKNOWN"))
+        val row = summary.getJSONArray("tasks").getJSONObject(0)
+        assertEquals("RUNNING", row.getString("status")) // Preserve journal evidence.
+        assertEquals("continue_independent_work_no_replay", row.getString("parent_next_step"))
     }
 
     @Test fun missingHandleDoesNotEraseAConfirmedHistoricalResult() {

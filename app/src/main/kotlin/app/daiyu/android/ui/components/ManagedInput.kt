@@ -483,7 +483,8 @@ private class InputWindow(private val window: Window) {
             legacyImeTree?.takeIf { it.isAlive }?.removeOnGlobalLayoutListener(legacyImeLayout)
             if (ownsImeState && originalImeState != managedImeState &&
                 (mode and LayoutParams.SOFT_INPUT_MASK_STATE) == managedImeState) {
-                val restored = (mode and LayoutParams.SOFT_INPUT_MASK_STATE.inv()) or originalImeState
+                // Only the state bits we still own may change; keep all caller adjustment flags.
+                val restored = (mode - managedImeState) or originalImeState
                 window.setSoftInputMode(restored)
                 // setSoftInputMode(0) restores defaults but leaves the previous attributes value.
                 if (restored == 0) window.attributes = window.attributes.apply { softInputMode = restored }

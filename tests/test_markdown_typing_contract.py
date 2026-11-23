@@ -365,7 +365,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn("staticCompositionLocalOf<() -> Long> { System::nanoTime }", self.typing)
         self.assertIn("val receiptClock = LocalMarkdownReceiptClock.current", self.typing)
         self.assertIn("motion.receive(sources, receiptClock(), paused = typingPaused)", self.typing)
-        self.assertLess(self.typing.index("motion.receive(sources,"), self.typing.index("motion.update(parts,"))
+        self.assertLess(self.typing.index("motion.receive(sources,"), self.typing.index("receivedMotion.update(parts,"))
         self.assertIn("receiptRate = added / seconds", self.reveal)
         self.assertIn("if (observesReceipts) desiredRate = receiptRate.takeIf { it > 0.0 } ?: rate", self.reveal)
         self.assertIn("desiredRate = arrived / arrivalSeconds", self.reveal)

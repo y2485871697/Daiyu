@@ -3,6 +3,7 @@ package app.daiyu.android
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -50,7 +51,7 @@ class ComposerEditAttachmentsUiTest : WiredActivityTestCase() {
                     }, enabled = true, onRemoveImage = { item ->
                         removals.incrementAndGet(); retained = retained.filterNot { it == item }
                     })
-                    ImageAttachments(holder.state.value, ImageAttachmentsActions({}, {}, {}, {}),
+                    ImageAttachments(holder.state.collectAsState().value, ImageAttachmentsActions({}, {}, {}, {}),
                         { _, _ -> ImageBitmap(8, 8) }, compact = true, numberOffset = retained.size)
                 }
             }

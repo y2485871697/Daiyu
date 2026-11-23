@@ -127,7 +127,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         motion = (BASE / 'MarkdownReveal.kt').read_text()
         self.assertIn('live: Boolean = streaming', typing)
         self.assertIn('val targetTerminal = terminal && exactProjection', typing)
-        self.assertIn('motion.update(parts, baselineLength, streaming, targetTerminal, live, paceTerminal)', typing)
+        self.assertIn('receivedMotion.update(parts, baselineLength, streaming, targetTerminal, live, paceTerminal)', typing)
         self.assertIn('previous == null -> baselineLength.coerceAtMost(total)', motion)
         self.assertNotIn('closed && !paceTerminal', motion)
 

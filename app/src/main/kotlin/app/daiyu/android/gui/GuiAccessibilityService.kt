@@ -1364,6 +1364,7 @@ internal object GuiRuntime {
             validateCallback = ::validateWindow, validateResult = ::validateWindow)
     }
 
+    @androidx.annotation.RequiresApi(30)
     private fun captureScreenshot(lease: GuiLeaseGate.Lease, observationId: String, visualOnly: Boolean,
         validateCallback: () -> GuiResult.Rejected?, validateResult: () -> GuiResult.Rejected?,
         retireObservation: () -> Unit = {}): CompletableFuture<GuiResult<GuiScreenshot>> {

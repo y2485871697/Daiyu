@@ -231,14 +231,15 @@ internal fun rememberMarkdownReveal(
     }
     val motion = remember(identity, resetEpoch, retainedLane) { retainedLane?.motion ?: MarkdownTypingState(baseline) }
     val receiptClock = LocalMarkdownReceiptClock.current
-    remember(motion, sources, typingPaused) {
+    val receivedMotion = remember(motion, sources, typingPaused) {
         motion.receive(sources, receiptClock(), paused = typingPaused)
+        motion
     }
     val exactProjection = projection?.sources == sources.map { it.text } &&
         projection?.windows.orEmpty() == sources.map { it.window }.takeIf { it.any { window -> window != null } }.orEmpty()
     val targetTerminal = terminal && exactProjection
     val target = remember(motion, parts, baselineLength, streaming, targetTerminal, live, paceTerminal) {
-        motion.update(parts, baselineLength, streaming, targetTerminal, live, paceTerminal)
+        receivedMotion.update(parts, baselineLength, streaming, targetTerminal, live, paceTerminal)
     }
     val advanceLimit = remember(target, blockedSources) {
         target?.parts?.takeWhile { it.source.id !in blockedSources }?.sumOf { it.length.toLong() }

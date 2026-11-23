@@ -126,7 +126,7 @@ class ChatResumeScrollContract(unittest.TestCase):
             ' '.join(self.typing.split()),
         )
         self.assertIn('remember(motion, parts, baselineLength, streaming, targetTerminal, live, paceTerminal)', self.typing)
-        self.assertIn('motion.update(parts, baselineLength, streaming, targetTerminal, live, paceTerminal)', self.typing)
+        self.assertIn('receivedMotion.update(parts, baselineLength, streaming, targetTerminal, live, paceTerminal)', self.typing)
         self.assertNotIn('key(revealResetEpoch)', self.chat)
         resume_prefix = (
             'resumeFollowPending && tail != null && !tail.isStreaming && '

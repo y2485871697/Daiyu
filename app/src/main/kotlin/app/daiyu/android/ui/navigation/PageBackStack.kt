@@ -51,10 +51,9 @@ internal fun PageBackStack(routeKey: Any?, backTargetKey: Any? = null, content: 
     val path = if (routeKey == null) parentPath else parentPath + routeKey
     val target = if (backTargetKey == null) parentPath else parentPath + backTargetKey
     val entry = remember(parent?.registry, parent?.entry) { PageBackStackRegistry.Entry(parent?.entry) }
-    val child = remember(parent?.registry, entry, path) { parent?.let { PageBackStackPath(it.registry, path, entry) } }
-    remember(active, entry, path) {
+    val child = remember(active, parent?.registry, entry, path) {
         if (active && (routeKey != null || entry.child)) checkNotNull(parent).registry.freezeCurrent(path)
-        Unit
+        parent?.let { PageBackStackPath(it.registry, path, entry) }
     }
     DisposableEffect(parent?.registry, entry, active) {
         val registry = parent?.registry

@@ -204,20 +204,24 @@ class HttpVoiceNetworkTest {
     }
 
     @Test fun streamingBackpressureCancellationUnblocksCallbackAndClosesBody() = runBlocking {
-        val factory = CapturingCalls(); val received = CompletableDeferred<Unit>()
-        val task = launch {
-            OkHttpVoiceTransport(factory).stream(request, 100_000).collect {
-                if (it is app.daiyu.android.voice.providers.VoiceHttpChunk.Bytes) {
-                    received.complete(Unit); kotlinx.coroutines.awaitCancellation()
+        kotlinx.coroutines.withTimeout(10_000) {
+            val factory = CapturingCalls()
+            val received = CompletableDeferred<Unit>()
+            val task = launch {
+                OkHttpVoiceTransport(factory).stream(request, 100_000).collect {
+                    if (it is app.daiyu.android.voice.providers.VoiceHttpChunk.Bytes) {
+                        received.complete(Unit); kotlinx.coroutines.awaitCancellation()
+                    }
                 }
             }
+            val call = factory.enqueuedCall.await()
+            val body = TrackedBody(ByteArray(100_000), -1)
+            val response = async(Dispatchers.IO) { call.respond(body) }
+            try { received.await() } finally { task.cancelAndJoin() }
+            response.await()
+            assertTrue(call.cancelled); assertTrue(body.closed)
+            assertTrue(body.readBytes < 100_000); assertEquals(1, factory.count)
         }
-        while (factory.count == 0) yield()
-        val body = TrackedBody(ByteArray(100_000), -1)
-        val response = async(Dispatchers.IO) { factory.last.respond(body) }
-        received.await(); task.cancelAndJoin(); response.await()
-        assertTrue(factory.last.cancelled); assertTrue(body.closed)
-        assertTrue(body.readBytes < 100_000); assertEquals(1, factory.count)
     }
 
     @Test fun streamingCumulativeLimitFailureIsRedactedAndDoesNotRetry() = runBlocking {
@@ -238,17 +242,18 @@ class HttpVoiceNetworkTest {
     }
 
     private class CapturingCalls : Call.Factory {
+        val enqueuedCall = CompletableDeferred<FakeCall>()
         lateinit var last: FakeCall
         var count = 0
-        override fun newCall(request: Request): Call = FakeCall(request).also { last = it; count++ }
+        override fun newCall(request: Request): Call = FakeCall(request) { enqueuedCall.complete(it) }.also { last = it; count++ }
     }
-    private class FakeCall(private val request: Request) : Call {
+    private class FakeCall(private val request: Request, private val onEnqueue: (FakeCall) -> Unit = {}) : Call {
         lateinit var callback: Callback
         var cancelled = false
         var enqueued = false
         override fun request() = request
         override fun execute(): Response = throw AssertionError("must enqueue")
-        override fun enqueue(responseCallback: Callback) { callback = responseCallback; enqueued = true }
+        override fun enqueue(responseCallback: Callback) { callback = responseCallback; enqueued = true; onEnqueue(this) }
         override fun cancel() { cancelled = true }
         override fun isExecuted() = enqueued
         override fun isCanceled() = cancelled

@@ -234,6 +234,8 @@ val hostTestJavaLauncher = extensions.getByType<org.gradle.jvm.toolchain.JavaToo
     .launcherFor { languageVersion.set(org.gradle.jvm.toolchain.JavaLanguageVersion.of(21)) }
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     javaLauncher.set(hostTestJavaLauncher)
+    // Robolectric and full-size media fixtures share this worker, not the Gradle daemon heap.
+    maxHeapSize = "2g"
     systemProperty("robolectric.dependency.repo.url", "https://maven-central.storage-download.googleapis.com/maven2")
     doFirst {
         val launcher = javaLauncher.get()

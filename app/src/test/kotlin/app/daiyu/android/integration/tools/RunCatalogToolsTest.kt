@@ -301,7 +301,7 @@ class RunCatalogToolsTest {
                                 if (name == "terminal_open") JSONObject().put("ok", true).put("session_id", "fixed")
                                 else {
                                     assertEquals("echo exact", arguments.getString("command")); commands++
-                                    JSONObject().put("ok", true).put("execution", "executed").put("stdout", "exact\n")
+                                    JSONObject().put("ok", true).put("execution", "executed").put("exit_code", 0).put("stdout", "exact\n")
                                 }
                             override fun read(id: String, offset: Long, limit: Int) = error("read not requested")
                             override fun close() {}
@@ -364,7 +364,7 @@ class RunCatalogToolsTest {
                         object : CommandTransport {
                             override fun execute(name: String, arguments: JSONObject): JSONObject =
                                 if (name == "terminal_open") JSONObject().put("ok", true).put("session_id", "fixed")
-                                else { commands.incrementAndGet(); JSONObject().put("execution", "executed") }
+                                else { commands.incrementAndGet(); JSONObject().put("ok", true).put("exit_code", 0).put("execution", "executed") }
                             override fun read(id: String, offset: Long, limit: Int) = error("unused")
                             override fun close() {}
                             override fun awaitTermination(timeoutMillis: Long) = true

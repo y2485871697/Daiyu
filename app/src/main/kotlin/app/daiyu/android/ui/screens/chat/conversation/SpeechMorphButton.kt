@@ -77,14 +77,14 @@ internal fun SpeechMorphButton(
         contentAlignment = Alignment.Center,
     ) {
         ContainedMorphLoadingIndicator(
-            modifier = Modifier.testTag("chat-voice-indicator").graphicsLayer {
+            modifier = Modifier.graphicsLayer {
                 // Read the SAME genie progress in the layer, never once per frame in composition.
                 val progress = callMotion?.progress?.value ?: 0f
                 val scale = maxOf(diameter.value / 20.dp, callEntryScale(progress))
                 scaleX = scale
                 scaleY = scale
                 rotationZ = callEntryRotation(progress)
-            },
+            }.testTag("chat-voice-indicator"),
             indicatorSize = 20.dp,
             // Entry and closing share the window clock; stable calls do not keep spinning.
             animate = generating || listening || showPressFeedback || callMotion?.transforming == true,

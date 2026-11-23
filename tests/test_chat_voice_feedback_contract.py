@@ -63,7 +63,7 @@ class ChatVoiceFeedbackContractTest(unittest.TestCase):
                          'interactionSource = interactionSource,',
                          'animate = generating || listening || showPressFeedback'):
             self.assertIn(fragment, self.button)
-        self.assertIn('Modifier.testTag("chat-voice-indicator")', self.button)
+        self.assertLess(self.button.index('.graphicsLayer {'), self.button.index('.testTag("chat-voice-indicator")'))
         self.assertIn('.testTag("chat-voice").size(32.dp).clip(CircleShape)', self.button)
         self.assertIn('onLongClick = onLongClick,', self.button)
         self.assertNotIn('performHapticFeedback', self.button)

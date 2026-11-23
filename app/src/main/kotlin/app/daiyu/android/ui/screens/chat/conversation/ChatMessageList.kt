@@ -428,6 +428,7 @@ internal fun ChatMessageList(
     hasTurnExtras: (ChatTurnUi.Assistant) -> Boolean = { true },
     replyPlayback: ReplyPlayback? = null,
 ) {
+    val actions = rememberStableChatActions(actions)
     val incomingTurns = turns
     var retainedTurns by remember { mutableStateOf(turns, androidx.compose.runtime.referentialEqualityPolicy()) }
     val retainingRows = retainUnconfirmedRows && incomingTurns.isEmpty() && retainedTurns.isNotEmpty()

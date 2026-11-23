@@ -124,6 +124,55 @@ data class ChatScreenActions(
     val hasCompletionToRead: Boolean = true,
 )
 
+/** Same callbacks behind a stable instance: rows skip recomposition while the host rebuilds actions. */
+@Composable
+internal fun rememberStableChatActions(a: ChatScreenActions): ChatScreenActions {
+    val latest = rememberUpdatedState(a)
+    return remember(a.messageActionsEnabled, a.messageBranchEnabled, a.editingMessageKey, a.hasCompletionToRead, a.onProjectedDraftEdit == null) { ChatScreenActions(
+        onOpenSidebar = { latest.value.onOpenSidebar() },
+        onMore = { latest.value.onMore() },
+        onCompressionSendBlocked = { latest.value.onCompressionSendBlocked() },
+        onSend = { p0 -> latest.value.onSend(p0) },
+        onSupplement = { p0 -> latest.value.onSupplement(p0) },
+        onTextChange = { p0 -> latest.value.onTextChange(p0) },
+        onSelectionChange = { p0, p1 -> latest.value.onSelectionChange(p0, p1) },
+        onReferenceShortcut = { p0, p1 -> latest.value.onReferenceShortcut(p0, p1) },
+        onProjectedDraftEdit = if (a.onProjectedDraftEdit == null) null else { p0, p1, p2, p3 -> latest.value.onProjectedDraftEdit!!(p0, p1, p2, p3) },
+        onControlPress = { latest.value.onControlPress() },
+        onControlRelease = { latest.value.onControlRelease() },
+        onPrimaryTap = { latest.value.onPrimaryTap() },
+        onCancelSend = { latest.value.onCancelSend() },
+        onPrimaryLongPress = { latest.value.onPrimaryLongPress() },
+        onAttach = { latest.value.onAttach() },
+        onVoice = { latest.value.onVoice() },
+        onVoiceLongPress = { latest.value.onVoiceLongPress() },
+        onModelClick = { latest.value.onModelClick() },
+        onReasoningClick = { latest.value.onReasoningClick() },
+        onAssistantClick = { latest.value.onAssistantClick() },
+        onOpenReasoning = { latest.value.onOpenReasoning() },
+        onCycleGptSpeed = { latest.value.onCycleGptSpeed() },
+        onOpenAssistant = { latest.value.onOpenAssistant() },
+        messageActionsEnabled = a.messageActionsEnabled,
+        messageBranchEnabled = a.messageBranchEnabled,
+        onCopy = { p0 -> latest.value.onCopy(p0) },
+        onRegenerate = { p0 -> latest.value.onRegenerate(p0) },
+        onSpeak = { p0 -> latest.value.onSpeak(p0) },
+        onBranch = { p0 -> latest.value.onBranch(p0) },
+        onEditUser = { p0 -> latest.value.onEditUser(p0) },
+        editingMessageKey = a.editingMessageKey,
+        onCancelMessageEdit = { latest.value.onCancelMessageEdit() },
+        onDeleteTurn = { p0 -> latest.value.onDeleteTurn(p0) },
+        onRetryStep = { p0 -> latest.value.onRetryStep(p0) },
+        onMenuAction = { p0 -> latest.value.onMenuAction(p0) },
+        onInteractiveModeChange = { p0 -> latest.value.onInteractiveModeChange(p0) },
+        onVisibleCompleted = { p0 -> latest.value.onVisibleCompleted(p0) },
+        onOpenWorkspace = { latest.value.onOpenWorkspace() },
+        onVisibleTextAdvance = { p0 -> latest.value.onVisibleTextAdvance(p0) },
+        onOutputRowVisibility = { p0, p1 -> latest.value.onOutputRowVisibility(p0, p1) },
+        hasCompletionToRead = a.hasCompletionToRead,
+    ) }
+}
+
 @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 internal fun DaiyuChatScreen(

@@ -62,8 +62,8 @@ class ControllerHapticsObserver(
         // A background stop may have raced creation before run was published to the listener.
         if (!controller.isRunUnfenced(message)) { activeRun.stop(); return }
         // Stable item/call IDs dedupe repeated controller notifications and history segment overlap.
-        val blocks = (message.historySegments.filter { it.role == Message.ASSISTANT_ROLE }
-            .flatMap { it.blocks } + message.blocks).associateBy { block -> when (block) {
+        // Only the live answer counts; earlier segments are history, not newly typed output.
+        val blocks = message.blocks.associateBy { block -> when (block) {
                 is MessageBlock.Text -> "text:${block.itemId}"
                 is MessageBlock.Tool -> "tool:${block.invocation.id.value}"
                 is MessageBlock.Image -> "image:${block.hashCode()}"

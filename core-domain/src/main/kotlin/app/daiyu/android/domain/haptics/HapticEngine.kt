@@ -134,9 +134,12 @@ class HapticEngine(private val clock: HapticClock) {
     fun backgroundOutput(owner: Owner, reasoning: Boolean = false, graphemes: () -> Int) {
         val host = hosts[owner] ?: return
         if (!allowed(host, reasoning) || backgroundVisible(host.conversation)) return
+        // In-app but scrolled to history: only answer text drives ticks, paced to its arrival.
+        // Thinking is skipped and the short queue stops a network burst from buzzing for seconds.
+        if (foreground && reasoning) return
         val count = graphemes()
         if (count <= 0) return
-        val room = 36 - pending.count { it.background }
+        val room = (if (foreground) FOREGROUND_ROOM else 36) - pending.count { it.background }
         repeat(count.coerceAtMost(room.coerceAtLeast(0))) {
             pending.addLast(Pending(owner, reasoning, true))
         }
@@ -191,6 +194,7 @@ class HapticEngine(private val clock: HapticClock) {
         if (pending.isNotEmpty()) nextTick = now + 32L
     }
 
+    private companion object { const val FOREGROUND_ROOM = 6 }
     fun nextDueMillis(): Long? = nextTick
     fun pendingCount(): Int = pending.size
     private fun generation(host: Host) = play(host,

@@ -423,4 +423,15 @@ class HapticEngineTest {
         assertEquals(HapticDelivery.FAILED, f.engine.touch(f.owner, HapticKind.CLICK))
         assertEquals(HapticDelivery.FAILED, f.engine.lastDelivery)
     }
+
+    @Test fun scrolledAwayInAppFollowsAnswerArrivalOnly() {
+        val f = Fixture()
+        f.engine.lifecycle(f.owner, resumed = true, visible = false)
+        f.engine.backgroundOutput(f.owner, 50, reasoning = true)
+        assertEquals(0, f.engine.pendingCount())
+        f.engine.backgroundOutput(f.owner, 50)
+        assertEquals(6, f.engine.pendingCount())
+        repeat(20) { f.advance() }
+        assertEquals(6, f.port.requests.size)
+    }
 }

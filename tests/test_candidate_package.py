@@ -83,7 +83,7 @@ class CandidatePackageTests(unittest.TestCase):
         arrays = [json.loads(x) for x in re.findall(r"'(\[[^']*\])'", smoke)]
         # Filtered smoke lanes may precede daily/candidate/formal; none may shadow formal.
         matrix = smoke.split('include: ${{ fromJSON(', 1)[1].split(') }}', 1)[0]
-        lanes = re.split(r"'\s+\|\|\s+(?=inputs.mode|\(inputs.mode|'\[)", matrix)
+        lanes = re.split(r"(?<=\]')\s+\|\|\s+", matrix)
         self.assertEqual(len(arrays), len(lanes))
         for lane, entries in zip(lanes[:-4], arrays[:-4]):
             self.assertTrue(lane.startswith("inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == '"))

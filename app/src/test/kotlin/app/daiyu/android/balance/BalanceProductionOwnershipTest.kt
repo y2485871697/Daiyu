@@ -155,8 +155,10 @@ class BalanceProductionOwnershipTest {
         val chat = source("ui/screens/chat/conversation/ChatScreen.kt")
         assertTrue(chat.contains("ChatTopBar(state.title, actions"))
         assertTrue(chat.contains("state.statusText?.let"))
+        assertTrue(chat.contains("val composer = state.composer.copy("))
+        assertTrue(chat.contains("val composerActions = actions.copy("))
         assertTrue(Regex(
-            """ChatComposer\(\s*state\.composer\s*,\s*actions\s*,\s*assistant\s*=\s*assistant\s*,\s*balanceState\s*=\s*state\.balanceState\s*(?=[,)])"""
+            """ChatComposer\(\s*composer\s*,\s*composerActions\s*,\s*assistant\s*=\s*assistant\s*,\s*balanceState\s*=\s*state\.balanceState\s*(?=[,)])"""
         ).containsMatchIn(chat))
         val composer = source("ui/screens/chat/conversation/ChatComposer.kt")
         assertTrue(composer.contains("ProviderBalanceIndicator("))

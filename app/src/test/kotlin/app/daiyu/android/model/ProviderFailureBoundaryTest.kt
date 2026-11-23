@@ -165,31 +165,35 @@ class ProviderFailureBoundaryTest {
         }
     }
 
-    @Test fun bufferedTextDeliveryFailureDoesNotAttachExternalReadFailureForMessagesAndChat() {
-        val partial = mapOf(
-            ProviderProtocol.MESSAGES to listOf(
-                "{\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"role\":\"assistant\",\"content\":[]}}",
-                "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"ok\"}}"
-            ).joinToString("") { "data: $it\n\n" },
-            ProviderProtocol.CHAT_COMPLETIONS to "data: {\"id\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null}]}\n\n")
-        for ((protocol, events) in partial) {
-            val readFailed = java.util.concurrent.atomic.AtomicBoolean()
-            val conn = object : Connection() {
-                override fun getInputStream(): ByteArrayInputStream = object : ByteArrayInputStream(events.toByteArray()) {
-                    override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
-                        if (available() == 0) { readFailed.set(true); throw IOException(sentinel) }
-                        return super.read(bytes, offset, length)
+    @Test fun immediateBodyAndBufferedReasoningPreserveSinkFailureForMessagesAndChat() {
+        for (buffered in listOf(false, true)) {
+            val block = if (buffered) "thinking" else "text"
+            val field = if (buffered) "reasoning_content" else "content"
+            val partial = mapOf(
+                ProviderProtocol.MESSAGES to listOf(
+                    "{\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"role\":\"assistant\",\"content\":[]}}",
+                    "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"$block\",\"$block\":\"ok\"}}"
+                ).joinToString("") { "data: $it\n\n" },
+                ProviderProtocol.CHAT_COMPLETIONS to "data: {\"id\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"$field\":\"ok\"},\"finish_reason\":null}]}\n\n")
+            for ((protocol, events) in partial) {
+                val readFailed = java.util.concurrent.atomic.AtomicBoolean()
+                val conn = object : Connection() {
+                    override fun getInputStream(): ByteArrayInputStream = object : ByteArrayInputStream(events.toByteArray()) {
+                        override fun read(bytes: ByteArray, offset: Int, length: Int): Int {
+                            if (available() == 0) { readFailed.set(true); throw IOException(sentinel) }
+                            return super.read(bytes, offset, length)
+                        }
                     }
                 }
+                val original = ModelRequestException(ModelFailure.PERMISSION)
+                val observed = failure { port(protocol) { conn }.open(emptyList()).next(emptyList()) {
+                    if (it is ModelEvent.TextDelta || it is ModelEvent.ReasoningDelta) throw original
+                } }
+                assertSame(protocol.name, original, observed)
+                assertEquals("$protocol: only buffered delivery reads again before the sink fails", buffered, readFailed.get())
+                assertTrue(original.suppressed.isEmpty())
+                assertFalse(StringWriter().also { original.printStackTrace(PrintWriter(it)) }.toString().contains(sentinel))
             }
-            val original = ModelRequestException(ModelFailure.PERMISSION)
-            val observed = failure { port(protocol) { conn }.open(emptyList()).next(emptyList()) {
-                if (it is ModelEvent.TextDelta) throw original
-            } }
-            assertSame(protocol.name, original, observed)
-            assertTrue(readFailed.get())
-            assertTrue(original.suppressed.isEmpty())
-            assertFalse(StringWriter().also { original.printStackTrace(PrintWriter(it)) }.toString().contains(sentinel))
         }
     }
 

@@ -157,8 +157,10 @@ class ProviderUsageTest {
         assertEquals(listOf(ModelEvent.Usage(0, null)), events.filterIsInstance<ModelEvent.Usage>())
         assertNull(ProviderUsage.messages(null, null, null, null))
     }
-    @Test fun messagesCloudInputDrivesRunnerPressureAfterToolsWithoutAddingOutputOrEnablingAuto() {
-        for (automatic in listOf(false, true)) for (highInput in listOf(false, true)) {
+    @Test fun messagesUsageSeparatesPromptPressureFromHeaderBoundCompactionAfterTools() {
+        for (automatic in listOf(false, true)) for (highInput in listOf(false, true))
+            for (outputTokens in listOf(1, 250_000)) for (identified in listOf(false, true)) {
+            val inputTokens = if (highInput) 240_000L else 20_000L
             val frames = listOf(
                 JSONObject().put("type", "message_start").put("message", JSONObject().put("id", "tool")
                     .put("role", "assistant").put("content", JSONArray()).put("usage", usage(
@@ -168,7 +170,7 @@ class ProviderUsageTest {
                     JSONObject().put("type", "tool_use").put("id", "call").put("name", "read").put("input", JSONObject())),
                 JSONObject().put("type", "content_block_stop").put("index", 0),
                 JSONObject().put("type", "message_delta").put("delta", JSONObject().put("stop_reason", "tool_use"))
-                    .put("usage", usage("output_tokens" to 250_000)),
+                    .put("usage", usage("output_tokens" to outputTokens)),
                 JSONObject().put("type", "message_stop"),
             ).joinToString("") { frame(it) }
             var compactions = 0; var tools = 0; var nexts = 0
@@ -180,12 +182,13 @@ class ProviderUsageTest {
             val runtime = object : RunContextRuntime {
                 override val automatic = automatic
                 override val windowTokens = 272_000L
+                override fun headerIdentity(tools: List<ToolDefinition>): String? = if (identified) "messages-test" else null
                 override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L
                 override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
                     request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
                     admit: () -> Unit, cancelled: () -> Boolean): List<Message>? {
                     assertEquals(1, tools)
-                    assertEquals(240_000L, billedTokens)
+                    assertEquals(inputTokens, billedTokens)
                     compactions++
                     return null
                 }
@@ -205,8 +208,13 @@ class ProviderUsageTest {
             assertEquals(RunStatus.COMPLETED, result.status)
             assertEquals(1, tools)
             assertEquals(2, nexts)
-            assertEquals(if (automatic && highInput) 1 else 0, compactions)
-            assertEquals(if (highInput) 240_000L else 20_000L, store.saved.last().usage.single().snapshot.inputTokens)
+            // The signed internal meter includes completed output. The pressure displayed to the
+            // user and the billed-input calibration remain prompt-only. Unknown headers cannot
+            // borrow a previous request's measurement.
+            val threshold = requireNotNull(runtime.pressureThresholdTokens)
+            assertEquals(if (automatic && identified && inputTokens + outputTokens >= threshold) 1 else 0, compactions)
+            assertEquals(inputTokens, store.saved.last().usage.single().snapshot.inputTokens)
+            assertTrue(store.saved.any { it.context?.meter?.pressureTokens == inputTokens })
         }
     }
 

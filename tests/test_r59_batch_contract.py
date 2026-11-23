@@ -36,7 +36,7 @@ class R59BatchContract(unittest.TestCase):
         source = (TEST / 'ui/navigation/PageBackGesturesActivityTest.kt').read_text()
         for token in ('val renderedRoute = route', 'PageBackGestureHost(renderedRoute,',
                       'backTargetKey = if (renderedRoute == "test-page")',
-                      'if (renderedRoute == "previous-page") Color.Red else Color.Blue',
+                      'if (renderedRoute == "previous-page") Color.Red else currentColor',
                       'Text(renderedRoute)',
                       'assertDimmedPreviousPage(backdrop, .6f, "recorded previous page must be red and dimmed")',
                       '(alpha + previewBackground.red * (1f - alpha)) * light',

@@ -36,7 +36,7 @@ class ChatOutsideTapContractTest(unittest.TestCase):
 
     def test_only_non_composer_content_uses_observer(self):
         text = (CHAT / 'ChatScreen.kt').read_text()
-        self.assertIn('if (draftFocused && !app.daiyu.android.ui.components.InputDismissal.insideInput) {', text)
+        self.assertIn('if (presentationActive && draftFocused && !app.daiyu.android.ui.components.InputDismissal.insideInput) {', text)
         dismiss = text.split('val dismissInputOnTap = chatInputDismissTapModifier {', 1)[1].split('ChatMenuLayer(', 1)[0]
         self.assertLess(dismiss.index('inputDismissInProgress = true'), dismiss.index('hideChatInputIme(focus, keyboard, view)'))
         self.assertIn('finally {', dismiss)
@@ -48,7 +48,7 @@ class ChatOutsideTapContractTest(unittest.TestCase):
         composer = text.split('}, composer = { backdrop ->', 1)[1]
         self.assertIn('onInputFocusChanged = { focused ->', composer)
         self.assertIn('draftFocused = focused', composer)
-        self.assertIn('if (focused && callUi?.presentation == DoubaoCallPresentation.EXPANDED) callActions.onMinimize()', composer)
+        self.assertIn('if (presentationActive && focused && callUi?.presentation == DoubaoCallPresentation.EXPANDED) callActions.onMinimize()', composer)
         self.assertIn('isInputDismissInProgress = { inputDismissInProgress }', composer)
         self.assertNotIn('dismissInputOnTap', composer)
         self.assertIn('ChatMenuLayer(modifier.fillMaxSize())', text)
@@ -59,7 +59,7 @@ class ChatOutsideTapContractTest(unittest.TestCase):
     def test_editor_reports_real_focus_without_changing_ime_or_draft_model(self):
         text = (CHAT / 'ChatComposer.kt').read_text()
         self.assertIn('onInputFocusChanged: (Boolean) -> Unit = {}', text)
-        self.assertIn('.onFocusChanged { onInputFocusChanged(it.isFocused) }', text)
+        self.assertIn('.onFocusChanged { inputFocused = it.isFocused; onInputFocusChanged(it.isFocused) }', text)
         self.assertIn('lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)', text)
         self.assertIn('isInputDismissInProgress: () -> Boolean = { false }', text)
         self.assertIn('if (((!lifecycleDismissInProgress && !isInputDismissInProgress() && !app.daiyu.android.ui.components.InputDismissal.inProgress) || value.text != references.text) &&', text)
@@ -107,7 +107,8 @@ class ChatOutsideTapContractTest(unittest.TestCase):
         text = (CHAT / 'ChatComposer.kt').read_text()
         self.assertIn('import androidx.compose.foundation.layout.isImeVisible', text)
         self.assertIn('cursorBrush = SolidColor(if (WindowInsets.isImeVisible) chrome.accent else Color.Unspecified)', text)
-        self.assertNotIn('clearFocus(', text)
+        self.assertEqual(1, text.count('clearFocus('))
+        self.assertIn('LaunchedEffect(inputOwned) {\n        if (!inputOwned && inputFocused) focus.clearFocus(force = true)', text)
         self.assertIn('onInputFocusChanged(it.isFocused)', text)
         android = (ANDROID / 'ChatComposerImeActivityTest.kt').read_text()
         hidden = android.split('fun testHiddenImeStopsCaretDrawingEvenWhenDraftRemainsFocused()', 1)[1]

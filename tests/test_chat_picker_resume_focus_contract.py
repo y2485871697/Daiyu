@@ -88,7 +88,7 @@ class ChatPickerResumeFocusContractTest(unittest.TestCase):
             'assertEquals(bindings + ("" to expectedChatBinding("second")), modelBindings())',
             'assertEquals(database, fixture.database.exportBackup())',
             'node("chat-model-option:second").assertIsEnabled().performClick()',
-            'node("chat-model-picker").assertExists()', 'fetchSemanticsNodes().isEmpty()',
+            'node("chat-model-picker").assertExists()', 'closeChatPicker()',
             'assertChatPickerOffline(calls)', 'assertEquals(0, fixture.opens.get())',
         ]:
             self.assertIn(fragment, body)

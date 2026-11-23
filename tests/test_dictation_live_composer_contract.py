@@ -40,7 +40,7 @@ class DictationLiveComposerContractTest(unittest.TestCase):
         composer = (SRC / 'ui/screens/chat/conversation/ChatComposer.kt').read_text()
         self.assertIn('if (!state.dictationPreview && references.references.isEmpty() && projected.references.isEmpty())', composer)
         models = (SRC / 'ui/screens/chat/conversation/ChatScreenModels.kt').read_text()
-        self.assertIn('!dictationPreview && when (phase)', models)
+        self.assertIn('!dictationPreview && when {', models)
         self.assertIn('if (currentDictationProjection() != null) return@send', main)
         self.assertIn('if (currentDictationProjection() != null) return@supplement', main)
 

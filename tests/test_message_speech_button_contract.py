@@ -66,8 +66,8 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
         bar = (CHAT / 'MessageActionBar.kt').read_text()
         self.assertTrue((CHAT / 'MessageSpeechIcon.kt').is_file())
         icon = (CHAT / 'MessageSpeechIcon.kt').read_text()
-        self.assertIn('if (allowSpeech) ConversationIconButton(onClick = { actions.onSpeak(id) })', bar)
-        self.assertIn('MessageSpeechIcon(speaking, Modifier.size(13.dp), preparing)', bar)
+        self.assertIn('if (allowSpeech) ConversationIconButton(onClick = { actions.onSpeak(id) }, enabled = actionsEnabled)', bar)
+        self.assertIn('MessageSpeechIcon(speaking, Modifier.size(13.dp).alpha(if (actionsEnabled) 1f else .38f), preparing)', bar)
         self.assertLess(icon.index('if (!speaking && !preparing)'), icon.index('val transition = rememberInfiniteTransition'))
         for part in ('DaiyuIcons.Speak, "朗读"', 'contentDescription = "停止朗读"', 'drawPath(body, tint, style = stroke)',
                      'drawPath(inner, tint, alpha =', 'drawPath(outer, tint, alpha =', 'tween(800, easing = LinearEasing)'):
@@ -77,8 +77,8 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
 
     def test_async_errors_keep_short_feedback_without_normal_status(self):
         main = (SRC / 'MainActivity.kt').read_text()
-        self.assertIn('LaunchedEffect(messageSpeechAttempt, messageSpeech)', main)
-        effect = main.split('LaunchedEffect(messageSpeechAttempt, messageSpeech)', 1)[1].split('val contextUsage', 1)[0]
+        self.assertIn('LaunchedEffect(routeActive, messageSpeechAttempt, messageSpeech)', main)
+        effect = main.split('LaunchedEffect(routeActive, messageSpeechAttempt, messageSpeech)', 1)[1].split('val contextUsage', 1)[0]
         self.assertIn('messageSpeech.owner == speechHost.owner', effect)
         self.assertIn('messageSpeech == speechHost.state.value', effect)
         self.assertIn('reportedMessageSpeechError != event', effect)

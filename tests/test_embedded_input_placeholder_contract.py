@@ -82,9 +82,11 @@ class EmbeddedInputPlaceholderContractTest(unittest.TestCase):
     def test_approval_outlined_labels_keep_their_original_constraints(self):
         constraints = {
             'PlatformActionApprovalHost.kt': (6, ('小时 0–23（本地时间）', '分钟 0–59', '计时秒数 1–86400', '绝对音量级数（非百分比；须在设备实际范围内）')),
-            'GenerationApprovalHost.kt': (4, ('原始 prompt（不改写）', 'size（原值；当前客户端不支持，非空将阻止确认）', '视频 duration（原值；当前不支持）', 'maxPolls：0–32，仅轮询原任务，不重发 POST')),
+            'GenerationApprovalHost.kt': (4, ('原始 prompt（不改写）', 'size（原值；当前客户端不支持，非空将阻止确认）', '视频 duration（原值；当前不支持）', 'maxPolls：0–240，仅轮询原任务，不重发 POST')),
             'ShizukuApprovalHost.kt': (3, ('精确 UID：0 或 2000（必选，无默认值）', '本次精确 shell 命令', '超时毫秒（1–120000）')),
         }
+        config = (UI.parent / 'model/generation/GenerationRunConfig.kt').read_text()
+        self.assertIn('require(maxPolls in 0..240)', config)
         for path, (count, labels) in constraints.items():
             source = (UI / path).read_text()
             with self.subTest(path=path):

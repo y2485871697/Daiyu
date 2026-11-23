@@ -73,8 +73,8 @@ class SettingsSwitchBusyContractTest(unittest.TestCase):
     def test_voice_transient_work_uses_busy_without_changing_its_guards(self):
         text = (SRC / 'VoiceSettingsPanel.kt').read_text()
         calls = re.findall(r'SettingsSwitchRow\([^\n]+', text)
-        self.assertEqual(len(calls), 6)
-        self.assertEqual(sum('busy = busy' in call for call in calls), 5)
+        self.assertEqual({call.split(chr(34))[1] for call in calls}, {'启用语音转文字', '启用语音对话', '云端朗读', '启用豆包实时通话'})
+        self.assertTrue(all('busy = busy' in call for call in calls))
         self.assertIn('if (!current() || busy) return', text)
 
     def test_android_regressions_cover_pending_pixels_lock_load_failure_and_no_retry(self):

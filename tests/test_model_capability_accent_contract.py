@@ -20,7 +20,7 @@ class ModelCapabilityAccentContractTest(unittest.TestCase):
 
     def test_all_labels_keep_their_conditions_and_compact_noninteractive_layout(self):
         for fragment in ('modelContextWindowLabel(context)', '"支持视觉".takeIf { form?.vision == true }',
-                         '"原生搜索".takeIf { form?.nativeSearch == true }',
+                         '(if (form?.preferNativeSearch == true && actions.nativeSearchSupported(model.id)) "原生搜索" else "搜索工具").takeIf { form?.searchTools == true }',
                          'if (selected) DaiyuIcon(DaiyuIcons.Check, "当前模型", tint = DaiyuPalette.selectionAccent)',
                          "horizontalArrangement = Arrangement.spacedBy(6.dp)",
                          "verticalArrangement = Arrangement.spacedBy(4.dp)"):

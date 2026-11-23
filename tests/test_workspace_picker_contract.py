@@ -12,7 +12,7 @@ class WorkspacePickerContract(unittest.TestCase):
     def test_body_and_strip_share_initial_pass_gesture(self):
         composer = self.text('ui/screens/chat/conversation/ChatComposer.kt')
         surface = self.text('ui/screens/chat/conversation/ChatComposerSurface.kt')
-        self.assertRegex(composer, r'testTag\("chat-draft"\)(?:\.focusProperties \{ canFocus = pageActive \})?\.workspacePullUpGesture\(workspacePointers, workspaceGestureEnabled, openWorkspace\)')
+        self.assertRegex(composer, r'testTag\("chat-draft"\)\.focusProperties \{ canFocus = inputOwned \}\.workspacePullUpGesture\(workspacePointers, workspaceGestureEnabled, openWorkspace\)')
         self.assertIn('key(state.editorGeneration) { ComposerWorkspacePullUpArea(workspacePointers, workspaceGestureEnabled, openWorkspace) }', composer)
         self.assertIn('requireUnconsumed = true, pass = PointerEventPass.Initial', surface)
         self.assertIn('awaitPointerEvent(PointerEventPass.Initial)', surface)

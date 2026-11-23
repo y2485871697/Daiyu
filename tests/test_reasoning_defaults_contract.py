@@ -23,7 +23,7 @@ class ReasoningDefaultsContractTest(unittest.TestCase):
         self.assertIn('branchReasoning = reasoningPreference.snapshot(target.conversationId.value)', actions)
         self.assertIn('reasoningPreference.retainAccepted(id.value, checkNotNull(branchReasoning))', actions)
         self.assertIn('if (retainBranchConfiguration(copy.id)) MessageActionResult.Branch(copy)', actions)
-        self.assertIn('sendPrepared(token, owner, text, actionRevision = revision)', actions)
+        self.assertIn('sendPrepared(token, owner, text, withChildren = conversationChildrenEnabled(owner), actionRevision = revision)', actions)
         self.assertNotIn('retainAccepted(prepared.conversation.id.value', actions)
         self.assertIn('retainBranchConfiguration(failure.locator.conversationId)', actions)
 
@@ -51,14 +51,18 @@ class ReasoningDefaultsContractTest(unittest.TestCase):
         self.assertLess(selection.index('switchChatReasoningModel('), selection.index('providers.selectConversationModel('))
         self.assertLess(selection.index('providers.selectConversationModel('), selection.index('check(database.bindModel('))
 
-    def test_video_off_is_applied_each_round_before_final_payload_validation(self):
+    def test_video_preserves_frozen_reasoning_and_validates_final_payload_each_round(self):
+        controller = (SRC / 'ChatController.kt').read_text()
+        self.assertIn('ReasoningRequestPolicy.freeze(ProviderSnapshot.capture(saved), reasoningIntent)', controller)
+        self.assertIn('projectVideoSettings(current.settings)', controller)
         request = (SRC / 'model/ResponsesModel.kt').read_text()
-        add = request.index('if (videoPlan != null) app.daiyu.android.model.videos.VideoRequestPolicy.disableReasoning(request)')
-        self.assertLess(add, request.index('ReasoningRequestPolicy.validate(request'))
-        self.assertLess(add, request.index('videoPlan?.validateRequest(settings, request, input)'))
-        guard = (SRC / 'ChatController.kt').read_text().split('if ((videoAttempt != null || physicalVideoHistory.inputs.isNotEmpty())', 1)[1].split('var videoPrepared', 1)[0]
-        self.assertIn('ReasoningEffort.OFF', guard)
-        self.assertNotIn('ReasoningEffort.DEFAULT', guard)
+        original = request.index('videoPlan?.validateRequest(settings, request, input)')
+        reasoning = request.index('ReasoningRequestPolicy.validate(request', original)
+        final = request.index('videoPlan?.validateRequest(settings, request, videoWireInput)', reasoning)
+        self.assertLess(final, request.index('val requestBytes =', final))
+        policy = (SRC / 'model/videos/VideoRequestPolicy.kt').read_text().split('fun finalPayload(', 1)[1]
+        self.assertIn('ReasoningRequestPolicy.validate(request, settings.protocol)', policy)
+        self.assertIn('request.optJSONArray("input")?.toString() == input.toString()', policy)
 
     def test_no_implicit_fallback_to_provider_default_for_native_off(self):
         policy = (SRC / 'model/ReasoningRequestPolicy.kt').read_text()
@@ -96,7 +100,8 @@ class ReasoningMismatchContractTest(unittest.TestCase):
         self.assertNotIn('choices.first()', preference)
         self.assertIn('return preference', preference)
         picker = (SRC / 'ui/components/subagent/ConversationThinkingPicker.kt').read_text()
-        self.assertEqual(2, picker.count('choices.getOrNull(selected)?.displayName ?: effort.displayName'))
+        self.assertEqual(1, picker.count('choices.getOrNull(selected)?.displayName ?: effort.displayName'))
+        self.assertIn('if (subagent) "subagent-thinking-value" else "chat-thinking-value"', picker)
 
     def test_main_and_child_admission_keep_typed_chinese_failures(self):
         controller = (SRC / 'ChatController.kt').read_text()

@@ -12,8 +12,10 @@ class ChatSettingsFeedbackContractTest(unittest.TestCase):
         status = host.split("statusText = controller.problem ?: when {", 1)[1].split("composer = ComposerUi", 1)[0]
         self.assertIn("controller.dataBusy -> controller.dataStatus", status)
         self.assertNotIn('"处理备份中"', status)
-        for text in ('!controller.ready -> "恢复会话中"', 'pendingTextSend != null', 'imageHost.sending'):
+        for text in ('!controller.ready -> "恢复会话中"', '!selectionReady -> "加载会话中"', 'messageEditBlocked -> when'):
             self.assertIn(text, status)
+        self.assertIn('preparingSendKey = pendingTextSend?.takeIf', host)
+        self.assertIn('mediaSubmissionKey = imageHost.submissionVisualKey', host)
         controller = (SRC / "ChatController.kt").read_text()
         self.assertIn("initialStatus = null", controller)
         for text in ('initialStatus = "正在准备导出"', 'initialStatus="正在读取备份"'):

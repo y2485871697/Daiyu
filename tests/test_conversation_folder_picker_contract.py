@@ -55,8 +55,8 @@ class ConversationFolderPickerContractTest(unittest.TestCase):
                       "OptionSelectionItem(", "items(folders, key = { it.id })",
                       "selectableGroup()", "weight(1f, fill = false)",
                       'text = "未分类"', "selectedFolderId = null", "selectedFolderId = folder.id",
-                      'text = "取消"', 'text = "保存"', "onClick = onDismiss",
-                      "onConfirm(selectedFolderId)", "folders.isEmpty()"):
+                      'text = "取消"', 'text = "保存"', "onClick = { finishSelection(onDismiss) }",
+                      "finishSelection { onConfirm(selectedFolderId) }", "folders.isEmpty()"):
             self.assertIn(token, picker)
         for token in ("TextField", "AssistantPreviewField", "createFolder", "database", "WindowDialog"):
             self.assertNotIn(token, picker)

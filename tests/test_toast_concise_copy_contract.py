@@ -56,7 +56,10 @@ class ToastConciseCopyContractTest(unittest.TestCase):
         controller = self.text('ChatController.kt')
         self.assertIn('"生成未受理，请重新预览"', main)
         self.assertIn('"会话未就绪、恢复失败或有任务正在进行"', main)
-        self.assertIn('"原视频目录证据、授权或原件校验失败"', controller)
+        self.assertIn('"原视频来源无法确认"', controller)
+        self.assertIn('VideoAttachmentFailure.CORRUPT -> "视频原件校验失败，请重新添加"', controller)
+        self.assertIn('VideoAttachmentFailure.MISSING -> "视频原件不存在，请重新添加"', controller)
+        self.assertIn('token.video?.revoke()', controller)
         self.assertIn('"独立摘要配置不可用（${failure.reason.name}），请重新保存"', controller)
 
     def test_backup_protocol_match_is_not_rewritten_as_display_copy(self):

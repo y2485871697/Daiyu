@@ -61,7 +61,7 @@ class SettingsCopyCleanupContractTest(unittest.TestCase):
         self.assertIn('ProviderChoiceRow("上游格式",', section)
         self.assertNotIn('summary =', section)
         self.assertNotIn('Endpoint 模式', section)
-        self.assertIn('listOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.RESPONSES)', section)
+        self.assertIn('listOf(ProviderProtocol.CHAT_COMPLETIONS, ProviderProtocol.RESPONSES, ProviderProtocol.GEMINI)', section)
         self.assertIn('onChange(draft.selectProtocol(protocols[choice]))', section)
 
     def test_all_four_balance_templates_omit_only_preset_description(self):

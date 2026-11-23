@@ -22,7 +22,7 @@ class DictationRetainedDraftContractTest(unittest.TestCase):
             self.assertIn('applyPartialDraft(target,', source)
         partial = region(main, 'private fun applyRecognizedPartial(', 'private fun applyRecognizedDraft(')
         for fragment in ('voiceEditorCurrent(target)', 'captured.accept(projection.text, recognized)',
-                         'applyingDictationDraft = true', 'try { updateDraft(next) } finally { applyingDictationDraft = false }',
+                         'applyingDictationDraft = true', 'try { updateDraft(next, ownedRecognition = true) } finally { applyingDictationDraft = false }',
                          'check(draft == next)', 'toSource(captured.cursor)'):
             self.assertIn(fragment, partial)
         for forbidden in ('onSend(', 'submit(', 'sendText('):
@@ -35,7 +35,7 @@ class DictationRetainedDraftContractTest(unittest.TestCase):
         self.assertIn('target.editorGeneration == editorGeneration', current)
         self.assertIn('dictationDraft?.first == target && dictationDraftRevision == draftRevision', current)
         revision = region(main, 'private var draftRevision =', 'private data class PendingTextSend(')
-        self.assertIn('if (!applyingDictationDraft) { invalidateConfiguredVoice(); dictationHost.invalidate(); offlineHost.invalidate() }', revision)
+        self.assertIn('if (!applyingDictationDraft && !doubaoCallPresentation.onDraftChanged(selected?.id?.value, remoteVoice.duplexActive)) {\n                    pauseNonCallVoice(); dictationHost.invalidate(); offlineHost.invalidate()', revision)
         self.assertIn('if (applyingDictationDraft) dictationDraftRevision = value', revision)
         save = region(main, 'private fun updateDraft(', 'internal fun createNewConversation(')
         self.assertIn('if (!applyingDictationDraft) { dictationHost.invalidate(); offlineHost.invalidate() }', save)

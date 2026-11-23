@@ -59,9 +59,10 @@ class TestRefreshContract(unittest.TestCase):
         loop = w3_deadline.split('while (true)', 1)[1]
         order = [loop.index(value) for value in (
             'checkDeadline()', 'val sample = sampledTick()',
-            'current in previous..minOf(previous + 1, appended.length)',
+            'current in previous..appended.length',
             'previous = current', 'checkDeadline()',
             'if (current == appended.length && sample.hasCopy && completed.get() > 0) break')]
+        self.assertIn('if (current < appended.length) assertNotCompleted(sample)', loop)
         order[4] = loop.index('checkDeadline()', order[3])
         self.assertEqual(sorted(order), order)
         self.assertEqual(2, method.count('ui.mainClock.advanceTimeByFrame()'))
@@ -71,7 +72,7 @@ class TestRefreshContract(unittest.TestCase):
         self.assertIn('ticksFinished - finishTicks', method)
         self.assertIn('failure.addSuppressed(AssertionError("W3 original wait failed:', method)
         self.assertIn('throw failure', method)
-        self.assertIn('current in previous..minOf(previous + 1, appended.length)', method)
+        self.assertIn('current in previous..appended.length', method)
         self.assertIn('current == appended.length && sample.hasCopy && completed.get() > 0', method)
         sample = method.split('fun presentationSample(): PresentationSample {', 1)[1].split('fun assertNotCompleted', 1)[0]
         self.assertEqual(1, sample.count('.fetchSemanticsNodes()'))

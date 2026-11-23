@@ -9,7 +9,7 @@ SOURCE = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/AssistantPickerVis
 class AssistantPickerClickCompletionContractTest(unittest.TestCase):
     def body(self):
         text = SOURCE.read_text(encoding='utf-8')
-        return text.split('fun testActionsKeepPreviewGeometryAndEditUsesOriginalId()', 1)[1].split('fun testSearchStillFiltersRealProfilesAndSelectionUsesOriginalId()', 1)[0]
+        return text.split('fun testActionsKeepPreviewGeometryAndEditUsesOriginalId()', 1)[1].split('\n    fun ', 1)[0]
 
     def test_real_single_edit_click_completes_before_original_id_assertion(self):
         body = self.body()

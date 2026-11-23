@@ -81,7 +81,19 @@ class CandidatePackageTests(unittest.TestCase):
         self.assertNotIn('record_tool_tests.py', body)
         smoke = workflow.split('  smoke:\n', 1)[1]
         arrays = [json.loads(x) for x in re.findall(r"'(\[[^']*\])'", smoke)]
-        self.assertEqual([len(v) for v in arrays], [2, 4, 4, 8])
+        # Filtered smoke lanes may precede daily/candidate/formal; none may shadow formal.
+        matrix = smoke.split('include: ${{ fromJSON(', 1)[1].split(') }}', 1)[0]
+        lanes = re.split(r"'\s+\|\|\s+(?=inputs.mode|\(inputs.mode|'\[)", matrix)
+        self.assertEqual(len(arrays), len(lanes))
+        for lane, entries in zip(lanes[:-4], arrays[:-4]):
+            self.assertTrue(lane.startswith("inputs.mode == 'smoke' && inputs.smoke_api == 'all' && inputs.smoke_classes == '"))
+            self.assertEqual([(v['api'], v['shard']) for v in entries], [('26', 0), ('37.2', 0)])
+        self.assertTrue(lanes[-4].startswith("inputs.mode == 'daily' &&"))
+        for lane, api, entries in zip(lanes[-3:-1], ['26', '37.2'], arrays[-3:-1]):
+            self.assertTrue(lane.startswith(f"(inputs.mode == 'smoke' || inputs.mode == 'candidate') && inputs.smoke_api == '{api}' &&"))
+            self.assertEqual([(v['api'], v['shard']) for v in entries], [(api, shard) for shard in range(4)])
+        self.assertTrue(lanes[-1].startswith("'["))
+        self.assertEqual([len(v) for v in arrays[-4:]], [2, 4, 4, 8])
         self.assertEqual({(v['api'], v['shard']) for v in arrays[-1]},
                          {(api, shard) for api in ('26', '37.2') for shard in range(4)})
         self.assertNotIn('gradlew', smoke)

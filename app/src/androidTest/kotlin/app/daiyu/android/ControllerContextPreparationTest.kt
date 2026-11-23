@@ -458,7 +458,7 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
             ProductionCompressionSettings(true,10000,1000,summaryModel = binding))
         val owner=seed(f);f.db.draft(owner.id,"pending")
         assertTrue(send(f,owner,"pending") is ChatController.TextSendResult.Rejected)
-        assertEquals("独立摘要配置不可用（MISSING）；请重新保存，草稿保留，未回退聊天模型",f.controller.problem)
+        assertEquals("独立摘要配置不可用（MISSING），请重新保存",f.controller.problem)
         assertEquals(0,factories.get());assertNull(f.controller.active)
         assertEquals("pending",f.db.conversations().single().draft)
         assertEquals(12,ContextService(f.app,f.db).displayHistory(owner.id).size)

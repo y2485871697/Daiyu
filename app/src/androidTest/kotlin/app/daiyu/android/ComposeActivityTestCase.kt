@@ -914,8 +914,7 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
         }
     }
     protected fun retainedControls(activity: MainActivity): app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions {
-        fun capture() = invokeHost(activity, "chatActions", { _: Set<String> -> }) as
-            app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions
+        fun capture() = activity.buildChatActions(onVisibleCompleted = {})
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) return capture()
         var controls: app.daiyu.android.ui.screens.chat.conversation.ChatScreenActions? = null
         var failure: Throwable? = null

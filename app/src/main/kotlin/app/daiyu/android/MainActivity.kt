@@ -3444,13 +3444,23 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable private fun chatActions(onVisibleCompleted: (Set<String>) -> Unit): ChatScreenActions {
+        val turns = chatState.turns
+        val renderedRevealTurns = remember(turns) { indexRevealTurns(turns) }
+        return buildChatActions(onVisibleCompleted, renderedRevealTurns)
+    }
+
+    private fun indexRevealTurns(turns: List<ChatTurnUi>) =
+        turns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey }
+
+    internal fun buildChatActions(
+        onVisibleCompleted: (Set<String>) -> Unit,
+        renderedRevealTurns: Map<String, ChatTurnUi.Assistant> = indexRevealTurns(chatState.turns),
+    ): ChatScreenActions {
         val dictationProjection = currentDictationProjection()
         val renderedOwner = controlOwner
         val renderedTextSend = pendingTextSend
         val renderedConversation = chatState.conversationKey
         val renderedRevealOwner = controller.active?.takeIf { it.conversationId.value == renderedConversation }
-        val turns = chatState.turns
-        val renderedRevealTurns = remember(turns) { turns.filterIsInstance<ChatTurnUi.Assistant>().associateBy { it.listKey } }
         val renderedRevealAdvance = hapticsHost?.revealAdvance(renderedConversation)
         val renderedEditorGeneration = editorGeneration
         val renderedContextEntryEpoch = contextManagementEntryEpoch

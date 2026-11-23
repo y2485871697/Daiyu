@@ -18,7 +18,7 @@ class OptionSelectionSheetContractTest(unittest.TestCase):
         self.assertNotIn('height =', text)
         self.assertNotIn('fillMaxHeight', text)
         shell = source('ui/screens/chat/conversation/ChatSelectionSheet.kt')
-        self.assertIn('PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled)', shell)
+        self.assertIn('PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled, automaticPopup = automaticPopup)', shell)
         self.assertIn('RoundedCornerShape(25.dp)', shell)
         self.assertIn('.size(29.dp, 3.dp)', shell)
         self.assertIn('weight(1f, fill = height != null)', shell)
@@ -81,7 +81,12 @@ class OptionSelectionSheetContractTest(unittest.TestCase):
         self.assertIn('DropdownMenu(expanded = expanded', tier)
         actions = source('ui/SubAgentSettingsScreen.kt')
         self.assertIn('if (editable) SubAgentDropdownMenu(expanded', actions)
-        for label in ('配置', '重命名', '删除'):
+        self.assertIn('SubAgentProfileRow(profile, providers, enabled = editable, settings = true', actions)
+        settings = row.split('if (settings) {', 1)[1].split('} else if (LocalConversationAgentStyle.current)', 1)[0]
+        self.assertIn('SubAgentSettingRow("模型"', settings)
+        self.assertIn('if (currentUsable) { modelPicker = true }', settings)
+        self.assertNotIn('DropdownMenuItem(text = { Text("配置")', actions)
+        for label in ('重命名', '删除'):
             self.assertIn(f'Text("{label}"', actions)
 
     def test_resolution_selection_keeps_restrictions_and_binding_guards(self):

@@ -69,7 +69,7 @@ class AppearanceSimplificationContractTest(unittest.TestCase):
         host = source('MainActivity.kt')
         self.assertIn('executionPhase = state?.phase', host)
         composer = source('ui/screens/chat/conversation/ChatComposer.kt')
-        self.assertIn('generating = state.showGenerationLoading()', composer)
+        self.assertIn('generating = !callEntryOnly && state.showGenerationLoading()', composer)
         speech = source('ui/screens/chat/conversation/SpeechMorphButton.kt')
         self.assertIn('animate = generating || listening || showPressFeedback', speech)
 

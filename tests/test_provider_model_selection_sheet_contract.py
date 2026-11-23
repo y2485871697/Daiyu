@@ -63,7 +63,7 @@ class ProviderModelSelectionSheetContractTest(unittest.TestCase):
         self.assertIn('dismissEnabled = !isSaving', self.text)
         sheet = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatSelectionSheet.kt').read_text()
         self.assertIn('dismissEnabled: Boolean = true', sheet)
-        self.assertIn('PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled)', sheet)
+        self.assertIn('PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled, automaticPopup = automaticPopup)', sheet)
         self.assertIn('.clickable(enabled = dismissEnabled', sheet)
         preview = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/components/PreviewDialog.kt').read_text()
         for fragment in ('dismissEnabled: Boolean = true',

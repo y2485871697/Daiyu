@@ -13,7 +13,7 @@ class SettingsAboutPolishContractTest(unittest.TestCase):
         shell = (SRC / 'ui/screens/chat/conversation/ChatSelectionSheet.kt').read_text()
         self.assertIn('showCloseButton: Boolean = true', shell)
         self.assertIn('if (showCloseButton) Box', shell)
-        self.assertIn('PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled)', shell)
+        self.assertIn('PreviewDialog(onDismiss, bottomSheet = true, dismissEnabled = dismissEnabled, automaticPopup = automaticPopup)', shell)
     def test_qq_retains_intrinsic_multicolor_paths(self):
         icons = (SRC / 'ui/icons/CommunityBrandIcons.kt').read_text()
         qq = icons.split('val TencentQQ:', 1)[1].split('val GitHub:', 1)[0]

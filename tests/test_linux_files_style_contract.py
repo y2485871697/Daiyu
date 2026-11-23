@@ -182,10 +182,13 @@ class LinuxFilesStyleContract(unittest.TestCase):
                     self.assertIn(text, read(name))
 
         dialogs = (COMPONENTS / 'WorkspaceEntryDialogs.kt').read_text()
-        delete = dialogs.split('"delete" -> ChatSelectionSheet(', 1)[1].split('"actions" ->', 1)[0]
-        self.assertIn('showCloseButton = false', delete)
+        delete = dialogs.split('"delete" -> DaiyuDeleteConfirmDialog(', 1)[1].split('"actions" ->', 1)[0]
+        self.assertIn('confirmEnabled = enabled()', delete)
+        self.assertIn('if (enabled()) { stage = "submitted"; onDelete() }', delete)
         self.assertNotIn('无法撤销。', delete)
-        self.assertIn('deletionAppearance = true', dialogs)
+        shared = (COMPONENTS / 'DaiyuDeleteConfirmDialog.kt').read_text()
+        self.assertNotIn('DaiyuIcons.Close', shared)
+        self.assertIn('DeleteConfirmButton(confirmText, onConfirm, Color.White, red,', shared)
 
     def test_settings_share_compact_topbar_without_changing_non_settings_defaults(self):
         adaptive = (COMPONENTS / 'AdaptiveTopAppBar.kt').read_text()

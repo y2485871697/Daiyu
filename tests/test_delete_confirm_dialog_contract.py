@@ -71,9 +71,9 @@ class DeleteConfirmDialogContractTest(unittest.TestCase):
 
     def test_nondelete_authorizations_and_regeneration_keep_their_original_presentation(self):
         main = source("MainActivity.kt")
-        regenerate = main.split("onRegenerate = { id ->", 1)[1].split("}, onSpeak =", 1)[0]
+        regenerate = main.split("onRegenerate = regenerate@{ id ->", 1)[1].split("}, onSpeak =", 1)[0]
         self.assertNotIn("deletionAppearance", regenerate)
-        deletion = main.split("onDeleteTurn = { id ->", 1)[1].split("}, onRetryStep =", 1)[0]
+        deletion = main.split("onDeleteTurn = delete@{ id ->", 1)[1].split("}, onRetryStep =", 1)[0]
         self.assertIn("deletionAppearance = true", deletion)
         self.assertNotIn("deletionAppearance", source("ui/screens/settings/WorkspaceSettingsScreen.kt"))
         self.assertIn('else DaiyuConfirmDialog("确认本次操作", pending.label, "确认", false,', source("VoiceAccountPanel.kt"))

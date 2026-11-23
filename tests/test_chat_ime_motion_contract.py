@@ -41,7 +41,8 @@ class ChatImeMotionContractTest(unittest.TestCase):
         self.assertRegex(composer, r'Column\s*\(\s*modifier\b[^{}]*\.managedInput\s*\(\s*\)')
         self.assertIn('Column(Modifier.fillMaxWidth().animateContentSize(', composer)
         editor = composer.split('Column(Modifier.fillMaxWidth().animateContentSize(', 1)[1]
-        self.assertLess(editor.index('ComposerReferenceChips('), editor.index('BasicTextField('))
+        self.assertLess(composer.index('ComposerReferenceChips('), composer.index('Column(Modifier.fillMaxWidth().animateContentSize('))
+        self.assertIn('BasicTextField(', editor)
         self.assertIn('\n                }\n                Box(Modifier.fillMaxWidth().padding(start = 13.dp', editor)
         self.assertLess(editor.index('BasicTextField('), editor.index('testTag("chat-composer-bottom")'))
         self.assertEqual(1, composer.count('animateContentSize('))

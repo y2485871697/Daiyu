@@ -12,8 +12,8 @@ class ConversationDeleteCloseContractTest(unittest.TestCase):
         self.assertIn("deleteRetainedConversation(id)", deletion)
         prompt = main.split("private class ConfirmPrompt(", 1)[1].split("private var prompt", 1)[0]
         self.assertIn("val showCloseButton: Boolean = true", prompt)
-        for start, end in (("onRegenerate = { id ->", "}, onSpeak ="),
-                           ("onDeleteTurn = { id ->", "}, onRetryStep =")):
+        for start, end in (("onRegenerate = regenerate@{ id ->", "}, onSpeak ="),
+                           ("onDeleteTurn = delete@{ id ->", "}, onRetryStep =")):
             scoped = main.split(start, 1)[1].split(end, 1)[0]
             self.assertIn("showCloseButton = false", scoped)
         self.assertEqual(4, main.count("showCloseButton = false"))

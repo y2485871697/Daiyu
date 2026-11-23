@@ -41,8 +41,10 @@ class AppearanceRolesContractTest(unittest.TestCase):
 
     def test_settings_subagent_confirms_use_danger_containers_without_changing_menus(self):
         settings = source('ui/SubAgentSettingsScreen.kt')
-        self.assertEqual(2, settings.count('containerColor = destructiveColors().container'))
-        self.assertEqual(2, settings.count('contentColor = destructiveColors().content'))
+        self.assertEqual(2, settings.count('app.daiyu.android.ui.components.DaiyuDeleteConfirmDialog('))
+        shared = source('ui/components/DaiyuDeleteConfirmDialog.kt')
+        self.assertIn('val red = Color(if (dark) 0xFFCB6B70 else 0xFFBB5358)', shared)
+        self.assertIn('DeleteConfirmButton(confirmText, onConfirm, Color.White, red,', shared)
         self.assertIn('repository.removePreset(preset.id)', settings)
         self.assertIn('editor.remove(profile.id)', settings)
 
@@ -77,9 +79,10 @@ class AppearanceRolesContractTest(unittest.TestCase):
         self.assertIn('containerColor = destructiveColors().container', inline)
         self.assertIn('contentColor = destructiveColors().content', inline)
         self.assertIn('tint = LocalContentColor.current', inline)
-        for path in ('ui/screens/settings/LocalCatalogModelsScreen.kt', 'ui/screens/settings/McpSettingsScreen.kt',
-                     'ui/components/WorkspaceEntryDialogs.kt', 'ui/screens/chat/ManageChatsScreen.kt'):
+        for path in ('ui/screens/settings/LocalCatalogModelsScreen.kt', 'ui/screens/settings/McpSettingsScreen.kt'):
             self.assertIn('deletionAppearance = true', source(path))
+        for path in ('ui/components/WorkspaceEntryDialogs.kt', 'ui/screens/chat/ManageChatsScreen.kt'):
+            self.assertIn('DaiyuDeleteConfirmDialog(', source(path))
         private = source('ui/screens/settings/PrivateWorkspacePanel.kt')
         self.assertIn('WorkspaceEntryDialogs(action.entry.name, action.entry.directory, enabled = { actionCurrent(action) },', private)
         self.assertIn('onRename = { modify(action, it) }, onDelete = { modify(action, null) },', private)

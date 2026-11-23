@@ -129,8 +129,7 @@ class ModelBulkSelectionActivityTest : WiredActivityTestCase() {
         val before = fixture.settings.localModelCatalogSnapshot()
         select("bulk-first"); node("local-model-delete-selected").performClick()
         awaitUniqueTag("dialog-confirm"); awaitNodeWindowFocus(node("dialog-confirm")); awaitVisualIdle()
-        val oldConfirm = checkNotNull(node("dialog-confirm").fetchSemanticsNode().config[
-            androidx.compose.ui.semantics.SemanticsActions.OnClick].action)
+        val oldConfirm = retainedClickCallback(node("dialog-confirm"))
         realPauseResume(activity)
         ui.waitUntil(5_000) {
             ui.mainClock.advanceTimeByFrame()

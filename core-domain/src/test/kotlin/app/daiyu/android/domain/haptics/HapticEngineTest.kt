@@ -424,11 +424,15 @@ class HapticEngineTest {
         assertEquals(HapticDelivery.FAILED, f.engine.lastDelivery)
     }
 
-    @Test fun scrolledAwayInAppFollowsAnswerArrivalOnly() {
+    @Test fun foregroundChatOwnsAllTextButHiddenPageCanQueueReasoning() {
         val f = Fixture()
-        f.engine.lifecycle(f.owner, resumed = true, visible = false)
-        f.engine.backgroundOutput(f.owner, 50, reasoning = true)
+        f.engine.lifecycle(f.owner, resumed = true, visible = true)
+        f.engine.backgroundOutput(f.owner, reasoning = true) { error("renderer owns reasoning") }
+        f.engine.backgroundOutput(f.owner, reasoning = false) { error("renderer owns body") }
         assertEquals(0, f.engine.pendingCount())
+        f.engine.lifecycle(f.owner, resumed = true, visible = false)
+        f.engine.backgroundOutput(f.owner, 1, reasoning = true)
+        assertEquals(1, f.engine.pendingCount())
         f.engine.backgroundOutput(f.owner, 50)
         assertEquals(6, f.engine.pendingCount())
         repeat(20) { f.advance() }

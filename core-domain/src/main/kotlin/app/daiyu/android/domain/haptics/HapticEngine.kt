@@ -134,9 +134,8 @@ class HapticEngine(private val clock: HapticClock) {
     fun backgroundOutput(owner: Owner, reasoning: Boolean = false, graphemes: () -> Int) {
         val host = hosts[owner] ?: return
         if (!allowed(host, reasoning) || backgroundVisible(host.conversation)) return
-        // In-app but scrolled to history: only answer text drives ticks, paced to its arrival.
-        // Thinking is skipped and the short queue stops a network burst from buzzing for seconds.
-        if (foreground && reasoning) return
+        // The foreground chat (including its history viewport) returned above. A hidden
+        // chat on another page still uses the bounded event queue, including reasoning.
         val count = graphemes()
         if (count <= 0) return
         val room = (if (foreground) FOREGROUND_ROOM else 36) - pending.count { it.background }

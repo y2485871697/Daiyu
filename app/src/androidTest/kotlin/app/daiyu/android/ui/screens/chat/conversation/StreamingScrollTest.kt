@@ -42,7 +42,11 @@ class StreamingScrollTest : WiredActivityTestCase() {
                 Box(Modifier.size(320.dp, 360.dp)) {
                     ChatMessageList(history + tail.copy(finalText = body), ChatScreenActions(onVisibleTextAdvance = { key ->
                         if (key == tail.listKey) ticks.incrementAndGet()
-                    }), scrollRequest = ChatScrollRequest(1), onViewportReady = viewportReady::set, replyPlayback = playback)
+                    }), scrollRequest = ChatScrollRequest(1), turnExtras = { turn ->
+                        // Empty assistant content has zero height. Represent the pre-output
+                        // waiting surface without seeding any text or triggering a body tick.
+                        if (turn.listKey == tail.listKey && turn.finalText.isEmpty()) Box(Modifier.size(24.dp))
+                    }, onViewportReady = viewportReady::set, replyPlayback = playback)
                 }
             }
         } }

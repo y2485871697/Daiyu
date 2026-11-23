@@ -219,11 +219,10 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     private fun awaitChatPickerLoaded() {
         awaitUniqueTag("chat-model-picker")
         awaitUniqueTag("chat-model-list")
-        val pickerField = MainActivity::class.java.getDeclaredField("chatModelPicker").apply { isAccessible = true }
         ui.waitUntil(5_000) {
             var settled = false
             mainThread {
-                val state = pickerField.get(activity) as? ChatModelPickerState
+                val state = invokeHost(activity, "getChatModelPicker") as? ChatModelPickerState
                 settled = state != null && !state.loading && !state.switching
             }
             settled && ui.onAllNodesWithTag("chat-model-picker").fetchSemanticsNodes().singleOrNull()?.config?.let {
@@ -339,7 +338,6 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         setDraft("复读模型时保留草稿")
         node("chat-model").performClick(); awaitChatPickerReady()
         node("chat-model-search").performTextReplacement("second"); dismissIme()
-        val pickerField = MainActivity::class.java.getDeclaredField("chatModelPicker").apply { isAccessible = true }
         val sessionField = MainActivity::class.java.getDeclaredField("chatModelSession").apply { isAccessible = true }
         val ownerField = MainActivity::class.java.getDeclaredField("chatModelOwner").apply { isAccessible = true }
         var previousSession: Any? = null
@@ -359,11 +357,11 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
         try {
             awaitCatalogEntered(entered)
             mainThread {
-                val picker = pickerField.get(activity) as ChatModelPickerState
-                pickerField.set(activity, picker.copy(switching = true))
+                val picker = invokeHost(activity, "getChatModelPicker") as ChatModelPickerState
+                invokeHost(activity, "setChatModelPicker", picker.copy(switching = true))
                 MainActivity::class.java.getDeclaredMethod("reloadChatModels", Any::class.java, Boolean::class.javaPrimitiveType)
                     .apply { isAccessible = true }.invoke(activity, ownerField.get(activity), true)
-                val pending = pickerField.get(activity) as ChatModelPickerState
+                val pending = invokeHost(activity, "getChatModelPicker") as ChatModelPickerState
                 assertFalse(pending.loading); assertTrue(pending.switching); assertFalse(pending.enabled)
                 assertSame(previousSession, sessionField.get(activity))
                 stale()
@@ -380,7 +378,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             ui.waitUntil(5_000) {
                 var ready = false
                 mainThread {
-                    val state = pickerField.get(activity) as ChatModelPickerState
+                    val state = invokeHost(activity, "getChatModelPicker") as ChatModelPickerState
                     ready = sessionField.get(activity) !== previousSession && !state.switching && !state.loading && state.enabled
                 }
                 ready

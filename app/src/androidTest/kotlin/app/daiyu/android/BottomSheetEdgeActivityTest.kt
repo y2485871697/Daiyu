@@ -173,6 +173,7 @@ class BottomSheetEdgeActivityTest : WiredActivityTestCase() {
             show(dark, scale) { dismiss -> ChatAttachmentSheet(dismiss) { action = it } }
             assertFloating("chat-selection-sheet", "chat-attachment:ATTACH_FOLDER")
             node("chat-attachment:ATTACH_IMAGE").performClick()
+            ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-selection-sheet").fetchSemanticsNodes().isEmpty() }
             assertEquals(ChatMenuAction.ATTACH_IMAGE, action)
             assertEquals(1, dismissals)
             var changes = 0

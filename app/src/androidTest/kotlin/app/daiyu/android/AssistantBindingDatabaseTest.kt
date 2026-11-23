@@ -203,7 +203,7 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         val branch = ContextService(context, db).branch(owner.id, a.id)
         assertEquals("bound", db.assistantId(branch))
         val backup = db.exportConversationBackup(owner.id)
-        assertEquals(3, JSONObject(backup).getInt("version"))
+        assertEquals(4, JSONObject(backup).getInt("version"))
         db.delete(owner.id); store.delete("bound")
         db.importBackup(backup)
         assertEquals("bound", db.assistantId(owner.id)) // Missing stays missing; never default.
@@ -211,7 +211,7 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         val envelope = JSONObject(backup)
         val payload = JSONObject(envelope.getString("payload"))
         payload.getJSONArray("conversations").getJSONObject(0).apply {
-            remove("assistant_id"); remove("workspace_binding")
+            remove("assistant_id"); remove("workspace_binding"); remove("sidebar_date")
         }
         val text = payload.toString()
         val digest = MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
@@ -222,9 +222,11 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         val db = database(); val owner = db.create("default")
         db.writableDatabase.execSQL("UPDATE conversations SET assistant_id=NULL WHERE id=?", arrayOf(owner.id.value))
         val exported = JSONObject(db.exportConversationBackup(owner.id))
-        assertEquals(3, exported.getInt("version"))
+        assertEquals(4, exported.getInt("version"))
         val payload = JSONObject(exported.getString("payload"))
-        payload.getJSONArray("conversations").getJSONObject(0).remove("workspace_binding")
+        payload.getJSONArray("conversations").getJSONObject(0).apply {
+            remove("workspace_binding"); remove("sidebar_date")
+        }
         val text = payload.toString()
         val digest = MessageDigest.getInstance("SHA-256").digest(text.toByteArray()).joinToString("") { "%02x".format(it) }
         val backup = exported.put("version", 2).put("payload", text).put("sha256", digest).toString()

@@ -63,8 +63,14 @@ class ChatComposerEditHeaderActivityTest : WiredActivityTestCase() {
             assertEquals(modelsBefore + 1, modelClicked)
             for (action in listOf(ChatMenuAction.ATTACH_IMAGE, ChatMenuAction.ATTACH_FILE, ChatMenuAction.ATTACH_FOLDER)) {
                 node("chat-attach").assertIsEnabled().performTouchInput { click(center) }
-                node("chat-attachment:${action.name}").performTouchInput { click(center) }
-                assertEquals(action, attachmentClicks.last())
+                val target = node("chat-attachment:${action.name}")
+                awaitDialogTouchReady(target)
+                val before = ui.runOnIdle { attachmentClicks.toList() }
+                target.performTouchInput { click(center) }
+                ui.waitUntil(5_000) {
+                    ui.onAllNodesWithTag("chat-selection-sheet").fetchSemanticsNodes().isEmpty()
+                }
+                ui.runOnIdle { assertEquals(before + action, attachmentClicks.toList()) }
             }
             show(320.dp, 1f, dark, enabled = false)
             val attachmentsBefore = attachmentClicks.size

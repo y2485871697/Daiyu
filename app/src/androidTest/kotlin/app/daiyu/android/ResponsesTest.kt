@@ -236,7 +236,7 @@ class ResponsesTest:InstrumentationTestCase() {
         assertEquals("reasoning.encrypted_content",request.getJSONArray("include").getString(0))
         assertEquals("get_battery_status",request.getJSONArray("tools").getJSONObject(0).getString("name"))
         assertEquals("POST",first.requestMethod);assertFalse(first.instanceFollowRedirects)
-        assertEquals(20_000,first.connectTimeout);assertEquals(60_000,first.readTimeout)
+        assertEquals(20_000,first.connectTimeout);assertEquals(600_000,first.readTimeout)
         val input=second.json().getJSONArray("input")
         assertEquals(3,input.length());assertEquals("synthetic-encrypted-content",input.getJSONObject(0).getString("encrypted_content"))
         assertEquals("call",input.getJSONObject(2).getString("call_id"))

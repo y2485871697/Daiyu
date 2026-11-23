@@ -10,6 +10,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -80,7 +81,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     configurationSavePending: Boolean = false,
     configurationSaveSucceeded: Boolean = false,
 ) {
-    val scope = rememberCoroutineScope()
+    val scope = key(persistence) { rememberCoroutineScope() }
     var state by remember(persistence) { mutableStateOf(CatalogImportSession.State()) }
     val currentFactory by rememberUpdatedState(createModel)
     val currentIsRemote by rememberUpdatedState(isRemoteModel)
@@ -97,7 +98,7 @@ internal fun <T> ProviderCatalogSettingsScreen(
     val selectedTab = pageUi?.modelTab ?: remember(providerIdentity, persistence) { mutableStateOf(false) }
     val selectedModelIds = pageUi?.selectedModelIds ?: remember(providerIdentity, persistence) { mutableStateOf<Set<String>?>(null) }
     var modelTab by selectedTab
-    var localRevision by remember { mutableStateOf(0L) }
+    var localRevision by remember(persistence) { mutableStateOf(0L) }
     val localCatalog = remember(providerIdentity, persistence) { LocalCatalogModelState(providerIdentity, persistence) }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle, localCatalog) {

@@ -513,7 +513,8 @@ internal fun ProviderManagementRoute(controller: ChatController, ownerCurrent: (
                         }
                     } ?: false
                 }))
-        } else if (d != null) key(d) {
+        } else if (d != null) key(d.pageUi) {
+            // Readback renews editor authority, not the parent of the attached text fields.
             val live = { current(p) && detail === d && d.live.get() }
             val cancelled = { !p.live.get() || !d.live.get() }
             val draft = d.draft

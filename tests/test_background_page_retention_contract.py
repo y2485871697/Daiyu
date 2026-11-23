@@ -30,7 +30,7 @@ class BackgroundPageRetentionContractTest(unittest.TestCase):
                       'retained.also { it.resume() }', 'saveOwner = ModelSettingsSaveOwner()',
                       'if (retained == null) closeDetail()', 'else if (openingSlot != null) open(checkNotNull(openingSlot))'):
             self.assertIn(guard, route)
-        self.assertIn('key(d)', route)
+        self.assertIn('key(d.pageUi)', route)
         self.assertIn('permit === p && resumed', route)
 
     def test_new_provider_callbacks_recheck_their_original_foreground_permit(self):

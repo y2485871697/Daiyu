@@ -31,7 +31,7 @@ class PagePositionContract(unittest.TestCase):
         route = source('ui/screens/settings/ProviderManagementRoute.kt')
         self.assertIn('val modelScrollOwner = detail?.pageUi ?: pausedDraft?.pageUi', route)
         self.assertIn('key(modelScrollOwner) { MiuixScrollBehavior() }', route)
-        self.assertLess(route.index('key(modelScrollOwner)'), route.index('key(d)'))
+        self.assertLess(route.index('key(modelScrollOwner)'), route.index('key(d.pageUi)'))
         self.assertIn('pageUi = d.pageUi, modelScrollBehavior = modelScrollBehavior', route)
         catalog = source('ui/screens/settings/ProviderCatalogSettingsScreen.kt')
         self.assertEqual(catalog.count('scrollBehavior = modelScrollBehavior'), 2)

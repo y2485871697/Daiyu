@@ -148,6 +148,8 @@ class ProviderSavePositionContractTest(unittest.TestCase):
 
     def test_catalog_invalidation_and_presentation_ownership_are_not_relaxed(self):
         catalog = source("ProviderCatalogSettingsScreen.kt")
+        self.assertIn("else if (d != null) key(d.pageUi)", source("ProviderManagementRoute.kt"))
+        self.assertIn("key(persistence) { rememberCoroutineScope() }", catalog)
         self.assertIn("onSave = { session.invalidate(); onSave(it) }", catalog)
         self.assertIn("onDraftChange = { session.invalidate(); onDraftChange(it) }", catalog)
         page = source("ProviderPageUiState.kt")

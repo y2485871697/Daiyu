@@ -154,16 +154,19 @@ class HapticsActivityHostTest : InstrumentationTestCase() {
         assertEquals(0, f.ports.sumOf { it.plays })
     }
 
-    fun testReadingHistoryDoesNotSwitchForegroundToNetworkTicks() = withHost { f ->
+    fun testOffscreenOutputKeepsTickingAcrossControllerSync() = withHost { f ->
         f.sync()
         val run = f.bindings.single().beginRun("r", "m")
-        run.output(reasoning = false) { error("A foreground network update must not drive the motor") }
+        val viewport = f.host.outputViewport("c")
+        viewport(false)
         f.sync()
-        run.output(reasoning = true) { error("Foreground reasoning also waits for a draw") }
+        f.host.revealAdvance("c")()
+        assertEquals(0, f.ports.sumOf { it.plays })
+        run.output(1)
         f.afterDrain = {
-            assertEquals(0, f.ports.sumOf { it.plays })
-            f.host.revealAdvance("c")()
-            assertEquals(1, f.ports.first().plays)
+            assertEquals(1, f.ports.last().plays)
+            viewport(true)
+            run.output(reasoning = false) { error("Visible output must not enqueue network ticks") }
         }
     }
 

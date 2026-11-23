@@ -29,41 +29,32 @@ class StreamingScrollTest : WiredActivityTestCase() {
     fun testNetworkBodyAppendsKeepScrollingWithoutReparsingOnDragFrames() = verifyNetworkScroll(false)
     fun testNetworkThoughtAppendsKeepScrollingWithoutReparsingOnDragFrames() = verifyNetworkScroll(true)
 
-    fun testHistoryIsSilentAndReturningReceivesFreshReveal() {
-        val ticks = java.util.concurrent.CopyOnWriteArrayList<String>()
+    fun testReadingHistoryHandsOutputToOffscreenTicksAndReturningReclaimsIt() {
+        val reports = java.util.concurrent.CopyOnWriteArrayList<Pair<String, Boolean>>()
         val history = (0..25).map { ChatTurnUi.Assistant("previous-$it", status = RunStatus.COMPLETED,
             finalText = "previous paragraph $it") }
-        var tail by mutableStateOf(ChatTurnUi.Assistant("live", status = RunStatus.RUNNING,
-            isStreaming = true, finalText = "live tail"))
+        val tail = ChatTurnUi.Assistant("live", status = RunStatus.RUNNING, isStreaming = true, finalText = "live tail")
         val liveKey = tail.listKey
         val viewportReady = java.util.concurrent.atomic.AtomicBoolean(false)
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 Box(Modifier.size(320.dp, 360.dp)) {
-                    ChatMessageList(history + tail, ChatScreenActions(onVisibleTextAdvance = { ticks.add(it) }),
-                        scrollRequest = ChatScrollRequest(1), onViewportReady = viewportReady::set)
+                    ChatMessageList(history + tail, ChatScreenActions(onOutputRowVisibility = { key, visible ->
+                        reports.add(key to visible)
+                    }), scrollRequest = ChatScrollRequest(1), onViewportReady = viewportReady::set)
                 }
             }
         } }
         val list = ui.onNodeWithTag("chat-messages")
         val oldText = ui.onNodeWithText("previous paragraph 0", useUnmergedTree = true)
         val liveRow = ui.onNodeWithTag("chat-turn:live", useUnmergedTree = true)
-        ui.waitUntil(5_000) { viewportReady.get() && liveRow.isDisplayed() }
+        ui.waitUntil(5_000) { viewportReady.get() && liveRow.isDisplayed() && reports.lastOrNull() == (liveKey to true) }
         list.performTouchInput { swipeDown() }
         list.performScrollToKey(history.first().listKey)
-        ui.waitUntil(5_000) { oldText.isDisplayed() && !liveRow.isDisplayed() }
-        val before = ticks.size
-        ui.runOnUiThread { tail = tail.copy(finalText = "live tail while reading") }
-        ui.waitForIdle()
-        oldText.assertIsDisplayed()
-        assertFalse(liveRow.isDisplayed())
-        assertEquals(before, ticks.size)
+        ui.waitUntil(5_000) { oldText.isDisplayed() && !liveRow.isDisplayed() && reports.lastOrNull() == (liveKey to false) }
         list.performScrollToKey(liveKey)
-        ui.waitUntil(5_000) { ui.onNodeWithText("live tail while reading", useUnmergedTree = true).isDisplayed() }
-        val returned = ticks.size
-        ui.runOnUiThread { tail = tail.copy(finalText = "live tail while reading then a fresh visible phrase") }
-        ui.waitUntil(5_000) { ticks.size > returned }
-        assertTrue(ticks.all { it == liveKey })
+        ui.waitUntil(5_000) { liveRow.isDisplayed() && reports.lastOrNull() == (liveKey to true) }
+        assertTrue(reports.all { it.first == liveKey })
     }
 
     private fun readingAnchorY(): Float = ui.onNode(

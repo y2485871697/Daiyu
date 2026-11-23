@@ -24,7 +24,7 @@ internal class ReplyPresentationControl(
 
     fun matches(turn: ChatTurnUi.Assistant) = turn.listKey == rowKey
     fun observeLive() { observedLive = true }
-    fun pending(turn: ChatTurnUi.Assistant) = matches(turn) && observedLive && !finished && (settledTurn != turn || pendingLanes.isNotEmpty())
+    fun pending(turn: ChatTurnUi.Assistant) = matches(turn) && observedLive && !finished && (settledTurn != turn || pendingLanes.isNotEmpty() || lanes.values.any { lane -> lane.inks.values.any { it.hasRemaining } })
     fun setSettled(turn: ChatTurnUi.Assistant, settled: Boolean) {
         if (!matches(turn)) return
         if (settled) settledTurn = turn

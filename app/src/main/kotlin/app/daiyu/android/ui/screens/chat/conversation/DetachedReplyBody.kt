@@ -4,6 +4,10 @@ import androidx.compose.runtime.*
 import app.daiyu.android.domain.RunStatus
 import kotlinx.coroutines.flow.first
 
+private class DetachedPart(val ink: MarkdownInk, val text: String) {
+    val boundaries by lazy(LazyThreadSafetyMode.NONE) { MarkdownTextBoundaries(text) }
+}
+
 /** Continue the current reply's ink while its lazy row is outside the reading viewport.
  * No invisible text nodes, synthetic draw receipts, network counters or vibrator queue. */
 @Composable
@@ -38,6 +42,7 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
     }
     val currentDetached by rememberUpdatedState(stillDetached)
     val latestAdvance by rememberUpdatedState(onAdvance)
+    val parts = ArrayList<DetachedPart>(projection.sources.size)
     for (index in projection.sources.indices) {
         val source = sources.getOrNull(index) ?: break
         val parsed = projection.sources[index]
@@ -57,22 +62,38 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
                 ink.detached = true
                 onDispose { ink.detached = false }
             }
-            // Keep the clock across appends: restarting a two-frame coroutine for every token
-            // would starve it on a fast connection. Once caught up, wait for a new target.
-            val target = rememberUpdatedState(remember(text) { text to MarkdownTextBoundaries(text) })
-            LaunchedEffect(ink, playback) {
-                while (true) {
-                    snapshotFlow { ink.position < target.value.first.length }.first { it }
-                    if (!currentDetached() || playback.paused || playback.control.stopped || playback.control.finished) break
-                    var before = withFrameNanos { it }
-                    while (ink.position < target.value.first.length && currentDetached() && !playback.paused && !playback.control.stopped && !playback.control.finished) {
-                        withFrameNanos { now ->
-                            val (body, bounds) = target.value
-                            if (currentDetached() && !playback.paused && !playback.control.stopped && !playback.control.finished &&
-                                ink.advanceDetached(body, bounds, (now - before) / 1e9)) latestAdvance()
-                            before = now
-                        }
-                    }
+            SideEffect { ink.targetLength(text.length) }
+            parts.add(remember(ink, text) { DetachedPart(ink, text) })
+        }
+    }
+    val targets by rememberUpdatedState(parts.toList())
+    val exact by rememberUpdatedState(bodyReleased && ordered.pending.isEmpty() && projection.sources == sources.map { it.text } &&
+        parts.size == sources.size && projection.windows == sources.map { it.window }.takeIf { it.any { w -> w != null } }.orEmpty())
+    val currentTurn by rememberUpdatedState(turn)
+    LaunchedEffect(lane, playback) {
+        while (currentDetached() && !playback.paused && !playback.control.finished) {
+            val next = targets.firstOrNull { it.ink.position < it.text.length }
+            if (next == null) {
+                if (exact && currentTurn.status == RunStatus.COMPLETED) {
+                    playback.control.reportPending(lane.motion, false)
+                    playback.control.setSettled(currentTurn, true)
+                }
+                snapshotFlow { targets.any { it.ink.position < it.text.length } ||
+                    exact && currentTurn.status == RunStatus.COMPLETED }.first { it }
+                if (targets.none { it.ink.position < it.text.length } && exact && currentTurn.status == RunStatus.COMPLETED) {
+                    playback.control.reportPending(lane.motion, false)
+                    playback.control.setSettled(currentTurn, true)
+                    break
+                }
+            }
+            var before = withFrameNanos { it }
+            while (currentDetached() && !playback.paused && !playback.control.finished &&
+                targets.any { it.ink.position < it.text.length }) {
+                withFrameNanos { now ->
+                    val part = targets.firstOrNull { it.ink.position < it.text.length }
+                    if (part != null && currentDetached() && !playback.paused && !playback.control.finished &&
+                        part.ink.advanceDetached(part.text, part.boundaries, (now - before) / 1e9)) latestAdvance()
+                    before = now
                 }
             }
         }

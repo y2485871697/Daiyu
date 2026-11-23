@@ -51,6 +51,22 @@ class MarkdownRevealHapticsTest {
         assertEquals(listOf(1), draws)
     }
 
+    @Test fun removingLazyRowDoesNotRetireControlsWithUnspentInk() {
+        val turn = ChatTurnUi.Assistant(id = "reply")
+        val control = ReplyPresentationControl(turn.listKey, true)
+        val lane = control.lane("body:reply", MarkdownParserIdentity(defaultMarkdownParser), 0L) { emptyList() }
+        val ink = MarkdownInk(0)
+        lane.inks["answer"] = ink
+        ink.targetLength(3)
+        control.setSettled(turn, true)
+        control.reportPending(ink, false)
+        assertTrue(control.pending(turn))
+        control.pause(true); assertTrue(control.pauseRequested && control.pending(turn))
+        control.pause(false); ink.detached = true
+        repeat(20) { ink.advanceDetached("甲乙丙", MarkdownTextBoundaries("甲乙丙"), .016) }
+        assertFalse(control.pending(turn))
+    }
+
     @Test fun slowCharactersPulseSeparatelyAndFastOutputCannotBuildUpDebt() {
         var time = 0L
         var next: Pair<Runnable, Long>? = null

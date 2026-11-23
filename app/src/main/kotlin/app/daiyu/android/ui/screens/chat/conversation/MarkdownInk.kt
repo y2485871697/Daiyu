@@ -18,6 +18,11 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
         return this
     }
 
+    private var documentEnd by mutableIntStateOf(start)
+    private val remaining = derivedStateOf { position < documentEnd }
+    val hasRemaining: Boolean get() = remaining.value
+    fun targetLength(length: Int) { documentEnd = length }
+
     val baselineEnd = start
     var position by mutableDoubleStateOf(start.toDouble()); private set
     private val paintedEnds = mutableMapOf<Int, Double>()
@@ -138,7 +143,7 @@ internal fun rememberPartInk(reveal: MarkdownReveal, id: String, bodyPaintFeedba
     val following = busy && !paused
     SideEffect { clearance?.setTypingPending(ink, following) }
     DisposableEffect(ink, clearance) { onDispose { clearance?.setTypingPending(ink, false) } }
-    SideEffect { reveal.publication.inkPending(ink, busy && control?.stopped != true); control?.reportPending(ink, busy) }
+    SideEffect { ink.targetLength(text.length); reveal.publication.inkPending(ink, busy && control?.stopped != true); control?.reportPending(ink, busy) }
     DisposableEffect(ink, control) { onDispose { reveal.publication.inkPending(ink, false); control?.reportPending(ink, false) } }
     LaunchedEffect(ink, admission, busy, paused) {
         if (busy && !paused) {

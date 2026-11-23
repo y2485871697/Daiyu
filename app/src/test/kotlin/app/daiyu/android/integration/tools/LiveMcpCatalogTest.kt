@@ -18,6 +18,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 class LiveMcpCatalogTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val message = Message(MessageId("a"), ConversationId("c"), RunId("r"), "assistant", emptyList(), RunStatus.RUNNING)
     private val remote = McpRemoteTool("read", "read", readOnlyHint = true)
     private fun settings(disabled: Boolean = false, absent: Boolean = false) = McpSettings(java.util.UUID.randomUUID().toString(),
@@ -61,17 +62,7 @@ class LiveMcpCatalogTest {
             SkillRunSession.create(task, emptySet(), emptyList())
         }
         init {
-            var owner: RunExecutionOwner? = null
-            val receiver = object : ReceiptBatchToolExecutor {
-                override fun bindOwner(value: RunExecutionOwner) { owner = value }
-                override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
-            }
-            ChatRunner(ModelPort { object : ModelSession {
-                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-                override fun cancel() {}
-            } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { "unused" },
-                RunnerOptions(receiptBatchExecutor = receiver)) {}.run(message, emptyList())
-            catalog.bindOwner(checkNotNull(owner))
+            catalog.bindOwner(liveOwners.issue(message))
         }
         fun update(value: McpSettings?) { current.set(value); changed?.invoke() }
         fun name() = catalog.definitions.single { it.name.startsWith("mcp_live_") }.name

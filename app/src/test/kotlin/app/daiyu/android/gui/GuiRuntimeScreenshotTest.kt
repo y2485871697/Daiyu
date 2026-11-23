@@ -32,6 +32,7 @@ import org.robolectric.util.ReflectionHelpers.ClassParameter
 @LooperMode(LooperMode.Mode.PAUSED)
 @Suppress("DEPRECATION")
 class GuiRuntimeScreenshotTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     // A caller owns the returned window, not the node shadow's backing instance.
     @Implements(AccessibilityNodeInfo::class)
     class CopyingWindowNodeShadow : ShadowAccessibilityNodeInfo() {
@@ -880,7 +881,7 @@ class GuiRuntimeScreenshotTest {
         for (screenshot in listOf(false, true)) for (pkg in listOf("external.app", null)) {
             session.close()
             session = (GuiRuntime.openForUser(GuiOwner("session", "run")) as GuiResult.Value).value
-            val owner = app.daiyu.android.integration.tools.runnerOwner(app.daiyu.android.domain.Message(
+            val owner = liveOwners.issue(app.daiyu.android.domain.Message(
                 app.daiyu.android.domain.MessageId("m"), app.daiyu.android.domain.ConversationId("c"),
                 app.daiyu.android.domain.RunId("run"), app.daiyu.android.domain.Message.ASSISTANT_ROLE,
                 emptyList(), app.daiyu.android.domain.RunStatus.RUNNING))
@@ -955,7 +956,7 @@ class GuiRuntimeScreenshotTest {
     }
 
     @Test fun ordinaryScreenshotWithoutIdNeverTraversesNodesAndExplicitStaleIdNeverReobserves() {
-        val owner = app.daiyu.android.integration.tools.runnerOwner(app.daiyu.android.domain.Message(
+        val owner = liveOwners.issue(app.daiyu.android.domain.Message(
             app.daiyu.android.domain.MessageId("m"), app.daiyu.android.domain.ConversationId("c"),
             app.daiyu.android.domain.RunId("run"), app.daiyu.android.domain.Message.ASSISTANT_ROLE,
             emptyList(), app.daiyu.android.domain.RunStatus.RUNNING))
@@ -1032,7 +1033,7 @@ class GuiRuntimeScreenshotTest {
 
     @Test fun implicitScreenshotSubmitsInTheSameMainTurnBeforeQueuedSelfContent() {
         openSelf()
-        val owner = app.daiyu.android.integration.tools.runnerOwner(app.daiyu.android.domain.Message(
+        val owner = liveOwners.issue(app.daiyu.android.domain.Message(
             app.daiyu.android.domain.MessageId("m"), app.daiyu.android.domain.ConversationId("c"),
             app.daiyu.android.domain.RunId("target-run"), app.daiyu.android.domain.Message.ASSISTANT_ROLE,
             emptyList(), app.daiyu.android.domain.RunStatus.RUNNING))

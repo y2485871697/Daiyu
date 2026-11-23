@@ -20,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36], manifest = Config.NONE)
 class ControllerVirtualDisplaySessionTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private class Journal : R08VirtualDisplayJournal {
         val claims = mutableMapOf<String, R08VirtualDisplayIntent>()
         var onClaim: (R08VirtualDisplayIntent) -> Unit = {}
@@ -158,11 +159,11 @@ class ControllerVirtualDisplaySessionTest {
             }
         }
     }
-    private class Fixture(includeRelease: Boolean = false, includeHandoff: Boolean = false,
+    private inner class Fixture(includeRelease: Boolean = false, includeHandoff: Boolean = false,
                           includeLaunch: Boolean = false, explicitApproval: Boolean = true) : AutoCloseable {
         val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
-        val owner = runnerOwner(message)
+        val owner = liveOwners.issue(message)
         val capabilities = SessionCapabilities("session", setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY))
         val parent = Parent(explicitApproval)
         val endpoint = Endpoint()

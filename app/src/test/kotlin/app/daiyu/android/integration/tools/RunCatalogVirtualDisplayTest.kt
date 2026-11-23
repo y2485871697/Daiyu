@@ -26,6 +26,7 @@ import java.util.concurrent.atomic.AtomicReference
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36], manifest = Config.NONE)
 class RunCatalogVirtualDisplayTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
 
@@ -119,7 +120,7 @@ class RunCatalogVirtualDisplayTest {
         val factoryGate: CountDownLatch? = null,
         bind: Boolean = true
     ) {
-        val owner = runnerOwner(message)
+        val owner = liveOwners.issue(message)
         val capabilities = SessionCapabilities("session", setOf("audit") +
             (if (enabled) setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY) else emptySet()) +
             (if (barrier) setOf(AskUserPlanTool.CAPABILITY) else emptySet()))
@@ -233,7 +234,7 @@ class RunCatalogVirtualDisplayTest {
             assertTrue(auth.allowedWrites.isEmpty())
             SkillRunSession.create(auth, emptySet(), emptyList())
         }
-        tools.bindOwner(runnerOwner(message))
+        tools.bindOwner(liveOwners.issue(message))
         assertTrue(tools.definitions.isEmpty())
         assertEquals(RunCatalogCloseResult.Drained, closeResult(tools))
     }
@@ -249,15 +250,15 @@ class RunCatalogVirtualDisplayTest {
         rejected { create() }
         for (auth in listOf(TaskAuthorization("foreign", "run"), TaskAuthorization("session", "foreign"))) {
             val tools = create(factory = { auth })
-            rejected { tools.bindOwner(runnerOwner(message)) }
+            rejected { tools.bindOwner(liveOwners.issue(message)) }
             assertEquals(RunCatalogCloseResult.Drained, closeResult(tools))
         }
         val fixed = TaskAuthorization("session", "run")
         val copied = create(fixed) { TaskAuthorization("session", "run") }
-        rejected { copied.bindOwner(runnerOwner(message)) }
+        rejected { copied.bindOwner(liveOwners.issue(message)) }
         assertEquals(RunCatalogCloseResult.Drained, closeResult(copied))
         val throwing = create(fixed) { throw IllegalStateException("approval unavailable") }
-        rejected { throwing.bindOwner(runnerOwner(message)) }
+        rejected { throwing.bindOwner(liveOwners.issue(message)) }
         assertEquals(RunCatalogCloseResult.Drained, closeResult(throwing))
         assertEquals(0, calls.get())
     }
@@ -265,7 +266,7 @@ class RunCatalogVirtualDisplayTest {
     @Test fun returnedLeafCannotSubstituteAnotherOwnerAndIsRevokedOnBindFailure() {
         val f = Fixture(bind = false)
         val foreignLeaf = f.approval.bind(f.owner, f.capabilities, f.authorization, f.endpoint, f.journal)
-        val otherOwner = runnerOwner(message)
+        val otherOwner = liveOwners.issue(message)
         val tools = RunCatalogTools(ToolRegistry(), f.capabilities, ToolLedger(f.store), message.conversationId, message.runId,
             authorization = f.authorization,
             virtualDisplayFactory = { owner, caps, auth ->
@@ -281,7 +282,7 @@ class RunCatalogVirtualDisplayTest {
 
     @Test fun realRunnerTokenAndForeignMessageAreNotInterchangeable() {
         val f = Fixture(); f.prepare()
-        rejected { f.tools.bindOwner(runnerOwner(message)) }
+        rejected { f.tools.bindOwner(liveOwners.issue(message)) }
         rejected { f.tools.execute(message.copy(id = MessageId("foreign")), listOf(f.step("start"))) { false } }
         rejected { f.tools.start(message.copy(runId = RunId("foreign")), listOf(f.step("start"))) { false } }
         assertTrue(f.journal.finals.isEmpty()); assertTrue(f.store.transaction { it.isEmpty() })

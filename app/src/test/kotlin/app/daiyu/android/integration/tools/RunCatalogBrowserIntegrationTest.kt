@@ -28,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference
  * 原生生命周期和关闭观察由测试控制。
  */
 class RunCatalogBrowserIntegrationTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val message = Message(MessageId("assistant-message"), ConversationId("conversation"),
         RunId("run"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
     private val identity = BrowserRunIdentity(message.conversationId, message.runId,
@@ -39,21 +40,8 @@ class RunCatalogBrowserIntegrationTest {
     private val extraEffect = WriteEffect("other-leaf", "write", "target", "exact")
 
     /** Obtain the opaque token through the same public Runner callback used by production. */
-    private fun issuedOwner(): RunExecutionOwner {
-        var token: RunExecutionOwner? = null
-        val receiver = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { token = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) =
-                error("no model tool calls expected")
-        }
-        val runner = ChatRunner(CatalogFixturePort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-            override fun cancel() {}
-        } }, object : ConversationStore { override fun save(message: Message) {} },
-            BatteryTool { error("no model tool calls expected") }, RunnerOptions(receiptBatchExecutor = receiver)) {}
-        assertEquals(RunStatus.COMPLETED, runner.run(message, emptyList()).status)
-        return checkNotNull(token)
-    }
+    private fun issuedOwner(): RunExecutionOwner =
+        liveOwners.issue(message)
 
     private class RecordingStore : ToolLedgerStore {
         private val memory = InMemoryToolLedgerStore()

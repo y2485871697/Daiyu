@@ -16,6 +16,7 @@ import org.junit.Test
 
 /** Real facade + catalog/ledger, fake lifecycle and port. No WebView, device or network. */
 class RunBrowserToolsTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private class Resources : BrowserTabLifecycle {
         val created = mutableListOf<BrowserTabLease>()
         val closed = mutableListOf<BrowserTabLease>()
@@ -39,21 +40,9 @@ class RunBrowserToolsTest {
     }
 
     // Obtain the opaque token from the real runner rather than reflecting/constructing an owner.
-    private fun owner(): RunExecutionOwner {
-        var token: RunExecutionOwner? = null
-        val receiver = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { token = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
-        }
-        val runner = ChatRunner(ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-            override fun cancel() {}
-        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("unused") },
-            RunnerOptions(receiptBatchExecutor = receiver)) {}
-        runner.run(Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
-            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING), emptyList())
-        return checkNotNull(token)
-    }
+    private fun owner(): RunExecutionOwner =
+        liveOwners.issue(Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
 
     private inner class Fixture(
         access: BrowserAccess = BrowserAccess.FULL,

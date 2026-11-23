@@ -21,6 +21,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Real Runner-issued owners, production effect encoder and dispatcher. No HTTP, files or DB. */
 class ControllerGenerationPreparationTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val identity = GenerationPreparationIdentity("account", ConversationId("conversation"),
         RunId("run"), MessageId("reply"))
     private val editor = GenerationEditorSnapshot(7, " exact editor\n", listOf("immutable-attachment"))
@@ -33,20 +34,8 @@ class ControllerGenerationPreparationTest {
                 GenerationRunConfig.Item("item", " original prompt\n", parameters = parameters)))), maxPolls, hosts)
     private fun confirmed() = prepare().let { it.confirm(it.preview, editor, identity) }
 
-    private fun owner(id: GenerationPreparationIdentity = identity): RunExecutionOwner {
-        var result: RunExecutionOwner? = null
-        val receiver = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { result = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
-        }
-        ChatRunner(ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-            override fun cancel() {}
-        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("unused") },
-            RunnerOptions(receiptBatchExecutor = receiver)) {}.run(
-            Message(id.assistantMessageId, id.conversationId, id.runId, Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING), emptyList())
-        return checkNotNull(result)
-    }
+    private fun owner(id: GenerationPreparationIdentity = identity): RunExecutionOwner =
+        liveOwners.issue(Message(id.assistantMessageId, id.conversationId, id.runId, Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
     private fun rejects(block: () -> Unit) { assertTrue(runCatching(block).isFailure) }
 
     private fun dispatchReview(token: ConfirmedGenerationPreparation, owner: RunExecutionOwner,

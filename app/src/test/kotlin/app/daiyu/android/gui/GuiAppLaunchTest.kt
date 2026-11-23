@@ -38,6 +38,7 @@ import java.util.concurrent.TimeUnit
 @Config(sdk = [30], shadows = [GuiAppLaunchTest.CopyingWindowNodeShadow::class])
 @LooperMode(LooperMode.Mode.PAUSED)
 class GuiAppLaunchTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     @Implements(AccessibilityNodeInfo::class)
     class CopyingWindowNodeShadow : ShadowAccessibilityNodeInfo() {
         @Implementation
@@ -145,20 +146,9 @@ class GuiAppLaunchTest {
         GuiRuntime.access = originalAccess
     }
 
-    private fun owner(): RunExecutionOwner {
-        var captured: RunExecutionOwner? = null
-        val executor = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { captured = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
-        }
-        ChatRunner(ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) = Unit
-            override fun cancel() = Unit
-        } }, object : ConversationStore { override fun save(message: Message) = Unit }, BatteryTool { error("unused") },
-            RunnerOptions(receiptBatchExecutor = executor)) {}.run(Message(MessageId("a"), ConversationId("c"),
-            RunId("r"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING), emptyList())
-        return checkNotNull(captured)
-    }
+    private fun owner(): RunExecutionOwner =
+        liveOwners.issue(Message(MessageId("a"), ConversationId("c"),
+            RunId("r"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
     private inner class Fixture(preference: TaskSurfacePreference = TaskSurfacePreference.FOREGROUND,
         answer: TaskSurface? = TaskSurface.FOREGROUND) {
         val owner = owner()

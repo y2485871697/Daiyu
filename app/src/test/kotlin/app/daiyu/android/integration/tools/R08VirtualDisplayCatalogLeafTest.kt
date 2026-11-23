@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36], manifest = Config.NONE)
 class R08VirtualDisplayCatalogLeafTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
 
@@ -117,7 +118,7 @@ class R08VirtualDisplayCatalogLeafTest {
 
     private inner class Fixture(store: ToolLedgerStore = InMemoryToolLedgerStore(), enabled: Boolean = true,
                                 withLaunchHandoff: Boolean = false) {
-        val owner = runnerOwner(message)
+        val owner = liveOwners.issue(message)
         val caps = SessionCapabilities("session", if (enabled) setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY) else emptySet())
         val plan = R08VirtualDisplayPlan.prepare(owner, caps, "stable_generation", listOfNotNull(
             R08VirtualDisplayWrite("start", R08VirtualDisplayAction.Start),

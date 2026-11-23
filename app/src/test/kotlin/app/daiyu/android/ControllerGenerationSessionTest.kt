@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Offline only: real Runner-issued owners, no HTTP, paid services, SQLite or media creation. */
 class ControllerGenerationSessionTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val identity = GenerationPreparationIdentity("account", ConversationId("conversation"),
         RunId("run"), MessageId("assistant"))
     private val editor = GenerationEditorSnapshot(3, " exact text ", listOf("immutable-photo"))
@@ -36,21 +37,9 @@ class ControllerGenerationSessionTest {
         return ControllerGenerationSession(p.confirm(p.preview, editor, identity), stop, drain)
     }
 
-    private fun owner(id: GenerationPreparationIdentity = identity): RunExecutionOwner {
-        var result: RunExecutionOwner? = null
-        val receiver = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { result = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
-        }
-        ChatRunner(ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-            override fun cancel() {}
-        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("unused") },
-            RunnerOptions(receiptBatchExecutor = receiver)) {}.run(
-            Message(id.assistantMessageId, id.conversationId, id.runId, Message.ASSISTANT_ROLE,
-                emptyList(), RunStatus.RUNNING), emptyList())
-        return checkNotNull(result)
-    }
+    private fun owner(id: GenerationPreparationIdentity = identity): RunExecutionOwner =
+        liveOwners.issue(Message(id.assistantMessageId, id.conversationId, id.runId, Message.ASSISTANT_ROLE,
+                emptyList(), RunStatus.RUNNING))
 
     private fun rejects(action: () -> Unit) { assertTrue(runCatching(action).isFailure) }
 

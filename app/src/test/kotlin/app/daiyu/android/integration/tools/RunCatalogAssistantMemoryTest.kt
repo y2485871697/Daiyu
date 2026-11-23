@@ -9,6 +9,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RunCatalogAssistantMemoryTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
 
@@ -23,7 +24,7 @@ class RunCatalogAssistantMemoryTest {
             message.conversationId, message.runId, memoryContext = context) { caps, task ->
             SkillRunSession.create(task, caps.enabled, emptyList())
         }
-        tools.bindOwner(runnerOwner(message))
+        tools.bindOwner(liveOwners.issue(message))
         try {
             assertEquals(setOf("assistant_memory_read", "assistant_memory_search"), tools.definitions.map { it.name }.toSet())
             assertEquals(1, assets.reads.size)
@@ -51,7 +52,7 @@ class RunCatalogAssistantMemoryTest {
             message.conversationId, message.runId, memoryContext = context) { caps, task ->
             SkillRunSession.create(task, caps.enabled, emptyList())
         }
-        tools.bindOwner(runnerOwner(message))
+        tools.bindOwner(liveOwners.issue(message))
         try {
             assertTrue(tools.definitions.isEmpty())
             assertTrue(assets.reads.isEmpty())

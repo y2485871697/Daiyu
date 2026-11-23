@@ -9,10 +9,11 @@ import org.junit.Test
 
 /** Authorization/ledger tests use a synthetic backend; no Android access. */
 class NotificationRunBoundaryTest {
-    private class Fixture(enabled: Boolean = true,
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
+    private inner class Fixture(enabled: Boolean = true,
         val tool: PlatformReadTool = PlatformReadTool.CROSS_APP_NOTIFICATIONS) {
         val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
-        val owner = runnerOwner(message)
+        val owner = liveOwners.issue(message)
         val authorization = TaskAuthorization("run", "run")
         val capabilities = SessionCapabilities("run", if (enabled) setOf(tool.capability, PlatformReadTool.TIME.capability) else emptySet())
         var denied: String? = null

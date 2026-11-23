@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicReference
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36], manifest = Config.NONE)
 class RunCatalogVirtualDisplaySessionTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
 
@@ -110,7 +111,7 @@ class RunCatalogVirtualDisplaySessionTest {
         closeResource: (AutoCloseable) -> Unit = { it.close() }
     ) : AutoCloseable {
         val pool = Executors.newCachedThreadPool()
-        val owner = runnerOwner(message)
+        val owner = liveOwners.issue(message)
         val caps = SessionCapabilities(if (otherObservation) "run" else "session",
             setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY, "audit", AskUserPlanTool.CAPABILITY,
                 RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY))

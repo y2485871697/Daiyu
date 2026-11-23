@@ -12,9 +12,10 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
 class LargeDelegationBatchTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val parent = Message(MessageId("parent"), ConversationId("conversation"), RunId("parent-run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
-    private val owner = runnerOwner(parent)
+    private val owner = liveOwners.issue(parent)
     private val session = SessionCapabilities("session", setOf(RunChildModels.CAPABILITY, RunChildTasks.CAPABILITY))
     private val authorization = TaskAuthorization(session.sessionId, parent.runId.value)
     private class Journal : ChildTaskStore {

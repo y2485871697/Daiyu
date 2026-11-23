@@ -16,6 +16,7 @@ import org.junit.Test
 
 /** Production schema, admission, single-effect approval and central ledger; no WebView/network. */
 class BrowserDefaultPermissionTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val assistant = AssistantProfile("profile", "Profile", "Frozen instructions")
     private val full = BrowserSettings(BrowserAccess.FULL)
     private val caps = setOf(RunBrowserTools.READ_CAPABILITY, RunBrowserTools.WRITE_CAPABILITY)
@@ -23,21 +24,9 @@ class BrowserDefaultPermissionTest {
     private val newTab = """{"action":"new_tab"}"""
     private val navigation = """{"action":"navigate","tab_id":0,"url":"https://example.invalid/dynamic"}"""
 
-    private fun owner(id: BrowserRunIdentity): RunExecutionOwner {
-        var token: RunExecutionOwner? = null
-        val receiver = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { token = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
-        }
-        val runner = ChatRunner(ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-            override fun cancel() {}
-        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("unused") },
-            RunnerOptions(receiptBatchExecutor = receiver)) {}
-        runner.run(Message(id.assistantMessageId, id.conversationId, id.runId,
-            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING), emptyList())
-        return checkNotNull(token)
-    }
+    private fun owner(id: BrowserRunIdentity): RunExecutionOwner =
+        liveOwners.issue(Message(id.assistantMessageId, id.conversationId, id.runId,
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
 
     private inner class Fixture(val preparation: BrowserRunPreparation,
         registry: BrowserSessionRegistry = BrowserSessionRegistry(),

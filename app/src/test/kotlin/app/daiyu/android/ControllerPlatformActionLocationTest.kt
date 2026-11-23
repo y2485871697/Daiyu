@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28])
 class ControllerPlatformActionLocationTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private class Persistence : TaskSurfacePersistence {
         var raw: String? = null
         var reads = 0
@@ -89,7 +90,7 @@ class ControllerPlatformActionLocationTest {
             preview.conversationId, preview.runId, authorization = scope.authorization, platformAction = scope) { caps, task ->
             SkillRunSession.create(task, caps.enabled, emptyList())
         }
-        tools.bindOwner(runnerOwner(message))
+        tools.bindOwner(liveOwners.issue(message))
         assertEquals(listOf(preview.action.kind.toolName), tools.definitions.map { it.name })
         val result = tools.execute(message, listOf(ToolInvocation(ToolCallId("clock"),
             preview.action.kind.toolName, preview.action.json))) { false }.single().outcome
@@ -129,7 +130,7 @@ class ControllerPlatformActionLocationTest {
             preview.conversationId, preview.runId, authorization = scope.authorization, platformAction = scope) { caps, task ->
             SkillRunSession.create(task, caps.enabled, emptyList())
         }
-        tools.bindOwner(runnerOwner(message))
+        tools.bindOwner(liveOwners.issue(message))
         assertEquals(listOf(preview.action.kind.toolName), tools.definitions.map { it.name })
         return tools to message
     }

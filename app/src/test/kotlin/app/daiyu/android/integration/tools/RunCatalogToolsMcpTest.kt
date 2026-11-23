@@ -19,6 +19,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Real catalog, original dispatcher/ledger, Runner-issued opaque owner, real okhttp Call; only wire is fake. */
 class RunCatalogToolsMcpTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
     private class Wire : Interceptor {
@@ -57,7 +58,7 @@ class RunCatalogToolsMcpTest {
             override val definition = app.daiyu.android.domain.tools.ToolDefinition("audit", 1, "audit", "audit", ToolEffect.READ_ONLY, ToolSchema())
             override fun prepare(arguments: ToolArguments) = PreparedTool.contextual { contexts.add(it); ExecutionReceipt.Confirmed("audit") }
         })
-        val owner = runnerOwner(message)
+        val owner = liveOwners.issue(message)
         val catalog = RunCatalogTools(registry, capabilities, ToolLedger(ledger), message.conversationId, message.runId,
             authorization = scope.authorization, mcp = scope) { grants, task ->
                 assertSame(capabilities, grants); assertSame(scope.authorization, task)
@@ -131,7 +132,7 @@ class RunCatalogToolsMcpTest {
             val denied = f.dispatch(f.call()).single().outcome
             assertEquals(DispatchOutcome.NotExecuted("mcp_owner_or_configuration_stale"), denied)
             assertFalse(denied.toString().contains("done"))
-            assertThrows(IllegalStateException::class.java) { f.catalog.bindOwner(runnerOwner(message)) }
+            assertThrows(IllegalStateException::class.java) { f.catalog.bindOwner(liveOwners.issue(message)) }
         } finally { f.close() }
     }
     @Test fun exactArgumentsAndMissingOrCopiedAuthorizationFailClosedBeforeReservation() {
@@ -158,7 +159,7 @@ class RunCatalogToolsMcpTest {
                 result
             }
         }
-        val realOwner = runnerOwner(message)
+        val realOwner = liveOwners.issue(message)
         val registry = ToolRegistry().register(object : RegisteredTool {
             override val definition = app.daiyu.android.domain.tools.ToolDefinition("private_read", 1, "private", "private", ToolEffect.READ_ONLY, ToolSchema())
             override fun prepare(arguments: ToolArguments) = PreparedTool.contextual(admit = {
@@ -221,7 +222,7 @@ class RunCatalogToolsMcpTest {
         assertFalse(drained.get())
         assertThrows(IllegalStateException::class.java) { f.scope.registeredTools() }
         assertThrows(IllegalStateException::class.java) { f.catalog.definitions }
-        assertThrows(IllegalStateException::class.java) { f.catalog.bindOwner(runnerOwner(message)) }
+        assertThrows(IllegalStateException::class.java) { f.catalog.bindOwner(liveOwners.issue(message)) }
         assertEquals(1, factories.get()); assertTrue(f.wire.methods.isEmpty())
     }
     @Test fun throwingLateTransportFactoryCannotTurnCloseIntoEmptyMapDrained() {

@@ -19,6 +19,7 @@ import org.junit.Test
 
 /** Real confirmation, adapter, dispatcher, facade and ledger. Only host/port are fake; no network. */
 class BrowserConfirmedCatalogTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val identity = BrowserRunIdentity(ConversationId("conversation"), RunId("run"),
         "assistant-profile", MessageId("assistant-message"))
     private val profile = AssistantProfile(identity.assistantId, "Test assistant", "")
@@ -198,19 +199,7 @@ class BrowserConfirmedCatalogTest {
     }
 
     /** Obtain the real opaque token from ChatRunner; do not forge it or reflect its constructor. */
-    private fun owner(id: BrowserRunIdentity = identity): RunExecutionOwner {
-        var captured: RunExecutionOwner? = null
-        val receiver = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { captured = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
-        }
-        val runner = ChatRunner(ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-            override fun cancel() {}
-        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("unused") },
-            RunnerOptions(receiptBatchExecutor = receiver)) {}
-        runner.run(Message(id.assistantMessageId, id.conversationId, id.runId,
-            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING), emptyList())
-        return checkNotNull(captured)
-    }
+    private fun owner(id: BrowserRunIdentity = identity): RunExecutionOwner =
+        liveOwners.issue(Message(id.assistantMessageId, id.conversationId, id.runId,
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
 }

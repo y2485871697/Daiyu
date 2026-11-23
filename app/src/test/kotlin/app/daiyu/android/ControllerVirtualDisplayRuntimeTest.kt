@@ -29,12 +29,13 @@ import java.util.concurrent.atomic.AtomicInteger
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [26, 36], manifest = Config.NONE)
 class ControllerVirtualDisplayRuntimeTest {
-    private class Fixture : AutoCloseable {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
+    private inner class Fixture : AutoCloseable {
         val base: Path = Files.createTempDirectory("r08-runtime-").toRealPath()
         val root: Path = base.resolve("leases")
         val fs = R08HostFileSystemFixture(base)
         val gate = Semaphore(1)
-        val owner = runnerOwner(Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
+        val owner = liveOwners.issue(Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
         val capabilities = SessionCapabilities("session", setOf(R08VirtualDisplayCatalogLeaf.CAPABILITY))
         val writes = listOf(R08VirtualDisplayWrite("start", R08VirtualDisplayAction.Start),

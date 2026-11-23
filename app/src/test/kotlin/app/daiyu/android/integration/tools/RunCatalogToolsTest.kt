@@ -32,12 +32,13 @@ internal fun runnerOwner(message: Message): RunExecutionOwner {
 }
 
 class RunCatalogToolsTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val owner = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
         "assistant", emptyList(), RunStatus.RUNNING)
     private fun ownedTools(registry: ToolRegistry, capabilities: SessionCapabilities, ledger: ToolLedger,
         conversation: ConversationId, run: RunId,
         capture: (SessionCapabilities, TaskAuthorization) -> SkillRunSession): RunCatalogTools =
-        RunCatalogTools(registry, capabilities, ledger, conversation, run, capture = capture).apply { bindOwner(runnerOwner(owner)) }
+        RunCatalogTools(registry, capabilities, ledger, conversation, run, capture = capture).apply { bindOwner(liveOwners.issue(owner)) }
 
     private val revision = "a".repeat(64)
     private val capabilities = SessionCapabilities("run", setOf(SkillRunSession.READ, SkillRunSession.RESOURCE))
@@ -56,7 +57,7 @@ class RunCatalogToolsTest {
             owner.conversationId, owner.runId,
             ordinaryFactory = { _, _, _ -> throw IllegalStateException("partial ordinary factory") },
             capture = { _, task -> scope(task) })
-        try { tools.bindOwner(runnerOwner(owner)); fail("factory failure hidden") }
+        try { tools.bindOwner(liveOwners.issue(owner)); fail("factory failure hidden") }
         catch (expected: IllegalStateException) { assertEquals("partial ordinary factory", expected.message) }
         val done = CountDownLatch(1)
         val result = AtomicReference<RunCatalogCloseResult>()
@@ -212,7 +213,7 @@ class RunCatalogToolsTest {
             assertTrue(contexts.single().owner.ownerId.isNotBlank())
             try { tools.execute(owner.copy(id = MessageId("foreign-assistant")), listOf(call)) { false }; fail("foreign assistant") }
             catch (_: IllegalArgumentException) {}
-            try { tools.bindOwner(runnerOwner(owner)); fail("second Runner owner accepted") }
+            try { tools.bindOwner(liveOwners.issue(owner)); fail("second Runner owner accepted") }
             catch (_: IllegalStateException) {}
         } finally { tools.close() }
         assertTrue(contexts.single().cancelled())
@@ -225,13 +226,13 @@ class RunCatalogToolsTest {
         denied { tools.definitions }
         assertEquals(0, captures)
         tools.close()
-        denied { tools.bindOwner(runnerOwner(owner)) }
+        denied { tools.bindOwner(liveOwners.issue(owner)) }
         assertEquals(0, captures)
     }
 
     @Test fun ownedUnknownReceiptCannotExecuteAgainThroughEitherDispatcherRoute() {
         var executions = 0
-        val token = runnerOwner(owner)
+        val token = liveOwners.issue(owner)
         val authorization = TaskAuthorization("run", "run")
         val registry = ToolRegistry().register(object : RegisteredTool {
             override val definition = app.daiyu.android.domain.tools.ToolDefinition(
@@ -253,7 +254,7 @@ class RunCatalogToolsTest {
     }
 
     @Test fun ownedWriteRequiresExactGrantBeforeReserveAndPreservesExecutionReferences() {
-        val token = runnerOwner(owner)
+        val token = liveOwners.issue(owner)
         val effect = WriteEffect("fixture", "replace", "target", "complete desired bytes")
         val exact = TaskAuthorization("run", "run", setOf(effect))
         val call = ToolInvocation(ToolCallId("provider-write"), "owned_write", "{}")
@@ -370,7 +371,7 @@ class RunCatalogToolsTest {
                         }
                     })
             }, capture = { capabilities, task -> SkillRunSession.create(task, capabilities.enabled, emptyList()) })
-        tools.bindOwner(runnerOwner(owner)); tools.definitions
+        tools.bindOwner(liveOwners.issue(owner)); tools.definitions
         fun command(id: String, timeout: Int) = ToolInvocation(ToolCallId(id), "terminal_exec",
             JSONObject().put("command", "echo exact").put("environment", "android").put("timeout_ms", timeout).toString())
         val first = java.util.concurrent.FutureTask { tools.execute(owner, listOf(command("first", 30000))) { false } }

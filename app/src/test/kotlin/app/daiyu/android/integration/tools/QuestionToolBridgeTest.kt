@@ -7,12 +7,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class QuestionToolBridgeTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
     private val arguments = """{"title":"Choose","question":"Which?","options":[{"id":"a","label":"A"},{"id":"b","label":"B"}]}"""
     private fun question() = ToolInvocation(ToolCallId("provider-question"), "ask_user", arguments)
     private inner class Fixture {
-        val owner = runnerOwner(message)
+        val owner = liveOwners.issue(message)
         val task = TaskAuthorization("session", message.runId.value)
         val store = InMemoryToolLedgerStore()
         val capabilities = SessionCapabilities("session", setOf(AskUserPlanTool.CAPABILITY, "read"))

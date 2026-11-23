@@ -16,6 +16,7 @@ import java.util.UUID
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE, sdk = [30])
 class OrdinaryWriteRepeatTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val context get() = RuntimeEnvironment.getApplication()
     private val name = "repeat-${UUID.randomUUID()}.db"
     private var store: SQLiteToolLedgerStore? = null
@@ -37,7 +38,7 @@ class OrdinaryWriteRepeatTest {
     private inner class Task(id: String, ledgerStore: SQLiteToolLedgerStore = store ?: open()) {
         val message = Message(MessageId("assistant-$id"), ConversationId("conversation"), RunId(id),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
-        val owner = runnerOwner(message)
+        val owner = liveOwners.issue(message)
         val auth = TaskAuthorization("session", id, emptySet())
         val scope = RunOrdinaryPlatformTools(owner, auth, backend).also { scopes += it }
         val dispatcher = ToolDispatcher(ToolRegistry().apply { scope.tools.forEach(::register) }.snapshot(),

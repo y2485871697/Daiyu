@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Real central catalog/dispatcher/ledger and Runner-issued owner; only Android transport is fake. */
 class PlatformActionCatalogTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private class Backend(var reply: ExecutionReceipt = ExecutionReceipt.Confirmed("{\"read_back\":true}")) : PlatformActionBackend {
         var calls = 0
         var unavailable: String? = null
@@ -35,7 +36,7 @@ class PlatformActionCatalogTest {
             assertSame(task, auth)
             SkillRunSession.create(auth, caps.enabled, emptyList())
         }
-        tools.bindOwner(runnerOwner(message)); tools.definitions
+        tools.bindOwner(liveOwners.issue(message)); tools.definitions
         return tools to scope
     }
     @Test fun exactApprovalOwnerAndOriginalLedgerConfirmedReplay() {
@@ -64,7 +65,7 @@ class PlatformActionCatalogTest {
         val caps = SessionCapabilities("run", setOf(action.kind.capability))
         val empty = RunCatalogTools(ToolRegistry(), caps, ToolLedger(InMemoryToolLedgerStore()), message.conversationId,
             message.runId) { c, a -> SkillRunSession.create(a, c.enabled, emptyList()) }
-        empty.bindOwner(runnerOwner(message))
+        empty.bindOwner(liveOwners.issue(message))
         assertFalse(empty.definitions.any { it.name == action.kind.toolName })
         assertEquals(DispatchOutcome.NotExecuted("unknown_tool"), empty.execute(message, listOf(call())) { false }.single().outcome)
         empty.close()
@@ -75,7 +76,7 @@ class PlatformActionCatalogTest {
         val task = TaskAuthorization("run", "run", setOf(action.effect))
         val scope = PlatformActionScope(message.conversationId, message.runId, action, task, Backend())
         try {
-            scope.bind(runnerOwner(message), caps, TaskAuthorization("run", "run", task.allowedWrites))
+            scope.bind(liveOwners.issue(message), caps, TaskAuthorization("run", "run", task.allowedWrites))
             fail("copied grant is not the approved task")
         } catch (_: IllegalArgumentException) {}
         scope.close()

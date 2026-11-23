@@ -19,10 +19,11 @@ private fun deviceCall(id: String, name: String = ReadOnlyTool.BATTERY.toolName,
     ToolInvocation(ToolCallId(id), name, arguments)
 
 class RunDeviceResourcesTest {
-    private class Fixture(bind: Boolean = true, read: (ToolInvocation) -> String = { """{"ok":true}""" }) : AutoCloseable {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
+    private inner class Fixture(bind: Boolean = true, read: (ToolInvocation) -> String = { """{"ok":true}""" }) : AutoCloseable {
         val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
-        val owner = runnerOwner(message)
+        val owner = liveOwners.issue(message)
         val authorization = TaskAuthorization("run", "run")
         val capabilities = SessionCapabilities("run", setOf(AndroidToolRegistry.BATTERY_CAPABILITY, AndroidToolRegistry.DEVICE_STATUS_CAPABILITY))
         val reads = AtomicInteger()
@@ -51,7 +52,7 @@ class RunDeviceResourcesTest {
     @Test fun copiedAuthorizationAndSecondRunnerOwnerCannotRead() {
         Fixture().use { f ->
             assertEquals(DispatchOutcome.NotExecuted("tool_run_authorization_mismatch"), f.dispatch(deviceCall("copied"), TaskAuthorization("run", "run")))
-            assertEquals(DispatchOutcome.NotExecuted("tool_run_owner_mismatch"), f.dispatch(deviceCall("other"), token = runnerOwner(f.message)))
+            assertEquals(DispatchOutcome.NotExecuted("tool_run_owner_mismatch"), f.dispatch(deviceCall("other"), token = liveOwners.issue(f.message)))
             assertEquals(0, f.reads.get()); assertTrue(f.dispatch(deviceCall("original")) is DispatchOutcome.Confirmed)
             assertEquals(1, f.reads.get())
         }

@@ -12,7 +12,7 @@ import kotlin.concurrent.thread
 /** Hold the issuing runner in next() while a test dispatches against its owner. */
 class LiveRunnerOwners : ExternalResource() {
     private val release = CountDownLatch(1)
-    private val workers = mutableListOf<CompletableFuture<Message>>()
+    private val workers = java.util.concurrent.CopyOnWriteArrayList<CompletableFuture<Message>>()
 
     fun issue(message: Message): RunExecutionOwner {
         val ready = CompletableFuture<RunExecutionOwner>()

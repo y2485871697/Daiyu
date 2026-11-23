@@ -234,7 +234,7 @@ val hostTestJavaLauncher = extensions.getByType<org.gradle.jvm.toolchain.JavaToo
     .launcherFor { languageVersion.set(org.gradle.jvm.toolchain.JavaLanguageVersion.of(21)) }
 tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
     javaLauncher.set(hostTestJavaLauncher)
-    systemProperty("robolectric.dependency.repo.url", "https://repo.maven.apache.org/maven2")
+    systemProperty("robolectric.dependency.repo.url", "https://maven-central.storage-download.googleapis.com/maven2")
     doFirst {
         val launcher = javaLauncher.get()
         check(launcher.metadata.languageVersion.asInt() == 21)

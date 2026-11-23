@@ -17,20 +17,10 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [36], application = Application::class, manifest = Config.NONE)
 class RunOrdinaryBrowserPreparationTest {
-    private fun owner(): RunExecutionOwner {
-        var captured: RunExecutionOwner? = null
-        val executor = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { captured = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
-        }
-        ChatRunner(ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) = Unit
-            override fun cancel() = Unit
-        } }, object : ConversationStore { override fun save(message: Message) = Unit }, BatteryTool { error("unused") },
-            RunnerOptions(receiptBatchExecutor = executor)) {}.run(Message(MessageId("reply"), ConversationId("conversation"),
-            RunId("run"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING), emptyList())
-        return checkNotNull(captured)
-    }
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
+    private fun owner(): RunExecutionOwner =
+        liveOwners.issue(Message(MessageId("reply"), ConversationId("conversation"),
+            RunId("run"), Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
 
     @Test fun firstNavigationAndNewTabUrlPrepareThroughTheActualOrdinaryLeafWithoutOpeningHost() {
         var opened = 0

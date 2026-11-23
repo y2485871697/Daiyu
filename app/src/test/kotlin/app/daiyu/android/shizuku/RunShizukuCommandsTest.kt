@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 class RunShizukuCommandsTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private open class Backend : ShizukuBackend {
         override val identity = ShizukuIdentity(2000, "service", "permission")
         val commands = mutableListOf<ShizukuCommand>()
@@ -35,21 +36,9 @@ class RunShizukuCommandsTest {
         override fun closeWithResult(onResult: (ShizukuCloseResult) -> Unit) { close(); onResult(closeResult) }
     }
 
-    private fun owner(): RunExecutionOwner {
-        var result: RunExecutionOwner? = null
-        val receiver = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { result = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
-        }
-        val runner = ChatRunner(ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-            override fun cancel() {}
-        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("unused") },
-            RunnerOptions(receiptBatchExecutor = receiver)) {}
-        runner.run(Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
-            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING), emptyList())
-        return checkNotNull(result)
-    }
+    private fun owner(): RunExecutionOwner =
+        liveOwners.issue(Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
 
     private class Fixture(val backend: Backend = Backend(), enabled: Boolean = true, approved: Boolean = true,
         bind: Boolean = true, val token: RunExecutionOwner) : AutoCloseable {

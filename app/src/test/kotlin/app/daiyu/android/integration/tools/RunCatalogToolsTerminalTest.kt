@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Production parent dispatch/close path, real Runner-issued owner, fake transport only. */
 class RunCatalogToolsTerminalTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val hostCwd = File(System.getProperty("java.io.tmpdir")).absoluteFile.toPath().normalize().toFile()
     private val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
@@ -64,7 +65,7 @@ class RunCatalogToolsTerminalTest {
             if (enabled) setOf(RunTerminalTools.CAPABILITY) else emptySet())
         val opens = AtomicInteger()
         val binding = CatalogTerminalBinding.approved(plan, authorization) { opens.incrementAndGet(); open?.invoke() ?: connection }
-        val token = runnerOwner(message)
+        val token = liveOwners.issue(message)
         val auditContexts = mutableListOf<ToolExecutionContext>()
         val registry = ToolRegistry().register(object : RegisteredTool {
             override val definition = app.daiyu.android.domain.tools.ToolDefinition(
@@ -136,7 +137,7 @@ class RunCatalogToolsTerminalTest {
                 assertTrue(auth.allowedWrites.isEmpty())
                 SkillRunSession.create(auth, emptySet(), emptyList())
             }
-            tools.bindOwner(runnerOwner(message))
+            tools.bindOwner(liveOwners.issue(message))
             try { assertTrue(tools.definitions.isEmpty()) } finally { tools.close() }
         }
         Fixture(enabled = false).use { f ->
@@ -168,7 +169,7 @@ class RunCatalogToolsTerminalTest {
     @Test fun realRunnerOwnerCannotBeSubstitutedEvenWithMatchingRunIds() {
         Fixture().use { f ->
             f.tools.definitions
-            rejected("tool_owner_already_bound") { f.tools.bindOwner(runnerOwner(message)) }
+            rejected("tool_owner_already_bound") { f.tools.bindOwner(liveOwners.issue(message)) }
             rejected("tool_run_owner_mismatch") {
                 f.tools.execute(message.copy(id = MessageId("foreign-assistant")), listOf(f.step("open"))) { false }
             }
@@ -180,7 +181,7 @@ class RunCatalogToolsTerminalTest {
             assertTrue(f.dispatch(f.step("open")).single().outcome is DispatchOutcome.Confirmed)
         }
         Fixture(bind = false).use { f ->
-            f.binding.bind(runnerOwner(message), f.capabilities)
+            f.binding.bind(liveOwners.issue(message), f.capabilities)
             rejected("tool_owner_already_bound") { f.tools.bindOwner(f.token) }
             assertEquals(0, f.opens.get()); assertTrue(f.store.transaction { it.isEmpty() })
         }

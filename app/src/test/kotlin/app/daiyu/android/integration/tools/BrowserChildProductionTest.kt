@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Production approval/token/catalog/ledger/fetch/coordinator; fake HTTP only, real private files. */
 class BrowserChildProductionTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val newTab = """{"action":"new_tab"}"""
     private val fetch = """{"action":"fetch","tab_id":0,"url":"https://fixture.invalid/file"}"""
     private val settings = BrowserSettings(BrowserAccess.FULL)
@@ -439,19 +440,7 @@ class BrowserChildProductionTest {
         }
     }
 
-    private fun owner(run: String, message: String): RunExecutionOwner {
-        var captured: RunExecutionOwner? = null
-        val receiver = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { captured = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
-        }
-        val runner = ChatRunner(ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-            override fun cancel() {}
-        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("unused") },
-            RunnerOptions(receiptBatchExecutor = receiver)) {}
-        runner.run(Message(MessageId(message), ConversationId("conversation"), RunId(run),
-            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING), emptyList())
-        return checkNotNull(captured)
-    }
+    private fun owner(run: String, message: String): RunExecutionOwner =
+        liveOwners.issue(Message(MessageId(message), ConversationId("conversation"), RunId(run),
+            Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
 }

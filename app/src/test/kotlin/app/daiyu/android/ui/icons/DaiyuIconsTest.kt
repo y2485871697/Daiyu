@@ -85,11 +85,12 @@ class DaiyuIconsTest {
         "Locate" to DaiyuIcons.Locate,
         "Import" to DaiyuIcons.Import,
         "Help" to DaiyuIcons.Help,
+        "Call" to DaiyuIcons.Call,
     )
 
     @Test
     fun everyRequiredIconBuildsWithAUniqueName() {
-        assertEquals(76, icons.size)
+        assertEquals(77, icons.size)
         assertEquals(icons.size, icons.map { it.second.name }.toSet().size)
         icons.forEach { (name, vector) ->
             assertEquals("Daiyu.$name", vector.name)

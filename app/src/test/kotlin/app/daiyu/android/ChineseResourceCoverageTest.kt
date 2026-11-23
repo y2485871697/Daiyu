@@ -14,10 +14,10 @@ class ChineseResourceCoverageTest {
         .first { File(it, "app/src/main/AndroidManifest.xml").isFile }
     private val resources = File(root, "app/src/main/res")
     private val files = mapOf(
-        "gui_strings.xml" to 2,
+        "gui_strings.xml" to 1,
         "image_attachments.xml" to 24,
         "strings_shizuku.xml" to 35,
-        "voice_host.xml" to 15,
+        "voice_host.xml" to 19,
     )
 
     private fun strings(directory: String, filename: String): Map<String, String> {
@@ -42,7 +42,7 @@ class ChineseResourceCoverageTest {
         return result
     }
 
-    @Test fun all76ChineseStringsHaveMatchingLocalizedKeysAndPayloads() {
+    @Test fun allLocalizedKeysAndPayloadsMatchTheirExpectedChineseText() {
         files.forEach { (filename, expectedCount) ->
             val defaults = strings("values", filename)
             val localized = strings("values-zh", filename)
@@ -50,7 +50,12 @@ class ChineseResourceCoverageTest {
             assertEquals("Localized keys in $filename", defaults.keys, localized.keys)
             defaults.forEach { (name, text) ->
                 // Full text equality also protects numbered placeholders and literal Android escapes (e.g. \\n).
-                assertEquals("Chinese payload for $name", text, localized.getValue(name))
+                val expected = when (name) {
+                    "voice_host_preparation_timeout" -> "音频准备超时"
+                    "voice_host_synthesis_timeout" -> "朗读合成超时"
+                    else -> text
+                }
+                assertEquals("Chinese payload for $name", expected, localized.getValue(name))
             }
         }
     }

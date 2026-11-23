@@ -37,7 +37,9 @@ class PlatformManifestBoundaryTest {
         assertFalse(names.any { it in setOf("android.permission.MANAGE_EXTERNAL_STORAGE",
             "android.permission.WRITE_EXTERNAL_STORAGE", "android.permission.WRITE_CONTACTS", "android.permission.WRITE_CALENDAR",
             "android.permission.BIND_NOTIFICATION_LISTENER_SERVICE") })
-        assertEquals(23, permissions.size)
+        assertTrue(names.containsAll(setOf("android.permission.ACCESS_COARSE_LOCATION", "android.permission.ACCESS_FINE_LOCATION",
+            "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK", "android.permission.FOREGROUND_SERVICE_SPECIAL_USE")))
+        assertEquals(27, permissions.size)
         assertEquals(names.size, permissions.size)
         assertTrue(names.contains("android.permission.SYSTEM_ALERT_WINDOW"))
         assertTrue(names.containsAll(setOf("com.android.alarm.permission.SET_ALARM", "android.permission.MODIFY_AUDIO_SETTINGS")))

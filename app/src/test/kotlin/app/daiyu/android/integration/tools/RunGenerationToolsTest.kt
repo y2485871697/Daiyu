@@ -20,22 +20,11 @@ import java.util.concurrent.TimeUnit
  * are substituted. SQLite registration is covered by the device adapter test, not this fake.
  */
 class RunGenerationToolsTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private fun owner(conversation: String = "conversation", run: String = "run",
-        assistant: String = "assistant"): RunExecutionOwner {
-        var token: RunExecutionOwner? = null
-        val receiver = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { token = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
-        }
-        ChatRunner(ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-            override fun cancel() {}
-        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("unused") },
-            RunnerOptions(receiptBatchExecutor = receiver)) {}.run(
-            Message(MessageId(assistant), ConversationId(conversation), RunId(run),
-                Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING), emptyList())
-        return checkNotNull(token)
-    }
+        assistant: String = "assistant"): RunExecutionOwner =
+        liveOwners.issue(Message(MessageId(assistant), ConversationId(conversation), RunId(run),
+                Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING))
 
     private class Attempts : GenerationAttemptStore {
         val rows = linkedMapOf<GenerationIdentity, Pair<GenerationAttempt, Submission?>>()

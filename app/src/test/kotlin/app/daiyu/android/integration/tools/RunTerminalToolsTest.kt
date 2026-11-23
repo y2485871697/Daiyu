@@ -20,24 +20,13 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Real central owner/authorization/ledger; deterministic transports, no shell or network. */
 class RunTerminalToolsTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val hostCwd = File(System.getProperty("java.io.tmpdir")).absoluteFile.toPath().normalize().toFile()
     private fun message() = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
 
-    private fun owner(message: Message = message()): RunExecutionOwner {
-        var result: RunExecutionOwner? = null
-        val receiver = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { result = owner }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
-        }
-        val runner = ChatRunner(ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-            override fun cancel() {}
-        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("unused") },
-            RunnerOptions(receiptBatchExecutor = receiver)) {}
-        runner.run(message, emptyList())
-        return checkNotNull(result)
-    }
+    private fun owner(message: Message = message()): RunExecutionOwner =
+        liveOwners.issue(message)
 
     private open class Connection : TerminalPtyConnection {
         val writes = mutableListOf<Triple<String, Long, ByteArray>>()
@@ -80,7 +69,7 @@ class RunTerminalToolsTest {
             TerminalPtyStep.Resize("resize", "host_resize", 90, 30, 100),
         ), listOf(TerminalPtyRead("page", 0, 1024)))
 
-    private class Fixture(
+    private inner class Fixture(
         val plan: TerminalPtyPlan,
         val connection: Connection = Connection(),
         val store: ToolLedgerStore = InMemoryToolLedgerStore(),
@@ -93,7 +82,7 @@ class RunTerminalToolsTest {
         val capabilities = SessionCapabilities("session", if (enabled) setOf(RunTerminalTools.CAPABILITY) else emptySet())
         val binding = CatalogTerminalBinding.approved(plan, authorization) { calls.incrementAndGet(); open?.invoke() ?: connection }
         val adapter = RunTerminalTools(binding, capabilities, ToolLedger(store))
-        val owner = ownerToken()
+        val owner = this@RunTerminalToolsTest.owner()
         val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
         val dispatcher = ToolDispatcher(ToolRegistry().also { r -> adapter.registeredTools.forEach(r::register) }.snapshot(), capabilities, ToolLedger(store))
@@ -101,7 +90,6 @@ class RunTerminalToolsTest {
         fun invocation(step: String, id: String = step) = ToolInvocation(ToolCallId(id), RunTerminalTools.STEP_TOOL,
             JSONObject().put("step_id", step).toString())
         fun call(step: String, id: String = step) = adapter.execute(message, listOf(invocation(step, id))) { false }.single().outcome
-        companion object { private fun ownerToken() = RunTerminalToolsTest().owner() }
     }
 
     @Test fun approvalRequiresEveryExactEffectAndCapabilityAloneAdvertisesNothing() {

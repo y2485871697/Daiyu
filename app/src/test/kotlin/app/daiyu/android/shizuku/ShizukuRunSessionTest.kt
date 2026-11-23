@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 class ShizukuRunSessionTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private class Backend(val uid: Int = 2000) : ShizukuBackend {
         override val identity = ShizukuIdentity(uid, "service", "permission")
         val executions = AtomicInteger()
@@ -34,21 +35,9 @@ class ShizukuRunSessionTest {
         }
     }
 
-    private fun owner(runId: String = "run"): RunExecutionOwner {
-        var owner: RunExecutionOwner? = null
-        val executor = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(value: RunExecutionOwner) { owner = value }
-            override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
-        }
-        ChatRunner(ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-            override fun cancel() {}
-        } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("unused") },
-            RunnerOptions(receiptBatchExecutor = executor)) {}.run(
-            Message(MessageId("assistant"), ConversationId("session"), RunId(runId), Message.ASSISTANT_ROLE,
-                emptyList(), RunStatus.RUNNING), emptyList())
-        return checkNotNull(owner)
-    }
+    private fun owner(runId: String = "run"): RunExecutionOwner =
+        liveOwners.issue(Message(MessageId("assistant"), ConversationId("session"), RunId(runId), Message.ASSISTANT_ROLE,
+                emptyList(), RunStatus.RUNNING))
 
     private fun approved(uid: Int = 2000): ShizukuRunSession = ShizukuRunSession("session", "run").apply {
         edit(uid, "printf exact", 1234)
@@ -145,11 +134,11 @@ class ShizukuRunSessionTest {
         session.close()
     }
 
-    private class DispatchFixture(val session: ShizukuRunSession, val backend: Backend) : AutoCloseable {
+    private inner class DispatchFixture(val session: ShizukuRunSession, val backend: Backend) : AutoCloseable {
         val commands = session.open { _, _ -> backend }
         val caps = SessionCapabilities("session", setOf(RunShizukuCommands.CAPABILITY))
         val auth = TaskAuthorization("session", "run", session.allowedWrites)
-        val token = ShizukuRunSessionTest().owner()
+        val token = this@ShizukuRunSessionTest.owner()
         val dispatcher = ToolDispatcher(ToolRegistry().register(commands.tool()).snapshot(), caps,
             ToolLedger(InMemoryToolLedgerStore()))
         init { commands.bind(token, caps, auth) }

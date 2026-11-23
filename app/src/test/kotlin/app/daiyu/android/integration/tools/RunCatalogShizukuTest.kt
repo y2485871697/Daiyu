@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
 
 class RunCatalogShizukuTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private class Backend : ShizukuBackend {
         override val identity = ShizukuIdentity(2000, "service", "permission")
         var executions = 0
@@ -56,7 +57,7 @@ class RunCatalogShizukuTest {
         val binding = CatalogShizukuBinding.open(session) { uid, _ -> assertEquals(2000, uid); backend }
         val caps = SessionCapabilities("session", setOf(RunShizukuCommands.CAPABILITY))
         val auth = TaskAuthorization("session", "run", session.allowedWrites)
-        val token = runnerOwner(message)
+        val token = liveOwners.issue(message)
         val store = InMemoryToolLedgerStore()
         var captures = 0
         val tools = RunCatalogTools(ToolRegistry(), caps, ToolLedger(store), message.conversationId, message.runId,
@@ -126,7 +127,7 @@ class RunCatalogShizukuTest {
             val tools = RunCatalogTools(ToolRegistry(), caps, ToolLedger(store), message.conversationId, message.runId,
                 authorization = auth, shizuku = binding, capture = ::emptySkills)
             try {
-                tools.bindOwner(runnerOwner(message))
+                tools.bindOwner(liveOwners.issue(message))
                 assertEquals(enabled, tools.definitions.any { it.name == RunShizukuCommands.TOOL_NAME })
                 val result = tools.execute(message, listOf(call())) { false }.single().outcome
                 assertEquals(DispatchOutcome.NotExecuted(if (enabled) "task_write_not_authorized" else "capability_disabled"), result)
@@ -155,7 +156,7 @@ class RunCatalogShizukuTest {
             val tools = RunCatalogTools(ToolRegistry(), caps, ToolLedger(failing), message.conversationId, message.runId,
                 authorization = auth, shizuku = binding, capture = ::emptySkills)
             try {
-                tools.bindOwner(runnerOwner(message)); tools.definitions
+                tools.bindOwner(liveOwners.issue(message)); tools.definitions
                 val receipts = if (useStart) (tools.start(message, listOf(call())) { false } as ReceiptBatchStart.Completed).receipts
                     else tools.execute(message, listOf(call())) { false }
                 assertEquals(DispatchOutcome.Unknown("receipt_persistence_failed"), receipts.single().outcome)
@@ -215,7 +216,7 @@ class RunCatalogShizukuTest {
         val caps = SessionCapabilities("session", setOf(RunChildTasks.CAPABILITY, RunShizukuCommands.CAPABILITY))
         val auth = TaskAuthorization("session", "run", session.allowedWrites)
         val grants = auth.allowedWrites.toSet()
-        val token = runnerOwner(message)
+        val token = liveOwners.issue(message)
         val journal = NoChildWork()
         val supervisor = RetainedChildTasks(journal)
         val entered = CountDownLatch(1)
@@ -306,7 +307,7 @@ class RunCatalogShizukuTest {
                 check(release.await(5, TimeUnit.SECONDS))
                 throw expected
             }, capture = ::emptySkills)
-        val token = runnerOwner(message)
+        val token = liveOwners.issue(message)
         val worker = Thread {
             try { tools.bindOwner(token) } catch (caught: Throwable) { failure.set(caught) }
         }
@@ -348,7 +349,7 @@ class RunCatalogShizukuTest {
                 }
                 resource.close(); otherStops.incrementAndGet()
             }) { actualCaps, actualAuth -> emptySkills(actualCaps, actualAuth).also { scope = it } }
-        val token = runnerOwner(message)
+        val token = liveOwners.issue(message)
         tools.bindOwner(token); tools.definitions
         assertFalse(scope.availableTools.isEmpty())
         val closer = Thread {
@@ -405,7 +406,7 @@ class RunCatalogShizukuTest {
         val tools = RunCatalogTools(ToolRegistry(), SessionCapabilities("session", setOf(RunShizukuCommands.CAPABILITY)),
             ToolLedger(store), message.conversationId, message.runId,
             authorization = TaskAuthorization("session", "run", session.allowedWrites), shizuku = binding, capture = ::emptySkills)
-        tools.bindOwner(runnerOwner(message)); tools.definitions
+        tools.bindOwner(liveOwners.issue(message)); tools.definitions
         val failure = AtomicReference<Throwable?>()
         val worker = Thread {
             try { tools.execute(message, listOf(call())) { false } } catch (caught: Throwable) { failure.set(caught) }

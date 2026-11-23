@@ -13,7 +13,7 @@ class CallCaptionRevealTest {
         for (frame in 1..600) {
             val nanos = frame * 16_000_000L
             assertEquals(conversation.advance(reference, nanos), caption.advance(target, nanos))
-            if (frame == 64) assertTrue(caption.visible(target) in 68..72)
+            if (frame <= 64) assertEquals(frame, caption.visible(target))
         }
         assertEquals(500, caption.visible(target))
     }
@@ -35,9 +35,9 @@ class CallCaptionRevealTest {
         typing.advance(target, 1L); typing.advance(target, 16_000_001L)
         target = typing.update("新".repeat(100), true)
         assertEquals(0, target.start)
-        typing.advance(target, 32_000_001L)
+        val beforePause = typing.advance(target, 32_000_001L)
         typing.pause(target)
-        assertEquals(0, typing.advance(target, 10_000_000_001L))
+        assertEquals(beforePause + 1, typing.advance(target, 10_000_000_001L))
         assertEquals("😀", "😀组合".take(MarkdownTextBoundaries("😀组合").end(1)))
     }
 }

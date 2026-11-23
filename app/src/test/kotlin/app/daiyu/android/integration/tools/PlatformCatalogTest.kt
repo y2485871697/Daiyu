@@ -9,10 +9,11 @@ import org.junit.Test
 import java.util.concurrent.atomic.AtomicInteger
 
 class PlatformCatalogTest {
-    private class Fixture(enabled: Set<PlatformReadTool> = PlatformReadTool.entries.toSet(), bind: Boolean = true) : AutoCloseable {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
+    private inner class Fixture(enabled: Set<PlatformReadTool> = PlatformReadTool.entries.toSet(), bind: Boolean = true) : AutoCloseable {
         val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
             Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
-        val owner = runnerOwner(message)
+        val owner = liveOwners.issue(message)
         val authorization = TaskAuthorization("run", "run")
         val capabilities = SessionCapabilities("run", AndroidToolRegistry.capabilitiesFor(emptySet(), enabled))
         val reads = AtomicInteger()
@@ -82,7 +83,7 @@ class PlatformCatalogTest {
             assertEquals(DispatchOutcome.NotExecuted("tool_run_authorization_mismatch"),
                 f.dispatch(call, TaskAuthorization("run", "run")))
             assertEquals(DispatchOutcome.NotExecuted("tool_run_owner_mismatch"),
-                f.dispatcher.dispatchOwned(f.authorization, listOf(call), runnerOwner(f.message)).single().outcome)
+                f.dispatcher.dispatchOwned(f.authorization, listOf(call), liveOwners.issue(f.message)).single().outcome)
             assertEquals(1, f.reads.get())
             f.resources.close()
             assertEquals(DispatchOutcome.NotExecuted("run_closed"), f.dispatch(f.call(PlatformReadTool.ENVIRONMENT, id = "after-close")))
@@ -132,7 +133,7 @@ class PlatformCatalogTest {
             assertEquals(DispatchOutcome.NotExecuted("tool_run_authorization_mismatch"),
                 f.dispatch(call, TaskAuthorization("run", "run")))
             assertEquals(DispatchOutcome.NotExecuted("tool_run_owner_mismatch"),
-                f.dispatcher.dispatchOwned(f.authorization, listOf(call), runnerOwner(f.message)).single().outcome)
+                f.dispatcher.dispatchOwned(f.authorization, listOf(call), liveOwners.issue(f.message)).single().outcome)
             assertTrue(f.dispatch(call, cancelled = { true }) is DispatchOutcome.NotExecuted)
             assertEquals(0, f.reads.get())
             assertTrue(f.dispatch(call) is DispatchOutcome.Confirmed)

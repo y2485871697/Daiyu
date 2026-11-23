@@ -10,6 +10,7 @@ import org.junit.Test
 
 /** Pure JVM contracts. The backend is a receipt fake; no shell/process/Android I/O. */
 class ControllerShizukuPreparationTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private fun preparation(command: String = "printf exact", uid: Int = 2000, timeout: Long = 1234) =
         ControllerShizukuPreparation(null, "用户草稿", uid, command, timeout,
             ConversationId("reserved-conversation"), RunId("reserved-run"))
@@ -182,7 +183,7 @@ class ControllerShizukuPreparationTest {
             assertSame(auth, actualAuth)
             SkillRunSession.create(actualAuth, actualCaps.enabled, emptyList())
         }
-        tools.bindOwner(runnerOwner(message))
+        tools.bindOwner(liveOwners.issue(message))
         assertEquals(listOf(RunShizukuCommands.TOOL_NAME), tools.definitions.map { it.name })
         fun call(script: String, id: String = "same-call") = ToolInvocation(ToolCallId(id),
             RunShizukuCommands.TOOL_NAME, """{"script":"$script","timeout_ms":1234}""")

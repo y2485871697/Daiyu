@@ -7,6 +7,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CatalogModelBridgeTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val owner = Message(MessageId("a"), ConversationId("conversation"), RunId("run"),
         "assistant", emptyList(), RunStatus.RUNNING)
     private val schema = ToolSchema(listOf(ArgumentField("query", ArgumentType.Text(maxLength=8, minimumLength=2))))
@@ -18,7 +19,7 @@ class CatalogModelBridgeTest {
             override fun prepare(arguments:ToolArguments)=PreparedTool(execute=execute)
         })
         return CatalogModelBridge(registry.snapshot(),SessionCapabilities("session",setOf("read")),
-            ToolLedger(InMemoryToolLedgerStore()),owner.conversationId,owner.runId,TaskAuthorization("session",owner.runId.value)).apply { bindOwner(runnerOwner(owner)) }
+            ToolLedger(InMemoryToolLedgerStore()),owner.conversationId,owner.runId,TaskAuthorization("session",owner.runId.value)).apply { bindOwner(liveOwners.issue(owner)) }
     }
     @Test fun canonicalFilteredSchemaAndReceiptReplayUseOneCatalogAndLedger() {
         var executions=0

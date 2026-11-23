@@ -16,6 +16,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /** Real catalog/leaf/Runner owner, no SQL, assets, network or paid submission. */
 class RunCatalogGenerationBindingTest {
+    @get:org.junit.Rule val liveOwners = app.daiyu.android.integration.tools.LiveRunnerOwners()
     private val message = Message(MessageId("assistant"), ConversationId("conversation"), RunId("run"),
         Message.ASSISTANT_ROLE, emptyList(), RunStatus.RUNNING)
     private val capabilities = SessionCapabilities("session", setOf(RunGenerationTools.CAPABILITY, "audit"))
@@ -93,7 +94,7 @@ class RunCatalogGenerationBindingTest {
     }
 
     @Test fun explicitlyGrantedLeafUsesTheSameCentralOwnerAuthorizationAndOriginalCall() {
-        val token = runnerOwner(message)
+        val token = liveOwners.issue(message)
         val grant = RunGenerationTools.writeEffect("account", token, config, config.batches.single())
         val auth = TaskAuthorization(capabilities.sessionId, message.runId.value, setOf(grant))
         val validations = AtomicInteger()
@@ -145,7 +146,7 @@ class RunCatalogGenerationBindingTest {
                 check(release.await(5, TimeUnit.SECONDS))
                 leaf(owner, auth).also { lateLeaf.set(it) }
             }, capture = ::capture)
-        val token = runnerOwner(message)
+        val token = liveOwners.issue(message)
         val worker = Thread {
             try { tools.bindOwner(token); failure.set(AssertionError("late binding published")) }
             catch (expected: IllegalStateException) { if (expected.message != "run_closed") failure.set(expected) }
@@ -173,7 +174,7 @@ class RunCatalogGenerationBindingTest {
             val tools = RunCatalogTools(ToolRegistry(), capabilities, ToolLedger(InMemoryToolLedgerStore()),
                 message.conversationId, message.runId, authorizationFactory = { wrong },
                 generationFactory = { owner, _, auth -> opens.incrementAndGet(); leaf(owner, auth) }, capture = ::capture)
-            rejected { tools.bindOwner(runnerOwner(message)) }
+            rejected { tools.bindOwner(liveOwners.issue(message)) }
             assertEquals(0, opens.get())
             assertEquals(RunCatalogCloseResult.Drained, closeAndAwait(tools))
         }
@@ -183,7 +184,7 @@ class RunCatalogGenerationBindingTest {
             authorizationFactory = { authCalls.incrementAndGet(); error("must not run") },
             generationFactory = { _, _, _ -> error("must not run") }, capture = ::capture)
         assertEquals(RunCatalogCloseResult.Drained, closeAndAwait(tools))
-        rejected { tools.bindOwner(runnerOwner(message)) }
+        rejected { tools.bindOwner(liveOwners.issue(message)) }
         assertEquals(0, authCalls.get())
     }
 
@@ -194,7 +195,7 @@ class RunCatalogGenerationBindingTest {
             message.conversationId, message.runId, authorization = fixed,
             authorizationFactory = { TaskAuthorization(fixed.sessionId, fixed.taskId) },
             generationFactory = { owner, _, auth -> opens.incrementAndGet(); leaf(owner, auth) }, capture = ::capture)
-        rejected { tools.bindOwner(runnerOwner(message)) }
+        rejected { tools.bindOwner(liveOwners.issue(message)) }
         assertEquals(0, opens.get())
         assertEquals(RunCatalogCloseResult.Drained, closeAndAwait(tools))
         rejected {
@@ -223,7 +224,7 @@ class RunCatalogGenerationBindingTest {
             message.conversationId, message.runId,
             authorizationFactory = { TaskAuthorization("session", "run") },
             generationFactory = { owner, _, auth -> leaf(owner, auth) }, capture = ::capture)
-        tools.bindOwner(runnerOwner(message)); tools.definitions
+        tools.bindOwner(liveOwners.issue(message)); tools.definitions
         val worker = Thread {
             try { tools.execute(message, listOf(ToolInvocation(ToolCallId("audit"), "audit", "{}"))) { false } }
             catch (caught: Throwable) { failure.set(caught) }
@@ -268,7 +269,7 @@ class RunCatalogGenerationBindingTest {
             override fun closeStatus() = app.daiyu.android.browser.network.BrowserCloseResult(true)
         }
         val browser = CatalogBrowserBinding.create(profile, preparation.confirm(preparation.preview)) { host }
-        val token = runnerOwner(message)
+        val token = liveOwners.issue(message)
         val paid = RunGenerationTools.writeEffect("account", token, config, config.batches.single())
         val auth = TaskAuthorization("run", "run", browser.requiredWrites + paid)
         val caps = SessionCapabilities("run", capabilities.enabled +
@@ -301,7 +302,7 @@ class RunCatalogGenerationBindingTest {
             message.conversationId, message.runId,
             authorizationFactory = { TaskAuthorization(capabilities.sessionId, it.runId.value) },
             generationFactory = { _, _, _ -> opens.incrementAndGet(); error("factory failed") }, capture = ::capture)
-        val token = runnerOwner(message)
+        val token = liveOwners.issue(message)
         rejected { tools.bindOwner(token) }; rejected { tools.bindOwner(token) }
         assertEquals(1, opens.get())
         assertTrue(closeAndAwait(tools) is RunCatalogCloseResult.Unknown)

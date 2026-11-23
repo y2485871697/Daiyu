@@ -120,7 +120,6 @@ data class ChatScreenActions(
     val onOpenWorkspace: () -> Unit = {},
     /** Actual typewriter growth in a visible row, never a network chunk or recomposition. */
     val onVisibleTextAdvance: (String) -> Unit = {},
-    val onOutputRowVisibility: (String, Boolean) -> Unit = { _, _ -> },
     val hasCompletionToRead: Boolean = true,
 )
 
@@ -168,7 +167,6 @@ internal fun rememberStableChatActions(a: ChatScreenActions): ChatScreenActions 
         onVisibleCompleted = { p0 -> latest.value.onVisibleCompleted(p0) },
         onOpenWorkspace = { latest.value.onOpenWorkspace() },
         onVisibleTextAdvance = { p0 -> latest.value.onVisibleTextAdvance(p0) },
-        onOutputRowVisibility = { p0, p1 -> latest.value.onOutputRowVisibility(p0, p1) },
         hasCompletionToRead = a.hasCompletionToRead,
     ) }
 }

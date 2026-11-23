@@ -154,20 +154,17 @@ class HapticsActivityHostTest : InstrumentationTestCase() {
         assertEquals(0, f.ports.sumOf { it.plays })
     }
 
-    fun testOffscreenOutputKeepsTickingAcrossControllerSync() = withHost { f ->
+    fun testForegroundChatUsesPresentationProgressAcrossControllerSync() = withHost { f ->
         f.sync()
         val run = f.bindings.single().beginRun("r", "m")
-        val viewport = f.host.outputViewport("c")
-        viewport(false)
-        f.sync()
-        f.host.revealAdvance("c")()
-        assertEquals(0, f.ports.sumOf { it.plays })
-        run.output(1)
-        f.afterDrain = {
-            assertEquals(1, f.ports.last().plays)
-            viewport(true)
-            run.output(reasoning = false) { error("Visible output must not enqueue network ticks") }
+        repeat(3) {
+            f.sync()
+            run.output(reasoning = false) { error("Network snapshots cannot drive the foreground chat motor") }
         }
+        assertEquals(0, f.ports.sumOf { it.plays })
+        f.host.revealAdvance("c")()
+        assertEquals(1, f.ports.sumOf { it.plays })
+        f.afterDrain = { assertEquals(1, f.ports.sumOf { it.plays }) }
     }
 
     fun testVisibleSurfaceAndSyncNeverInventRevealTicks() = withHost { f ->

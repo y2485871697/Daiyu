@@ -68,10 +68,25 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
     }
 
     fun advance(text: String, boundaries: MarkdownTextBoundaries, limit: Int, seconds: Double) {
+        if (detached || !canStep(text, limit)) return
+        step(text, boundaries, limit, seconds)
+    }
+
+    var detached by mutableStateOf(false)
+    // This is the same cursor the next on-screen layout will read, not a motor queue.
+    fun advanceDetached(text: String, boundaries: MarkdownTextBoundaries, seconds: Double): Boolean {
+        if (!detached || position >= text.length) return false
+        step(text, boundaries, text.length, seconds)
+        val end = boundaries.floor(position.toInt())
+        if (end <= tickFrontier) return false
+        val from = tickFrontier
+        tickFrontier = end
+        return (from until end).any { !text[it].isWhitespace() && text[it] != '\uFFFC' }
+    }
+
+    private fun step(text: String, boundaries: MarkdownTextBoundaries, limit: Int, seconds: Double) {
         val end = boundaries.floor(limit.coerceIn(0, text.length))
-        if (position >= end) { position = end.toDouble(); return }
-        // A delayed first layout or a blocked draw cannot spend invisible animation time.
-        if (!canStep(text, end)) return
+        if (position >= end) return
         var start = boundaries.floor(position.toInt())
         var next = boundaries.next(start)
         val fraction = (position - start) / (next - start)
@@ -103,8 +118,8 @@ internal fun rememberPartInk(reveal: MarkdownReveal, id: String, bodyPaintFeedba
     val admission = reveal.visibility(id)
     val stopped = LocalReplyPlayback.current?.control?.stopped == true
     val ink = remember(reveal, id, stopped) { reveal.inkFor(id, stopped) }
-    val paused = LocalReplyPlayback.current?.let { it.paused || it.control.stopped } == true || !LocalChatPresentationActive.current
-    val busy by remember(ink, admission) { derivedStateOf { ink.position != admission.value.toDouble() } }
+    val paused = ink.detached || LocalReplyPlayback.current?.let { it.paused || it.control.stopped } == true || !LocalChatPresentationActive.current
+    val busy by remember(ink, admission) { derivedStateOf { ink.position < admission.value.toDouble() } }
     val control = LocalReplyPlayback.current?.control
     val playback = LocalReplyPlayback.current
     val currentPlayback by rememberUpdatedState(playback)
@@ -129,7 +144,7 @@ internal fun rememberPartInk(reveal: MarkdownReveal, id: String, bodyPaintFeedba
         if (busy && !paused) {
             var before = withFrameNanos { it }
             var reanchoring = false
-            while (ink.position != admission.value.toDouble()) {
+            while (ink.position < admission.value.toDouble() && !ink.detached) {
                 // When layout has not painted this position, a new clock frame cannot advance it.
                 if (!ink.canStep(currentText, admission.value)) {
                     snapshotFlow { ink.canStep(currentText, admission.value) }.first { it }

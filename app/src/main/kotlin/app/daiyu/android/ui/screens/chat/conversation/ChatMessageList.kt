@@ -438,7 +438,12 @@ internal fun ChatMessageList(
     val reconnects = remember(timeline) {
         timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
     }
-    val reconnectPartsByKey = remember(turns, reconnects) { reconnectPartsForTurns(turns, reconnects) }
+    // Most streams never reconnect. Do not walk the entire history and allocate a blank
+    // ReconnectParts for every assistant each time only the live suffix changes.
+    val noReconnect = remember { ReconnectParts(emptyList(), emptySet()) }
+    val reconnectPartsByKey = if (reconnects.isEmpty()) emptyMap() else remember(turns, reconnects) {
+        reconnectPartsForTurns(turns, reconnects)
+    }
     val placedReconnectIds = remember(reconnectPartsByKey) {
         reconnectPartsByKey.values.flatMapTo(hashSetOf()) { it.placedIds }
     }
@@ -537,7 +542,7 @@ internal fun ChatMessageList(
             live = turn.status == RunStatus.RUNNING || replyPlayback?.control?.pending(turn) == true)
     }
     replyPlayback?.let { playback ->
-        assistantTurns.values.firstOrNull(playback.control::matches)?.let { turn ->
+        (turns.lastOrNull() as? ChatTurnUi.Assistant)?.takeIf(playback.control::matches)?.let { turn ->
             workflowAdmissions.scope(turn.listKey, initialPositionPending).retainReplyControl(playback.control)
         }
     }
@@ -551,18 +556,6 @@ internal fun ChatMessageList(
         (scrollRequest?.messageId != null || scrollRequest?.listKey != null) && touchEpoch == requestTouchEpoch)
     val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
     val tailAssistant = turns.lastOrNull() as? ChatTurnUi.Assistant
-    val outputRow = tailAssistant?.takeIf { it.status == RunStatus.RUNNING }?.listKey
-    val notifyOutputVisibility by rememberUpdatedState(actions.onOutputRowVisibility)
-    LaunchedEffect(listState, outputRow) {
-        val key = outputRow ?: return@LaunchedEffect
-        snapshotFlow {
-            val layout = listState.layoutInfo
-            presentationActive && pageActive && scrollResumed && !initialPositionPending && !currentRetainingRows &&
-                layout.visibleItemsInfo.any { it.key == key && it.size > 0 &&
-                    it.offset < layout.viewportEndOffset - currentOcclusionPx &&
-                    it.offset + it.size > layout.viewportStartOffset }
-        }.collect { visible -> notifyOutputVisibility(key, visible) }
-    }
     val nestedStates = remember { mutableMapOf<String, StreamingTailViewport>() }
     val initialQuestionContent = initialPositionPending || resumeFollowPending || !pageActive || !scrollResumed ||
         !presentationActive || retainingRows
@@ -579,6 +572,22 @@ internal fun ChatMessageList(
     val unboundedTail = remember { StreamingTailViewport(false) }
     val nestedTail = nestedStates[tailAssistant?.listKey] ?: unboundedTail
     val currentNestedTail by rememberUpdatedState(nestedTail)
+    val detachedBody = remember(listState, tailAssistant?.listKey, nestedTail) { derivedStateOf {
+        if (followBottom || !presentationActive || !pageActive || !scrollResumed || initialPositionPending || currentRetainingRows) false
+        else {
+            val layout = listState.layoutInfo
+            val row = layout.visibleItemsInfo.firstOrNull { it.key == tailAssistant?.listKey }
+            val bottom = layout.viewportEndOffset - currentOcclusionPx
+            layout.visibleItemsInfo.isNotEmpty() && (row == null || row.offset >= bottom ||
+                row.offset + row.size > bottom + 1 || nestedTail.bounded && nestedTail.scrollOffset + 1 < nestedTail.maxOffset)
+        }
+    } }
+    if (detachedBody.value && tailAssistant != null && replyPlayback != null && replyPlayback.control.matches(tailAssistant) &&
+        (tailAssistant.status == RunStatus.RUNNING || tailAssistant.status == RunStatus.COMPLETED && replyPlayback.control.pending(tailAssistant))) {
+        val part = reconnectPartsByKey[tailAssistant.listKey]?.parts?.lastOrNull()
+        DetachedReplyBody(part?.turn ?: tailAssistant, part?.workflow, workflowAdmissions.scope(tailAssistant.listKey, false),
+            replyPlayback, revealResetEpoch, { detachedBody.value }) { actions.onVisibleTextAdvance(tailAssistant.listKey) }
+    }
     val assistantOwnerKey by rememberUpdatedState(tailAssistant?.listKey)
     val turnKeys = remember(turns) { turns.map { it.listKey } }
     val clearanceLayout = remember(listState) { FollowClearanceLayout() }
@@ -733,7 +742,7 @@ internal fun ChatMessageList(
                     it.status == RunStatus.RUNNING &&
                         (it.isStreaming && it.hasBodyTextActions() && it.workflowContent().work == null ||
                             it.hasPlainTextBody(allowEmpty = true) && !hasTurnExtras(it) &&
-                                reconnectPartsByKey.getValue(it.listKey).placedIds.isEmpty() &&
+                                reconnectPartsByKey[it.listKey]?.placedIds.isNullOrEmpty() &&
                                 fallbackAfter[it.listKey].isNullOrEmpty() && compressionAfter[it.listKey].isNullOrEmpty())
                 } == true
                 if (shortBoundedTail && liveTextTail && !resumeFollowPending && !nestedTail.followCatchup &&
@@ -1337,7 +1346,7 @@ internal fun ChatMessageList(
                                     !currentRetainingRows && currentAssistants[turn.listKey]?.let { it.status == RunStatus.RUNNING && it.isStreaming } == true
                                 }
                             }) { Column {
-                            ReconnectedAssistantTurn(turn, reconnectPartsByKey.getValue(turn.listKey), actions, imageLoader,
+                            ReconnectedAssistantTurn(turn, reconnectPartsByKey[turn.listKey] ?: noReconnect, actions, imageLoader,
                                 dedicatedTool = dedicatedTool, toolContent = toolContent,
                                 speaking = speechMessageId == turn.listKey || speechMessageId == turn.actionKey || speechMessageId == turn.id,
                                 preparing = speechPreparingMessageId == turn.listKey || speechPreparingMessageId == turn.actionKey || speechPreparingMessageId == turn.id,
@@ -1530,7 +1539,7 @@ internal fun AssistantTurn(
         mutableStateOf(ordered.work == null && reasoningReady && ordered.body.isNotEmpty())
     }
     val canReleaseWithoutWorkflow = ordered.work == null && reasoningReady
-    val bodyVisible = answerReleased || canReleaseWithoutWorkflow
+    val bodyVisible = answerReleased || canReleaseWithoutWorkflow || visualScope?.bodyWasReleased(turn.listKey) == true
     val blockedSources = remember(ordered.body, bodyVisible) {
         if (bodyVisible) emptySet() else ordered.body.filterIsInstance<MessageContentUi.Text>().map { it.itemId }.toSet()
     }

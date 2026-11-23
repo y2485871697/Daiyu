@@ -33,6 +33,9 @@ internal class WorkflowVisualScope(private val baseline: Boolean) {
     fun handoff(owner: String, initial: List<ReportedReasoning>) = handoffs.getOrPut(owner) {
         ReasoningHandoff(if (baseline) initial else emptyList())
     }
+    private val detachedAnswers = mutableStateMapOf<String, Boolean>()
+    fun releaseDetachedBody(key: String) { detachedAnswers[key] = true }
+    fun bodyWasReleased(key: String) = detachedAnswers[key] == true
     private val bodyOwners = mutableSetOf<String>()
     fun bodyBaseline(key: String, sources: List<MarkdownTypingSource>): List<MarkdownTypingSource> =
         if (bodyOwners.add(key) && !baseline) emptyList() else sources.toList()

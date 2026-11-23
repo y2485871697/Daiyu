@@ -147,7 +147,7 @@ class StreamingFollowContract(unittest.TestCase):
                       "it.status == RunStatus.RUNNING &&",
                       "(it.isStreaming && it.hasBodyTextActions() && it.workflowContent().work == null ||",
                       "it.hasPlainTextBody(allowEmpty = true) && !hasTurnExtras(it) &&",
-                      "reconnectPartsByKey.getValue(it.listKey).placedIds.isEmpty() &&",
+                      "reconnectPartsByKey[it.listKey]?.placedIds.isNullOrEmpty() &&",
                       "fallbackAfter[it.listKey].isNullOrEmpty() && compressionAfter[it.listKey].isNullOrEmpty())",
                       "} == true", "!resumeFollowPending", "!nestedTail.followCatchup",
                       "clearanceLayout.followViewport == Triple(layout.viewportSize,",

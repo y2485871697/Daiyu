@@ -294,10 +294,10 @@ internal fun rememberMarkdownReveal(
                                 currentAwaitPaintAdmission && !publication.ready -> motion.visible(current)
                                 else -> motion.advance(current, frameNanos, end, streamSnapshot) {
                                     // Document leaves report their own draw; other leaves still use the lane callback.
-                                    if (publication.answerPaint.isEmpty() && publication.bodyInkIds.isEmpty() || current.parts.any { part ->
+                                    if (!streamSnapshot && (publication.answerPaint.isEmpty() && publication.bodyInkIds.isEmpty() || current.parts.any { part ->
                                             val id = part.source.id
                                             id !in publication.bodyInkIds && id !in publication.answerPaint && current.limit(id, end) > current.limit(id, before)
-                                        }) currentAdvance()
+                                        })) currentAdvance()
                                 }
                             }
                             if (currentAwaitPaintAdmission) publication.reserve(current, before, shown)

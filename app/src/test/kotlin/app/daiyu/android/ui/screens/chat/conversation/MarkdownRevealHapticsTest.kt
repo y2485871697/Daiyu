@@ -30,6 +30,27 @@ class MarkdownRevealHapticsTest {
         assertEquals(listOf(2, 3), bursts)
     }
 
+    @Test fun detachedFramesSpendTheSameInkAndReturningDrawDoesNotReplay() {
+        val text = "甲😀乙".repeat(40)
+        val bounds = MarkdownTextBoundaries(text)
+        val ink = MarkdownInk(0)
+        ink.detached = true
+        assertFalse(ink.advanceDetached(text, bounds, 0.0))
+        assertEquals(0.0, ink.position, 0.0)
+        assertTrue(ink.advanceDetached(text, bounds, .016))
+        assertTrue(ink.position < text.length)
+        repeat(160) { ink.advanceDetached(text, bounds, .016) }
+        assertEquals(text.length.toDouble(), ink.position, 0.0)
+        assertFalse(ink.advanceDetached(text, bounds, .016))
+        ink.detached = false
+        val draws = mutableListOf<Int>()
+        ink.onGlyphDrawn = { draws.add(it) }
+        ink.reportDraw(0, text.length, bounds)
+        assertTrue(draws.isEmpty())
+        ink.reportDraw(0, text.length + 1, MarkdownTextBoundaries(text + "新"))
+        assertEquals(listOf(1), draws)
+    }
+
     @Test fun slowCharactersPulseSeparatelyAndFastOutputCannotBuildUpDebt() {
         var time = 0L
         var next: Pair<Runnable, Long>? = null

@@ -29,11 +29,9 @@ internal class HapticsActivityHost(
     })
 
     private class Owner(val binding: HapticsHostBinding, val observation: AutoCloseable) {
-        var outputInViewport = true
         fun close() { observation.close(); binding.close() }
     }
     private var chat: Owner? = null
-    private var chatSurfaceVisible = false
     var settingsOwner: HapticsHostBinding? = null
         private set
     private var closed = false
@@ -50,7 +48,6 @@ internal class HapticsActivityHost(
     fun sync(conversationId: String?, chatVisible: Boolean, settingsVisible: Boolean) {
         checkMain()
         if (closed) return
-        chatSurfaceVisible = chatVisible
         if (chat?.binding?.conversationId != conversationId) {
             closeSettings()
             chat?.close(); chat = null
@@ -60,24 +57,13 @@ internal class HapticsActivityHost(
                 chat = Owner(binding, observe(binding))
             }
         }
-        chat?.let { it.binding.setVisibleOutput(chatVisible && it.outputInViewport) }
+        // The chat owns foreground feedback even when its live lazy item is off screen.
+        chat?.binding?.setVisibleOutput(chatVisible)
         if (!settingsVisible) closeSettings()
         else if (settingsOwner == null) {
             // Sharing the conversation avoids stealing the active run's engine arbitration.
             settingsOwner = HapticsHostBinding(runtime, view, lifecycleOwner,
                 conversationId ?: "haptics-settings").also { it.setVisibleOutput(false) }
-        }
-    }
-
-    fun outputViewport(conversationId: String?): (Boolean) -> Unit {
-        checkMain()
-        val owner = chat?.takeIf { it.binding.conversationId == conversationId }
-        return { visible ->
-            checkMain()
-            if (!closed && owner != null && chat === owner) {
-                owner.outputInViewport = visible
-                owner.binding.setVisibleOutput(chatSurfaceVisible && visible)
-            }
         }
     }
 

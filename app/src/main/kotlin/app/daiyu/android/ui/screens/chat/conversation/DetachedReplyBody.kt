@@ -28,13 +28,12 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
     val lane = remember(playback.control, turn.listKey, parser, epoch) {
         playback.control.lane("body:${turn.listKey}", parser, epoch) { visualScope.bodyBaseline(turn.listKey, sources) }
     }
-    if (sources.isEmpty()) return
     val streaming = turn.status == RunStatus.RUNNING
-    val projection = rememberMarkdownProjection(sources.map { it.text }, streaming, sources.map { it.window }) ?: return
+    val projection = rememberMarkdownProjection(sources.map { it.text }, streaming, sources.map { it.window })
     val baseline = lane.baseline
     val initial = if (baseline.isEmpty()) null else if (sources == baseline) projection else
         rememberMarkdownProjection(baseline.map { it.text }, streaming, baseline.map { it.window })
-    if (baseline.isNotEmpty() && initial?.sources != baseline.map { it.text }) return
+    if (sources.isNotEmpty() && baseline.isNotEmpty() && initial?.sources != baseline.map { it.text }) return
     if (bodyReleased && body.isNotEmpty() && ordered.work != null) SideEffect {
         val handoff = visualScope.handoff(turn.listKey, reasoning)
         reasoning.forEach(handoff::complete)
@@ -42,14 +41,14 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
     }
     val currentDetached by rememberUpdatedState(stillDetached)
     val latestAdvance by rememberUpdatedState(onAdvance)
-    val parts = ArrayList<DetachedPart>(projection.sources.size)
-    for (index in projection.sources.indices) {
+    val parts = ArrayList<DetachedPart>((projection?.sources?.size ?: 0) + reasoning.size)
+    for (index in projection?.sources.orEmpty().indices) {
         val source = sources.getOrNull(index) ?: break
-        val parsed = projection.sources[index]
+        val parsed = projection?.sources?.get(index) ?: continue
         if (!source.text.startsWith(parsed)) continue
         key(source.id) {
-            val shown = source.copy(text = parsed, window = projection.windows.getOrNull(index))
-            val text = projection.displayTextAt(index)
+            val shown = source.copy(text = parsed, window = projection?.windows?.getOrNull(index))
+            val text = projection?.displayTextAt(index) ?: continue
             val ink = remember(lane, shown, text) {
                 val i = baseline.indexOfFirst { it.id == shown.id }
                 val base = if (i >= 0) initial?.displayTextAt(i)?.length ?: 0 else 0
@@ -66,9 +65,39 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
             parts.add(remember(ink, text) { DetachedPart(ink, text) })
         }
     }
+    // Reasoning summaries have their own retained presentation lane; keep spending that
+    // same cursor while the lazy message row is outside the viewport.
+    for (item in ordered.steps.filterIsInstance<MessageContentUi.Reasoning>()) {
+        val reported = item.reported
+        if (!hasReportedReasoningText(reported.text)) continue
+        val sourceWindow = LocalReasoningSourceWindows.current[reported.itemId] ?: item.markdownWindow
+        val reasoningProjection = rememberMarkdownProjection(listOf(reported.text), streaming, windows = listOf(sourceWindow)) ?: continue
+        val reasoningSource = MarkdownTypingSource(reported.itemId, reasoningProjection.sources.singleOrNull() ?: reported.text,
+            reasoningProjection.windows.singleOrNull() ?: sourceWindow)
+        val displayed = reasoningProjection.displayTextAt(0)
+        val reasoningSlot = listOf("reasoning", turn.listKey, reported.itemId)
+        val reasoningLane = remember(playback.control, reasoningSlot, parser, epoch) {
+            playback.control.lane(reasoningSlot, parser, epoch) { listOf(reasoningSource) }
+        }
+        key(reasoningSlot) {
+            val ink = remember(reasoningLane, reasoningSource, displayed) {
+                val previous = reasoningLane.inks[reported.itemId]
+                (previous?.forSource(reasoningSource.copy(text = displayed), displayed.length, false)
+                    ?: MarkdownInk(0, reasoningSource.copy(text = displayed))).also {
+                    reasoningLane.inks[reported.itemId] = it
+                }
+            }
+            DisposableEffect(ink) {
+                ink.detached = true
+                onDispose { ink.detached = false }
+            }
+            SideEffect { ink.targetLength(displayed.length) }
+            parts.add(remember(ink, displayed) { DetachedPart(ink, displayed) })
+        }
+    }
     val targets by rememberUpdatedState(parts.toList())
-    val exact by rememberUpdatedState(bodyReleased && ordered.pending.isEmpty() && projection.sources == sources.map { it.text } &&
-        parts.size == sources.size && projection.windows == sources.map { it.window }.takeIf { it.any { w -> w != null } }.orEmpty())
+    val exact by rememberUpdatedState(bodyReleased && ordered.pending.isEmpty() && projection?.sources == sources.map { it.text } &&
+        parts.size >= sources.size && projection?.windows.orEmpty() == sources.map { it.window }.takeIf { it.any { w -> w != null } }.orEmpty())
     val currentTurn by rememberUpdatedState(turn)
     LaunchedEffect(lane, playback) {
         while (currentDetached() && !playback.paused && !playback.control.finished) {

@@ -203,7 +203,7 @@ class HttpVoiceNetworkTest {
         assertTrue(late.closed); assertEquals(0L, late.readBytes)
     }
 
-    @Test fun streamingBackpressureCancellationUnblocksCallbackAndClosesBody() = runBlocking {
+    @Test(timeout = 15_000L) fun streamingBackpressureCancellationUnblocksCallbackAndClosesBody() = runBlocking {
         kotlinx.coroutines.withTimeout(10_000) {
             val factory = CapturingCalls()
             val received = CompletableDeferred<Unit>()
@@ -216,9 +216,18 @@ class HttpVoiceNetworkTest {
             }
             val call = factory.enqueuedCall.await()
             val body = TrackedBody(ByteArray(100_000), -1)
-            val response = async(Dispatchers.IO) { call.respond(body) }
-            try { received.await() } finally { task.cancelAndJoin() }
-            response.await()
+            // Model OkHttp's callback thread independently of the collector's coroutine scope.
+            val callback = java.util.concurrent.FutureTask<Unit> { call.respond(body) }
+            val thread = Thread(callback, "test-voice-http-callback").apply { isDaemon = true; start() }
+            try {
+                received.await()
+                task.cancelAndJoin()
+                callback.get(5, java.util.concurrent.TimeUnit.SECONDS)
+            } finally {
+                task.cancel()
+                callback.cancel(true)
+                thread.join(1_000)
+            }
             assertTrue(call.cancelled); assertTrue(body.closed)
             assertTrue(body.readBytes < 100_000); assertEquals(1, factory.count)
         }

@@ -376,7 +376,8 @@ class BackupActivityTest:ComposeActivityTestCase() {
         importPipe = pipe; provider.pipe = pipe
         try {
             picker(107, uri = completeUri); press(DialogInterface.BUTTON_POSITIVE)
-            val progress = hasText("正在读取备份：已读取 ", substring = true) and hasText("字节", substring = true)
+            val progress = hasText("正在读取备份：已读取 ", substring = true) and hasText("字节", substring = true) and
+                hasAnyAncestor(hasTestTag("page:备份与导入"))
             ui.waitUntil(10_000) { ui.onAllNodes(progress, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
             ui.onNode(progress, useUnmergedTree = true).assertIsDisplayed()
             main {
@@ -497,12 +498,17 @@ class BackupActivityTest:ComposeActivityTestCase() {
     }
     private fun deferred():Any?=MainActivity::class.java.getDeclaredField("deferredOpenedBackup").apply {isAccessible=true}.get(activity)
     private fun publishGate(state:String?) {
-        main {
-            gate(state)
-            // Deliver the same production observer notification used by async recovery completion.
-            ChatController::class.java.getDeclaredMethod("notifyChanged").apply {isAccessible=true}.invoke(controller)
-        }
-        instrumentation.waitForIdleSync()
+        val dispatched = CountDownLatch(1)
+        val observer: () -> Unit = { dispatched.countDown() }
+        try {
+            main {
+                gate(state)
+                controller.observe(observer)
+                ChatController::class.java.getDeclaredMethod("notifyChanged").apply {isAccessible=true}.invoke(controller)
+            }
+            assertTrue("recovery change was not dispatched", dispatched.await(10, TimeUnit.SECONDS))
+            instrumentation.waitForIdleSync()
+        } finally { main { controller.unobserve(observer) } }
     }
     private fun implicitOpened(uri:Uri=textUri)=opened(uri).setComponent(null).setPackage(instrumentation.targetContext.packageName)
     fun testExplicitBackupViewDuringRecoveryStillRequiresConfirmation() {

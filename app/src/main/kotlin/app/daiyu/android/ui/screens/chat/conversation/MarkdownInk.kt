@@ -42,6 +42,12 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
     private var tickFrontier = start
     var hasPaintedGlyph by mutableStateOf(false)
         private set
+    fun resumePainted(next: MarkdownTypingSource): MarkdownInk? {
+        val previous = source ?: return null
+        if (!hasPaintedGlyph || previous != next && !markdownTypingAppends(listOf(previous), listOf(next))) return null
+        source = next
+        return this
+    }
     fun covers(next: MarkdownTypingSource, length: Int) = source == next && position >= length
     var onGlyphDrawn: ((Int) -> Unit)? = null
     fun reportDraw(offset: Int, whole: Int, boundaries: MarkdownTextBoundaries) {

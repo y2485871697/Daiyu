@@ -52,7 +52,7 @@ class BackgroundExecutionContract(unittest.TestCase):
     def test_original_haptic_settings_motor_usage_and_tick_rate_are_not_replaced(self):
         engine = (ROOT / "core-domain/src/main/kotlin/app/daiyu/android/domain/haptics/HapticEngine.kt").read_text()
         port = (APP / "haptics/AndroidHapticPort.kt").read_text()
-        self.assertIn("if (now - lastTick < 32L) return null", engine)
+        self.assertIn("if (now - lastTick < 32L) { skipped?.invoke(TickSkip.THROTTLED); return null }", engine)
         self.assertIn("VibrationAttributes.USAGE_TOUCH", port)
         self.assertNotIn("USAGE_NOTIFICATION", port)
         self.assertNotIn("FLAG_BYPASS", port)

@@ -34,11 +34,12 @@ class MarkdownRevealHapticsTest {
         val first = MarkdownTypingSource("body", "甲")
         val final = first.copy(text = "甲乙")
         val ink = MarkdownInk(1, first)
-        assertFalse(ink.hasPaintedGlyph)
+        assertNull(ink.resumePainted(first))
         ink.reportDraw(0, 1, MarkdownTextBoundaries(first.text))
         assertTrue(ink.hasPaintedGlyph)
         assertFalse(ink.covers(final, 2))
-        assertSame(ink, ink.forSource(final, 0, false))
+        assertSame(ink, ink.resumePainted(final))
+        assertNull(ink.resumePainted(first))
         assertFalse(ink.covers(final, 2))
         ink.detached = true
         repeat(5) { ink.advanceDetached(final.text, MarkdownTextBoundaries(final.text), .05) }

@@ -41,10 +41,7 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
             val shown = source.copy(text = parsed, window = projection?.windows?.getOrNull(index))
             val text = projection?.displayTextAt(index) ?: continue
             // Take over a painted cursor, not a merely parsed answer waiting for its first draw.
-            val previous = lane.inks[shown.id]?.takeIf { it.hasPaintedGlyph } ?: return@key
-            val ink = remember(previous, shown, text) {
-                previous.forSource(shown, text.length, false).also { lane.inks[shown.id] = it }
-            }
+            val ink = lane.inks[shown.id]?.resumePainted(shown) ?: return@key
             DisposableEffect(ink) {
                 ink.detached = true
                 onDispose { ink.detached = false }

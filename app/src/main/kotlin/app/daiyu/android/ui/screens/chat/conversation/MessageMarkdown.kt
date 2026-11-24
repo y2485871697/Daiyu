@@ -513,8 +513,10 @@ private fun MarkdownInlineText(
             val density = LocalDensity.current
             val plan = remember(ink, width, style, direction, density.density, density.fontScale, measurer) { StreamingWordWrap() }
             val planned = remember(plan, body) {
-                plan.plan(body, kotlin.math.ceil(ink.paintPositionForWrap(paintOffset)).toInt()) {
-                    measurer.measure(it, style, constraints = Constraints(maxWidth = width))
+                ScrollTextTiming.timed(Part.WORD_WRAP) {
+                    plan.plan(body, kotlin.math.ceil(ink.paintPositionForWrap(paintOffset)).toInt()) {
+                        measurer.measure(it, style, constraints = Constraints(maxWidth = width))
+                    }
                 }
             }
             MarkdownInlinePrefix(planned, limit, paintOffset, Modifier, style)

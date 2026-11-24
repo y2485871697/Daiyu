@@ -1,13 +1,11 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import app.daiyu.android.ui.haptics.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import app.daiyu.android.ui.app.LocalAppearanceDark
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -55,7 +53,7 @@ internal fun Modifier.conversationClickable(
     clickFeedback: Boolean = true,
     onClick: () -> Unit,
 ): Modifier = clickable(
-    interactionSource = remember { MutableInteractionSource() },
+    interactionSource = null,
     indication = null,
     enabled = enabled,
     role = role,

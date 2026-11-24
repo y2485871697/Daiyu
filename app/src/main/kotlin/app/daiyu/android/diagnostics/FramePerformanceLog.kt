@@ -106,7 +106,7 @@ internal class PerformanceFrameBatch(
             frames.forEachIndexed { index, f -> f.scrollTextNs?.let { ns ->
                 costs.put(JSONArray().put(index).also { row -> ns.forEach { row.put(it) } })
             } }
-            summary.put("scroll_text_ns_frame_prepare_candidate_nextline_measure_partial", costs)
+            summary.put("scroll_text_ns_frame_prepare_candidate_nextline_measure_wordwrap_partial", costs)
         }
         emit(epoch, summary)
         frames.clear()

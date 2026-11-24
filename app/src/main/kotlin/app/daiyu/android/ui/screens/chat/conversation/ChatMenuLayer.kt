@@ -259,10 +259,10 @@ internal fun ChatAnchoredMenu(
             mounted = false
         }
     }
-    Box(Modifier.onGloballyPositioned { coordinates ->
-        anchor = coordinates.parentLayoutCoordinates?.boundsInRoot() ?: coordinates.boundsInRoot()
-    })
     if ((expanded || mounted) && layer != null) {
+        if (anchorBounds == null) Box(Modifier.onGloballyPositioned { coordinates ->
+            anchor = coordinates.parentLayoutCoordinates?.boundsInRoot() ?: coordinates.boundsInRoot()
+        })
         val menu = remember(maxHeight, offset, screenMargin, preferAbove, minWidth, alignStart) {
             MenuOverlay({ latestExpanded }, { latestAnchorBounds ?: anchor },
                 { if (latestExpanded) latestDismiss() }, maxHeight, offset, screenMargin, preferAbove, minWidth, alignStart,

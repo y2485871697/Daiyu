@@ -5,6 +5,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class MarkdownRevealHapticsTest {
+    @Test fun naturallyDrawingSummaryCanFinishButOpeningHistoryDoesNotRearm() {
+        assertTrue(reasoningPaintFeedback(false, true, true, false))
+        assertFalse(reasoningPaintFeedback(false, false, true, false))
+        assertFalse(reasoningPaintFeedback(false, true, false, false))
+        assertFalse(reasoningPaintFeedback(false, true, true, true))
+    }
     @Test fun detachedProgressDistinguishesTerminalBodyFromEndedReasoning() {
         val done = app.daiyu.android.domain.RunStatus.COMPLETED
         val live = app.daiyu.android.domain.RunStatus.RUNNING

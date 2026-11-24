@@ -219,7 +219,9 @@ internal fun ReportedReasoningCard(
                             RevealedMessageMarkdown(
                                 displayed, projection?.blocksAt(0), display.reveal, summary.itemId, Modifier.fillMaxWidth(),
                                 generationComplete = generationComplete && projection != null && displayed == summary.text,
-                                deferBlockReveal = true, bodyPaintFeedback = displayThinking && summary.activeSinceNanos != null && !generationComplete && !paused && !stopped && parentExpanded && !manuallyCollapsed,
+                                deferBlockReveal = true, bodyPaintFeedback = displayThinking && !paused && !stopped && parentExpanded && !manuallyCollapsed &&
+                                    reasoningPaintFeedback(summary.activeSinceNanos != null && !generationComplete,
+                                        observedLive, display.waitingForReveal, manualExpansion),
                                 sourceWindow = projection?.windows?.singleOrNull() ?: LocalReasoningSourceWindows.current[summary.itemId],
                             )
                         }
@@ -234,6 +236,10 @@ internal fun ReportedReasoningCard(
 private class ReasoningRevealTicket(private var unused: Boolean) {
     fun take(): Boolean = unused.also { unused = false }
 }
+
+// Only a naturally unfolding, once-live summary may finish ticking after transport ends.
+internal fun reasoningPaintFeedback(active: Boolean, sawLive: Boolean, awaitingDraw: Boolean, manual: Boolean) =
+    active || sawLive && awaitingDraw && !manual
 
 private data class ReasoningSummaryDisplay(
     val reported: ReportedReasoning,

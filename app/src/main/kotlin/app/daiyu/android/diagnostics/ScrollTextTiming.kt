@@ -2,7 +2,7 @@ package app.daiyu.android.diagnostics
 
 /** Short, non-nested text measurements. The main thread writes; the frame worker reads by vsync. */
 internal class ScrollTextTiming {
-    enum class Part { PREPARE, CANDIDATE, NEXT_LINE, MEASURE }
+    enum class Part { PREPARE, CANDIDATE, NEXT_LINE, MEASURE, WORD_WRAP }
     private val starts = LongArray(512)
     private val ends = LongArray(starts.size)
     private val kinds = IntArray(starts.size)

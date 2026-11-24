@@ -26,14 +26,16 @@ internal class StreamingWordWrap {
                 i in 1 until body.length && body[i - 1] != '\n' && graphemes.floor(i) == i
             }
         }
-        var natural = boundaries(annotated(locked))
+        var input = annotated(locked)
+        var natural = boundaries(input)
         // An incomplete word can span two network chunks. Do not move its already drawn beginning.
         if (anchor in 1 until body.length && natural.any { it < anchor && it !in locked }) {
             locked.add(anchor)
-            natural = boundaries(annotated(locked))
+            input = annotated(locked)
+            natural = boundaries(input)
         }
         previous = body.text
         breaks = (locked + natural).distinct().sorted()
-        return annotated(breaks)
+        return if (breaks == locked) input else annotated(breaks)
     }
 }

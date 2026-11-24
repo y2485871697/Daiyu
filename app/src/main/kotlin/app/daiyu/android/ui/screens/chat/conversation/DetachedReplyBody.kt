@@ -53,9 +53,13 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
         if (!source.text.startsWith(parsed)) { SideEffect { HapticTrace.mark(HC.BODY_WAIT_PARSE) }; continue }
         val shown = source.copy(text = parsed, window = projection?.windows?.getOrNull(index))
         val text = projection?.displayTextAt(index) ?: continue
-        // Take over a painted cursor, not a merely parsed answer waiting for its first draw.
         val previous = lane.inks[shown.id]
-        val ink = previous?.resumePainted(shown)
+        // Only an admitted new part of the once-live reply can start without a draw receipt.
+        // Never invent a zero baseline for history, a replacement, or a stale parser prefix.
+        val admitted = (streaming || playback.control.permitsTerminalFeedback(turn)) &&
+            source == shown && lane.baseline.none { it.id == shown.id }
+        val ink = if (previous == null && admitted) MarkdownInk(0, shown).also { lane.inks[shown.id] = it }
+            else previous?.resumePainted(shown, admitted)
         if (ink == null) {
             val why = when { previous == null -> HC.BODY_NO_CURSOR; !previous.hasPaintedGlyph -> HC.BODY_NO_PAINT; else -> HC.BODY_SOURCE_CHANGED }
             SideEffect { HapticTrace.mark(why) }

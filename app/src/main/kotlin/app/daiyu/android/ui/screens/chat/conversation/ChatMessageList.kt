@@ -137,6 +137,8 @@ internal class StreamingTextClearance {
     private val lineSpace = mutableStateMapOf<Any, Int>()
 
     fun prepareLine(owner: Any, extraHeight: Int) {
+        val existing = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { lineSpace[owner] }
+        if ((existing ?: 0) == extraHeight.coerceAtLeast(0)) return
         if (extraHeight > 0) lineSpace[owner] = extraHeight else lineSpace.remove(owner)
     }
 

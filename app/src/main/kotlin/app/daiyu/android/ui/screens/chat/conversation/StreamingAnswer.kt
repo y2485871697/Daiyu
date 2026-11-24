@@ -1,5 +1,9 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.diagnostics.HapticTrace
+import app.daiyu.android.diagnostics.RuntimeDiagnostics.Code as HC
+
+
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
@@ -106,7 +110,7 @@ internal fun StreamingAnswer(source: String, streaming: Boolean, id: String, rev
         Markdown(document = shown, modifier = bodySize.padding(horizontal = 4.dp).drawWithContent {
                 drawContent()
                 val added = receipt.record(shown)
-                if (!frozen && added > 0) ticks.offer(if (streaming) added else 1)
+                if (!frozen && added > 0) { HapticTrace.mark(HC.DOCUMENT_DRAW, added); ticks.offer(if (streaming) added else 1) }
             },
             style = MiuixTheme.textStyles.body1.copy(color = conversationColors().text, fontSize = 16.sp, lineHeight = 26.sp),
             onLinkClick = { if (MarkdownText.isSafeLink(it)) runCatching { uri.openUri(it) }; Unit })

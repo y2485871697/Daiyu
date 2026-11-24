@@ -1,5 +1,9 @@
 package app.daiyu.android.haptics
 
+import app.daiyu.android.diagnostics.HapticTrace
+import app.daiyu.android.diagnostics.RuntimeDiagnostics.Code as HC
+
+
 import android.app.Activity
 import android.app.Application
 import android.os.Build
@@ -125,7 +129,23 @@ class HapticsRuntime internal constructor(
         }
         fun selectionStart() { checkMain(); if (!disposed && !closed) engine.selectionStart(owner) }
         /** UI reveal clock only; network chunks must use backgroundOutput instead. */
-        fun visibleAdvance() { checkMain(); if (!disposed && !closed) engine.visibleAdvance(owner) }
+        fun visibleAdvance() {
+            checkMain()
+            if (disposed || closed) { HapticTrace.mark(HC.SESSION_CLOSED); return }
+            val result = engine.visibleAdvance(owner) { reason -> HapticTrace.mark(when (reason) {
+                HapticEngine.TickSkip.NO_OWNER -> HC.NO_OWNER
+                HapticEngine.TickSkip.NOT_VISIBLE -> HC.NOT_VISIBLE
+                HapticEngine.TickSkip.NOT_ALLOWED -> HC.NOT_ALLOWED
+                HapticEngine.TickSkip.THROTTLED -> HC.THROTTLED
+            }) } ?: return
+            HapticTrace.mark(when (result) {
+                HapticDelivery.PLAYED -> HC.MOTOR_PLAYED
+                HapticDelivery.SYSTEM_DISABLED -> HC.MOTOR_SYSTEM_DISABLED
+                HapticDelivery.UNAVAILABLE -> HC.MOTOR_UNAVAILABLE
+                HapticDelivery.PERMISSION_DENIED -> HC.MOTOR_PERMISSION_DENIED
+                HapticDelivery.FAILED -> HC.MOTOR_FAILED
+            })
+        }
         fun backgroundOutput(graphemes: Int, reasoning: Boolean = false) = dispatch {
             if (!disposed) engine.backgroundOutput(owner, graphemes, reasoning)
         }

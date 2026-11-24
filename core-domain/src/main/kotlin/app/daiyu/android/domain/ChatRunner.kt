@@ -1142,6 +1142,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 reconnectBudget?.check()
                                 val attemptSink: (ModelEvent) -> Unit = { event ->
                                     val ack = delivery.deliverAcknowledged {
+                                        try { options.diagnostics?.let { trace -> when (event) {
+                                            is ModelEvent.TextDelta -> trace.input(InputKind.TEXT_DELTA, event.text.length)
+                                            is ModelEvent.TextFinal -> trace.input(InputKind.TEXT_FINAL, event.text.length)
+                                            is ModelEvent.ReasoningDelta -> trace.input(InputKind.REASON_DELTA, event.text.length)
+                                            is ModelEvent.ReasoningFinal -> trace.input(InputKind.REASON_FINAL, event.text.length)
+                                            else -> trace.input(InputKind.OTHER, -1)
+                                        } } } catch (_: Throwable) { }
                                         diagnostic(RunDiagnosticStage.MODEL_EVENT) { sink(event) }
                                         ModelDeliveryAck.ACCEPTED
                                     }

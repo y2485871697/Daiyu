@@ -1,5 +1,9 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.diagnostics.HapticTrace
+import app.daiyu.android.diagnostics.RuntimeDiagnostics.Code as HC
+
+
 import androidx.compose.runtime.*
 import kotlinx.coroutines.flow.first
 import androidx.compose.ui.graphics.Paint
@@ -42,13 +46,13 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
         if (end <= tickFrontier) return
         var start = (tickFrontier - offset).coerceAtLeast(0)
         tickFrontier = end
-        val notify = onGlyphDrawn ?: return
+        val notify = onGlyphDrawn ?: run { HapticTrace.mark(HC.INK_NO_LISTENER); return }
         var count = 0
         while (start < whole && count < ReplyCharacterTicks.BURST) {
             start = boundaries.next(start)
             count++
         }
-        if (count > 0) notify(count)
+        if (count > 0) { HapticTrace.mark(HC.INK_DRAW, count); notify(count) }
     }
     private var lastDrawnProgress by mutableDoubleStateOf(-1.0)
 

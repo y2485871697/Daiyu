@@ -1,5 +1,9 @@
 package app.daiyu.android
 
+import app.daiyu.android.diagnostics.HapticTrace
+import app.daiyu.android.diagnostics.RuntimeDiagnostics.Code as HC
+
+
 import app.daiyu.android.ui.RetainedToolOutcomes.ReadKey as ToolReceiptKey
 
 import app.daiyu.android.diagnostics.RuntimeDiagnostics
@@ -3611,16 +3615,18 @@ class MainActivity : ComponentActivity() {
             if (activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
                 selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration &&
                 turn != null && live) {
+                HapticTrace.mark(if (renderedRevealAdvance == null) HC.BINDING_GONE else HC.HOST_FORWARD)
                 renderedRevealAdvance?.invoke()
-            }
+            } else HapticTrace.mark(HC.HOST_REJECT)
         },
         onTerminalTextAdvance = { key ->
             val tail = chatState.turns.lastOrNull() as? ChatTurnUi.Assistant
             if (tail != null && tail.listKey == key && tail.status == RunStatus.COMPLETED && !tail.stopRequested &&
                 controller.active == null && activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
                 selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration) {
+                HapticTrace.mark(if (renderedRevealAdvance == null) HC.BINDING_GONE else HC.HOST_FORWARD)
                 renderedRevealAdvance?.invoke()
-            }
+            } else HapticTrace.mark(HC.HOST_REJECT)
         },
         onInteractiveModeChange = { enabled -> if (currentChat()) controller.interactiveMode.setEnabled(enabled) },
         onMore = { if (currentChat()) refreshAutomaticCompression() },

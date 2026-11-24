@@ -1,5 +1,9 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.diagnostics.HapticTrace
+import app.daiyu.android.diagnostics.RuntimeDiagnostics.Code as HC
+
+
 import app.daiyu.android.diagnostics.synchronousTrace
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
@@ -587,8 +591,10 @@ internal fun ChatMessageList(
         val part = reconnectPartsByKey[tailAssistant.listKey]?.parts?.lastOrNull()
         DetachedReplyBody(part?.turn ?: tailAssistant, part?.workflow, workflowAdmissions.scope(tailAssistant.listKey, false),
             replyPlayback, revealResetEpoch, { detachedBody.value }) {
+            HapticTrace.mark(HC.DETACHED_ADVANCE)
             if (tailAssistant.status == RunStatus.RUNNING) actions.onVisibleTextAdvance(tailAssistant.listKey)
             else if (replyPlayback.control.permitsTerminalFeedback(tailAssistant)) actions.onTerminalTextAdvance(tailAssistant.listKey)
+            else HapticTrace.mark(HC.TERMINAL_GATE)
         }
     }
     val assistantOwnerKey by rememberUpdatedState(tailAssistant?.listKey)
@@ -1363,7 +1369,8 @@ internal fun ChatMessageList(
                                         if (turn.status == RunStatus.RUNNING) actions.onVisibleTextAdvance(turn.listKey)
                                         else if (replyPlayback?.control?.permitsTerminalFeedback(turn) == true)
                                             actions.onTerminalTextAdvance(turn.listKey)
-                                    }
+                                        else HapticTrace.mark(HC.TERMINAL_GATE)
+                                    } else HapticTrace.mark(HC.ROW_HIDDEN)
                                 },
                                 onContentDisplayed = { displayed ->
                                     if (displayed) displayedTurns[turn.listKey] = turn else displayedTurns.remove(turn.listKey)

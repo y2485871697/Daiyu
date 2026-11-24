@@ -63,7 +63,7 @@ class TypewriterHapticsContract(unittest.TestCase):
 
     def test_existing_global_throttle_settings_and_background_suppression_remain(self):
         engine = (ROOT / "core-domain/src/main/kotlin/app/daiyu/android/domain/haptics/HapticEngine.kt").read_text()
-        self.assertIn("if (now - lastTick < 32L) return null", engine)
+        self.assertIn("if (now - lastTick < 32L) { skipped?.invoke(TickSkip.THROTTLED); return null }", engine)
         self.assertIn("settings.generationOn", engine)
         self.assertIn("backgroundVisible(host.conversation)", engine)
         for name in ["MarkdownTyping.kt", "MarkdownReveal.kt"]:

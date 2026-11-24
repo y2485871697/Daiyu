@@ -117,11 +117,13 @@ class HapticEngine(private val clock: HapticClock) {
         return touch(owner, HapticKind.LONG_PRESS)
     }
 
-    fun visibleAdvance(owner: Owner): HapticDelivery? {
-        val host = hosts[owner] ?: return null
-        if (!visible(host) || !allowed(host, false)) return null
+    enum class TickSkip { NO_OWNER, NOT_VISIBLE, NOT_ALLOWED, THROTTLED }
+    fun visibleAdvance(owner: Owner, skipped: ((TickSkip) -> Unit)? = null): HapticDelivery? {
+        val host = hosts[owner] ?: run { skipped?.invoke(TickSkip.NO_OWNER); return null }
+        if (!visible(host)) { skipped?.invoke(TickSkip.NOT_VISIBLE); return null }
+        if (!allowed(host, false)) { skipped?.invoke(TickSkip.NOT_ALLOWED); return null }
         val now = clock.nowMillis()
-        if (now - lastTick < 32L) return null
+        if (now - lastTick < 32L) { skipped?.invoke(TickSkip.THROTTLED); return null }
         lastTick = now
         return generation(host)
     }

@@ -1,5 +1,9 @@
 package app.daiyu.android.haptics
 
+import app.daiyu.android.diagnostics.HapticTrace
+import app.daiyu.android.diagnostics.RuntimeDiagnostics.Code as HC
+
+
 import android.icu.text.BreakIterator
 import android.os.Looper
 import android.view.View
@@ -75,7 +79,7 @@ internal class HapticsActivityHost(
         val owner = chat?.takeIf { it.binding.conversationId == conversationId }
         return {
             checkMain()
-            if (!closed && owner != null && chat === owner) owner.binding.feedback.visibleAdvance()
+            if (!closed && owner != null && chat === owner) owner.binding.feedback.visibleAdvance() else HapticTrace.mark(HC.BINDING_GONE)
         }
     }
 

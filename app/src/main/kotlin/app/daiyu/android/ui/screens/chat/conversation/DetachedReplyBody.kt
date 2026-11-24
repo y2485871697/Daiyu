@@ -37,11 +37,11 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
         val source = sources.getOrNull(index) ?: break
         val parsed = projection?.sources?.get(index) ?: continue
         if (!source.text.startsWith(parsed)) continue
+        val shown = source.copy(text = parsed, window = projection?.windows?.getOrNull(index))
+        val text = projection?.displayTextAt(index) ?: continue
+        // Take over a painted cursor, not a merely parsed answer waiting for its first draw.
+        val ink = lane.inks[shown.id]?.resumePainted(shown) ?: continue
         key(source.id) {
-            val shown = source.copy(text = parsed, window = projection?.windows?.getOrNull(index))
-            val text = projection?.displayTextAt(index) ?: continue
-            // Take over a painted cursor, not a merely parsed answer waiting for its first draw.
-            val ink = lane.inks[shown.id]?.resumePainted(shown) ?: return@key
             DisposableEffect(ink) {
                 ink.detached = true
                 onDispose { ink.detached = false }

@@ -38,7 +38,11 @@ internal class ReplyPresentationControl(
     fun pending(turn: ChatTurnUi.Assistant) = matches(turn) && observedLive && !finished && (settledTurn != turn || pendingLanes.isNotEmpty() || lanes.values.any { lane -> lane.inks.values.any { it.hasRemaining } })
     fun setSettled(turn: ChatTurnUi.Assistant, settled: Boolean) {
         if (!matches(turn)) return
-        if (settled) settledTurn = turn
+        if (settled) {
+            settledTurn = turn
+            // Row completion is final for feedback even when a disposed lane still reports pending.
+            if (turn.status == RunStatus.COMPLETED) terminalFeedbackArmed = false
+        }
         // Removing a lazy row revokes its viewport readiness, not an already displayed terminal reply.
         else if (turn.status == RunStatus.RUNNING && settledTurn == turn) settledTurn = null
     }

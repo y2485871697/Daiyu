@@ -80,10 +80,10 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
             playback.control.lane(reasoningSlot, parser, epoch) { listOf(reasoningSource) }
         }
         key(reasoningSlot) {
-            val ink = remember(reasoningLane, reasoningSource, displayed) {
+            val ink = remember(reasoningLane, reasoningSource, displayed, streaming) {
                 val previous = reasoningLane.inks[reported.itemId]
-                (previous?.forSource(reasoningSource.copy(text = displayed), displayed.length, false)
-                    ?: MarkdownInk(0, reasoningSource.copy(text = displayed))).also {
+                (previous?.forSource(reasoningSource, displayed.length, false)
+                    ?: MarkdownInk(if (streaming && reported.activeSinceNanos != null) 0 else displayed.length, reasoningSource)).also {
                     reasoningLane.inks[reported.itemId] = it
                 }
             }

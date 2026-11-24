@@ -76,7 +76,9 @@ class MarkdownRevealHapticsTest {
         assertTrue(control.permitsTerminalFeedback(done))
         assertFalse(control.permitsTerminalFeedback(done.copy(listKey = "older")))
         control.pause(true); assertFalse(control.permitsTerminalFeedback(done)); control.pause(false)
-        control.setSettled(done, true); control.updateFeedback(done)
+        control.reportPending(Any(), true) // stale lane survives the final draw
+        control.setSettled(done, true) // no parent recomposition between settlement and motor callback
+        assertFalse(control.permitsTerminalFeedback(done))
         control.reportPending(Any(), true)
         assertFalse(control.permitsTerminalFeedback(done))
         val historical = ReplyPresentationControl(done.listKey, false)

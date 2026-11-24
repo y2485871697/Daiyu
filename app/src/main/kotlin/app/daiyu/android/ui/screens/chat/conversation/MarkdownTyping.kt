@@ -48,6 +48,8 @@ internal class MarkdownReveal(
     }
     private val completion = derivedStateOf { exact && target != null && visible() >= target.total }
     val settled: Boolean get() = completion.value && publication.settled(target)
+    fun bodyInkComplete() = target?.parts?.all { part -> part.length == 0 ||
+        publication.inks[part.source.id]?.covers(part.source, part.length) == true } == true
     fun applied(id: String, visible: Int) {
         target?.let { publication.applied(it, id, visible) }
     }

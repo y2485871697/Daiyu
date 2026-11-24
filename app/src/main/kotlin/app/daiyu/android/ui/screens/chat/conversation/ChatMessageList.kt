@@ -1567,7 +1567,7 @@ internal fun AssistantTurn(
     val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true
     SideEffect { onContentReady(contentReady) }
     SideEffect { onContentDisplayed(hasDisplayBody || contentReady) }
-    val revealSettled = reveal.settled && reasoningReady && (bodyVisible || ordered.body.isEmpty())
+    val revealSettled = reveal.settled && (turn.status != RunStatus.COMPLETED || generationComplete && reveal.bodyInkComplete()) && reasoningReady && (bodyVisible || ordered.body.isEmpty())
     SideEffect { onRevealSettled(revealSettled) }
     DisposableEffect(turn.listKey) { onDispose { onContentReady(false); onRevealSettled(false); onContentDisplayed(false) } }
     val actionSlotSources = remember(actionTurn) {
@@ -1654,6 +1654,8 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, ordered: AssistantW
         dedicatedTool = dedicatedTool, toolContent = toolContent, plainNarration = ordered.plainNarration, plainText = turn.content.isEmpty(),
         imageOffset = ordered.leading.count { it is MessageContentUi.Image }) }
     if (ordered.body.isNotEmpty() && bodyVisible) {
+        val scope = LocalWorkflowVisualScope.current
+        SideEffect { scope?.rememberReleasedBody(turn.listKey) }
         MessageContent(ordered.body, actions, imageLoader, markdown = true,
             imageOffset = (ordered.leading + ordered.steps).count { it is MessageContentUi.Image },
             entryBody = { key, body -> WorkflowEntry(key, bodyEntrances, observedLive,

@@ -30,15 +30,6 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
     }
     val streaming = turn.status == RunStatus.RUNNING
     val projection = rememberMarkdownProjection(sources.map { it.text }, streaming, sources.map { it.window })
-    val baseline = lane.baseline
-    val initial = if (baseline.isEmpty()) null else if (sources == baseline) projection else
-        rememberMarkdownProjection(baseline.map { it.text }, streaming, baseline.map { it.window })
-    if (sources.isNotEmpty() && baseline.isNotEmpty() && initial?.sources != baseline.map { it.text }) return
-    if (bodyReleased && body.isNotEmpty() && ordered.work != null) SideEffect {
-        val handoff = visualScope.handoff(turn.listKey, reasoning)
-        reasoning.forEach(handoff::complete)
-        visualScope.releaseDetachedBody(turn.listKey)
-    }
     val currentDetached by rememberUpdatedState(stillDetached)
     val latestAdvance by rememberUpdatedState(onAdvance)
     val parts = ArrayList<DetachedPart>((projection?.sources?.size ?: 0) + reasoning.size)
@@ -49,13 +40,10 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
         key(source.id) {
             val shown = source.copy(text = parsed, window = projection?.windows?.getOrNull(index))
             val text = projection?.displayTextAt(index) ?: continue
-            val ink = remember(lane, shown, text) {
-                val i = baseline.indexOfFirst { it.id == shown.id }
-                val base = if (i >= 0) initial?.displayTextAt(i)?.length ?: 0 else 0
-                val previous = lane.inks[shown.id]
-                // A replacement is a new baseline, not an append to replay.
-                val start = if (previous != null) text.length else base.coerceAtMost(text.length)
-                (previous?.forSource(shown, start, false) ?: MarkdownInk(start, shown)).also { lane.inks[shown.id] = it }
+            // Take over a painted cursor, not a merely parsed answer waiting for its first draw.
+            val previous = lane.inks[shown.id]?.takeIf { it.hasPaintedGlyph } ?: return@key
+            val ink = remember(previous, shown, text) {
+                previous.forSource(shown, text.length, false).also { lane.inks[shown.id] = it }
             }
             DisposableEffect(ink) {
                 ink.detached = true
@@ -65,13 +53,17 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
             parts.add(remember(ink, text) { DetachedPart(ink, text) })
         }
     }
+    val bodyPartCount = parts.size
     // Reasoning summaries have their own retained presentation lane; keep spending that
     // same cursor while the lazy message row is outside the viewport.
+    var exactReasoning = true
     for (item in ordered.steps.filterIsInstance<MessageContentUi.Reasoning>()) {
         val reported = item.reported
         if (!hasReportedReasoningText(reported.text)) continue
         val sourceWindow = LocalReasoningSourceWindows.current[reported.itemId] ?: item.markdownWindow
-        val reasoningProjection = rememberMarkdownProjection(listOf(reported.text), streaming, windows = listOf(sourceWindow)) ?: continue
+        val reasoningProjection = rememberMarkdownProjection(listOf(reported.text), streaming, windows = listOf(sourceWindow))
+        if (reasoningProjection == null) { exactReasoning = false; continue }
+        if (reasoningProjection.sources.singleOrNull() != reported.text || reasoningProjection.windows.singleOrNull() != sourceWindow) exactReasoning = false
         val reasoningSource = MarkdownTypingSource(reported.itemId, reasoningProjection.sources.singleOrNull() ?: reported.text,
             reasoningProjection.windows.singleOrNull() ?: sourceWindow)
         val displayed = reasoningProjection.displayTextAt(0)
@@ -96,8 +88,8 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
         }
     }
     val targets by rememberUpdatedState(parts.toList())
-    val exact by rememberUpdatedState(bodyReleased && ordered.pending.isEmpty() && projection?.sources == sources.map { it.text } &&
-        parts.size >= sources.size && projection?.windows.orEmpty() == sources.map { it.window }.takeIf { it.any { w -> w != null } }.orEmpty())
+    val exact by rememberUpdatedState(exactReasoning && bodyReleased && ordered.pending.isEmpty() && projection?.sources == sources.map { it.text } &&
+        bodyPartCount == sources.size && projection?.windows.orEmpty() == sources.map { it.window }.takeIf { it.any { w -> w != null } }.orEmpty())
     val currentTurn by rememberUpdatedState(turn)
     LaunchedEffect(lane, playback) {
         while (currentDetached() && !playback.paused && !playback.control.finished) {

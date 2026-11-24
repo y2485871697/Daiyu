@@ -30,6 +30,21 @@ class MarkdownRevealHapticsTest {
         assertEquals(listOf(2, 3), bursts)
     }
 
+    @Test fun parsedBodyIsNotPaintedAndShorterSourceCannotSettleFinalInk() {
+        val first = MarkdownTypingSource("body", "甲")
+        val final = first.copy(text = "甲乙")
+        val ink = MarkdownInk(1, first)
+        assertFalse(ink.hasPaintedGlyph)
+        ink.reportDraw(0, 1, MarkdownTextBoundaries(first.text))
+        assertTrue(ink.hasPaintedGlyph)
+        assertFalse(ink.covers(final, 2))
+        assertSame(ink, ink.forSource(final, 0, false))
+        assertFalse(ink.covers(final, 2))
+        ink.detached = true
+        repeat(5) { ink.advanceDetached(final.text, MarkdownTextBoundaries(final.text), .05) }
+        assertTrue(ink.covers(final, 2))
+    }
+
     @Test fun detachedFramesSpendTheSameInkAndReturningDrawDoesNotReplay() {
         val text = "甲😀乙".repeat(40)
         val bounds = MarkdownTextBoundaries(text)

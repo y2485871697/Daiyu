@@ -40,9 +40,13 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
     fun paintPositionForWrap(offset: Int): Double = paintedEnds[offset] ?: 0.0
     fun paintedLength(offset: Int): Int = (paintedEnds[offset] ?: 0.0).toInt()
     private var tickFrontier = start
+    var hasPaintedGlyph by mutableStateOf(false)
+        private set
+    fun covers(next: MarkdownTypingSource, length: Int) = source == next && position >= length
     var onGlyphDrawn: ((Int) -> Unit)? = null
     fun reportDraw(offset: Int, whole: Int, boundaries: MarkdownTextBoundaries) {
         val end = offset + whole
+        if (end > 0 && !hasPaintedGlyph) hasPaintedGlyph = true
         if (end <= tickFrontier) return
         var start = (tickFrontier - offset).coerceAtLeast(0)
         tickFrontier = end

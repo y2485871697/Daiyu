@@ -35,7 +35,7 @@ class TypewriterHapticsContract(unittest.TestCase):
             self.assertIn(token, text)
         self.assertNotIn("setVisibleOutput", text)
 
-    def test_production_host_freezes_owner_and_supports_normal_terminal_drain(self):
+    def test_production_host_freezes_owner_and_silences_completed_history(self):
         main = (APP / "MainActivity.kt").read_text()
         setup = main.split("private fun chatActions(onVisibleCompleted:", 1)[1].split("fun editorMatches()", 1)[0]
         self.assertIn("onVisibleTextAdvance = { key ->", main)
@@ -44,9 +44,11 @@ class TypewriterHapticsContract(unittest.TestCase):
             self.assertIn(token, setup)
         for token in ["renderedRevealTurns[key]", "active.runId == renderedRevealOwner.runId",
                       "active.conversationId == renderedRevealOwner.conversationId", "controller.isRunUnfenced(active)",
-                      "active == null && turn?.status == RunStatus.COMPLETED", "editorGeneration == renderedEditorGeneration",
-                      'retainedPage == "chat"', "!sidebarVisible", "renderedRevealAdvance?.invoke()"]:
+                      "editorGeneration == renderedEditorGeneration", 'retainedPage == "chat"',
+                      "!sidebarVisible", "turn != null && live", "renderedRevealAdvance?.invoke()"]:
             self.assertIn(token, call)
+        self.assertNotIn("completedDrain", call)
+        self.assertNotIn("RunStatus.COMPLETED", call)
         self.assertNotIn("filterIsInstance", call) # no history scan on every reveal frame
         self.assertNotIn("beginRun", call)
 

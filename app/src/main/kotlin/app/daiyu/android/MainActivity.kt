@@ -3608,10 +3608,9 @@ class MainActivity : ComponentActivity() {
             val live = active != null && renderedRevealOwner != null && active.id == renderedRevealOwner.id &&
                 active.runId == renderedRevealOwner.runId && active.conversationId == renderedRevealOwner.conversationId &&
                 active.id.value == turn?.ownerMessageId && active.status == RunStatus.RUNNING && controller.isRunUnfenced(active)
-            val completedDrain = active == null && turn?.status == RunStatus.COMPLETED
             if (activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
                 selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration &&
-                turn != null && (live || completedDrain)) {
+                turn != null && live) {
                 renderedRevealAdvance?.invoke()
             }
         },

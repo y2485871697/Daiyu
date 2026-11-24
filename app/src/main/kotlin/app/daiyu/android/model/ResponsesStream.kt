@@ -5,6 +5,8 @@ import org.json.JSONObject
 import java.io.BufferedReader
 
 internal object ResponsesStream {
+    /** The provider stopped at its output cap after visible text and no tool call; the reply may be continued. */
+    class OutputLimitReached(val texts: List<Pair<String, String>>) : ModelRequestException(ModelFailure.INCOMPLETE)
     private fun checkProtocol(valid:Boolean) {
         if(!valid) throw ModelRequestException(ModelFailure.PROTOCOL)
     }
@@ -432,7 +434,12 @@ internal object ResponsesStream {
                     event.optJSONObject("response")?.optJSONObject("error") ?: event.optJSONObject("error") ?: event,
                     (reader as? ProviderRequestTrace.Reader)?.trace?.diagnosticRedactions.orEmpty(),
                     event.optString("request_id").takeIf(String::isNotBlank))
-                "response.incomplete" -> throw ModelRequestException(ModelFailure.INCOMPLETE)
+                "response.incomplete" -> {
+                    val reason = event.optJSONObject("response")?.optJSONObject("incomplete_details")?.optString("reason")
+                    val texts = parts.map { (id, values) -> id to values.values.joinToString("") }.filter { it.second.isNotEmpty() }
+                    if (reason == "max_output_tokens" && calls.isEmpty() && texts.isNotEmpty()) throw OutputLimitReached(texts)
+                    throw ModelRequestException(ModelFailure.INCOMPLETE)
+                }
             }
             if (base == null) { base = saved; startedNanos = nanoTime() }
             tail = seq

@@ -164,4 +164,37 @@ class ResponsesBoundaryRegressionTest {
         assertEquals("array",parameters.getJSONObject("properties").getJSONObject("options").getJSONObject("properties").getJSONObject("tags").getString("type"))
     }
 
+    private fun sse(value: JSONObject) = "data: $value\n\n"
+    private fun textDelta(id: String, text: String) =
+        sse(JSONObject().put("type", "response.output_text.delta").put("item_id", id).put("delta", text))
+    private fun capped(reason: String = "max_output_tokens") = sse(JSONObject().put("type", "response.incomplete")
+        .put("response", JSONObject().put("status", "incomplete").put("incomplete_details", JSONObject().put("reason", reason))))
+    private val completed = sse(JSONObject().put("type", "response.completed")
+        .put("response", JSONObject().put("status", "completed").put("output", org.json.JSONArray())))
+    @Test fun outputCapContinuesTheSameReply() {
+        val connections = listOf(Connection(stream = textDelta("m1", "前半") + capped()),
+            Connection(stream = textDelta("m2", "后半") + completed))
+        var opened = 0
+        val events = mutableListOf<ModelEvent>()
+        ResponsesModel(config) { connections[opened++] }.open(emptyList()).next(emptyList()) { events.add(it) }
+        assertEquals(2, opened)
+        val texts = events.filterIsInstance<ModelEvent.TextFinal>()
+        assertTrue(texts.all { it.itemId == "m1" })
+        assertEquals("前半后半", texts.last().text)
+        val input = JSONObject(connections[1].body.toString("UTF-8")).getJSONArray("input")
+        assertEquals("assistant", input.getJSONObject(input.length() - 2).getString("role"))
+        assertEquals("前半", input.getJSONObject(input.length() - 2).getString("content"))
+        assertEquals(1, events.filterIsInstance<ModelEvent.ProtocolOutput>().size)
+    }
+    @Test fun otherIncompleteReasonsAndEmptyCapStillFail() {
+        for (stream in listOf(textDelta("m", "x") + capped("content_filter"), capped())) {
+            var opened = 0
+            try {
+                ResponsesModel(config) { opened++; Connection(stream = stream) }.open(emptyList()).next(emptyList()) {}
+                fail("incomplete accepted")
+            } catch (failure: ModelRequestException) { assertEquals(ModelFailure.INCOMPLETE, failure.failure) }
+            assertEquals(1, opened)
+        }
+    }
+
 }

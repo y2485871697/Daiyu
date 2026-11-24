@@ -299,8 +299,10 @@ class ResponsesModel internal constructor(
             }
             started = true
             usable = false
+            outputLimit = null; limitRows = null
             try {
                 advance(outputs, sink)
+                while (limitRows != null) advance(emptyList()) { event -> sink(checkNotNull(outputLimit).map(event)) }
                 retry.completed()
             } catch (failure: Exception) {
                 if (consumerFailure || refreshFailed) retry.completed() else retry.failed(failure,
@@ -309,12 +311,26 @@ class ResponsesModel internal constructor(
                 throw failure
             }
         }
+        private var outputLimit: OutputLimitContinuation? = null
+        private var limitRows: List<JSONObject>? = null
+        /** Queue the next request with the capped text as assistant history, like Messages pause_turn. */
+        private fun continueAfterOutputLimit(limit: ResponsesStream.OutputLimitReached) {
+            val next = outputLimit?.next(limit) ?: OutputLimitContinuation(limit)
+            if (next.rounds > OUTPUT_LIMIT_ROUNDS) throw ModelRequestException(ModelFailure.INCOMPLETE)
+            outputLimit = next
+            pending = emptySet()
+            val text = limit.texts.joinToString("") { it.second }
+            limitRows = listOf(JSONObject().put("role", "assistant").put("content", text),
+                JSONObject().put("role", "user").put("content", RequestContinuation(text).instruction))
+        }
         private fun advance(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
             outputs.forEach {
                 val item = JSONObject().put("type", "function_call_output").put("call_id", it.callId.value).put("output", it.output)
                 input.put(item); ownItems.add(item.toString())
             }
-            val continuation = retry.continuation
+            val continuation = if (limitRows == null) retry.continuation else RequestContinuation("")
+            limitRows?.forEach { row -> input.put(row); ownItems.add(row.toString()) }
+            limitRows = null
             if (continuation.hasAcceptedOutput) {
                 val additions = listOfNotNull(
                     ("assistant" to continuation.textPrefix).takeIf { continuation.textPrefix.isNotEmpty() },
@@ -476,7 +492,13 @@ class ResponsesModel internal constructor(
                     resumeAllowed = backgroundResume != null
                     val items = if (backgroundResume != null) decoder.read(reader, cancelled::get,
                         prefix = ownItems.toList(), acknowledgedSink = requireNotNull(deliverAcknowledged))
-                    else ResponsesStream.readBuffered(reader, cancelled::get, deliver)
+                    else try { ResponsesStream.readBuffered(reader, cancelled::get, deliver) }
+                    catch (limit: ResponsesStream.OutputLimitReached) {
+                        eventBuffer.flush()
+                        continueAfterOutputLimit(limit)
+                        null
+                    }
+                    if (items == null) { resumeAllowed = false; return@useProviderResponse }
                     trace.completionReceived()
                     voiceSearch?.completed()
                     checkCancelled()
@@ -535,5 +557,33 @@ class ResponsesModel internal constructor(
             try { current?.disconnect() } catch (_: Exception) {}
             imageFiles.closeAsync()
         }
+    }
+}
+
+
+private const val OUTPUT_LIMIT_ROUNDS = 8
+
+/** Joins text continued after the provider's output cap onto the reply item the user already sees. */
+private class OutputLimitContinuation(limit: ResponsesStream.OutputLimitReached) {
+    var rounds = 1
+        private set
+    private var targetId = limit.texts.last().first
+    private var prefix = limit.texts.last().second
+    private var sourceId: String? = null
+    fun next(limit: ResponsesStream.OutputLimitReached): OutputLimitContinuation {
+        val (id, text) = limit.texts.last()
+        if (id == sourceId) prefix += text else { targetId = id; prefix = text }
+        sourceId = null
+        rounds++
+        return this
+    }
+    fun map(event: ModelEvent): ModelEvent = when (event) {
+        is ModelEvent.TextFinal -> if (claim(event.itemId)) ModelEvent.TextFinal(targetId, prefix + event.text) else event
+        is ModelEvent.TextDelta -> if (claim(event.itemId)) ModelEvent.TextDelta(targetId, event.text) else event
+        else -> event
+    }
+    private fun claim(id: String): Boolean {
+        if (sourceId == null) sourceId = id
+        return id == sourceId
     }
 }

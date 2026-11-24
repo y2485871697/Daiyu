@@ -229,7 +229,7 @@ data class ModelRequestDiagnostic(
     }
 }
 
-class ModelRequestException(
+open class ModelRequestException(
     val failure: ModelFailure,
     val diagnostic: ModelRequestDiagnostic? = null,
     val transportInterrupted: Boolean = false,

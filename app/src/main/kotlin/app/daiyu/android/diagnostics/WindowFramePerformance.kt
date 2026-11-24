@@ -46,7 +46,44 @@ internal class WindowFramePerformance private constructor(
     @Volatile private var handler: Handler? = null
     private var route = "startup"
     @Volatile private var scrollPhase = BackPerformanceRecorder.Scroll.IDLE
-    internal fun scroll(phase: BackPerformanceRecorder.Scroll) { scrollPhase = phase }
+    internal fun scroll(phase: BackPerformanceRecorder.Scroll) {
+        val old = scrollPhase
+        scrollPhase = phase
+        if ((old == BackPerformanceRecorder.Scroll.IDLE) != (phase == BackPerformanceRecorder.Scroll.IDLE))
+            scrollProbe(phase != BackPerformanceRecorder.Scroll.IDLE && resumed && !closed)
+    }
+    @Volatile private var scrollTicket = 0L
+    private var nextScrollProbeNs = 0L
+    // One bounded burst per active scroll. Sample the main thread from the existing metrics worker.
+    private fun scrollProbe(active: Boolean) {
+        if (!active) { scrollTicket++; return }
+        val epoch = log.captureEpoch() ?: return
+        val worker = handler ?: return
+        val now = System.nanoTime()
+        if (now < nextScrollProbeNs) return
+        nextScrollProbeNs = now + 2_000_000_000L
+        val ticket = ++scrollTicket
+        val main = Looper.getMainLooper().thread
+        var remaining = 12
+        worker.postDelayed(object : Runnable {
+            override fun run() {
+                if (scrollTicket != ticket || log.captureEpoch() != epoch) return
+                val start = System.nanoTime()
+                val stack = main.stackTrace
+                val end = System.nanoTime()
+                if (scrollTicket != ticket || log.captureEpoch() != epoch) return
+                val symbols = org.json.JSONArray()
+                stack.asSequence().filter { it.className.startsWith("app.daiyu.android.") ||
+                    it.className.startsWith("androidx.") || it.className.startsWith("android.") ||
+                    it.className.startsWith("kotlinx.coroutines.") }.take(32).forEach {
+                    symbols.put(it.className.take(180) + "#" + it.methodName.take(100))
+                }
+                log.append(epoch, org.json.JSONObject().put("kind", "chat_scroll_stack")
+                    .put("start_ns", start).put("end_ns", end).put("symbols", symbols))
+                if (--remaining > 0 && end - start < 3_000_000L) worker.postDelayed(this, 83L)
+            }
+        }, 17L)
+    }
     internal fun requestPopup(type: PopupPerformanceCapture.Type) {
         if (resumed && !closed) RuntimeDiagnostics.popupRequest(type)
     }
@@ -172,6 +209,7 @@ internal class WindowFramePerformance private constructor(
             windows.forEach { (window, kind) -> attach(window, kind) }
             activity.window.decorView.postDelayed(heartbeat, 1000)
         } else {
+            scroll(BackPerformanceRecorder.Scroll.IDLE)
             sessions.keys.toList().forEach(::detach)
             if (closed) {
                 val old = thread
@@ -360,12 +398,14 @@ internal fun ObserveDiagnosticInteraction(kind: String, readPhase: () -> String)
         try {
             androidx.compose.runtime.snapshotFlow { current.value() }.collect { phase ->
                 val safePhase = phase.takeIf { it in setOf("idle", "entering", "open", "exiting", "retained",
-                    "drag", "scroll", "predictive", "settle", "forward", "return", "closed", "moving") } ?: "idle"
+                    "drag", "scroll", "inner-scroll", "predictive", "settle", "forward", "return", "closed", "moving") } ?: "idle"
                 if (safeKind == "chat-scroll") host?.scroll(when (safePhase) {
                     "drag" -> BackPerformanceRecorder.Scroll.DRAG
-                    "scroll" -> BackPerformanceRecorder.Scroll.NON_DRAG_SCROLL
+                    "scroll", "inner-scroll" -> BackPerformanceRecorder.Scroll.NON_DRAG_SCROLL
                     else -> BackPerformanceRecorder.Scroll.IDLE
                 })
+                if (!diagnostic && safeKind == "chat-scroll" && window != null && host?.recordingPageFrames() == true)
+                    host.context(window, token, if (safePhase == "idle") null else "chat-scroll=$safePhase")
                 if (!diagnostic && recordNavigation && window != null)
                     host?.context(window, token, if (safePhase == "idle") null else "navigation=$safePhase")
                 if (!diagnostic) return@collect
@@ -381,7 +421,7 @@ internal fun ObserveDiagnosticInteraction(kind: String, readPhase: () -> String)
         } finally {
             if (safeKind == "chat-scroll") host?.scroll(BackPerformanceRecorder.Scroll.IDLE)
             activeSpan?.let { JankDiagnostics.endPhase(it, cookie) }
-            if ((diagnostic || recordNavigation) && window != null) host?.context(window, token, null)
+            if ((diagnostic || recordNavigation || safeKind == "chat-scroll") && window != null) host?.context(window, token, null)
         }
     }
 }

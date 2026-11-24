@@ -44,6 +44,18 @@ class JankDiagnosticsContract(unittest.TestCase):
         self.assertIn('session.incident.flush()',s)
         self.assertIn('removeOnFrameMetricsAvailableListener',s)
 
+    def test_scroll_probe_is_epoch_bounded_and_stacks_use_frame_clock(self):
+        s = (APP/'diagnostics/WindowFramePerformance.kt').read_text()
+        probe = s.split('private fun scrollProbe(active: Boolean)', 1)[1].split('internal fun requestPopup', 1)[0]
+        self.assertLess(probe.index('val epoch = log.captureEpoch() ?: return'), probe.index('worker.postDelayed'))
+        self.assertLess(probe.index('scrollTicket != ticket'), probe.index('main.stackTrace'))
+        for token in ('var remaining = 12', 'if (--remaining > 0', 'end - start < 3_000_000L',
+                      '"start_ns", start', '"end_ns", end', 'log.append(epoch', '.take(32)'):
+            self.assertIn(token, probe)
+        self.assertIn('host.context(window, token, if (safePhase == "idle") null else "chat-scroll=$safePhase")', s)
+        chat = (APP/'ui/screens/chat/conversation/ChatMessageList.kt').read_text()
+        self.assertIn('currentNestedTail.scroller?.isScrollInProgress == true -> "inner-scroll"', chat)
+
     def test_interaction_observer_reads_only_discrete_phases(self):
         s=(APP/'diagnostics/WindowFramePerformance.kt').read_text().split('internal fun ObserveDiagnosticInteraction',1)[1]
         self.assertIn('snapshotFlow { current.value() }',s)

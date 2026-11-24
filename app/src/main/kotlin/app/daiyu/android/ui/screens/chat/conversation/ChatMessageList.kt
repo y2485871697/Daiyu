@@ -244,7 +244,7 @@ internal class StreamingTailViewport(initiallyBounded: Boolean) {
     var anchorCorrection = ""
     var followDiagnostic = ""
     var clearanceDiagnostic = ""
-    var scroller: ScrollableState? = null
+    var scroller by mutableStateOf<ScrollableState?>(null)
     private val presentedQuestions = mutableSetOf<String>()
 
     fun registerQuestionBaseline(keys: List<String>) {
@@ -972,7 +972,13 @@ internal fun ChatMessageList(
         }
     }
     app.daiyu.android.diagnostics.ObserveDiagnosticInteraction("chat-scroll") {
-        if (!scrollResumed || !listState.isScrollInProgress) "idle" else if (currentDragging) "drag" else "scroll"
+        when {
+            !pageActive || !scrollResumed -> "idle"
+            currentNestedTail.bounded && currentNestedTail.scroller?.isScrollInProgress == true -> "inner-scroll"
+            !listState.isScrollInProgress -> "idle"
+            currentDragging -> "drag"
+            else -> "scroll"
+        }
     }
     LaunchedEffect(listState) {
         snapshotFlow { Triple(scrollResumed, currentDragging, listState.isScrollInProgress) }

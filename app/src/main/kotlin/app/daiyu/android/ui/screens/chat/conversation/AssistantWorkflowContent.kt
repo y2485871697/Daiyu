@@ -35,11 +35,6 @@ internal fun WorkProcessUi.withResolvedTerminalCards(): WorkProcessUi? {
     return if (visibleSegments.isEmpty()) null else copy(segments = visibleSegments)
 }
 
-private fun WorkProcessUi.afterReasoning(steps: List<MessageContentUi>, tail: List<MessageContentUi>): WorkProcessUi =
-    if (running && controlActivity == null && tail.any { it is MessageContentUi.Text && it.text.isNotBlank() } &&
-        steps.isNotEmpty() && steps.all { it is MessageContentUi.Reasoning && it.reported.activeSinceNanos == null } &&
-        segments.none { it.steps.isNotEmpty() || it.reasoning?.activeSinceNanos != null }) copy(running = false, summary = "已完成") else this
-
 internal fun ChatTurnUi.Assistant.workflowContent(): AssistantWorkflowContent {
     if (content.isNotEmpty()) {
         val lastStep = content.indexOfLast { it is MessageContentUi.Reasoning || it is MessageContentUi.Tool }
@@ -48,7 +43,7 @@ internal fun ChatTurnUi.Assistant.workflowContent(): AssistantWorkflowContent {
         val leading = content.take(firstStep)
         val split = lastStep + 1
         val steps = content.subList(firstStep, split)
-        val projectedWork = workProcess ?: WorkProcessUi(steps.mapNotNull {
+        val work = workProcess ?: WorkProcessUi(steps.mapNotNull {
             when (it) {
                 is MessageContentUi.Reasoning -> WorkSegmentUi(reasoning = it.reported)
                 is MessageContentUi.Tool -> WorkSegmentUi(steps = listOf(it.step))
@@ -56,18 +51,17 @@ internal fun ChatTurnUi.Assistant.workflowContent(): AssistantWorkflowContent {
             }
         }, summary = if (status == RunStatus.RUNNING) "进行中" else "已完成", running = status == RunStatus.RUNNING)
         val tail = content.drop(split)
-        val work = projectedWork.afterReasoning(steps, tail)
         return if (work.running) AssistantWorkflowContent(work, steps, emptyList(), pending = tail, leading = leading)
         else AssistantWorkflowContent(work, steps, tail, leading = leading)
     }
-    val projectedWork = workProcess ?: reportedReasoning.filter {
+    val work = workProcess ?: reportedReasoning.filter {
         hasReportedReasoningText(it.text) || it.activeSinceNanos != null
     }.takeIf { it.isNotEmpty() }?.let { reasoning ->
         WorkProcessUi(reasoning.map { WorkSegmentUi(reasoning = it) },
             summary = if (status == RunStatus.RUNNING) "思考中" else "已完成", running = status == RunStatus.RUNNING)
     }
     val narration = mutableSetOf<String>()
-    val steps = projectedWork?.segments.orEmpty().flatMapIndexed { index, segment -> buildList {
+    val steps = work?.segments.orEmpty().flatMapIndexed { index, segment -> buildList {
         if (!segment.narration.isNullOrBlank()) {
             val id = segment.narrationId ?: "workflow-narration:$index"
             // Narration uses the same Markdown projection as mixed-content replies.
@@ -79,7 +73,6 @@ internal fun ChatTurnUi.Assistant.workflowContent(): AssistantWorkflowContent {
     val body = finalContent.ifEmpty {
         if (finalText.isBlank()) emptyList() else listOf(MessageContentUi.Text("final", finalText))
     }
-    val work = projectedWork?.afterReasoning(steps, body)
     return if (work?.running == true) AssistantWorkflowContent(work, steps, emptyList(), narration, pending = body, leading = leadingContent)
     else AssistantWorkflowContent(work, steps, body, narration, leading = leadingContent)
 }

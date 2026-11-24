@@ -39,7 +39,7 @@ class TypewriterHapticsContract(unittest.TestCase):
         detached = (CHAT / "DetachedReplyBody.kt").read_text()
         self.assertIn("part.lane.pulses(currentTurn.status)", detached)
         self.assertIn("ENDED_REASON -> false", detached)
-        self.assertIn("previous?.resumePainted(shown, admitted)", detached)
+        self.assertIn("previous?.resumePainted(shown)", detached)
         listing = (CHAT / "ChatMessageList.kt").read_text()
         self.assertIn("replyPlayback.control.permitsTerminalFeedback(tailAssistant)) actions.onTerminalTextAdvance", listing)
         self.assertNotIn("!detachedBody.value && replyPlayback?.control?.permitsTerminalFeedback", listing)

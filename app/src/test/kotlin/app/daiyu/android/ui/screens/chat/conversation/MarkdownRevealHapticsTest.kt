@@ -60,14 +60,6 @@ class MarkdownRevealHapticsTest {
         assertTrue(ink.covers(final, 2))
     }
 
-    @Test fun admittedUnpaintedAppendCanResumeWithoutReplayingReplacement() {
-        val first = MarkdownTypingSource("body", "甲")
-        val ink = MarkdownInk(0, first)
-        assertNull(ink.resumePainted(first))
-        assertSame(ink, ink.resumePainted(first.copy(text = "甲乙"), admitted = true))
-        assertNull(ink.resumePainted(first.copy(text = "更正"), admitted = true))
-    }
-
     @Test fun detachedFramesSpendTheSameInkAndReturningDrawDoesNotReplay() {
         val text = "甲😀乙".repeat(40)
         val bounds = MarkdownTextBoundaries(text)

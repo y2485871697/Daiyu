@@ -42,9 +42,9 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
     private var tickFrontier = start
     var hasPaintedGlyph by mutableStateOf(false)
         private set
-    fun resumePainted(next: MarkdownTypingSource, admitted: Boolean = false): MarkdownInk? {
+    fun resumePainted(next: MarkdownTypingSource): MarkdownInk? {
         val previous = source ?: return null
-        if ((!hasPaintedGlyph && !admitted) || previous != next && !markdownTypingAppends(listOf(previous), listOf(next))) return null
+        if (!hasPaintedGlyph || previous != next && !markdownTypingAppends(listOf(previous), listOf(next))) return null
         source = next
         return this
     }

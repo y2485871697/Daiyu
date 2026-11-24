@@ -67,7 +67,6 @@ internal class WindowFramePerformance private constructor(
         if (now < nextScrollProbeNs) return
         nextScrollProbeNs = now + 2_000_000_000L
         val ticket = ++scrollTicket
-        queueProbe(worker, { scrollTicket == ticket && log.captureEpoch() == epoch }, { log.append(epoch, it) })
         val main = Looper.getMainLooper().thread
         var remaining = 12
         worker.postDelayed(object : Runnable {
@@ -88,37 +87,6 @@ internal class WindowFramePerformance private constructor(
                 if (--remaining > 0 && end - start < 3_000_000L) worker.postDelayed(this, 83L)
             }
         }, 17L)
-    }
-    // Normal (not async) queue marker. Scheduler counters bracket the delay, not an individual frame.
-    private fun queueProbe(worker: Handler, valid: () -> Boolean, save: (org.json.JSONObject) -> Unit) {
-        val main = Handler(Looper.getMainLooper())
-        val stats = java.io.File("/proc/self/task/${android.os.Process.myPid()}/schedstat")
-        fun counters(): List<Long>? = try {
-            stats.readText().trim().split(Regex("\\s+")).take(2).map(String::toLong).takeIf { it.size == 2 }
-        } catch (_: Exception) { null }
-        var left = 48
-        worker.post(object : Runnable {
-            override fun run() {
-                if (!valid() || left-- <= 0) return
-                val before = counters()
-                val sent = System.nanoTime()
-                main.post {
-                    val ack = System.nanoTime()
-                    worker.post sample@{
-                        if (!valid()) return@sample
-                        if (ack - sent >= 8_000_000L) {
-                            val after = counters()
-                            val row = org.json.JSONObject().put("kind", "scroll_main_queue")
-                                .put("sent_ns", sent).put("ack_ns", ack).put("counters_end_ns", System.nanoTime())
-                            if (before != null && after != null) row.put("cpu_ns", after[0] - before[0])
-                                .put("runnable_wait_ns", after[1] - before[1])
-                            save(row)
-                        }
-                        worker.postDelayed(this, 60L)
-                    }
-                }
-            }
-        })
     }
     internal fun requestPopup(type: PopupPerformanceCapture.Type) {
         if (resumed && !closed) RuntimeDiagnostics.popupRequest(type)

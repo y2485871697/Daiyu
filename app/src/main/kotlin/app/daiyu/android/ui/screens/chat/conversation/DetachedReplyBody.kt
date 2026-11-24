@@ -4,7 +4,7 @@ import androidx.compose.runtime.*
 import app.daiyu.android.domain.RunStatus
 import kotlinx.coroutines.flow.first
 
-private class DetachedPart(val ink: MarkdownInk, val text: String) {
+private class DetachedPart(val ink: MarkdownInk, val text: String, val liveFeedback: Boolean) {
     val boundaries by lazy(LazyThreadSafetyMode.NONE) { MarkdownTextBoundaries(text) }
 }
 
@@ -47,7 +47,7 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
                 onDispose { ink.detached = false }
             }
             SideEffect { ink.targetLength(text.length) }
-            parts.add(remember(ink, text) { DetachedPart(ink, text) })
+            parts.add(remember(ink, text) { DetachedPart(ink, text, liveFeedback = true) })
         }
     }
     val bodyPartCount = parts.size
@@ -81,7 +81,8 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
                 onDispose { ink.detached = false }
             }
             SideEffect { ink.targetLength(displayed.length) }
-            parts.add(remember(ink, displayed) { DetachedPart(ink, displayed) })
+            val active = reported.activeSinceNanos != null && !turn.reasoningStopped
+            parts.add(remember(ink, displayed, active) { DetachedPart(ink, displayed, active) })
         }
     }
     val targets by rememberUpdatedState(parts.toList())
@@ -110,7 +111,8 @@ internal fun DetachedReplyBody(turn: ChatTurnUi.Assistant, workflow: AssistantWo
                 withFrameNanos { now ->
                     val part = targets.firstOrNull { it.ink.position < it.text.length }
                     if (part != null && currentDetached() && !playback.paused && !playback.control.finished &&
-                        part.ink.advanceDetached(part.text, part.boundaries, (now - before) / 1e9)) latestAdvance()
+                        part.ink.advanceDetached(part.text, part.boundaries, (now - before) / 1e9) &&
+                        part.liveFeedback && currentTurn.status == RunStatus.RUNNING) latestAdvance()
                     before = now
                 }
             }

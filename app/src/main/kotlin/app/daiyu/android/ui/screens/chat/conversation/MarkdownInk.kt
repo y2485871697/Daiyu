@@ -91,6 +91,7 @@ internal class MarkdownInk(start: Int, private var source: MarkdownTypingSource?
         step(text, boundaries, limit, seconds)
     }
 
+    val glyphPaint by lazy(LazyThreadSafetyMode.NONE) { Paint() }
     var detached by mutableStateOf(false)
     // This is the same cursor the next on-screen layout will read, not a motor queue.
     fun advanceDetached(text: String, boundaries: MarkdownTextBoundaries, seconds: Double): Boolean {
@@ -198,7 +199,7 @@ internal fun ContentDrawScope.drawMarkdownInk(layout: TextLayoutResult?, ink: Ma
         val glyph = layout.getPathForRange(whole, next)
         clipPath(glyph) {
             val canvas = drawContext.canvas
-            canvas.saveLayer(glyph.getBounds(), Paint().apply { alpha = ((p - whole) / (next - whole)).toFloat() })
+            canvas.saveLayer(glyph.getBounds(), ink.glyphPaint.apply { alpha = ((p - whole) / (next - whole)).toFloat() })
             try { scope.drawContent() } finally { canvas.restore() }
         }
     }

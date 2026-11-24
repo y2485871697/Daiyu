@@ -110,7 +110,8 @@ internal fun ReportedReasoningCard(
             }
             val revealEnabled = arrived && revealGate && hasReportedReasoningText(text) &&
                 (isThinking || observedLive || firstPresentation || currentOverride == true)
-            var observedDisplayLive by remember(revealGate, revealResetEpoch) { mutableStateOf(isThinking) }
+            // Saveable: a row recreated after scrolling back must keep typing feedback for the unrevealed tail.
+            var observedDisplayLive by rememberSaveable(revealGate, revealResetEpoch) { mutableStateOf(isThinking) }
             SideEffect { if (isThinking) observedDisplayLive = true }
             val hasDisplayText = hasReportedReasoningText(text)
             var queuedEmptyBaseline by remember(revealGate, revealResetEpoch) {

@@ -8,9 +8,9 @@ import kotlinx.coroutines.flow.first
 
 internal enum class DetachedLane { BODY, ACTIVE_REASON, ENDED_REASON;
     fun pulses(status: RunStatus) = when (this) {
-        BODY -> status == RunStatus.RUNNING || status == RunStatus.COMPLETED
+        // Ended reasoning only has a cursor here if it was presented live; its unrevealed tail is still typing.
+        BODY, ENDED_REASON -> status == RunStatus.RUNNING || status == RunStatus.COMPLETED
         ACTIVE_REASON -> status == RunStatus.RUNNING
-        ENDED_REASON -> false
     }
 }
 

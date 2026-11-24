@@ -38,7 +38,10 @@ class TypewriterHapticsContract(unittest.TestCase):
     def test_only_unspent_body_can_forward_after_transport_end(self):
         detached = (CHAT / "DetachedReplyBody.kt").read_text()
         self.assertIn("part.lane.pulses(currentTurn.status)", detached)
-        self.assertIn("ENDED_REASON -> false", detached)
+        self.assertNotIn("ENDED_REASON -> false", detached)
+        self.assertIn("BODY, ENDED_REASON -> status == RunStatus.RUNNING || status == RunStatus.COMPLETED", detached)
+        card = (CHAT / "ReportedReasoningCard.kt").read_text()
+        self.assertIn("var observedDisplayLive by rememberSaveable(revealGate, revealResetEpoch)", card)
         self.assertIn("previous?.resumePainted(shown)", detached)
         listing = (CHAT / "ChatMessageList.kt").read_text()
         self.assertIn("replyPlayback.control.permitsTerminalFeedback(tailAssistant)) actions.onTerminalTextAdvance", listing)

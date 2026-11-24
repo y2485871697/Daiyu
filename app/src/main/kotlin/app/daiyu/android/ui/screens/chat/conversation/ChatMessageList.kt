@@ -1308,6 +1308,7 @@ internal fun ChatMessageList(
     }
 
     val viewportHeightPx = remember { mutableIntStateOf(0) }
+    val exposeSemantics = rememberExposeChatSemantics()
     Box(modifier.fillMaxSize()) {
       Layout(modifier = Modifier.fillMaxSize(), content = {
         LazyColumn(state = listState, userScrollEnabled = pageActive && !initialPositionPending && !retainingRows && presentationActive,
@@ -1320,6 +1321,7 @@ internal fun ChatMessageList(
                 }
                 .drawWithContent { if (!initialPositionPending) drawContent() }
                 .then(if (initialPositionPending) Modifier.clearAndSetSemantics {} else Modifier)
+                .then(if (exposeSemantics) Modifier else Modifier.clearAndSetSemantics {})
                 .pointerInput(Unit) {
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)

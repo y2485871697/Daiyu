@@ -35,13 +35,14 @@ class TypewriterHapticsContract(unittest.TestCase):
             self.assertIn(token, text)
         self.assertNotIn("setVisibleOutput", text)
 
-    def test_detached_terminal_and_finished_reasoning_are_silent(self):
-        detached = (CHAT / 'DetachedReplyBody.kt').read_text()
-        self.assertIn('reported.activeSinceNanos != null && !turn.reasoningStopped', detached)
-        self.assertIn('part.liveFeedback && currentTurn.status == RunStatus.RUNNING) latestAdvance()', detached)
-        listing = (CHAT / 'ChatMessageList.kt').read_text()
-        self.assertNotIn('actions.onTerminalTextAdvance(tailAssistant.listKey)', listing)
-        self.assertIn('!detachedBody.value && replyPlayback?.control?.permitsTerminalFeedback(turn)', listing)
+    def test_only_unspent_body_can_forward_after_transport_end(self):
+        detached = (CHAT / "DetachedReplyBody.kt").read_text()
+        self.assertIn("part.lane.pulses(currentTurn.status)", detached)
+        self.assertIn("ENDED_REASON -> false", detached)
+        self.assertIn("previous?.resumePainted(shown)", detached)
+        listing = (CHAT / "ChatMessageList.kt").read_text()
+        self.assertIn("replyPlayback.control.permitsTerminalFeedback(tailAssistant)) actions.onTerminalTextAdvance", listing)
+        self.assertNotIn("!detachedBody.value && replyPlayback?.control?.permitsTerminalFeedback", listing)
 
     def test_production_host_freezes_owner_and_silences_completed_history(self):
         main = (APP / "MainActivity.kt").read_text()

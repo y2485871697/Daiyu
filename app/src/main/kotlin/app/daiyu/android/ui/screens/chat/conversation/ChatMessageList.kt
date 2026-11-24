@@ -594,6 +594,8 @@ internal fun ChatMessageList(
             replyPlayback, revealResetEpoch, { detachedBody.value }) {
             HapticTrace.mark(HC.DETACHED_ADVANCE)
             if (tailAssistant.status == RunStatus.RUNNING) actions.onVisibleTextAdvance(tailAssistant.listKey)
+            else if (replyPlayback.control.permitsTerminalFeedback(tailAssistant)) actions.onTerminalTextAdvance(tailAssistant.listKey)
+            else HapticTrace.mark(HC.TERMINAL_GATE)
         }
     }
     val assistantOwnerKey by rememberUpdatedState(tailAssistant?.listKey)
@@ -1372,7 +1374,7 @@ internal fun ChatMessageList(
                                         layout.visibleItemsInfo.any { it.key == turn.listKey && it.size > 0 &&
                                             it.offset < visibleBottom && it.offset + it.size > layout.viewportStartOffset }) {
                                         if (turn.status == RunStatus.RUNNING) actions.onVisibleTextAdvance(turn.listKey)
-                                        else if (!detachedBody.value && replyPlayback?.control?.permitsTerminalFeedback(turn) == true)
+                                        else if (replyPlayback?.control?.permitsTerminalFeedback(turn) == true)
                                             actions.onTerminalTextAdvance(turn.listKey)
                                         else HapticTrace.mark(HC.TERMINAL_GATE)
                                     } else HapticTrace.mark(HC.ROW_HIDDEN)

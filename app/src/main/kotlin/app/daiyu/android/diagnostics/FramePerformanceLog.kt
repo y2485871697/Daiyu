@@ -51,7 +51,7 @@ internal class PerformanceRouteTimeline {
 internal data class PerformanceFrame(
     val vsyncNs: Long, val totalNs: Long, val budgetNs: Long, val refreshHz: Double,
     val stagesNs: LongArray, val callbackDrops: Int, val firstDraw: Boolean,
-)
+) { var scrollTextNs: LongArray? = null }
 
 /** Worker-confined one-second windows, split on page, refresh-rate and capture epoch changes. */
 internal class PerformanceFrameBatch(
@@ -101,6 +101,13 @@ internal class PerformanceFrameBatch(
             .put("callback_drops", frames.sumOf { it.callbackDrops.toLong() })
             .put("first_draw_frames", frames.count { it.firstDraw }).put("end_reason", reason)
             .put("frames", raw)
+        if (frames.any { it.scrollTextNs != null }) {
+            val costs = JSONArray()
+            frames.forEachIndexed { index, f -> f.scrollTextNs?.let { ns ->
+                costs.put(JSONArray().put(index).also { row -> ns.forEach { row.put(it) } })
+            } }
+            summary.put("scroll_text_ns_frame_prepare_candidate_nextline_measure_partial", costs)
+        }
         emit(epoch, summary)
         frames.clear()
     }

@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.diagnostics.ScrollTextTiming
+import app.daiyu.android.diagnostics.ScrollTextTiming.Part
 import app.daiyu.android.ui.haptics.TouchHaptics
 import androidx.compose.ui.platform.LocalView
 import android.graphics.Typeface
@@ -271,7 +273,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
         var result by remember { mutableStateOf<TextLayoutResult?>(null) }
         val bounds = remember(ink, text.text) { ink?.let { MarkdownTextBoundaries(text.text) } }
         BasicText(text, modifier.layout { measurable, constraints ->
-            val child = measurable.measure(constraints)
+            val child = ScrollTextTiming.timed(Part.MEASURE) { measurable.measure(constraints) }
             val height = result?.takeIf { it.layoutInput.text == text }?.let(::inkHeight) ?: if (ink == null) child.height else 0
             layout(child.width, constraints.constrainHeight(height)) { child.placeRelative(0, 0) }
         }.drawWithContent {
@@ -307,8 +309,8 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                 if (clearance.availableHeight(coordinates) == Float.POSITIVE_INFINITY) latestCandidateText
                 else {
                     val prepared = if (coordinates != null) frame.measureConstraints?.let { constraints ->
-                        measurer.measure(latestCandidateText, style, softWrap = softWrap,
-                            constraints = constraints.copy(minHeight = 0))
+                        ScrollTextTiming.timed(Part.PREPARE) { measurer.measure(latestCandidateText, style, softWrap = softWrap,
+                            constraints = constraints.copy(minHeight = 0)) }
                     } else null
                     // Prepare the native input before placement; only the real layout and draw publish it.
                     if (prepared != null && clearance.fits(coordinates, inkHeight(prepared))) latestCandidateText
@@ -374,13 +376,13 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     } }
     key(style, softWrap, density.density, density.fontScale, direction) {
         BasicText(displayedText, modifier.layout { measurable, constraints ->
-            val candidate = measurer.measure(candidateText, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0))
+            val candidate = ScrollTextTiming.timed(Part.CANDIDATE) { measurer.measure(candidateText, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0)) }
             val previous = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.layout }
             if (previous == null || previous.multiParagraph !== candidate.multiParagraph ||
                 previous.layoutInput != candidate.layoutInput || previous.size != candidate.size)
                 frame.layout = candidate
             frame.measureConstraints = candidate.layoutInput.constraints
-            val future = nextLineText?.let { lineMeasurer.measureMarkdownNextLine(candidate, it) }
+            val future = nextLineText?.let { ScrollTextTiming.timed(Part.NEXT_LINE) { lineMeasurer.measureMarkdownNextLine(candidate, it) } }
             frame.nextAdvance = future?.takeIf { it.lineCount > candidate.lineCount }?.let {
                 (it.size.height - candidate.size.height).coerceAtLeast(0)
             } ?: 0
@@ -389,7 +391,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             if (playback?.paused != true &&
                 (frame.nextAdvance == 0 || drawn == null || candidate.size.height > drawn.size.height))
                 clearance.prepareLine(owner, 0)
-            val committed = measurable.measure(constraints.copy(minHeight = 0))
+            val committed = ScrollTextTiming.timed(Part.MEASURE) { measurable.measure(constraints.copy(minHeight = 0)) }
             layout(constraints.constrainWidth(maxOf(candidate.size.width, committed.width)),
                 constraints.constrainHeight(if (ink == null) maxOf(candidate.size.height, committed.height) else inkHeight(candidate))) {
                 androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {

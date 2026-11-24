@@ -171,7 +171,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         ui = (BASE / 'MessageMarkdown.kt').read_text()
         clearance = ui.split('internal fun ClearanceText(', 1)[1].split('internal fun TextLayoutResult.canPaintPrefixOf', 1)[0]
         for token in ('val candidateText = if (playback?.paused == true) displayedText else text',
-                      'frame.layout = candidate', 'val future = nextLineText?.let { lineMeasurer.measureMarkdownNextLine(candidate, it) }',
+                      'frame.layout = candidate', 'val future = nextLineText?.let { ScrollTextTiming.timed(Part.NEXT_LINE) { lineMeasurer.measureMarkdownNextLine(candidate, it) } }',
                       'it.lineCount > candidate.lineCount', '(it.size.height - candidate.size.height).coerceAtLeast(0)',
                       'if (playback?.paused != true &&', 'clearance.prepareLine(owner, 0)',
                       'BasicText(displayedText, modifier.layout',

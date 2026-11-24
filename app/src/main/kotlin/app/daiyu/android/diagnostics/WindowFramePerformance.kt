@@ -46,9 +46,13 @@ internal class WindowFramePerformance private constructor(
     @Volatile private var handler: Handler? = null
     private var route = "startup"
     @Volatile private var scrollPhase = BackPerformanceRecorder.Scroll.IDLE
+    private val textTiming = ScrollTextTiming()
     internal fun scroll(phase: BackPerformanceRecorder.Scroll) {
         val old = scrollPhase
         scrollPhase = phase
+        if (phase != BackPerformanceRecorder.Scroll.IDLE && recordingPageFrames() && resumed && !closed)
+            ScrollTextTiming.active = textTiming
+        else if (ScrollTextTiming.active === textTiming) ScrollTextTiming.active = null
         if ((old == BackPerformanceRecorder.Scroll.IDLE) != (phase == BackPerformanceRecorder.Scroll.IDLE))
             scrollProbe(phase != BackPerformanceRecorder.Scroll.IDLE && resumed && !closed)
     }
@@ -151,6 +155,8 @@ internal class WindowFramePerformance private constructor(
             }
             if (epoch != null || diagnostic) {
                 val page = timeline.pageAt(vsync)
+                if (epoch != null && kind == "main" && "chat-scroll=" in page && budget > 0 && frame.totalNs > budget)
+                    frame.scrollTextNs = textTiming.overlap(vsync, vsync + frame.totalNs)
                 if (epoch != null) batch.add(epoch, page, frame)
                 if (diagnostic) incident.add(page, frame)
             }
@@ -296,6 +302,7 @@ internal class WindowFramePerformance private constructor(
             activity.lifecycleScope.launch {
                 withContext(Dispatchers.IO) { store.load() }
                 store.state.collect { state ->
+                    if (!state.enabled && ScrollTextTiming.active === host.textTiming) ScrollTextTiming.active = null
                     host.enabled = true // Broad batches still use log.captureEpoch(), never this listener gate.
                     if (!host.diagnostic && (!state.loaded || !state.enabled || state.unavailable)) {
                         host.sessions.filterValues { it.kind != "main" &&

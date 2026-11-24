@@ -11,13 +11,12 @@ class MarkdownRevealHapticsTest {
         assertFalse(reasoningPaintFeedback(false, true, false, false))
         assertFalse(reasoningPaintFeedback(false, true, true, true))
     }
-    @Test fun detachedProgressPulsesWhileAnyPresentedCursorAdvances() {
+    @Test fun detachedProgressSilencesEndedReasoningTail() {
         val done = app.daiyu.android.domain.RunStatus.COMPLETED
         val live = app.daiyu.android.domain.RunStatus.RUNNING
         assertTrue(DetachedLane.BODY.pulses(done)); assertTrue(DetachedLane.BODY.pulses(live))
         assertTrue(DetachedLane.ACTIVE_REASON.pulses(live)); assertFalse(DetachedLane.ACTIVE_REASON.pulses(done))
-        assertTrue(DetachedLane.ENDED_REASON.pulses(live)); assertTrue(DetachedLane.ENDED_REASON.pulses(done))
-        assertFalse(DetachedLane.ENDED_REASON.pulses(app.daiyu.android.domain.RunStatus.STOPPED))
+        assertFalse(DetachedLane.ENDED_REASON.pulses(live)); assertFalse(DetachedLane.ENDED_REASON.pulses(done))
     }
 
     @Test fun documentFeedbackOnlyOnNewPaintedContent() {

@@ -586,7 +586,10 @@ internal fun ChatMessageList(
         (tailAssistant.status == RunStatus.RUNNING || tailAssistant.status == RunStatus.COMPLETED && replyPlayback.control.pending(tailAssistant))) {
         val part = reconnectPartsByKey[tailAssistant.listKey]?.parts?.lastOrNull()
         DetachedReplyBody(part?.turn ?: tailAssistant, part?.workflow, workflowAdmissions.scope(tailAssistant.listKey, false),
-            replyPlayback, revealResetEpoch, { detachedBody.value }) { actions.onVisibleTextAdvance(tailAssistant.listKey) }
+            replyPlayback, revealResetEpoch, { detachedBody.value }) {
+            if (tailAssistant.status == RunStatus.RUNNING) actions.onVisibleTextAdvance(tailAssistant.listKey)
+            else if (replyPlayback.control.permitsTerminalFeedback(tailAssistant)) actions.onTerminalTextAdvance(tailAssistant.listKey)
+        }
     }
     val assistantOwnerKey by rememberUpdatedState(tailAssistant?.listKey)
     val turnKeys = remember(turns) { turns.map { it.listKey } }
@@ -1357,7 +1360,9 @@ internal fun ChatMessageList(
                                     if (presentationActive && pageActive && !currentRetainingRows && !initialPositionPending && scrollResumed && turn.status in setOf(RunStatus.RUNNING, RunStatus.COMPLETED) &&
                                         layout.visibleItemsInfo.any { it.key == turn.listKey && it.size > 0 &&
                                             it.offset < visibleBottom && it.offset + it.size > layout.viewportStartOffset }) {
-                                        actions.onVisibleTextAdvance(turn.listKey)
+                                        if (turn.status == RunStatus.RUNNING) actions.onVisibleTextAdvance(turn.listKey)
+                                        else if (replyPlayback?.control?.permitsTerminalFeedback(turn) == true)
+                                            actions.onTerminalTextAdvance(turn.listKey)
                                     }
                                 },
                                 onContentDisplayed = { displayed ->

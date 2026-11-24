@@ -67,6 +67,23 @@ class MarkdownRevealHapticsTest {
         assertFalse(control.pending(turn))
     }
 
+    @Test fun terminalFeedbackFollowsTheOnceLiveReplyAndCannotBeRearmedByHistory() {
+        val live = ChatTurnUi.Assistant("answer", status = app.daiyu.android.domain.RunStatus.RUNNING)
+        val done = live.copy(status = app.daiyu.android.domain.RunStatus.COMPLETED, finalText = "正文")
+        val control = ReplyPresentationControl(live.listKey, true)
+        control.updateFeedback(live)
+        control.updateFeedback(done)
+        assertTrue(control.permitsTerminalFeedback(done))
+        assertFalse(control.permitsTerminalFeedback(done.copy(listKey = "older")))
+        control.pause(true); assertFalse(control.permitsTerminalFeedback(done)); control.pause(false)
+        control.setSettled(done, true); control.updateFeedback(done)
+        control.reportPending(Any(), true)
+        assertFalse(control.permitsTerminalFeedback(done))
+        val historical = ReplyPresentationControl(done.listKey, false)
+        historical.reportPending(Any(), true); historical.updateFeedback(done)
+        assertFalse(historical.permitsTerminalFeedback(done))
+    }
+
     @Test fun slowCharactersPulseSeparatelyAndFastOutputCannotBuildUpDebt() {
         var time = 0L
         var next: Pair<Runnable, Long>? = null

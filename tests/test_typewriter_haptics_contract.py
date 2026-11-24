@@ -39,7 +39,7 @@ class TypewriterHapticsContract(unittest.TestCase):
         main = (APP / "MainActivity.kt").read_text()
         setup = main.split("private fun chatActions(onVisibleCompleted:", 1)[1].split("fun editorMatches()", 1)[0]
         self.assertIn("onVisibleTextAdvance = { key ->", main)
-        call = main.split("onVisibleTextAdvance = { key ->", 1)[1].split("onInteractiveModeChange", 1)[0]
+        call = main.split("onVisibleTextAdvance = { key ->", 1)[1].split("onTerminalTextAdvance =", 1)[0]
         for token in ["renderedRevealOwner", "associateBy { it.listKey }", "hapticsHost?.revealAdvance(renderedConversation)"]:
             self.assertIn(token, setup)
         for token in ["renderedRevealTurns[key]", "active.runId == renderedRevealOwner.runId",

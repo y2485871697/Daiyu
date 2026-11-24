@@ -22,6 +22,17 @@ internal class ReplyPresentationControl(
     private val lanes = mutableMapOf<LaneKey, ReplyTypingLane>()
     private val pendingLanes = mutableStateMapOf<Any, Unit>()
 
+    // Only seeing this very reply run arms its terminal draw callbacks. History can
+    // report pending layout work, but neither that nor remounting may arm feedback.
+    private var terminalFeedbackArmed = false
+    fun updateFeedback(turn: ChatTurnUi.Assistant) {
+        if (!matches(turn)) return
+        if (turn.status == RunStatus.RUNNING) terminalFeedbackArmed = !turn.stopRequested
+        else if (turn.status != RunStatus.COMPLETED || !pending(turn)) terminalFeedbackArmed = false
+    }
+    fun permitsTerminalFeedback(turn: ChatTurnUi.Assistant) = terminalFeedbackArmed &&
+        turn.status == RunStatus.COMPLETED && !turn.stopRequested && !pauseRequested && pending(turn)
+
     fun matches(turn: ChatTurnUi.Assistant) = turn.listKey == rowKey
     fun observeLive() { observedLive = true }
     fun pending(turn: ChatTurnUi.Assistant) = matches(turn) && observedLive && !finished && (settledTurn != turn || pendingLanes.isNotEmpty() || lanes.values.any { lane -> lane.inks.values.any { it.hasRemaining } })

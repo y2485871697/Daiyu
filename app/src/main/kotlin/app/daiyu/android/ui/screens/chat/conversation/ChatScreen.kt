@@ -121,6 +121,7 @@ data class ChatScreenActions(
     /** Actual typewriter growth in a visible row, never a network chunk or recomposition. */
     val onVisibleTextAdvance: (String) -> Unit = {},
     val hasCompletionToRead: Boolean = true,
+    val onTerminalTextAdvance: (String) -> Unit = onVisibleTextAdvance,
 )
 
 /** Same callbacks behind a stable instance: rows skip recomposition while the host rebuilds actions. */
@@ -167,6 +168,7 @@ internal fun rememberStableChatActions(a: ChatScreenActions): ChatScreenActions 
         onVisibleCompleted = { p0 -> latest.value.onVisibleCompleted(p0) },
         onOpenWorkspace = { latest.value.onOpenWorkspace() },
         onVisibleTextAdvance = { p0 -> latest.value.onVisibleTextAdvance(p0) },
+        onTerminalTextAdvance = { key -> latest.value.onTerminalTextAdvance(key) },
         hasCompletionToRead = a.hasCompletionToRead,
     ) }
 }
@@ -243,6 +245,7 @@ internal fun DaiyuChatScreen(
     }
     val playback = remember(presentation, runtimePhase) { ReplyPlayback(presentation, runtimePhase == ComposerPhase.PAUSED) }
     val presentationOnly = runtimePhase == ComposerPhase.IDLE && reply?.let(presentation::pending) == true
+    SideEffect { reply?.let(presentation::updateFeedback) }
     val composer = state.composer.copy(
         phase = when {
             presentationOnly -> if (playback.paused) ComposerPhase.PAUSED else ComposerPhase.RUNNING

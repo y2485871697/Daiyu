@@ -49,6 +49,28 @@ class ProductionBodyHapticsTest : WiredActivityTestCase() {
         }
     }
 
+    fun testCompletedTransportStillTicksWhilePaintingButScrollingSettledBodyIsSilent() {
+        val session = fixture.session("长段落继续逐字显示。".repeat(80) + "正文结束标记", holdSeconds = 120)
+        try {
+            setDraft("正文收尾触感")
+            val send = node("chat-send")
+            awaitNodeWindowFocus(send)
+            send.performClick()
+            ui.waitUntil(10_000) { session.entered.count == 0L }
+            node("chat-control").assertExists()
+            session.release.countDown()
+            ui.waitUntil(10_000) { fixture.controller.active == null }
+            val before = times.size
+            ui.waitUntil(10_000) { times.size >= before + 2 }
+            ui.waitUntil(20_000) { ui.onAllNodesWithTag("chat-send").fetchSemanticsNodes().size == 1 }
+            val settled = times.size
+            node("chat-messages").performTouchInput { swipeDown() }
+            node("chat-messages").performTouchInput { swipeUp() }
+            ui.waitForIdle()
+            assertEquals("Scrolling settled body must not replay generation ticks", settled, times.size)
+        } finally { session.release.countDown() }
+    }
+
     fun testActualSendPaintsBodyAndDeliversGenerationTicksToMotorPort() {
         val session = fixture.session("结束", holdSeconds = 120)
         try {

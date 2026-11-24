@@ -3614,6 +3614,14 @@ class MainActivity : ComponentActivity() {
                 renderedRevealAdvance?.invoke()
             }
         },
+        onTerminalTextAdvance = { key ->
+            val tail = chatState.turns.lastOrNull() as? ChatTurnUi.Assistant
+            if (tail != null && tail.listKey == key && tail.status == RunStatus.COMPLETED && !tail.stopRequested &&
+                controller.active == null && activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+                selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration) {
+                renderedRevealAdvance?.invoke()
+            }
+        },
         onInteractiveModeChange = { enabled -> if (currentChat()) controller.interactiveMode.setEnabled(enabled) },
         onMore = { if (currentChat()) refreshAutomaticCompression() },
         onVoiceLongPress = { admitVoiceModePicker() && currentChat() },

@@ -386,7 +386,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                 val input = result.layoutInput
                 input.text == candidateText && input.style == style && input.softWrap == softWrap &&
                     input.constraints.maxWidth == textConstraints.maxWidth && input.constraints.maxHeight == textConstraints.maxHeight &&
-                    input.density.density == density && input.density.fontScale == fontScale && input.layoutDirection == layoutDirection
+                    input.density.density == density.density && input.density.fontScale == density.fontScale && input.layoutDirection == direction
             }
             val candidate = native ?: ScrollTextTiming.timed(Part.CANDIDATE) {
                 measurer.measure(candidateText, style, softWrap = softWrap, constraints = textConstraints) }

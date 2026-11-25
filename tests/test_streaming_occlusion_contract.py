@@ -101,6 +101,8 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertLess(measure.index('measurable.measure(textConstraints)'), measure.index('val candidate = native ?:'))
         self.assertIn('Snapshot.withoutReadObservation { frame.rendered }', measure)
         self.assertIn('input.text == candidateText && input.style == style && input.softWrap == softWrap', measure)
+        # The outer LocalDensity value shadows MeasureScope.density; compare its fields explicitly.
+        self.assertIn('input.density.density == density.density && input.density.fontScale == density.fontScale', measure)
         self.assertIn("}.graphicsLayer(), style, softWrap = softWrap, onTextLayout = {", leaf)
         publication = leaf.split("fun published(available: Float? = null): Boolean =", 1)[1].split("fun prepareNextLine(", 1)[0]
         self.assertIn("actual.layoutInput.text == latestCandidateText", publication)

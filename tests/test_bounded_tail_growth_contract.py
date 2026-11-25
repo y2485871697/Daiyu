@@ -13,6 +13,13 @@ class BoundedTailGrowthContractTest(unittest.TestCase):
         self.assertIn('if (it.isAttached) onContentPositioned()', container)
         self.assertIn('onContentPositioned = { if (turn.listKey == currentTailKey) correctFollowClearance() }', ui)
 
+    def test_document_follow_pins_content_end_inside_capped_viewport(self):
+        ui = SRC.read_text()
+        branch = ui.split('} else if (documentFollow && following && origin != null) {', 1)[1].split('} else {', 1)[0]
+        # Pinning to the item origin left each new line below the edge until the next list scroll.
+        self.assertIn('state.scrollOffset = maximum.toFloat()', branch)
+        self.assertNotIn('state.scrollOffset = placed.toFloat()', branch)
+
 
 if __name__ == '__main__':
     unittest.main()

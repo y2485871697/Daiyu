@@ -389,10 +389,10 @@ internal fun StreamingTailContainer(
                 state.scrollOffset = 0f
                 0
             } else if (documentFollow && following && origin != null) {
-                // Move the viewport along the item, not the glyphs inside the item.
-                // Its placement and the inverse content translation cancel exactly.
+                // Keep the viewport at the safe bottom and show the content end. A new line then grows
+                // upward in the same frame; the later list scroll only moves the viewport within the item.
                 val placed = (safeBottom - viewport.height - origin.roundToInt()).coerceIn(0, maximum)
-                state.scrollOffset = placed.toFloat()
+                state.scrollOffset = maximum.toFloat()
                 state.followCatchup = false
                 placed
             } else {

@@ -473,9 +473,9 @@ internal fun TextMeasurer.measureMarkdownNextLine(candidate: TextLayoutResult, t
     return measurePrefix(text.subSequence(0, prefixEnd)).takeIf { it.lineCount > nextLine }
 }
 
+// Space below the leaf (card padding, border, later steps) moves down with the new line; it never pays for it.
 internal fun markdownLineSpace(nextAdvance: Int, bodyEnd: Float?, drawnBottom: Float?): Int =
-    if (bodyEnd == null || drawnBottom == null) 0 else
-        kotlin.math.ceil((nextAdvance - (bodyEnd - drawnBottom).coerceAtLeast(0f)).coerceAtLeast(0f)).toInt()
+    if (bodyEnd == null || drawnBottom == null) 0 else nextAdvance
 
 internal fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boolean {
     val previous = layoutInput

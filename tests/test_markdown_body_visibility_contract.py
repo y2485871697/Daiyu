@@ -240,7 +240,8 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertNotIn('contentHeight', body_end)
         line_space = ui.split('internal fun markdownLineSpace(', 1)[1].split('internal fun TextLayoutResult.canPaintPrefixOf', 1)[0]
         self.assertIn('if (bodyEnd == null || drawnBottom == null) 0', line_space)
-        self.assertIn('kotlin.math.ceil((nextAdvance - (bodyEnd - drawnBottom).coerceAtLeast(0f)).coerceAtLeast(0f)).toInt()', line_space)
+        self.assertIn('if (bodyEnd == null || drawnBottom == null) 0 else nextAdvance', line_space)
+        self.assertNotIn('bodyEnd - drawnBottom', line_space)
 
 
     def test_table_cell_budget_and_visible_semantics_are_preserved(self):

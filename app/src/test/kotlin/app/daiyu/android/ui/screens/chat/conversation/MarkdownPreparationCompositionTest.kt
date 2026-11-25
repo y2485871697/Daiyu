@@ -74,13 +74,13 @@ class MarkdownPreparationCompositionTest {
         val clearance = StreamingTextClearance()
         val owner = Any()
         clearance.prepareLine(owner, markdownLineSpace(26, 31f, 19f))
-        assertEquals("Existing parent trailing space shares the next-line budget", 14,
+        assertEquals("Space below the leaf moves down with the next line; it cannot pay for it", 26,
             clearance.reservedHeight(193, 400, true))
-        clearance.prepareLine(owner, markdownLineSpace(26, 57f, 19f))
+        clearance.prepareLine(owner, 0)
         assertEquals("The pending candidate consumes the already prepared line", 0,
             clearance.reservedHeight(219, 400, true))
         clearance.prepareLine(owner, markdownLineSpace(26, 57f, 45f))
-        assertEquals("Drawn candidate still leaves its parent trailing space", 14,
+        assertEquals("Drawn candidate prepares a whole following line", 26,
             clearance.reservedHeight(219, 400, true))
         clearance.prepareLine(owner, markdownLineSpace(0, 57f, 45f))
         assertEquals("No imminent wrap leaves no next-line reserve", 0,
@@ -92,12 +92,11 @@ class MarkdownPreparationCompositionTest {
     @Test fun nextLineReserveDoesNotSpendNativeBottomPaddingAsTrailingSpace() {
         val clearance = StreamingTextClearance()
         val owner = Any()
-        assertEquals("The last line bottom would spend two pixels of native layout", 14,
+        assertEquals("The next native line needs its whole advance", 26,
             markdownLineSpace(26, 31f, 19f))
         clearance.prepareLine(owner, markdownLineSpace(26, 31f, 21f))
-        assertEquals("Only space after the full native layout can consume the reserve", 16,
-            clearance.reservedHeight(193, 400, true))
-        clearance.prepareLine(owner, markdownLineSpace(26, 57f, 21f))
+        assertEquals(26, clearance.reservedHeight(193, 400, true))
+        clearance.prepareLine(owner, 0)
         assertEquals("Body growth consumes the prepared next line", 0,
             clearance.reservedHeight(219, 400, true))
     }
@@ -105,15 +104,9 @@ class MarkdownPreparationCompositionTest {
     @Test fun nextLineSpaceNeedsCurrentGeometryAndACompatibleDrawnBaseline() {
         assertEquals(0, markdownLineSpace(26, 19f, null))
         assertEquals(0, markdownLineSpace(26, null, 19f))
-        assertEquals(8, markdownLineSpace(26, 37f, 19f))
-        assertEquals(0, markdownLineSpace(26, 71f, 19f))
+        for (bodyEnd in listOf(19f, 19.25f, 20f, 31.25f, 37f, 71f))
+            assertEquals("Trailing card space is pushed down, not consumed: $bodyEnd", 26, markdownLineSpace(26, bodyEnd, 19f))
         assertEquals(26, markdownLineSpace(26, 19f, 45f))
-        assertEquals("Fractional trailing space must not underreserve the next native layout", 14,
-            markdownLineSpace(26, 31.25f, 19f))
-        assertEquals("A quarter pixel of trailing space cannot pay a full native pixel", 26,
-            markdownLineSpace(26, 19.25f, 19f))
-        assertEquals("Exact integer trailing space is still fully consumed", 25,
-            markdownLineSpace(26, 20f, 19f))
     }
 
     @Test fun pendingAppendsDoNotPrepareTheSameDisplayedAstAgain() = verifyPendingAppends(false)

@@ -242,6 +242,25 @@ class WorkflowDisclosureMotionTest {
         assertEquals("Closing before the effect uses the last placed pixels", 580, extent.measure(false, 580))
     }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test fun growingOpenCardPlacesEachNewHeightWithoutRestartingTheSpring() = runTest {
+        val clock = BroadcastFrameClock()
+        val extent = WorkflowCardExtent(initiallyExpanded = true)
+        extent.fullHeight = 300
+        assertEquals(300, extent.measure(true, null))
+        val first = backgroundScope.launch(clock) { extent.animate(true) }
+        runCurrent()
+        assertTrue("An initially open card has nothing to disclose", first.isCompleted)
+        for (height in listOf(326, 352, 378)) {
+            extent.fullHeight = height
+            val update = backgroundScope.launch(clock) { extent.animate(true) }
+            runCurrent()
+            assertTrue("Growth must not wait for a frame", update.isCompleted)
+            assertEquals("The card must cover the newest line at once", height, extent.measure(true, null))
+            assertEquals(0, extent.contentOffset)
+        }
+    }
+
     @Test fun upperAnchorYieldsToReceivedSourcesAndAlreadyPendingTyping() {
         var received: String? = null
         var pending = false

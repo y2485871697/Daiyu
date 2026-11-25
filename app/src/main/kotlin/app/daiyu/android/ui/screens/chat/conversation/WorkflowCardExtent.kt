@@ -19,6 +19,7 @@ internal class WorkflowCardExtent(private val initiallyExpanded: Boolean) {
     private var placedGeometry by mutableStateOf<Offset?>(if (initiallyExpanded) null else Offset.Zero)
     var fullHeight by mutableIntStateOf(0)
     private var measuredHeight = 0
+    private var openingTarget = 0
     var contentOffset = 0
         private set
 
@@ -49,6 +50,16 @@ internal class WorkflowCardExtent(private val initiallyExpanded: Boolean) {
             geometry.snapTo(Offset(fullHeight.toFloat(), 0f))
             return
         }
+        // Content growing inside an already open card is not a disclosure. Restarting the opening spring on every
+        // new line kept the card a line short, so its bottom border hugged and then jumped past the newest text.
+        if (expanded && (!initialized && initiallyExpanded ||
+                finished != false && openingTarget > 0 && geometry.value.x >= openingTarget - 1f)) {
+            geometry.snapTo(Offset(fullHeight.toFloat(), 0f))
+            initialized = true
+            openingTarget = fullHeight
+            finished = true
+            return
+        }
         if (!initialized) {
             geometry.snapTo(Offset(measuredHeight.toFloat(), contentOffset.toFloat()))
             initialized = true
@@ -59,6 +70,7 @@ internal class WorkflowCardExtent(private val initiallyExpanded: Boolean) {
         finished = null
         val spec = spring<Offset>(stiffness = Spring.StiffnessMediumLow, visibilityThreshold = Offset(1f, 1f))
         if (expanded) {
+            openingTarget = fullHeight
             geometry.animateTo(Offset(fullHeight.toFloat(), 0f), spec)
         } else {
             // The effect can run before the closing layout: apply its frozen limit here too.

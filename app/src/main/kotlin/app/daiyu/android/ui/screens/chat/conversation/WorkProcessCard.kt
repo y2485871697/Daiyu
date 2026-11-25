@@ -96,6 +96,9 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
         else if (manuallyClosed) reasoning.filter { it.activeSinceNanos == null }.forEach(sequence::complete)
     }
     val reasoningState = rememberSaveableStateHolder()
+    // Inner cards keep their disclosure in this holder only while the detail is shown. Once the whole
+    // workflow has closed, reopening it starts every inner card from its default collapsed state.
+    androidx.compose.runtime.SideEffect { if (fullyClosed && !contentMounted) reasoningState.removeState("ordered-content") }
     val items = motionItems ?: segments.flatMap { segment ->
         listOfNotNull(segment.reasoning?.let { MessageContentUi.Reasoning(it) }) + segment.steps.map { MessageContentUi.Tool(it) }
     }

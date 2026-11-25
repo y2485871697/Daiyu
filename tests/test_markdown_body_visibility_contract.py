@@ -40,7 +40,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
                       'val selected = if (frozen) frame.drawn else frame.committed',
                       'val actual = frame.rendered?.takeIf',
                       'frame.layout?.let { actual.canPaintPrefixOf(it) } == true',
-                      'inkHeight(actual) <= available + .01f',
+                      'admits(actual, available)',
                       '!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text'):
             self.assertIn(token, inputs)
         self.assertEqual(' '.join(feedback.split()),
@@ -62,7 +62,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('frame.measureConstraints?.let { constraints ->', native)
         self.assertIn('constraints = constraints.copy(minHeight = 0)', native)
         self.assertNotIn('frame.layout', native)
-        self.assertIn('if (prepared != null && inkHeight(prepared) <= available + .01f) latestCandidateText', native)
+        self.assertIn('if (prepared != null && admits(prepared, available)) latestCandidateText', native)
         self.assertIn('else frame.committed?.layoutInput?.text ?: latestCandidateText', native)
         self.assertIn('frame.drawn?.layoutInput?.text ?: AnnotatedString("")', native)
         measure = leaf.split('BasicText(displayedText, modifier.layout { measurable, constraints ->', 1)[1].split('.onPlaced(::placed)', 1)[0]
@@ -75,7 +75,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('val drawn = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.drawn }', measure)
         draw = leaf.split('}.onGloballyPositioned(::placed).drawWithContent {', 1)[1]
         self.assertIn('drawMarkdownInk(actual, ink, inkOffset, inkBounds, inkControl?.stopped == true)\n                androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {\n                    frame.drawn = actual\n                    prepareNextLine()', draw)
-        self.assertIn('inkHeight(actual) <= available + .01f', draw)
+        self.assertIn('admits(actual, available)', draw)
         self.assertIn('publication?.setPending(owner, !published(available))', draw)
 
     def test_body_and_thought_both_defer_frame_reads_to_markdown_leaves(self):
@@ -175,7 +175,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
                       'it.lineCount > candidate.lineCount', '(it.size.height - candidate.size.height).coerceAtLeast(0)',
                       'if (playback?.paused != true &&', 'clearance.prepareLine(owner, 0)',
                       'BasicText(displayedText, modifier.layout',
-                      'inkHeight(actual) <= available + .01f',
+                      'admits(actual, available)',
                       'actual.layoutInput.text == latestCandidateText'):
             self.assertIn(token, clearance)
         publication = clearance.split('fun published(available: Float? = null): Boolean =', 1)[1].split('fun placed(', 1)[0]
@@ -223,7 +223,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
             'if (available == Float.POSITIVE_INFINITY) latestCandidateText '
             'else { val prepared = if (coordinates != null) frame.measureConstraints?.let { constraints ->',
             ' '.join(display.split()))
-        self.assertIn('if (prepared != null && inkHeight(prepared) <= available + .01f) latestCandidateText', display)
+        self.assertIn('if (prepared != null && admits(prepared, available)) latestCandidateText', display)
         measure = clearance.split('BasicText(displayedText, modifier.layout', 1)[1].split('frame.measureConstraints =', 1)[0]
         self.assertIn('Snapshot.withoutReadObservation { frame.layout }', measure)
         self.assertIn('previous.multiParagraph !== candidate.multiParagraph', measure)
@@ -265,7 +265,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
                       'measurer.measure(latestCandidateText, style, softWrap = softWrap,',
                       'frame.measureConstraints?.let { constraints ->',
                       'constraints = constraints.copy(minHeight = 0)',
-                      'inkHeight(prepared) <= available + .01f',
+                      'admits(prepared, available)',
                       'else frame.committed?.layoutInput?.text ?: latestCandidateText'):
             self.assertIn(token, native_input)
         for forbidden in ('frame.committed =', 'frame.drawn =', 'frame.rendered =',
@@ -274,8 +274,8 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('BasicText(displayedText', clearance)
         placed = clearance.split('fun placed(coordinates: LayoutCoordinates) {', 1)[1].split('val refreshAdmission', 1)[0]
         self.assertIn('frame.availableHeight = clearance.availableHeight(coordinates)', placed)
-        self.assertIn('inkHeight(candidate) <= frame.availableHeight + .01f -> candidate', placed)
-        self.assertIn('inkHeight(actual) <= (available ?: clearance.availableHeight(frame.coordinates)) + .01f', clearance)
+        self.assertIn('admits(candidate, frame.availableHeight) -> candidate', placed)
+        self.assertIn('admits(actual, available ?: clearance.availableHeight(frame.coordinates))', clearance)
         self.assertIn('publication?.setPending(owner, false)', clearance)
         self.assertNotIn('drawText(', clearance)
         self.assertIn('SelectionContainer {', ui)
@@ -297,3 +297,13 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertNotIn('click(center)', source)
         self.assertEqual(2, source.count('down(Offset('))
         self.assertLess(source.index('down(Offset('), source.index('text = appended'))
+
+
+class GrowingLineLeavesTrailingSpaceContract(unittest.TestCase):
+    def test_new_line_waits_for_space_below_leaf(self):
+        ui = (Path(__file__).resolve().parents[1] / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/MessageMarkdown.kt').read_text()
+        admits = ui.split('fun admits(layout: TextLayoutResult, available: Float): Boolean {', 1)[1].split('val playback = LocalReplyPlayback.current', 1)[0]
+        self.assertIn('if (height <= shown) return true', admits)
+        self.assertIn('clearance.bodyEndInLeaf(leaf)?.minus(leaf.size.height)', admits)
+        self.assertIn('return height + trailing <= available + .01f', admits)
+        self.assertNotIn('inkHeight(actual) <= available + .01f', ui)

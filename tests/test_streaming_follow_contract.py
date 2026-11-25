@@ -215,3 +215,19 @@ class StreamingFollowContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LiveWorkflowReasoningFollowContract(unittest.TestCase):
+    def test_streaming_thought_moves_viewport_in_the_same_frame(self):
+        root = Path(__file__).resolve().parents[1] / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation'
+        source = (root / 'ChatMessageList.kt').read_text()
+        workflow = (root / 'AssistantWorkflowContent.kt').read_text()
+        self.assertIn('val documentFollowOwner = liveDocumentOwner ?:', source)
+        self.assertIn('tail.hasLiveWorkflowReasoning() && replyPlayback?.control?.stopped != true', source)
+        self.assertIn('documentFollow = turn.listKey == documentFollowOwner,', source)
+        self.assertIn('|| tail.hasLiveWorkflowReasoning()) &&', source)
+        # The reply wave gap keeps its own owner; workflow thoughts do not reserve it.
+        self.assertIn('val tailClearance = if (liveDocumentOwner != null) 28.dp else ChatTailClearance', source)
+        helper = workflow.split('fun ChatTurnUi.Assistant.hasLiveWorkflowReasoning()', 1)[1].split('internal fun', 1)[0]
+        self.assertIn('?.takeIf { it.steps.isEmpty() }?.reasoning', helper)
+        self.assertIn('reasoning.activeSinceNanos != null && hasReportedReasoningText(reasoning.text)', helper)

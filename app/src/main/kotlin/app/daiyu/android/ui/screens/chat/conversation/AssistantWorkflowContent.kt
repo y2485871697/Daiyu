@@ -83,6 +83,19 @@ internal fun ChatTurnUi.Assistant.hasBodyTextActions(): Boolean =
     else leadingContent.any { it.text.isNotBlank() } ||
         if (finalContent.isNotEmpty()) finalContent.any { it.text.isNotBlank() } else finalText.isNotBlank()
 
+/** The latest step of a running workflow is a thought whose text is still arriving. */
+internal fun ChatTurnUi.Assistant.hasLiveWorkflowReasoning(): Boolean {
+    if (status != RunStatus.RUNNING) return false
+    val reasoning = when {
+        workProcess != null -> workProcess.segments.lastOrNull { it.reasoning != null || it.steps.isNotEmpty() }
+            ?.takeIf { it.steps.isEmpty() }?.reasoning
+        content.isNotEmpty() -> (content.lastOrNull { it is MessageContentUi.Reasoning || it is MessageContentUi.Tool }
+            as? MessageContentUi.Reasoning)?.reported
+        else -> reportedReasoning.lastOrNull()
+    } ?: return false
+    return reasoning.activeSinceNanos != null && hasReportedReasoningText(reasoning.text)
+}
+
 internal fun ChatTurnUi.Assistant.isPlainStreamingBody(): Boolean =
     status == RunStatus.RUNNING && isStreaming && !stopRequested && hasPlainTextBody()
 

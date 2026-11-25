@@ -529,6 +529,12 @@ internal fun ChatMessageList(
         tailCompressions.isEmpty() && tail.status == RunStatus.RUNNING && tail.isStreaming && !tail.stopRequested && !tail.reasoningStopped &&
             tail.workProcess?.running != true && tail.hasBodyTextActions() && replyPlayback?.control?.stopped != true
     }?.listKey
+    // Streaming thoughts inside a running workflow grow like body text. Move the viewport with the item in the
+    // same frame; otherwise a new line is admitted at the edge and the frame follower lifts it afterwards.
+    val documentFollowOwner = liveDocumentOwner ?: (turns.lastOrNull() as? ChatTurnUi.Assistant)?.takeIf { tail ->
+        tailCompressions.isEmpty() && tail.isStreaming && !tail.stopRequested && !tail.reasoningStopped &&
+            tail.hasLiveWorkflowReasoning() && replyPlayback?.control?.stopped != true
+    }?.listKey
     val tailClearance = if (liveDocumentOwner != null) 28.dp else ChatTailClearance
     val currentFollowClearancePx by rememberUpdatedState(with(density) { tailClearance.roundToPx() })
     val currentDragging by rememberUpdatedState(dragging)
@@ -1107,7 +1113,8 @@ internal fun ChatMessageList(
                 // Reveal may be waiting for this very movement to clear its next line.
                 val alignment = resumeFollowPending && !currentNestedTail.textClearance.pacedFollowing
                 val documentOverflow = tail?.listKey == currentTailKey && tail?.isStreaming == true &&
-                    tail.hasBodyTextActions() && tail.workProcess?.running != true && last.size >= layout.viewportSize.height - currentOcclusionPx
+                    (tail.hasBodyTextActions() && tail.workProcess?.running != true || tail.hasLiveWorkflowReasoning()) &&
+                    last.size >= layout.viewportSize.height - currentOcclusionPx
                 // With a document there is no queued character motion. At the physical end,
                 // wait for a new measured extent instead of polling the same last pixel.
                 if (documentOverflow && !listState.canScrollForward) {
@@ -1420,7 +1427,7 @@ internal fun ChatMessageList(
                             // Once the terminal row has ink receipts, the outer viewport clip is enough.
                             preserveTextClearance = turn.listKey == currentTailKey &&
                                 (turn.status == RunStatus.RUNNING || revealedTurns[turn.listKey] != turn),
-                            documentFollow = turn.listKey == liveDocumentOwner,
+                            documentFollow = turn.listKey == documentFollowOwner,
                             trackViewport = viewportState.bounded || viewportState.migrating ||
                                 turn.listKey == currentTailKey || turn.listKey == assistantOwnerKey,
                             listViewportHeight = { viewportHeightPx.intValue },

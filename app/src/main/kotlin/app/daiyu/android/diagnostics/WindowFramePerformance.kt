@@ -216,8 +216,12 @@ internal class WindowFramePerformance private constructor(
             windows.forEach { (window, kind) -> attach(window, kind) }
             activity.window.decorView.postDelayed(heartbeat, 1000)
             looperProbe.update(handler.takeIf { log.captureEpoch() != null })
+            ChatGeometryTrace.sink = if (log.captureEpoch() == null) null else { row ->
+                log.captureEpoch()?.let { epoch -> log.append(epoch, row) }
+            }
         } else {
             looperProbe.update(null)
+            ChatGeometryTrace.sink = null
             scroll(BackPerformanceRecorder.Scroll.IDLE)
             sessions.keys.toList().forEach(::detach)
             if (closed) {

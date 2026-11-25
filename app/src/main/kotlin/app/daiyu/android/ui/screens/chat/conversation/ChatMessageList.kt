@@ -353,6 +353,8 @@ internal fun StreamingTailContainer(
             val reserve = if (!reserveNextLine) 0 else state.textClearance.reservedHeight(body.height, currentViewportHeight,
                 state.bounded && preserveTextClearance && follows() && protectClearance() && followIntent())
             state.contentHeight = body.height + reserve
+            if (app.daiyu.android.diagnostics.ChatGeometryTrace.active) app.daiyu.android.diagnostics.ChatGeometryTrace.record("tail",
+                "body" to body.height, "reserve" to reserve, "bounded" to state.bounded, "catchup" to state.followCatchup)
             // Position-dependent clipping is resolved after this item's current origin is placed.
             val height = if (state.bounded) minOf(state.contentHeight, currentViewportHeight) else body.height
             layout(body.width, height) {
@@ -789,6 +791,8 @@ internal fun ChatMessageList(
                 val consumed = listState.dispatchRawDelta(correction)
                 clearanceLayout.viewportLoss.consume(consumed)
                 nestedTail.clearanceDiagnostic = "delta=$correction,consumed=$consumed"
+                app.daiyu.android.diagnostics.ChatGeometryTrace.record("restore", "delta" to correction, "consumed" to consumed,
+                    "obscured" to obscured, "item" to (last.offset + last.size), "visible" to visibleBottom)
                 if (consumed > 0f && clearanceLayout.active) {
                     // Raw delta may defer placement; finish it after the previous layout pass.
                     remeasurement.forceRemeasure()
@@ -1167,6 +1171,8 @@ internal fun ChatMessageList(
                     val consumed = listState.scrollBy(delta)
                     if (clearanceLayout.viewportLoss.owner == scrollOwner) clearanceLayout.viewportLoss.consume(consumed)
                     currentNestedTail.followDiagnostic = "distance=$followDistance,delta=$delta,consumed=$consumed"
+                    app.daiyu.android.diagnostics.ChatGeometryTrace.record("follow", "distance" to followDistance,
+                        "delta" to delta, "consumed" to consumed, "overflow" to documentOverflow, "alignment" to alignment)
                     if (documentOverflow && !alignment) {
                         motion.reset()
                         return@collect

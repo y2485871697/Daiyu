@@ -56,6 +56,15 @@ class JankDiagnosticsContract(unittest.TestCase):
         chat = (APP/'ui/screens/chat/conversation/ChatMessageList.kt').read_text()
         self.assertIn('currentNestedTail.scroller?.isScrollInProgress == true -> "inner-scroll"', chat)
 
+    def test_chat_geometry_trace_is_capture_bounded(self):
+        root = __import__('pathlib').Path(__file__).resolve().parents[1]
+        trace = (root / 'app/src/main/kotlin/app/daiyu/android/diagnostics/ChatGeometryTrace.kt').read_text()
+        window = (root / 'app/src/main/kotlin/app/daiyu/android/diagnostics/WindowFramePerformance.kt').read_text()
+        self.assertIn('MAX_ROWS_PER_SECOND = 240', trace)
+        self.assertIn('if (last[event] == signature) return', trace)
+        self.assertIn('ChatGeometryTrace.sink = if (log.captureEpoch() == null) null else', window)
+        self.assertIn('ChatGeometryTrace.sink = null', window)
+
     def test_main_looper_probe_is_capture_bounded(self):
         s = (APP/'diagnostics/WindowFramePerformance.kt').read_text()
         self.assertIn('looperProbe.update(handler.takeIf { log.captureEpoch() != null })', s)

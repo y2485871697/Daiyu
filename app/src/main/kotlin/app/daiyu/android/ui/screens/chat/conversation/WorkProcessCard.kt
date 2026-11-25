@@ -43,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
@@ -113,6 +114,10 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
         LocalWorkflowNodeMotionEnabled provides (expanded && !stopped && work.controlActivity != ToolActivityUi.PAUSED && work.controlActivity != ToolActivityUi.PAUSING),
         LocalReasoningPaused provides (work.controlActivity == ToolActivityUi.PAUSED || work.controlActivity == ToolActivityUi.PAUSING)) {
     Column(modifier.fillMaxWidth().then(disclosure.containerModifier)
+        .onGloballyPositioned {
+            if (app.daiyu.android.diagnostics.ChatGeometryTrace.active) app.daiyu.android.diagnostics.ChatGeometryTrace.record("card",
+                "bottom" to (it.positionInWindow().y + it.size.height), "height" to it.size.height)
+        }
         .streamingWorkflowSurface(colors.surface, colors.line, 12.dp,
             if (colors.dark) Color(0x05FFFFFF) else Color(0x40FFFFFF), headerHeight = { headerHeight.intValue })
         .testTag("work-process-surface")) {
@@ -150,6 +155,8 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                 val detail = measurable.measure(constraints)
                 detailExtent.fullHeight = detail.height
                 val height = detailExtent.measure(expanded, disclosure.closingDetailHeight)
+                if (app.daiyu.android.diagnostics.ChatGeometryTrace.active) app.daiyu.android.diagnostics.ChatGeometryTrace.record("extent",
+                    "full" to detail.height, "shown" to height, "offset" to detailExtent.contentOffset)
                 layout(detail.width, height) { detail.placeRelative(0, detailExtent.contentOffset) }
             }) {
                 HorizontalDivider(thickness = 1.dp, color = colors.line)

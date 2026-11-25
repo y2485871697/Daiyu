@@ -11,8 +11,9 @@ internal object SQLiteText {
 
     fun read(db: SQLiteDatabase, table: String, column: String, key: String, id: String,
         maxBytes: Long = 64L * 1024 * 1024, cancellationSignal: CancellationSignal? = null): String? =
-        RuntimeDiagnostics.measure(RuntimeDiagnostics.Stage.SQL_TEXT_READ) {
-            readInternal(db, table, column, key, id, maxBytes, cancellationSignal)
+        System.nanoTime().let { started ->
+            try { readInternal(db, table, column, key, id, maxBytes, cancellationSignal) }
+            finally { RuntimeDiagnostics.slow(RuntimeDiagnostics.Stage.SQL_TEXT_READ, started, 4) }
         }
 
     private fun readInternal(db: SQLiteDatabase, table: String, column: String, key: String, id: String,

@@ -56,6 +56,17 @@ class JankDiagnosticsContract(unittest.TestCase):
         chat = (APP/'ui/screens/chat/conversation/ChatMessageList.kt').read_text()
         self.assertIn('currentNestedTail.scroller?.isScrollInProgress == true -> "inner-scroll"', chat)
 
+    def test_main_looper_probe_is_capture_bounded(self):
+        s = (APP/'diagnostics/WindowFramePerformance.kt').read_text()
+        self.assertIn('looperProbe.update(handler.takeIf { log.captureEpoch() != null })', s)
+        self.assertLess(s.index('looperProbe.update(null)'), s.index('sessions.keys.toList().forEach(::detach)'))
+        p = (APP/'diagnostics/MainLooperProbe.kt').read_text()
+        for token in ('looper.setMessageLogging(null)', 'const val SLOW_MS = 8L', 'MAX_ROWS_PER_SECOND = 80',
+                      'if (sequence != id || startedNs != start) return', '"main_slow_message"', '"main_slow_stack"'):
+            self.assertIn(token, p)
+        q = (APP/'storage/SQLiteText.kt').read_text()
+        self.assertIn('RuntimeDiagnostics.slow(RuntimeDiagnostics.Stage.SQL_TEXT_READ, started, 4)', q)
+
     def test_interaction_observer_reads_only_discrete_phases(self):
         s=(APP/'diagnostics/WindowFramePerformance.kt').read_text().split('internal fun ObserveDiagnosticInteraction',1)[1]
         self.assertIn('snapshotFlow { current.value() }',s)

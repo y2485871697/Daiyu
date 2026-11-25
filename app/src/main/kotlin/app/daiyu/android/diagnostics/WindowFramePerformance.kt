@@ -47,6 +47,7 @@ internal class WindowFramePerformance private constructor(
     private var route = "startup"
     @Volatile private var scrollPhase = BackPerformanceRecorder.Scroll.IDLE
     private val textTiming = ScrollTextTiming()
+    private val looperProbe = MainLooperProbe { row -> log.captureEpoch()?.let { epoch -> log.append(epoch, row) } }
     internal fun scroll(phase: BackPerformanceRecorder.Scroll) {
         val old = scrollPhase
         scrollPhase = phase
@@ -214,7 +215,9 @@ internal class WindowFramePerformance private constructor(
         if (enabled && resumed && !closed) {
             windows.forEach { (window, kind) -> attach(window, kind) }
             activity.window.decorView.postDelayed(heartbeat, 1000)
+            looperProbe.update(handler.takeIf { log.captureEpoch() != null })
         } else {
+            looperProbe.update(null)
             scroll(BackPerformanceRecorder.Scroll.IDLE)
             sessions.keys.toList().forEach(::detach)
             if (closed) {

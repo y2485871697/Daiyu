@@ -398,6 +398,14 @@ internal object RuntimeDiagnostics {
         finally { try { span.end(failure) } catch (_: Throwable) { } }
     }
 
+    /** One END row only for work at or over [thresholdMs]; frequent fast work no longer evicts the ring. */
+    fun slow(stage: Stage, startedNs: Long, thresholdMs: Long) {
+        try {
+            val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNs)
+            if (elapsed >= thresholdMs) emit(stage, Code.END, 0, elapsed, -1, -1)
+        } catch (_: Throwable) { }
+    }
+
     internal fun currentEpoch(): Long = generation.get()
 
     fun event(stage: Stage, code: Code, size: Long = -1, count: Long = -1,

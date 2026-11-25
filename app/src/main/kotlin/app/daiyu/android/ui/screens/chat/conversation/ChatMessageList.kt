@@ -1612,8 +1612,8 @@ internal fun AssistantTurn(
         }
     }
     // A run stopped before any output has nothing to show or act on; the stopped divider says enough.
-    if (stoppedFooter && !turn.hasVisibleResponse() && !actionTurn.hasVisibleResponse()) return@key
-    if (turn.hasVisibleResponse() || actionsVisible || showActions && actionTurn !== turn || holdActionSlot) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val stoppedEmpty = stoppedFooter && !turn.hasVisibleResponse() && !actionTurn.hasVisibleResponse()
+    if (!stoppedEmpty && (turn.hasVisibleResponse() || actionsVisible || showActions && actionTurn !== turn || holdActionSlot)) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (showIdentity) Row(Modifier.testTag("reply-identity:${turn.listKey}").workflowInkClearance().drawWithContent {
             if (customAvatar == null || avatar.value != null) drawContent()
         }.padding(bottom = 2.dp), verticalAlignment = Alignment.CenterVertically,

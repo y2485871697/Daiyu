@@ -168,12 +168,12 @@ class ChatReturnRefreshContractTest(unittest.TestCase):
         self.assertIn('private val messageActionRenderedRevision = MessageActionRenderedRevision(', self.main)
         self.assertIn(lookup, prepare)
         self.assertLess(prepare.index(lookup), prepare.index('if (messageActionKey == key'))
-        callback = prepare.split('controller.loadMessageActionSnapshot(owner)', 1)[1]
+        callback = prepare.split('controller.loadMessageActionSnapshot(owner,', 1)[1]
         self.assertNotIn('messageActionRenderedRevision', callback)
         for guard in ('messageActionVisit === visit', 'messageActionLoading == key',
                       'activityUsable() && voiceForeground', 'selected?.id == key.conversation',
                       'editorGeneration == key.editor', 'controller.dataRevision == key.data',
-                      'ContextRevision.digest(rows) == key.rows', 'candidate.matchesRendered(rows)'):
+                      'rows == requested', 'it.matchesRendered(requested)'):
             self.assertIn(guard, callback)
         self.assertIn('snapshot.matchesRendered(shown.map { it.second })', self.main)
         self.assertIn('messageActionRenderedRevision.matches(it, shown.map { row -> row.second })', self.main)

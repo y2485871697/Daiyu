@@ -30,6 +30,9 @@ internal class MessageActionRenderedRevision(
         return current.revision ?: digest(current.rows).also { current.revision = it }
     }
 
+    /** Detached rows backing [revision]; safe to read from a worker thread. */
+    fun rows(owner: ConversationId, rows: List<Message>): List<Message> = projection(owner, rows).rows
+
     fun matches(snapshot: MessageActionSnapshot, rows: List<Message>): Boolean {
         val current = projection(snapshot.conversationId, rows)
         val revisions = snapshot.rowRevisions.toMap()

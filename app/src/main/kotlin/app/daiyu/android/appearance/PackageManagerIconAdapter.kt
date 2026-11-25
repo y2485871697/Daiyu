@@ -13,6 +13,10 @@ class PackageManagerIconAdapter(context: Context) : LauncherComponentPort {
     private val contextForResources = context.applicationContext
     private val packageName = context.packageName
     private val pm = context.packageManager
+    // Manifest facts (alias, target, launcher filter, icon) cannot change while this process runs.
+    // Each resume re-validated 64 aliases with ~200 binder calls on the main thread.
+    private var launcherNames: Set<String>? = null
+    private val manifestEnabled = hashMapOf<String, Boolean>()
     private fun component(name: String): ComponentName {
         require(name.startsWith("$packageName.icon.L_")) { "Not an owned icon alias" }
         return ComponentName(packageName, name)
@@ -20,27 +24,31 @@ class PackageManagerIconAdapter(context: Context) : LauncherComponentPort {
 
     override fun validate(componentName: String) {
         val component = component(componentName)
+        if (componentName in manifestEnabled) return
         val flags = PackageManager.MATCH_DISABLED_COMPONENTS
         val info = pm.getActivityInfo(component, flags)
         check(info.packageName == packageName && info.targetActivity != null && info.exported) { "Missing exported activity-alias: $componentName" }
         val target = pm.getActivityInfo(ComponentName(packageName, info.targetActivity), flags)
         check(target.enabled && target.applicationInfo.enabled) { "Disabled alias target: ${info.targetActivity}" }
-        val launchers = pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER).setPackage(packageName), flags)
-        check(launchers.any { it.activityInfo.name == componentName }) { "Alias has no MAIN/LAUNCHER filter: $componentName" }
+        val launchers = launcherNames ?: pm.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            .setPackage(packageName), flags).mapTo(hashSetOf()) { it.activityInfo.name }.also { launcherNames = it }
+        check(componentName in launchers) { "Alias has no MAIN/LAUNCHER filter: $componentName" }
         val entry = app.daiyu.android.domain.appearance.Task17IconCatalog.entries.firstOrNull {
             it.componentName(packageName) == componentName
         } ?: error("Alias is outside the icon catalog")
         val iconId = Task17IconResources.drawableId(contextForResources, entry)
         check(iconId != 0 && info.icon == iconId) { "Alias icon is missing or does not match catalog: $componentName" }
+        manifestEnabled[componentName] = info.enabled
     }
 
     override fun snapshot(componentName: String): IconComponentSnapshot {
         val component = component(componentName)
         val explicit = fromPm(pm.getComponentEnabledSetting(component))
-        val info = pm.getActivityInfo(component, PackageManager.MATCH_DISABLED_COMPONENTS)
-        val enabled = info.applicationInfo.enabled && when (explicit) {
+        val declared = manifestEnabled[componentName]
+            ?: pm.getActivityInfo(component, PackageManager.MATCH_DISABLED_COMPONENTS).enabled
+        val enabled = contextForResources.applicationInfo.enabled && when (explicit) {
             IconComponentState.ENABLED -> true
-            IconComponentState.DEFAULT -> info.enabled
+            IconComponentState.DEFAULT -> declared
             else -> false
         }
         return IconComponentSnapshot(explicit, enabled)

@@ -1594,19 +1594,21 @@ class MainActivity : ComponentActivity() {
         if (!activityUsable() || !voiceForeground || !selectionReady || displayWindow != null || !controller.ready || controller.dataBusy || controller.active != null) return
         val key = MessageActionRenderKey(owner, editorGeneration,
             messageActionRenderedRevision.revision(owner, shown.map { it.second }), controller.dataRevision)
+        // Frozen rows whose digest is key.rows; the worker matches the candidate against them.
+        val requested = messageActionRenderedRevision.rows(owner, shown.map { it.second })
         if (messageActionKey == key || messageActionLoading == key || messageActionAttempted == key) return
         messageActionSnapshot = null; messageActionKey = null
         // Admitted failures and mismatches consume the key; a busy rejection has not read anything.
         messageActionAttempted = key; messageActionLoading = key
         val visit = messageActionVisit
-        val admitted = controller.loadMessageActionSnapshot(owner) { candidate ->
+        val admitted = controller.loadMessageActionSnapshot(owner,
+            accept = { it.conversationId == owner && it.matchesRendered(requested) }) { candidate ->
             if (messageActionVisit === visit && messageActionLoading == key) {
                 messageActionLoading = null
                 val rows = shown.map { it.second }
                 if (activityUsable() && voiceForeground && selected?.id == key.conversation && editorGeneration == key.editor &&
                     controller.dataRevision == key.data &&
-                    app.daiyu.android.domain.context.ContextRevision.digest(rows) == key.rows &&
-                    candidate != null && candidate.conversationId == owner && candidate.matchesRendered(rows)) {
+                    rows == requested && candidate != null && candidate.conversationId == owner) {
                     messageActionSnapshot = candidate; messageActionKey = key
                     inlineMessageEditor?.let { editor ->
                         candidate.refreshedEditTarget(editor.key, editor.target, editor.baseline)?.let { target ->

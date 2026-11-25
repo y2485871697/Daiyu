@@ -5334,13 +5334,15 @@ class ChatController internal constructor(private val application:Application,
     /** Capture on the same serialized worker as persistence. Main must bind this snapshot to the
      * rendered conversation/editor owner, never acquire a fresh target from a stale callback. */
     internal fun loadMessageActionSnapshot(owner: ConversationId,
+        accept: (MessageActionSnapshot) -> Boolean = { true },
         complete: (MessageActionSnapshot?) -> Unit): Boolean {
         synchronized(this) {
             if (!idleAvailable() || hasLiveChildTasks()) return false
             messageActionReaders++
         }
         try { executor.execute {
-            val snapshot = runCatching { messageActionStore.snapshot(owner) }.getOrNull()
+            // Content verification hashes every rendered row; keep it on this worker, not main.
+            val snapshot = runCatching { messageActionStore.snapshot(owner).takeIf(accept) }.getOrNull()
             handler.post {
                 val deliver = synchronized(this) {
                     messageActionReaders--

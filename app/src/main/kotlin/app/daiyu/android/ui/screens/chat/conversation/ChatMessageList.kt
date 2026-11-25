@@ -369,6 +369,11 @@ internal fun StreamingTailContainer(
                     follows() && !state.followCatchup && state.scrollOffset >= state.maxOffset - 1f) {
                     state.maxOffset = (state.maxOffset + growth).coerceAtLeast(0)
                     state.scrollOffset = state.maxOffset.toFloat()
+                } else if (state.bounded && growth < 0 && state.maxOffset > 0) {
+                    // Shrinking content (a collapsing card) is clamped to its smaller end by the outer pass one
+                    // frame late, so the end first rises off the edge. Apply that same clamp here.
+                    state.maxOffset = (state.maxOffset + growth).coerceAtLeast(0)
+                    state.scrollOffset = state.scrollOffset.coerceAtMost(state.maxOffset.toFloat())
                 }
             }
             if (app.daiyu.android.diagnostics.ChatGeometryTrace.active) app.daiyu.android.diagnostics.ChatGeometryTrace.record("tail",

@@ -31,6 +31,7 @@ class BoundedTailGrowthContractTest(unittest.TestCase):
         self.assertIn('state.scrollOffset = state.maxOffset.toFloat()', inner[1].split('layout(body.width, height)', 1)[0])
         self.assertIn('withoutReadObservation { state.contentHeight }', inner[0])
         self.assertIn('previousHeight >= currentViewportHeight && state.maxOffset > 0', inner[1])
+        self.assertIn('state.bounded && growth < 0 && state.maxOffset > 0', inner[1])
 
 
 if __name__ == '__main__':

@@ -48,8 +48,8 @@ class StreamingOcclusionContract(unittest.TestCase):
         markdown = (CHAT.parent / "MessageMarkdown.kt").read_text()
         for token in ("remember(clearance) { mutableMapOf<Int, TextLayoutResult>() }",
                       "frame.availableHeight = clearance.availableHeight(coordinates)",
-                      "admits(candidate, frame.availableHeight) -> candidate", "painted[paintOffset] = actual",
-                      "admits(actual, available)", "frame.committed",
+                      "inkHeight(candidate) <= frame.availableHeight + .01f -> candidate", "painted[paintOffset] = actual",
+                      "inkHeight(actual) <= available + .01f", "frame.committed",
                       'BasicText(displayedText',
                       "paintOffset + offset", "paintOffset + offsets[column]",
                       "previous?.canPaintPrefixOf(candidate) == true", "current.text.text.startsWith(previous.text.text)",
@@ -86,7 +86,7 @@ class StreamingOcclusionContract(unittest.TestCase):
                       'measurer.measure(latestCandidateText, style, softWrap = softWrap,',
                       'frame.measureConstraints?.let { constraints ->',
                       'constraints = constraints.copy(minHeight = 0)',
-                      'admits(prepared, available)',
+                      'inkHeight(prepared) <= available + .01f',
                       'else frame.committed?.layoutInput?.text ?: latestCandidateText'):
             self.assertIn(token, native_input)
         self.assertNotIn('frame.layout', native_input)
@@ -107,7 +107,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         publication = leaf.split("fun published(available: Float? = null): Boolean =", 1)[1].split("fun prepareNextLine(", 1)[0]
         self.assertIn("actual.layoutInput.text == latestCandidateText", publication)
         self.assertIn("actual.canPaintPrefixOf(it)", publication)
-        self.assertIn("admits(actual, available ?: clearance.availableHeight(frame.coordinates))", publication)
+        self.assertIn("inkHeight(actual) <= (available ?: clearance.availableHeight(frame.coordinates)) + .01f", publication)
         self.assertIn("candidate.layoutInput.text == latestCandidateText && clearance.whollyAboveViewport", publication)
         self.assertLess(publication.index("frame.paintedHere"), publication.index("clearance.whollyAboveViewport"))
         self.assertNotIn("frame.drawn =", publication)

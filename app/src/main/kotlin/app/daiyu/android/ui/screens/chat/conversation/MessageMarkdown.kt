@@ -293,18 +293,6 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             drawn = committed
         }
     }
-    // Growth pushes what follows this leaf in the turn (card padding, border, later rows) down with it, and the
-    // follower aligns that real bottom with the safe edge. A new line waits until that space fits as well;
-    // otherwise it is drawn at the edge first and lifted a frame later. Already drawn height keeps the plain check.
-    fun admits(layout: TextLayoutResult, available: Float): Boolean {
-        val height = inkHeight(layout)
-        if (height > available + .01f) return false
-        val shown = frame.drawn?.takeIf { it.canPaintPrefixOf(layout) }?.let { inkHeight(it) } ?: return true
-        if (height <= shown) return true
-        val leaf = frame.coordinates?.takeIf { it.isAttached } ?: return true
-        val trailing = (clearance.bodyEndInLeaf(leaf)?.minus(leaf.size.height) ?: 0f).coerceAtLeast(0f)
-        return height + trailing <= available + .01f
-    }
     val playback = LocalReplyPlayback.current
     val measurer = rememberTextMeasurer(cacheSize = 1)
     val lineMeasurer = rememberTextMeasurer(cacheSize = 2)
@@ -326,7 +314,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                             constraints = constraints.copy(minHeight = 0)) }
                     } else null
                     // Prepare the native input before placement; only the real layout and draw publish it.
-                    if (prepared != null && admits(prepared, available)) latestCandidateText
+                    if (prepared != null && inkHeight(prepared) <= available + .01f) latestCandidateText
                     else frame.committed?.layoutInput?.text ?: latestCandidateText
                 }
             }
@@ -337,7 +325,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     fun published(available: Float? = null): Boolean = latestCandidateText.isEmpty() ||
         frame.paintedHere && frame.drawn?.let { actual ->
             actual.layoutInput.text == latestCandidateText && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
-                admits(actual, available ?: clearance.availableHeight(frame.coordinates))
+                inkHeight(actual) <= (available ?: clearance.availableHeight(frame.coordinates)) + .01f
         } == true || frame.layout?.let { candidate ->
             candidate.layoutInput.text == latestCandidateText && clearance.whollyAboveViewport(frame.coordinates,
                 maxOf(candidate.size.height, frame.coordinates?.size?.height ?: 0))
@@ -361,7 +349,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             val previous = frame.committed ?: paintOffset?.let { painted[it] }
             val accepted = when {
                 playback?.paused == true -> frame.drawn
-                admits(candidate, frame.availableHeight) -> candidate
+                inkHeight(candidate) <= frame.availableHeight + .01f -> candidate
                 previous?.canPaintPrefixOf(candidate) == true -> previous
                 else -> null
             }
@@ -435,7 +423,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                     (!frozen && selected?.let { result.canPaintPrefixOf(it) } == true)
             }
             val completePaint = actual != null && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
-                admits(actual, available) && (!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text)
+                inkHeight(actual) <= available + .01f && (!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text)
             // A pending tail line must not erase earlier, already painted lines when the edge moves.
             if (!completePaint) {
                 val previous = frame.drawn

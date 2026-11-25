@@ -91,6 +91,7 @@ internal fun ReportedReasoningCard(
     var overrideStopped by rememberSaveable(ownerKey) { mutableStateOf(stopped) }
     val currentOverride = expandedOverride.takeIf { overridePhase == isThinking && overrideStopped == stopped }
     val manuallyCollapsed = currentOverride == false
+    val staticExpansion = !isThinking && currentOverride == true
     val summaryDisplays = reported.map { summary ->
         key(ownerKey, summary.itemId) {
             val text = summary.text.takeIf(::hasReportedReasoningText).orEmpty()
@@ -101,14 +102,14 @@ internal fun ReportedReasoningCard(
             val revealGate = parentExpanded && !manuallyCollapsed && (!stopped || currentOverride == true)
             val presentationLane = listOf("reasoning", ownerKey, summary.itemId)
             val playback = LocalReplyPlayback.current
-            SideEffect { if (!revealGate) playback?.control?.skipLane(presentationLane) }
+            SideEffect { if (!revealGate || staticExpansion) playback?.control?.skipLane(presentationLane) }
             val ticket = remember(visualScope, ownerKey, summary.itemId) {
                 ReasoningRevealTicket(visualScope?.claimReasoning(ownerKey, summary.itemId) == true)
             }
             val firstPresentation = remember(ticket, revealGate, revealResetEpoch) {
                 ticket.take() && revealGate && !stopped
             }
-            val revealEnabled = arrived && revealGate && hasReportedReasoningText(text) &&
+            val revealEnabled = arrived && revealGate && !staticExpansion && hasReportedReasoningText(text) &&
                 (isThinking || observedLive || firstPresentation || currentOverride == true)
             // Saveable: a row recreated after scrolling back must keep typing feedback for the unrevealed tail.
             var observedDisplayLive by rememberSaveable(revealGate, revealResetEpoch) { mutableStateOf(isThinking) }
@@ -118,7 +119,7 @@ internal fun ReportedReasoningCard(
                 mutableStateOf(revealGate && isThinking && !arrived && !hasDisplayText)
             }
             SideEffect { if (hasDisplayText || !isThinking) queuedEmptyBaseline = false }
-            val reveal = key(revealGate) {
+            val reveal = key(revealGate, staticExpansion) {
                 key(firstPresentation || hasDisplayText || queuedEmptyBaseline && arrived) {
                     rememberMarkdownReveal(
                         listOf(MarkdownTypingSource(summary.itemId, text, sourceWindow)), projection,
@@ -130,7 +131,7 @@ internal fun ReportedReasoningCard(
                         live = isThinking || firstPresentation,
                         paceTerminal = firstPresentation,
                         initialBaseline = if (firstPresentation || queuedEmptyBaseline) emptyList() else null,
-                        presentationLane = presentationLane.takeIf { revealGate },
+                        presentationLane = presentationLane.takeIf { revealGate && !staticExpansion },
                         awaitPaintAdmission = true,
                         streamSnapshot = true,
                     )
@@ -141,10 +142,10 @@ internal fun ReportedReasoningCard(
             val fullyDisplayed = !isThinking && !paused && revealEnabled && reveal.publication.active && reveal.settled
             // Shrinking the disclosure must not invalidate text already fully drawn for this source.
             SideEffect { if (fullyDisplayed) displayedCompletion = true }
-            val displaySettled = displayedCompletion || reveal.settled
+            val displaySettled = staticExpansion || displayedCompletion || reveal.settled
             ReasoningSummaryDisplay(summary, projection, reveal, firstPresentation, displaySettled,
-                waitingForReveal = firstPresentation && projection?.sources != listOf(text) ||
-                    revealEnabled && (observedDisplayLive || firstPresentation) && !displaySettled)
+                waitingForReveal = !staticExpansion && (firstPresentation && projection?.sources != listOf(text) ||
+                    revealEnabled && (observedDisplayLive || firstPresentation) && !displaySettled))
         }
     }
     val settled = summaryDisplays.all { it.displaySettled }
@@ -217,7 +218,13 @@ internal fun ReportedReasoningCard(
                             val summary = display.reported
                             val projection = display.projection
                             val displayed = projection?.sources?.singleOrNull() ?: summary.text
-                            RevealedMessageMarkdown(
+                            if (staticExpansion) {
+                                CompositionLocalProvider(LocalStreamingTextClearance provides null) {
+                                    ProjectedMessageMarkdown(displayed, projection?.blocksAt(0), Modifier.fillMaxWidth(),
+                                        generationComplete = displayed == summary.text,
+                                        sourceWindow = projection?.windows?.singleOrNull() ?: LocalReasoningSourceWindows.current[summary.itemId])
+                                }
+                            } else RevealedMessageMarkdown(
                                 displayed, projection?.blocksAt(0), display.reveal, summary.itemId, Modifier.fillMaxWidth(),
                                 generationComplete = generationComplete && projection != null && displayed == summary.text,
                                 deferBlockReveal = true, bodyPaintFeedback = displayThinking && !paused && !stopped && parentExpanded && !manuallyCollapsed &&

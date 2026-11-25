@@ -1417,7 +1417,9 @@ internal fun ChatMessageList(
                             clearance = { currentOcclusionPx + currentFollowClearancePx },
                             protectClearance = { turn.listKey == assistantOwnerKey && followBottom },
                             viewportHeight = tailViewportHeight,
-                            preserveTextClearance = turn.listKey == currentTailKey,
+                            // Once the terminal row has ink receipts, the outer viewport clip is enough.
+                            preserveTextClearance = turn.listKey == currentTailKey &&
+                                (turn.status == RunStatus.RUNNING || revealedTurns[turn.listKey] != turn),
                             documentFollow = turn.listKey == liveDocumentOwner,
                             trackViewport = viewportState.bounded || viewportState.migrating ||
                                 turn.listKey == currentTailKey || turn.listKey == assistantOwnerKey,

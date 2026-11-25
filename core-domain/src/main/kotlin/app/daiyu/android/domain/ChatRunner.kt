@@ -279,13 +279,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         cancelSession(captured.first)
         return true
     }
-    /** Queues on the live owner; durable admission precedes the next model request.
-     * A paused run resumes, while an executing tool batch keeps its receipt boundary. */
+    /** Steers the same run at its next sampling boundary, after the current tool batch.
+     * Queuing alone neither cancels the provider nor acknowledges a durable user message. */
     fun admitSupplement(message: Message, complete: (SupplementAdmission) -> Unit): Boolean {
         val frozen = message.copy(blocks = message.blocks.toList(), protocolItems = message.protocolItems.toList(),
             historySegments = message.historySegments.toList())
         val pending = PendingSupplement(frozen, complete)
-        val captured = synchronized(terminalLock) {
+        val (accepted, waiter) = synchronized(terminalLock) {
             val owner = identity
             val rawText = frozen.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { it.text }
             val text = rawText.trim()
@@ -299,33 +299,22 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 rawText.length > 64_000 || queued.size >= 16 ||
                 queued.sumOf { it.blocks.filterIsInstance<MessageBlock.Text>().sumOf { block -> block.text.length } } + rawText.length > 192_000 ||
                 queued.any { it.blocks.filterIsInstance<MessageBlock.Text>().joinToString("\n") { block -> block.text }.trim() == text } ||
-                frozen.id in supplementIds || frozen.id in sourceMessageIds) null
+                frozen.id in supplementIds || frozen.id in sourceMessageIds) false to null
             else {
                 supplementIds.add(frozen.id)
                 pendingSupplements.addLast(pending)
-                breakStream = true
                 if (pauseRequested) { pauseRequested = false; pauseRevision++ }
                 execution = execution.copy(pauseRequested = false)
-                val interrupt = requestOpening || execution.phase == ExecutionPhase.STREAMING ||
-                    execution.phase == ExecutionPhase.RECONNECTING
-                if (interrupt) {
-                    if (reasoningInterruptedAtNanos == null) reasoningInterruptedAtNanos = System.nanoTime()
-                    attemptDelivery?.expire()
-                    generation++
-                }
-                Pair(if (interrupt) session else null, boundaryWaiter)
+                true to boundaryWaiter
             }
         }
-        if (captured == null) {
+        if (!accepted) {
             completeAdmission(pending, SupplementAdmission.Rejected(message.id))
             return false
         }
         wakeToolWaiters()
         syncReconnectPause()
-        captured.second?.let { LockSupport.unpark(it) }
-        cancelSession(captured.first)
-        options.contextRuntime?.cancel()
-        compactingRuntime?.cancel()
+        waiter?.let { LockSupport.unpark(it) }
         return true
     }
     private fun completeAdmission(pending: PendingSupplement, result: SupplementAdmission) {
@@ -464,12 +453,12 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         val calls = linkedMapOf<ToolCallId, ToolInvocation>()
         val results = mutableMapOf<ToolCallId, String>()
         val unknownOperations = mutableSetOf<Pair<String, String>>()
-        fun awaitPause() {
+        fun awaitPause(admitSteering: Boolean = false) {
             while (true) {
                 var pending: PendingSupplement? = null
                 val needsCheckpoint = synchronized(terminalLock) {
                     if (stopped.get() || terminalReserved) { boundaryWaiter = null; return }
-                    pending = pendingSupplements.pollFirst()
+                    if (admitSteering) pending = pendingSupplements.pollFirst()
                     admittingSupplement = pending?.message
                     if (pending != null) { setPhase(ExecutionPhase.BOUNDARY); false }
                     else {
@@ -508,7 +497,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             current = segmentHistory.project(current)
             setPhase(if (pauseRequested) ExecutionPhase.PAUSED else ExecutionPhase.BOUNDARY)
             checkpoint()
-            awaitPause()
+            awaitPause(admitSteering = true)
             if (stopped.get() || terminalReserved) throw InterruptedException()
             val acceptedUsers = synchronized(terminalLock) {
                 if (stopped.get() || terminalReserved) throw InterruptedException()
@@ -1368,7 +1357,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     active = open()
                     continue
                 }
-                if (requestFailure != null && (pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty())) {
+                if (requestFailure != null && (pauseRequested || breakStream)) {
                     cancelSession(active); boundary(); pressureChecked = false; active = open(); continue
                 }
                 transportFailure?.let { throw it }

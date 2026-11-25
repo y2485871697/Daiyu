@@ -26,6 +26,7 @@ class RunnerSupplementAdmissionTest {
         val firstStarted = CountDownLatch(1)
         val releaseFirst = CountDownLatch(1)
         val opens = AtomicInteger()
+        val cancels = AtomicInteger()
         val results = LinkedBlockingQueue<SupplementAdmission>()
         val histories = CopyOnWriteArrayList<List<Message>>()
         val runner: ChatRunner
@@ -40,11 +41,11 @@ class RunnerSupplementAdmissionTest {
                             else {
                                 firstStarted.countDown()
                                 check(releaseFirst.await(5, TimeUnit.SECONDS))
-                                sink(ModelEvent.TextFinal("body", "stale"))
+                                sink(ModelEvent.TextFinal("body", "before steering"))
                             }
                         } else sink(ModelEvent.TextFinal("body", "done"))
                     }
-                    override fun cancel() { releaseFirst.countDown() }
+                    override fun cancel() { cancels.incrementAndGet(); releaseFirst.countDown() }
                 }
             }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { "ok" }, RunnerOptions(runtimeStore = runtime)) {}
             task = FutureTask { runner.run(answer, listOf(user("original"))) }
@@ -68,18 +69,63 @@ class RunnerSupplementAdmissionTest {
             assertEquals(listOf("original", "added"), f.histories.last().filter { it.role == Message.USER_ROLE }.map { it.id.value })
         }
     }
-    @Test fun streamingAdmissionInterruptsOnlyOldAttemptAndKeepsOriginalRun() {
+    @Test fun steeringWaitsForCurrentSampleAndKeepsOriginalRun() {
         Fixture(pauseOnFirst = false).use { f ->
             assertEquals(ExecutionPhase.STREAMING, f.runner.state().phase)
             assertTrue(f.offer("added"))
+            assertEquals(0, f.cancels.get())
+            assertTrue(f.results.isEmpty()); assertEquals(1, f.opens.get())
+            f.releaseFirst.countDown()
             assertEquals(SupplementAdmission.Accepted(MessageId("added")), f.result())
             val completed = f.task.get(5, TimeUnit.SECONDS)
             assertEquals(initial.id, completed.id); assertEquals(initial.runId, completed.runId)
             assertEquals(RunStatus.COMPLETED, completed.status); assertEquals(2, f.opens.get())
-            assertEquals("done", completed.blocks.filterIsInstance<MessageBlock.Text>().joinToString("") { it.text })
+            assertEquals(listOf("before steering", "done"), completed.blocks.filterIsInstance<MessageBlock.Text>().map { it.text })
+            assertEquals(listOf("original", "answer", "added"), f.histories.last().map { it.id.value })
             assertEquals(listOf("original", "added"), f.histories.last().filter { it.role == Message.USER_ROLE }.map { it.id.value })
             assertEquals(1, f.runtime.admissions.size); assertTrue(f.results.isEmpty())
         }
+    }
+    @Test fun steeringDuringToolsCommitsOnlyAfterEveryReceiptAndDoesNotReplayTools() {
+        val runtime = Runtime()
+        val admissions = mutableListOf<SupplementAdmission>()
+        val calls = listOf("a", "b").map { ToolInvocation(ToolCallId(it), "read", "{}") }
+        var opens = 0
+        var batches = 0
+        lateinit var runner: ChatRunner
+        val model = ModelPort { history ->
+            val first = ++opens == 1
+            if (!first) {
+                assertEquals(listOf(SupplementAdmission.Accepted(MessageId("added"))), admissions)
+                val rows = MessageHistory.expand(history)
+                assertEquals(listOf("original", "answer", "added"), rows.map { it.id.value })
+                val tools = rows[1].blocks.filterIsInstance<MessageBlock.Tool>()
+                assertEquals(calls, tools.map { it.invocation })
+                assertEquals(listOf("a", "b"), tools.map { it.result })
+            }
+            object : ModelSession {
+                override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                    assertTrue(outputs.isEmpty())
+                    if (first) calls.forEach { sink(ModelEvent.ToolReady(it)) }
+                    else sink(ModelEvent.TextFinal("answer", "done"))
+                }
+                override fun cancel() = Unit
+            }
+        }
+        runner = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+            BatteryTool { error("batch only") }, RunnerOptions(runtimeStore = runtime,
+                batchExecutor = BatchToolExecutor { _, invocations, _ ->
+                    batches++
+                    assertEquals(calls, invocations)
+                    assertTrue(runner.admitSupplement(user("added"), admissions::add))
+                    assertTrue(admissions.isEmpty()); assertTrue(runtime.admissions.isEmpty())
+                    assertEquals(1, opens)
+                    invocations.map { ToolOutput(it.id, it.id.value) }
+                })) {}
+        val result = runner.run(initial, listOf(user("original")))
+        assertEquals(RunStatus.COMPLETED, result.status)
+        assertEquals(1, batches); assertEquals(2, opens)
+        assertEquals(1, runtime.admissions.size)
     }
     @Test fun blockedCommitDoesNotAcceptEarlyOrBlockStop() {
         val entered = CountDownLatch(1); val release = CountDownLatch(1)

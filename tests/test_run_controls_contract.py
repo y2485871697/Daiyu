@@ -42,12 +42,13 @@ class RunControlsContractTest(unittest.TestCase):
 
     def test_live_stop_and_resume_do_not_commit_unaccepted_visual_state(self):
         screen = (APP / 'ui/screens/chat/conversation/ChatScreen.kt').read_text()
-        stop = screen.split('onPrimaryLongPress = {', 1)[1].split('onSupplement =', 1)[0]
+        stop = screen.split('onPrimaryLongPress = {', 1)[1].split('val userMessageEntrance =', 1)[0]
         self.assertIn('if (runtimePhase == ComposerPhase.IDLE) presentation.stopAtVisible()', stop)
         self.assertIn('else actions.onPrimaryLongPress()', stop)
         self.assertIn('if (reply?.reasoningStopped == true) presentation.stopAtVisible()', screen)
         self.assertNotIn('text -> presentation.finish(); actions.onSend(text)', screen)
-        self.assertIn('if (queued) presentation.finish()', screen)
+        self.assertNotIn('if (queued) presentation.finish()', screen)
+        self.assertIn('rows.lastOrNull()?.listKey != previousKey', screen)
         controller = (APP / 'ChatController.kt').read_text()
         pause = controller.split('internal fun pause(owner:', 1)[1].split('internal fun resume(owner:', 1)[0]
         self.assertEqual(2, pause.count('if (owned.state().pauseRequested) resources?.let(::capturePausedChildren)'))
@@ -70,8 +71,9 @@ class RunControlsContractTest(unittest.TestCase):
         self.assertNotIn('!pauseRequested ||', admission)
         self.assertIn('pendingSupplements.addLast(pending)', admission)
         self.assertIn('if (pauseRequested) { pauseRequested = false; pauseRevision++ }', admission)
-        self.assertIn('val interrupt = requestOpening || execution.phase == ExecutionPhase.STREAMING ||', admission)
-        self.assertIn('if (interrupt) {', admission)
+        for interrupt in ('cancelSession(', 'breakStream =', 'generation++', 'attemptDelivery?.expire()'):
+            self.assertNotIn(interrupt, admission)
+        self.assertEqual(1, runner.count('awaitPause(admitSteering = true)'))
         self.assertIn('queuedSupplementMessages()', admission)
         self.assertIn('rawText.length > 64_000', admission)
         self.assertIn('queued.size >= 16', admission)

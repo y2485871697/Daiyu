@@ -7422,14 +7422,9 @@ class MainActivity : ComponentActivity() {
         userEntranceSupplementId = ticket.messageId
         publishChat()
         return try {
-            val queued = controller.admitSupplement(owner, ticket.messageId, text) {
+            controller.admitSupplement(owner, ticket.messageId, text) {
                 if (activityUsable()) refresh()
             }
-            if (queued) window.decorView.postDelayed({
-                if (activityUsable() && supplementDraft.pending === ticket && supplementDraft.receipt == null)
-                    toast("追加结果未确认，请查看会话")
-            }, 15_000L)
-            queued
         } catch (_: Exception) {
             supplementDraft.receive(SupplementAdmission.Unconfirmed(ticket.messageId))
             settleSupplementReceipt()

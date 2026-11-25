@@ -28,7 +28,8 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertNotIn("currentVisualTopInsetPx", source)
         self.assertNotIn("composerVisualTopInset", source)
         for token in ("clearance = { currentOcclusionPx + currentFollowClearancePx }",
-                      "preserveTextClearance = turn.listKey == currentTailKey",
+                      "preserveTextClearance = turn.listKey == currentTailKey &&",
+                      "turn.status == RunStatus.RUNNING || revealedTurns[turn.listKey] != turn",
                       "val typingPending: Boolean get() = typingOwners.isNotEmpty()",
                       "typingOwners[owner] = Unit", "pacedFollowing = true", "} else typingOwners.remove(owner)"):
             self.assertIn(token, source)
@@ -85,7 +86,7 @@ class StreamingOcclusionContract(unittest.TestCase):
                       'measurer.measure(latestCandidateText, style, softWrap = softWrap,',
                       'frame.measureConstraints?.let { constraints ->',
                       'constraints = constraints.copy(minHeight = 0)',
-                      'clearance.fits(coordinates, inkHeight(prepared))',
+                      'inkHeight(prepared) <= available + .01f',
                       'else frame.committed?.layoutInput?.text ?: latestCandidateText'):
             self.assertIn(token, native_input)
         self.assertNotIn('frame.layout', native_input)
@@ -96,14 +97,12 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn('val candidateText = if (playback?.paused == true) displayedText else text', leaf)
         self.assertIn("measurer.measure(candidateText, style", leaf)
         self.assertIn("}.graphicsLayer(), style, softWrap = softWrap, onTextLayout = {", leaf)
-        publication = leaf.split("fun published(): Boolean =", 1)[1].split("fun prepareNextLine(", 1)[0]
-        self.assertEqual(" ".join(publication.split()),
-                         "latestCandidateText.isEmpty() || frame.layout?.let { candidate -> "
-                         "candidate.layoutInput.text == latestCandidateText && clearance.whollyAboveViewport(frame.coordinates, "
-                         "maxOf(candidate.size.height, frame.coordinates?.size?.height ?: 0)) "
-                         "} == true || frame.paintedHere && frame.drawn?.let { actual -> "
-                         "actual.layoutInput.text == latestCandidateText && frame.layout?.let { actual.canPaintPrefixOf(it) } == true && "
-                         "clearance.fits(frame.coordinates, inkHeight(actual)) } == true")
+        publication = leaf.split("fun published(available: Float? = null): Boolean =", 1)[1].split("fun prepareNextLine(", 1)[0]
+        self.assertIn("actual.layoutInput.text == latestCandidateText", publication)
+        self.assertIn("actual.canPaintPrefixOf(it)", publication)
+        self.assertIn("inkHeight(actual) <= (available ?: clearance.availableHeight(frame.coordinates)) + .01f", publication)
+        self.assertIn("candidate.layoutInput.text == latestCandidateText && clearance.whollyAboveViewport", publication)
+        self.assertLess(publication.index("frame.paintedHere"), publication.index("clearance.whollyAboveViewport"))
         self.assertNotIn("frame.drawn =", publication)
         self.assertNotIn("painted[", publication)
         self.assertIn("!frozen || actual.layoutInput.text == frame.drawn?.layoutInput?.text", leaf)

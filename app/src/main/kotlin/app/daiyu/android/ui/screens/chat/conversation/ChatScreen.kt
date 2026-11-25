@@ -263,7 +263,6 @@ internal fun DaiyuChatScreen(
             if (runtimePhase == ComposerPhase.IDLE) presentation.stopAtVisible()
             else actions.onPrimaryLongPress()
         },
-        onSupplement = { text -> actions.onSupplement(text).also { queued -> if (queued) presentation.finish() } },
     )
     val userMessageEntrance = suppliedUserMessageEntrance ?:
         rememberUserMessageEntrance(state.userMessageEntrance, presentationActive, awaitPlacement = true)

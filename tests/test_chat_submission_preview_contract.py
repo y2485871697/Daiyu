@@ -19,8 +19,8 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
         self.assertLess(settlement.index('updateDraft("")'), settlement.index('supplementDraft.finish('))
         self.assertIn('if (draft.isNotEmpty()) return', settlement)
         self.assertIn('controller.admitSupplement(owner, ticket.messageId, text)', admission)
-        self.assertIn('if (queued) window.decorView.postDelayed(', admission)
-        self.assertIn('toast("追加结果未确认，请查看会话")', admission)
+        self.assertNotIn('window.decorView.postDelayed(', admission)
+        self.assertIn('等待接入引导', (CHAT / 'ChatComposer.kt').read_text())
 
     def test_preview_is_screen_projection_not_authoritative_rows(self):
         screen = (CHAT / 'ChatScreen.kt').read_text()

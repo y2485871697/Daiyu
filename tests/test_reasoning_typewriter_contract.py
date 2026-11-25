@@ -8,12 +8,15 @@ CHAT = ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversatio
 class ReasoningTypewriterContract(unittest.TestCase):
     def test_reasoning_uses_same_reveal_and_formatted_leaf(self):
         source = (CHAT / 'ReportedReasoningCard.kt').read_text()
-        for token in ['val reveal = key(revealGate)', 'rememberMarkdownReveal(', 'MarkdownTypingSource(summary.itemId, text, sourceWindow)',
+        for token in ['val reveal = key(revealGate, staticExpansion)', 'rememberMarkdownReveal(', 'MarkdownTypingSource(summary.itemId, text, sourceWindow)',
                       'RevealedMessageMarkdown(', 'display.reveal, summary.itemId',
                       'awaitPaintAdmission = true', 'streamSnapshot = true',
                       'resetEpoch = revealResetEpoch', 'onVisibleAdvance = onVisibleAdvance']:
             self.assertIn(token, source)
-        self.assertNotIn('ProjectedMessageMarkdown(', source)
+        self.assertIn('val staticExpansion = !isThinking && currentOverride == true', source)
+        static = source.split('if (staticExpansion) {', 1)[1].split('else RevealedMessageMarkdown(', 1)[0]
+        self.assertIn('ProjectedMessageMarkdown(', static)
+        self.assertIn('LocalStreamingTextClearance provides null', static)
         timer = source.split('internal fun rememberReasoningElapsed(', 1)[1].split('internal fun hasReportedReasoningText', 1)[0]
         self.assertIn('delay(100L)', timer)
         self.assertNotIn('withFrameNanos', timer)

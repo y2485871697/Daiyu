@@ -306,14 +306,15 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             if (playback?.paused == true) frame.drawn?.layoutInput?.text ?: AnnotatedString("")
             else {
                 val coordinates = frame.coordinates?.takeIf { it.isAttached }
-                if (clearance.availableHeight(coordinates) == Float.POSITIVE_INFINITY) latestCandidateText
+                val available = clearance.availableHeight(coordinates)
+                if (available == Float.POSITIVE_INFINITY) latestCandidateText
                 else {
                     val prepared = if (coordinates != null) frame.measureConstraints?.let { constraints ->
                         ScrollTextTiming.timed(Part.PREPARE) { measurer.measure(latestCandidateText, style, softWrap = softWrap,
                             constraints = constraints.copy(minHeight = 0)) }
                     } else null
                     // Prepare the native input before placement; only the real layout and draw publish it.
-                    if (prepared != null && clearance.fits(coordinates, inkHeight(prepared))) latestCandidateText
+                    if (prepared != null && inkHeight(prepared) <= available + .01f) latestCandidateText
                     else frame.committed?.layoutInput?.text ?: latestCandidateText
                 }
             }
@@ -321,13 +322,14 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     }
     val candidateText = if (playback?.paused == true) displayedText else text
     val owner = remember(frame) { Any() }
-    fun published(): Boolean = latestCandidateText.isEmpty() || frame.layout?.let { candidate ->
-        candidate.layoutInput.text == latestCandidateText && clearance.whollyAboveViewport(frame.coordinates,
-            maxOf(candidate.size.height, frame.coordinates?.size?.height ?: 0))
-    } == true || frame.paintedHere && frame.drawn?.let { actual ->
-        actual.layoutInput.text == latestCandidateText && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
-            clearance.fits(frame.coordinates, inkHeight(actual))
-    } == true
+    fun published(available: Float? = null): Boolean = latestCandidateText.isEmpty() ||
+        frame.paintedHere && frame.drawn?.let { actual ->
+            actual.layoutInput.text == latestCandidateText && frame.layout?.let { actual.canPaintPrefixOf(it) } == true &&
+                inkHeight(actual) <= (available ?: clearance.availableHeight(frame.coordinates)) + .01f
+        } == true || frame.layout?.let { candidate ->
+            candidate.layoutInput.text == latestCandidateText && clearance.whollyAboveViewport(frame.coordinates,
+                maxOf(candidate.size.height, frame.coordinates?.size?.height ?: 0))
+        } == true
     fun prepareNextLine() {
         if (playback?.paused == true) return
         if (frame.nextAdvance <= 0) { clearance.prepareLine(owner, 0); return }
@@ -355,7 +357,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                 frame.committed = accepted
         }
         prepareNextLine()
-        publication?.setPending(owner, !published())
+        publication?.setPending(owner, !published(frame.availableHeight))
     }
     val refreshAdmission by rememberUpdatedState {
         frame.coordinates?.takeIf { it.isAttached }?.let(::placed)
@@ -434,7 +436,7 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
                 }
             }
             androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
-                publication?.setPending(owner, !published())
+                publication?.setPending(owner, !published(available))
             }
         }.graphicsLayer(), style, softWrap = softWrap, onTextLayout = {
             frame.rendered = it
@@ -473,7 +475,7 @@ internal fun TextLayoutResult.canPaintPrefixOf(candidate: TextLayoutResult): Boo
         previous.softWrap != current.softWrap ||
         previous.density.density != current.density.density ||
         previous.density.fontScale != current.density.fontScale || previous.layoutDirection != current.layoutDirection) return false
-    if (previous.text === current.text) return true
+    if (previous.text.length == current.text.length) return previous.text == current.text
     val prefix = current.text.subSequence(0, previous.text.length)
     return previous.text == prefix
 }

@@ -33,8 +33,8 @@ class ReleaseChatRecoveryContract(unittest.TestCase):
     def test_reasoning_sessions_rebaseline_only_at_visibility_boundaries(self):
         source = (CHAT / 'ReportedReasoningCard.kt').read_text()
         self.assertIn('val revealGate = parentExpanded && !manuallyCollapsed && (!stopped || currentOverride == true)', source)
-        self.assertIn('val revealEnabled = arrived && revealGate && hasReportedReasoningText(text)', source)
-        self.assertIn('val reveal = key(revealGate)', source)
+        self.assertIn('val revealEnabled = arrived && revealGate && !staticExpansion && hasReportedReasoningText(text)', source)
+        self.assertIn('val reveal = key(revealGate, staticExpansion)', source)
         self.assertIn('streaming = isThinking && revealEnabled', source)
         self.assertIn('enabled = revealEnabled', source)
         self.assertIn('allowBaselinePrefix = false', source)

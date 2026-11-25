@@ -91,8 +91,8 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         header = card[card.index('Row(Modifier.fillMaxWidth().heightIn'):card.index('AnimatedVisibility(')]
         self.assertIn('.workflowToolAppearance(appearance)', header)
         self.assertIn('val arrived = appearance?.arrived != false', card)
-        self.assertIn('val revealEnabled = arrived && revealGate && hasReportedReasoningText(text)', card)
-        self.assertIn('val reveal = key(revealGate)', card)
+        self.assertIn('val revealEnabled = arrived && revealGate && !staticExpansion && hasReportedReasoningText(text)', card)
+        self.assertIn('val reveal = key(revealGate, staticExpansion)', card)
         self.assertNotIn('key(revealEnabled)', card)
         gate = card[card.index('val revealGate ='):card.index('val revealEnabled =')]
         self.assertNotIn('hasReportedReasoningText', gate)

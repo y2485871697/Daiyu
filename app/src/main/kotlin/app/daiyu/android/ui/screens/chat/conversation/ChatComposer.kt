@@ -169,7 +169,7 @@ internal fun ChatComposer(state: ComposerUi, actions: ChatScreenActions, modifie
         mediaSubmitting -> "正在发送"
         preparingSend -> "取消发送"
         state.phase == ComposerPhase.PAUSED && !hasText -> "继续"
-        textAction && state.supplementPending && !state.presentationOnly -> "正在追加"
+        textAction && state.supplementPending && !state.presentationOnly -> "等待接入引导"
         textAction && state.phase != ComposerPhase.IDLE && !state.presentationOnly -> "追加消息"
         editing -> "保存并重新生成"
         textAction -> "发送"

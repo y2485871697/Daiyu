@@ -48,7 +48,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
                          'frame.drawn = actual prepareNextLine() frame.paintedHere = true '
                          'if (paintOffset != null) painted[paintOffset] = actual } } '
                          'androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { '
-                         'publication?.setPending(owner, !published()) }')
+                         'publication?.setPending(owner, !published(available)) }')
         self.assertIn('snapshotFlow { publicationCheck() }.collect { publication?.setPending(owner, !it) }', leaf)
         self.assertIn('SideEffect { publication?.setPending(owner, !published()) }', leaf)
         self.assertIn('publication?.setPending(owner, false)', leaf)
@@ -62,7 +62,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('frame.measureConstraints?.let { constraints ->', native)
         self.assertIn('constraints = constraints.copy(minHeight = 0)', native)
         self.assertNotIn('frame.layout', native)
-        self.assertIn('if (prepared != null && clearance.fits(coordinates, inkHeight(prepared))) latestCandidateText', native)
+        self.assertIn('if (prepared != null && inkHeight(prepared) <= available + .01f) latestCandidateText', native)
         self.assertIn('else frame.committed?.layoutInput?.text ?: latestCandidateText', native)
         self.assertIn('frame.drawn?.layoutInput?.text ?: AnnotatedString("")', native)
         measure = leaf.split('BasicText(displayedText, modifier.layout { measurable, constraints ->', 1)[1].split('.onPlaced(::placed)', 1)[0]
@@ -76,7 +76,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         draw = leaf.split('}.onGloballyPositioned(::placed).drawWithContent {', 1)[1]
         self.assertIn('drawMarkdownInk(actual, ink, inkOffset, inkBounds, inkControl?.stopped == true)\n                androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {\n                    frame.drawn = actual\n                    prepareNextLine()', draw)
         self.assertIn('inkHeight(actual) <= available + .01f', draw)
-        self.assertIn('publication?.setPending(owner, !published())', draw)
+        self.assertIn('publication?.setPending(owner, !published(available))', draw)
 
     def test_body_and_thought_both_defer_frame_reads_to_markdown_leaves(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()
@@ -178,7 +178,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
                       'inkHeight(actual) <= available + .01f',
                       'actual.layoutInput.text == latestCandidateText'):
             self.assertIn(token, clearance)
-        publication = clearance.split('fun published(): Boolean =', 1)[1].split('fun placed(', 1)[0]
+        publication = clearance.split('fun published(available: Float? = null): Boolean =', 1)[1].split('fun placed(', 1)[0]
         self.assertIn('latestCandidateText.isEmpty()', publication)
         self.assertNotIn('text.isEmpty()', publication)
         self.assertNotIn('== text', publication)
@@ -218,12 +218,12 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('clearance.prepareLine(owner, if (growthPending) 0 else markdownLineSpace(frame.nextAdvance,', prepare)
         self.assertNotIn('candidate.layoutInput.text != drawn.layoutInput.text', prepare)
         display = clearance.split('val displayedText by remember(', 1)[1].split('val candidateText =', 1)[0]
-        self.assertIn('if (clearance.availableHeight(coordinates) == Float.POSITIVE_INFINITY) latestCandidateText', display)
+        self.assertIn('if (available == Float.POSITIVE_INFINITY) latestCandidateText', display)
         self.assertIn(
-            'if (clearance.availableHeight(coordinates) == Float.POSITIVE_INFINITY) latestCandidateText '
+            'if (available == Float.POSITIVE_INFINITY) latestCandidateText '
             'else { val prepared = if (coordinates != null) frame.measureConstraints?.let { constraints ->',
             ' '.join(display.split()))
-        self.assertIn('if (prepared != null && clearance.fits(coordinates, inkHeight(prepared))) latestCandidateText', display)
+        self.assertIn('if (prepared != null && inkHeight(prepared) <= available + .01f) latestCandidateText', display)
         measure = clearance.split('BasicText(displayedText, modifier.layout', 1)[1].split('frame.measureConstraints =', 1)[0]
         self.assertIn('Snapshot.withoutReadObservation { frame.layout }', measure)
         self.assertIn('previous.multiParagraph !== candidate.multiParagraph', measure)
@@ -265,7 +265,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
                       'measurer.measure(latestCandidateText, style, softWrap = softWrap,',
                       'frame.measureConstraints?.let { constraints ->',
                       'constraints = constraints.copy(minHeight = 0)',
-                      'clearance.fits(coordinates, inkHeight(prepared))',
+                      'inkHeight(prepared) <= available + .01f',
                       'else frame.committed?.layoutInput?.text ?: latestCandidateText'):
             self.assertIn(token, native_input)
         for forbidden in ('frame.committed =', 'frame.drawn =', 'frame.rendered =',
@@ -275,7 +275,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         placed = clearance.split('fun placed(coordinates: LayoutCoordinates) {', 1)[1].split('val refreshAdmission', 1)[0]
         self.assertIn('frame.availableHeight = clearance.availableHeight(coordinates)', placed)
         self.assertIn('inkHeight(candidate) <= frame.availableHeight + .01f -> candidate', placed)
-        self.assertIn('clearance.fits(frame.coordinates, inkHeight(actual))', clearance)
+        self.assertIn('inkHeight(actual) <= (available ?: clearance.availableHeight(frame.coordinates)) + .01f', clearance)
         self.assertIn('publication?.setPending(owner, false)', clearance)
         self.assertNotIn('drawText(', clearance)
         self.assertIn('SelectionContainer {', ui)

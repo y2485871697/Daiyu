@@ -307,6 +307,28 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
         } finally { ui.mainClock.autoAdvance = true }
     }
 
+    fun testManualExpansionShowsCompletedThoughtInOneStepWhileRunContinues() {
+        val text = "完成的思考摘要" + "甲".repeat(120)
+        prepare(text)
+        var advances = 0
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    ReportedReasoningCard("completed-live-run", listOf(ReportedReasoning("r", text, 1100L)),
+                        generationComplete = false, onVisibleAdvance = { advances++ })
+                }
+            } }
+            ui.mainClock.advanceTimeBy(64)
+            ui.onNodeWithText("已思考").assertExists()
+            ui.onNodeWithTag("reported-reasoning-header:completed-live-run").performClick()
+            ui.mainClock.advanceTimeBy(256)
+            assertTrue(visibleText().contains(text))
+            assertEquals(0, advances)
+            ui.onNodeWithText("已思考").assertExists()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     private fun assertHiddenThoughtDoesNotWaitForReveal(stop: Boolean) {
         val baseline = "起始摘要"
         val pending = baseline + "未显示".repeat(100)

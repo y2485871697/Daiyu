@@ -277,6 +277,7 @@ internal fun StreamingTailContainer(
     documentFollow: Boolean = false,
     reserveNextLine: Boolean = true,
     trackViewport: Boolean = true,
+    onContentPositioned: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val questionArrival = remember(state, initialContent) {
@@ -306,7 +307,11 @@ internal fun StreamingTailContainer(
         Layout(content = {
             CompositionLocalProvider(LocalQuestionCardArrival provides questionArrival,
                 LocalStreamingTextClearance provides state.textClearance.takeIf { preserveTextClearance }) {
-                Column(content = { content() })
+                // Once the viewport is capped, new lines grow only this content: neither the viewport nor the
+                // row changes size, so no row-level positioning callback runs before draw. Report it here.
+                Column(if (!trackViewport || onContentPositioned == null) Modifier else Modifier.onGloballyPositioned {
+                    if (it.isAttached) onContentPositioned()
+                }, content = { content() })
             }
         }, modifier = Modifier
             .testTag("chat-stream-viewport:$itemKey")
@@ -1456,6 +1461,7 @@ internal fun ChatMessageList(
                             listViewportHeight = { viewportHeightPx.intValue },
                             initialContent = initialQuestionContent,
                             followIntent = { turn.listKey == assistantOwnerKey && followBottom },
+                            onContentPositioned = { if (turn.listKey == currentTailKey) correctFollowClearance() },
                             content = turnContent)
                     } else turnContent()
                 }

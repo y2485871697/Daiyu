@@ -220,7 +220,9 @@ internal fun Modifier.streamingWorkflowSurface(background: Color, border: Color,
     }
     val tracked = if (clearance == null) this else onPlaced(::positioned).onGloballyPositioned(::positioned)
     return tracked.drawWithContent {
-        val available = if (clearance == null) Float.POSITIVE_INFINITY else minOf(frame.availableHeight, clearance.availableHeight(frame.coordinates))
+        // The surface follows the item where it is drawn. The cached height is from the last placement callback,
+        // which predates a same-frame list correction and would cut the border a line short for one frame.
+        val available = if (clearance == null) Float.POSITIVE_INFINITY else clearance.availableHeight(frame.coordinates)
         val height = minOf(size.height, available)
         val header = headerHeight?.invoke()
         if (height > 0f && (header == null || header > 0 && height + .01f >= header)) {

@@ -267,5 +267,16 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
 
 
 
+class WorkflowSurfaceLiveClipContractTest(unittest.TestCase):
+    def test_surface_clips_to_live_geometry_not_cached_placement(self):
+        src = (Path(__file__).resolve().parents[1] /
+            'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowTimelineLayout.kt').read_text()
+        surface = src.split('internal fun Modifier.streamingWorkflowSurface(', 1)[1].split('internal fun Modifier.workflowInkClearance(', 1)[0]
+        draw = surface.split('return tracked.drawWithContent {', 1)[1]
+        # A cached placement height predates the same-frame correction and lifts the bottom border for a frame.
+        self.assertIn('else clearance.availableHeight(frame.coordinates)', draw)
+        self.assertNotIn('frame.availableHeight', draw)
+
+
 if __name__ == '__main__':
     unittest.main()

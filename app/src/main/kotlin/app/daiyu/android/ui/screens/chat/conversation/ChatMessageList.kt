@@ -410,7 +410,9 @@ internal fun StreamingTailContainer(
                 // Keep the viewport at the safe bottom and show the content end. A new line then grows
                 // upward in the same frame; the later list scroll only moves the viewport within the item.
                 val placed = (safeBottom - viewport.height - origin.roundToInt()).coerceIn(0, maximum)
-                state.scrollOffset = maximum.toFloat()
+                // Only a capped extent pins its end. Short content is moved by the list; its maximum comes from an
+                // origin placed before that scroll, so pinning it here would lift the row a second line for a frame.
+                state.scrollOffset = if (state.contentHeight > viewport.height) maximum.toFloat() else 0f
                 state.followCatchup = false
                 placed
             } else {

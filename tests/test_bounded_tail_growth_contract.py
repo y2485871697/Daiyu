@@ -17,7 +17,7 @@ class BoundedTailGrowthContractTest(unittest.TestCase):
         ui = SRC.read_text()
         branch = ui.split('} else if (documentFollow && following && origin != null) {', 1)[1].split('} else {', 1)[0]
         # Pinning to the item origin left each new line below the edge until the next list scroll.
-        self.assertIn('state.scrollOffset = maximum.toFloat()', branch)
+        self.assertIn('state.scrollOffset = if (state.contentHeight > viewport.height) maximum.toFloat() else 0f', branch)
         self.assertNotIn('state.scrollOffset = placed.toFloat()', branch)
 
 

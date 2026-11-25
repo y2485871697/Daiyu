@@ -378,12 +378,23 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
     } }
     key(style, softWrap, density.density, density.fontScale, direction) {
         BasicText(displayedText, modifier.layout { measurable, constraints ->
-            val candidate = ScrollTextTiming.timed(Part.CANDIDATE) { measurer.measure(candidateText, style, softWrap = softWrap, constraints = constraints.copy(minHeight = 0)) }
+            val textConstraints = constraints.copy(minHeight = 0)
+            // BasicText lays out this same input in the common case. Reuse its native result instead of a
+            // second full paragraph layout per measure; only a held-back display needs its own candidate.
+            val committed = ScrollTextTiming.timed(Part.MEASURE) { measurable.measure(textConstraints) }
+            val native = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.rendered }?.takeIf { result ->
+                val input = result.layoutInput
+                input.text == candidateText && input.style == style && input.softWrap == softWrap &&
+                    input.constraints.maxWidth == textConstraints.maxWidth && input.constraints.maxHeight == textConstraints.maxHeight &&
+                    input.density.density == density && input.density.fontScale == fontScale && input.layoutDirection == layoutDirection
+            }
+            val candidate = native ?: ScrollTextTiming.timed(Part.CANDIDATE) {
+                measurer.measure(candidateText, style, softWrap = softWrap, constraints = textConstraints) }
             val previous = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.layout }
             if (previous == null || previous.multiParagraph !== candidate.multiParagraph ||
                 previous.layoutInput != candidate.layoutInput || previous.size != candidate.size)
                 frame.layout = candidate
-            frame.measureConstraints = candidate.layoutInput.constraints
+            frame.measureConstraints = textConstraints
             val future = nextLineText?.let { ScrollTextTiming.timed(Part.NEXT_LINE) { lineMeasurer.measureMarkdownNextLine(candidate, it) } }
             frame.nextAdvance = future?.takeIf { it.lineCount > candidate.lineCount }?.let {
                 (it.size.height - candidate.size.height).coerceAtLeast(0)
@@ -393,7 +404,6 @@ internal fun ClearanceText(text: AnnotatedString, paintOffset: Int?, modifier: M
             if (playback?.paused != true &&
                 (frame.nextAdvance == 0 || drawn == null || candidate.size.height > drawn.size.height))
                 clearance.prepareLine(owner, 0)
-            val committed = ScrollTextTiming.timed(Part.MEASURE) { measurable.measure(constraints.copy(minHeight = 0)) }
             layout(constraints.constrainWidth(maxOf(candidate.size.width, committed.width)),
                 constraints.constrainHeight(if (ink == null) maxOf(candidate.size.height, committed.height) else inkHeight(candidate))) {
                 androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {

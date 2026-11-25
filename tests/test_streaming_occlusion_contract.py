@@ -96,6 +96,11 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("playback?.paused == true -> frame.drawn", leaf)
         self.assertIn('val candidateText = if (playback?.paused == true) displayedText else text', leaf)
         self.assertIn("measurer.measure(candidateText, style", leaf)
+        measure = leaf.split('BasicText(displayedText, modifier.layout { measurable, constraints ->', 1)[1].split('frame.layout = candidate', 1)[0]
+        # The native BasicText result is measured first and reused; the measurer is only the held-back fallback.
+        self.assertLess(measure.index('measurable.measure(textConstraints)'), measure.index('val candidate = native ?:'))
+        self.assertIn('Snapshot.withoutReadObservation { frame.rendered }', measure)
+        self.assertIn('input.text == candidateText && input.style == style && input.softWrap == softWrap', measure)
         self.assertIn("}.graphicsLayer(), style, softWrap = softWrap, onTextLayout = {", leaf)
         publication = leaf.split("fun published(available: Float? = null): Boolean =", 1)[1].split("fun prepareNextLine(", 1)[0]
         self.assertIn("actual.layoutInput.text == latestCandidateText", publication)

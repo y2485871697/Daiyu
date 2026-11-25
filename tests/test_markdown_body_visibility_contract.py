@@ -70,7 +70,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
             'val previous = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.layout } '
             'if (previous == null || previous.multiParagraph !== candidate.multiParagraph || '
             'previous.layoutInput != candidate.layoutInput || previous.size != candidate.size) '
-            'frame.layout = candidate frame.measureConstraints = candidate.layoutInput.constraints',
+            'frame.layout = candidate frame.measureConstraints = textConstraints',
             ' '.join(measure.split()))
         self.assertIn('val drawn = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { frame.drawn }', measure)
         draw = leaf.split('}.onGloballyPositioned(::placed).drawWithContent {', 1)[1]

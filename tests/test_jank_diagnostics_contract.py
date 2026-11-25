@@ -64,6 +64,7 @@ class JankDiagnosticsContract(unittest.TestCase):
         for token in ('looper.setMessageLogging(null)', 'const val SLOW_MS = 8L', 'MAX_ROWS_PER_SECOND = 80',
                       'if (sequence != id || startedNs != start) return', '"main_slow_message"', '"main_slow_stack"'):
             self.assertIn(token, p)
+        self.assertIn('Regex("""[@\\{][0-9a-f]{5,}\\}?""")', p)
         q = (APP/'storage/SQLiteText.kt').read_text()
         self.assertIn('RuntimeDiagnostics.slow(RuntimeDiagnostics.Stage.SQL_TEXT_READ, started, 4)', q)
 

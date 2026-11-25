@@ -105,6 +105,7 @@ internal class MainLooperProbe(private val append: (JSONObject) -> Unit) {
         const val RESAMPLE_MS = 4L
         const val MAX_SAMPLES = 8
         const val MAX_ROWS_PER_SECOND = 80
-        val HASH = Regex("[@{][0-9a-f]{5,}}?")
+        // Android ICU rejects an unescaped literal brace; keep both escaped.
+        val HASH = Regex("""[@\{][0-9a-f]{5,}\}?""")
     }
 }

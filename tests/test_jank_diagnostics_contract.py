@@ -63,6 +63,10 @@ class JankDiagnosticsContract(unittest.TestCase):
         self.assertIn('val liveDocumentOverflow =', restore)
         self.assertIn('sameFrameReasoning ||\n                liveDocumentOverflow', restore)
         self.assertLess(restore.index('val liveDocumentOverflow ='), restore.index('pacedFollowing && !viewportCorrection'))
+        overflow = restore.split('val liveDocumentOverflow =', 1)[1].split('if (nestedTail.textClearance', 1)[0]
+        # The typed-out remainder after the stream ends must not fall back to the paced follower.
+        self.assertNotIn('isStreaming', overflow)
+        self.assertIn('revealedTurns[activeTail.listKey] != activeTail', overflow)
 
     def test_chat_geometry_trace_is_capture_bounded(self):
         root = __import__('pathlib').Path(__file__).resolve().parents[1]

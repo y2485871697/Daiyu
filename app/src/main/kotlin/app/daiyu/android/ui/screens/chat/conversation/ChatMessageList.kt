@@ -738,9 +738,9 @@ internal fun ChatMessageList(
             if (sameFrameReasoning && nestedTail.followCatchup) return
             // A live document taller than the viewport is followed by a whole line at once. Pay it here,
             // before draw; the frame follower would show the new line under the edge for one frame first.
+            // Includes the typed-out remainder after the stream ends: those lines grow the same document.
             val liveDocumentOverflow = activeTail != null && currentTailKey == activeTail.listKey &&
-                activeTail.isStreaming && (activeTail.hasBodyTextActions() && activeTail.workProcess?.running != true ||
-                    activeTail.hasLiveWorkflowReasoning()) &&
+                (activeTail.status == RunStatus.RUNNING || revealedTurns[activeTail.listKey] != activeTail) &&
                 nestedTail.contentHeight >= layout.viewportSize.height - currentOcclusionPx
             if (nestedTail.textClearance.pacedFollowing && !viewportCorrection && !sameFrameReasoning &&
                 !liveDocumentOverflow) return

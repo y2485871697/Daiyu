@@ -231,3 +231,17 @@ class LiveWorkflowReasoningFollowContract(unittest.TestCase):
         helper = workflow.split('fun ChatTurnUi.Assistant.hasLiveWorkflowReasoning()', 1)[1].split('internal fun', 1)[0]
         self.assertIn('?.takeIf { it.steps.isEmpty() }?.reasoning', helper)
         self.assertIn('reasoning.activeSinceNanos != null && hasReportedReasoningText(reasoning.text)', helper)
+
+
+class ReasoningCardSameFrameGrowthTest(unittest.TestCase):
+    def test_reasoning_card_growth_is_cleared_in_the_same_frame_without_a_reserve(self):
+        source = (Path(__file__).resolve().parents[1] / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatMessageList.kt').read_text()
+        self.assertIn('val reasoningDocumentOwner = documentFollowOwner?.takeIf { it != liveDocumentOwner }', source)
+        self.assertIn('reserveNextLine = turn.listKey != reasoningDocumentOwner,', source)
+        self.assertIn('val reserve = if (!reserveNextLine) 0 else state.textClearance.reservedHeight(', source)
+        correction = source.split('fun correctFollowClearance() {', 1)[1].split('// A non-following viewport', 1)[0]
+        self.assertIn('if (sameFrameReasoning && nestedTail.followCatchup) return', correction)
+        self.assertIn('!viewportCorrection && !sameFrameReasoning) return', correction)
+        self.assertIn('|| viewportCorrection || sameFrameReasoning', correction)
+        self.assertLess(correction.index('val sameFrameReasoning'), correction.index('pacedFollowing && !viewportCorrection'))
+

@@ -275,6 +275,7 @@ internal fun StreamingTailContainer(
     drawClearance: () -> Int = clearance,
     preserveTextClearance: Boolean = false,
     documentFollow: Boolean = false,
+    reserveNextLine: Boolean = true,
     trackViewport: Boolean = true,
     content: @Composable () -> Unit,
 ) {
@@ -349,7 +350,7 @@ internal fun StreamingTailContainer(
             // Publish H without querying alignment lines: prefetch must measure, not place this subtree.
             state.paintHeight = body.height
             // A trailing blank line lets the ordinary follower prepare space before its first glyph.
-            val reserve = state.textClearance.reservedHeight(body.height, currentViewportHeight,
+            val reserve = if (!reserveNextLine) 0 else state.textClearance.reservedHeight(body.height, currentViewportHeight,
                 state.bounded && preserveTextClearance && follows() && protectClearance() && followIntent())
             state.contentHeight = body.height + reserve
             // Position-dependent clipping is resolved after this item's current origin is placed.
@@ -535,6 +536,11 @@ internal fun ChatMessageList(
         tailCompressions.isEmpty() && tail.isStreaming && !tail.stopRequested && !tail.reasoningStopped &&
             tail.hasLiveWorkflowReasoning() && replyPlayback?.control?.stopped != true
     }?.listKey
+    // A blank reserve sits below the whole turn. Thinking inside a card fills it with its new line, so the card
+    // padding and border drop one line and are lifted again when the next reserve appears. Without the reserve,
+    // the measured growth is cleared by a same-frame list correction instead, and the border never moves.
+    val reasoningDocumentOwner = documentFollowOwner?.takeIf { it != liveDocumentOwner }
+    val currentReasoningDocumentOwner by rememberUpdatedState(reasoningDocumentOwner)
     val tailClearance = if (liveDocumentOwner != null) 28.dp else ChatTailClearance
     val currentFollowClearancePx by rememberUpdatedState(with(density) { tailClearance.roundToPx() })
     val currentDragging by rememberUpdatedState(dragging)
@@ -726,7 +732,9 @@ internal fun ChatMessageList(
                 return
             }
             val viewportCorrection = clearanceLayout.viewportLoss.pendingPx > 0f
-            if (nestedTail.textClearance.pacedFollowing && !viewportCorrection) return
+            val sameFrameReasoning = currentTailKey == assistantOwnerKey && currentReasoningDocumentOwner == currentTailKey
+            if (sameFrameReasoning && nestedTail.followCatchup) return
+            if (nestedTail.textClearance.pacedFollowing && !viewportCorrection && !sameFrameReasoning) return
             val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey &&
                 nestedTail.contentHeight > 0 && nestedTail.contentHeight <= layout.viewportSize.height -
                 currentOcclusionPx - with(density) { 11.dp.roundToPx() + currentFollowClearancePx }
@@ -734,7 +742,7 @@ internal fun ChatMessageList(
                 activeTail != null && activeTail.status != RunStatus.RUNNING && !activeTail.isStreaming &&
                 readyTurns[activeTail.listKey] == activeTail &&
                 revealedTurns[activeTail.listKey] != activeTail
-            val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal || viewportCorrection
+            val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal || viewportCorrection || sameFrameReasoning
             if (nestedTail.followCatchup && !protectMeasuredTail) return
             if (!protectMeasuredTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return
             var last = layout.visibleItemsInfo.lastOrNull {
@@ -1428,6 +1436,7 @@ internal fun ChatMessageList(
                             preserveTextClearance = turn.listKey == currentTailKey &&
                                 (turn.status == RunStatus.RUNNING || revealedTurns[turn.listKey] != turn),
                             documentFollow = turn.listKey == documentFollowOwner,
+                            reserveNextLine = turn.listKey != reasoningDocumentOwner,
                             trackViewport = viewportState.bounded || viewportState.migrating ||
                                 turn.listKey == currentTailKey || turn.listKey == assistantOwnerKey,
                             listViewportHeight = { viewportHeightPx.intValue },

@@ -334,7 +334,11 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertNotIn("state.itemOrigin", measure)
         self.assertNotIn("val followOffset = (body.height - viewportHeight()", viewport)
         placement = viewport.split("layout(viewport.width, contentHeight)", 1)[1]
-        self.assertNotIn("state.scrollOffset =", measure)
+        # The only inner write advances an already capped end; short growth never offsets its content.
+        capped = measure.split("previousHeight >= currentViewportHeight && state.maxOffset > 0 &&", 1)
+        self.assertEqual(2, len(capped))
+        self.assertNotIn("state.scrollOffset =", capped[0])
+        self.assertEqual(1, capped[1].count("state.scrollOffset ="))
         self.assertEqual(1, placement.count("val following = follows()"))
         self.assertIn("val followOffset = if (state.contentHeight > viewport.height) maximum else 0", placement)
         self.assertIn("val maximum = if (state.bounded) (state.contentHeight - visibleHeight).coerceAtLeast(0) else 0", placement)

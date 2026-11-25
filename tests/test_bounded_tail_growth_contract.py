@@ -21,5 +21,17 @@ class BoundedTailGrowthContractTest(unittest.TestCase):
         self.assertNotIn('state.scrollOffset = placed.toFloat()', branch)
 
 
+    def test_capped_viewport_advances_pinned_end_in_the_growing_measure(self):
+        ui = SRC.read_text()
+        container = ui.split('internal fun StreamingTailContainer(', 1)[1].split('internal fun ChatMessageList(', 1)[0]
+        inner = container.split('state.contentHeight = body.height + reserve', 1)
+        self.assertEqual(len(inner), 2)
+        # The outer extent sees H one frame late; the inner measure must move the pinned end itself.
+        self.assertIn('val growth = state.contentHeight - previousHeight', inner[1].split('layout(body.width, height)', 1)[0])
+        self.assertIn('state.scrollOffset = state.maxOffset.toFloat()', inner[1].split('layout(body.width, height)', 1)[0])
+        self.assertIn('withoutReadObservation { state.contentHeight }', inner[0])
+        self.assertIn('previousHeight >= currentViewportHeight && state.maxOffset > 0', inner[1])
+
+
 if __name__ == '__main__':
     unittest.main()

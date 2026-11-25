@@ -357,7 +357,20 @@ internal fun StreamingTailContainer(
             // A trailing blank line lets the ordinary follower prepare space before its first glyph.
             val reserve = if (!reserveNextLine) 0 else state.textClearance.reservedHeight(body.height, currentViewportHeight,
                 state.bounded && preserveTextClearance && follows() && protectClearance() && followIntent())
+            val previousHeight = androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation { state.contentHeight }
             state.contentHeight = body.height + reserve
+            // A capped viewport keeps its size, so the outer extent only re-reads H in the next frame and its
+            // placement would still show the old end: the new line lands under the edge for one frame. Advance
+            // the pinned end here, in the measure that saw the growth; the outer pass recomputes the same value.
+            androidx.compose.runtime.snapshots.Snapshot.withoutReadObservation {
+                val growth = state.contentHeight - previousHeight
+                // Only an already capped extent: short content must never use its partial height as an offset.
+                if (state.bounded && growth != 0 && previousHeight >= currentViewportHeight && state.maxOffset > 0 &&
+                    follows() && !state.followCatchup && state.scrollOffset >= state.maxOffset - 1f) {
+                    state.maxOffset = (state.maxOffset + growth).coerceAtLeast(0)
+                    state.scrollOffset = state.maxOffset.toFloat()
+                }
+            }
             if (app.daiyu.android.diagnostics.ChatGeometryTrace.active) app.daiyu.android.diagnostics.ChatGeometryTrace.record("tail",
                 "body" to body.height, "reserve" to reserve, "bounded" to state.bounded, "catchup" to state.followCatchup)
             // Position-dependent clipping is resolved after this item's current origin is placed.

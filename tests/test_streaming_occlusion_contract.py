@@ -258,7 +258,10 @@ class StreamingOcclusionContract(unittest.TestCase):
         source = CHAT.read_text()
         viewport = source.split('internal fun StreamingTailContainer(', 1)[1].split('internal fun ChatMessageList(', 1)[0]
         placement = viewport.split('layout(viewport.width, contentHeight)', 1)[1]
-        self.assertIn('val origin = if (state.bounded) state.itemOrigin else null', placement)
+        self.assertIn('val origin = if (!state.bounded) null else {', placement)
+        # The bounded origin comes from this placement pass, so a same-frame list scroll cannot leave q one line stale.
+        self.assertIn('list.localPositionOf(placed, Offset.Zero).y else state.itemOrigin', placement)
+        self.assertIn('val placed = coordinates?.takeIf { it.isAttached }', placement)
         self.assertIn('state.viewportOffset = q', placement)
         self.assertIn('viewport.placeRelative(0, q)', placement)
         self.assertIn('list.localPositionOf(coordinates, Offset.Zero).y', viewport)

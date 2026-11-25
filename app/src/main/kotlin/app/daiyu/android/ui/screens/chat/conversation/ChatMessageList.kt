@@ -393,7 +393,14 @@ internal fun StreamingTailContainer(
             // onPlaced runs after this item's parent placement, before its child
             // placement. No assumption about LazyListState publishing a measure.
             val following = follows()
-            val origin = if (state.bounded) state.itemOrigin else null
+            // Read the item's position here, not the onPlaced copy: that copy predates a same-frame list scroll, so
+            // the viewport rode up with the item for one frame and the card border landed a line high. Reading
+            // coordinates during placement also re-runs this block whenever the list moves the item.
+            val origin = if (!state.bounded) null else {
+                val list = listCoordinates()?.takeIf { it.isAttached }
+                val placed = coordinates?.takeIf { it.isAttached }
+                if (list != null && placed != null) list.localPositionOf(placed, Offset.Zero).y else state.itemOrigin
+            }
             val safeBottom = currentListHeight - clearance()
             val visibleHeight = if (state.bounded) {
                 minOf(viewport.height, (safeBottom - (origin?.roundToInt() ?: 0).coerceAtLeast(0)).coerceAtLeast(1))

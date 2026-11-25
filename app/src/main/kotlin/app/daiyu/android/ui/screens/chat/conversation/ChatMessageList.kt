@@ -736,7 +736,14 @@ internal fun ChatMessageList(
             val viewportCorrection = clearanceLayout.viewportLoss.pendingPx > 0f
             val sameFrameReasoning = currentTailKey == assistantOwnerKey && currentReasoningDocumentOwner == currentTailKey
             if (sameFrameReasoning && nestedTail.followCatchup) return
-            if (nestedTail.textClearance.pacedFollowing && !viewportCorrection && !sameFrameReasoning) return
+            // A live document taller than the viewport is followed by a whole line at once. Pay it here,
+            // before draw; the frame follower would show the new line under the edge for one frame first.
+            val liveDocumentOverflow = activeTail != null && currentTailKey == activeTail.listKey &&
+                activeTail.isStreaming && (activeTail.hasBodyTextActions() && activeTail.workProcess?.running != true ||
+                    activeTail.hasLiveWorkflowReasoning()) &&
+                nestedTail.contentHeight >= layout.viewportSize.height - currentOcclusionPx
+            if (nestedTail.textClearance.pacedFollowing && !viewportCorrection && !sameFrameReasoning &&
+                !liveDocumentOverflow) return
             val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey &&
                 nestedTail.contentHeight > 0 && nestedTail.contentHeight <= layout.viewportSize.height -
                 currentOcclusionPx - with(density) { 11.dp.roundToPx() + currentFollowClearancePx }
@@ -744,7 +751,8 @@ internal fun ChatMessageList(
                 activeTail != null && activeTail.status != RunStatus.RUNNING && !activeTail.isStreaming &&
                 readyTurns[activeTail.listKey] == activeTail &&
                 revealedTurns[activeTail.listKey] != activeTail
-            val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal || viewportCorrection || sameFrameReasoning
+            val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal || viewportCorrection || sameFrameReasoning ||
+                liveDocumentOverflow
             if (nestedTail.followCatchup && !protectMeasuredTail) return
             if (!protectMeasuredTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return
             var last = layout.visibleItemsInfo.lastOrNull {

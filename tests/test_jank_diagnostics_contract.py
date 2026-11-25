@@ -56,6 +56,14 @@ class JankDiagnosticsContract(unittest.TestCase):
         chat = (APP/'ui/screens/chat/conversation/ChatMessageList.kt').read_text()
         self.assertIn('currentNestedTail.scroller?.isScrollInProgress == true -> "inner-scroll"', chat)
 
+    def test_live_document_overflow_is_restored_before_draw(self):
+        root = __import__('pathlib').Path(__file__).resolve().parents[1]
+        src = (root / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatMessageList.kt').read_text()
+        restore = src.split('fun correctFollowClearance()', 1)[1].split('fun ', 1)[0]
+        self.assertIn('val liveDocumentOverflow =', restore)
+        self.assertIn('sameFrameReasoning ||\n                liveDocumentOverflow', restore)
+        self.assertLess(restore.index('val liveDocumentOverflow ='), restore.index('pacedFollowing && !viewportCorrection'))
+
     def test_chat_geometry_trace_is_capture_bounded(self):
         root = __import__('pathlib').Path(__file__).resolve().parents[1]
         trace = (root / 'app/src/main/kotlin/app/daiyu/android/diagnostics/ChatGeometryTrace.kt').read_text()

@@ -241,7 +241,7 @@ class ReasoningCardSameFrameGrowthTest(unittest.TestCase):
         self.assertIn('val reserve = if (!reserveNextLine) 0 else state.textClearance.reservedHeight(', source)
         correction = source.split('fun correctFollowClearance() {', 1)[1].split('// A non-following viewport', 1)[0]
         self.assertIn('if (sameFrameReasoning && nestedTail.followCatchup) return', correction)
-        self.assertIn('!viewportCorrection && !sameFrameReasoning) return', correction)
+        self.assertIn('!viewportCorrection && !sameFrameReasoning &&\n                !liveDocumentOverflow) return', correction)
         self.assertIn('|| viewportCorrection || sameFrameReasoning', correction)
         self.assertLess(correction.index('val sameFrameReasoning'), correction.index('pacedFollowing && !viewportCorrection'))
 

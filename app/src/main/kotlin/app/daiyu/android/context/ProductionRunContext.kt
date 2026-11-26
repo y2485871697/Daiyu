@@ -139,7 +139,7 @@ internal class ProductionRunContext(
             val text = HarnessContextSummarizer(model, cancellation, definitions, systemPrompt,
                 nextModel = model.rebind?.let { rebind -> { rebind(usage()) } }, archiveToolResult = archiveToolResult).summarize(
                 CompressionInput(logical.take(cut), ContextRevision.digest(prefix),
-                    checkpointTargetTokens = compactionCheckpointTarget(prefixTokens))).trim()
+                    checkpointTargetTokens = compactionCheckpointTarget(prefixTokens), archiveId = activity.id.takeIf { taskId == null })).trim()
             if (cancelled()) return null
             require(text.isNotEmpty()) { "摘要为空；保留原文" }
             val id = "summary-${activity.id}"

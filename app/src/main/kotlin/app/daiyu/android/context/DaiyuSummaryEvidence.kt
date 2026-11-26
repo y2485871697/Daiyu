@@ -6,6 +6,7 @@ import app.daiyu.android.model.*
 import org.json.JSONObject
 
 internal object DaiyuSummaryEvidence {
+    const val HISTORICAL_TOOL = "historical_tool"
     private const val TOOL_PRUNE_LIMIT = 8_192
     private const val TOOL_PRUNE_HEAD = 4_096
     private const val TOOL_PRUNE_TAIL = 1_024
@@ -33,6 +34,12 @@ internal object DaiyuSummaryEvidence {
     fun prepare(originals: List<Message>, cancellation: ContextPreparationCancellation,
         archive: ((Message, ContextPreparationCancellation) -> String)?): Prepared {
         var replayable = true
+        val declared = originals.flatMapTo(mutableSetOf()) { row ->
+            row.blocks.filterIsInstance<MessageBlock.Tool>().map { it.invocation.id.value } +
+                row.protocolItems.mapNotNull { raw -> JSONObject(raw).takeIf { it.optString("type") == "function_call" }
+                    ?.optString("call_id")?.takeIf(String::isNotBlank) }
+        }
+        val pending = mutableSetOf<String>()
         val messages = originals.map { row ->
             cancellation.check()
             if (row.role !in setOf("system", Message.USER_ROLE, "assistant") ||
@@ -57,12 +64,25 @@ internal object DaiyuSummaryEvidence {
                 changes[block.invocation.id.value] = result
                 block.copy(result = result)
             }
+            val historical = mutableListOf<MessageBlock.Text>()
             val protocol = row.protocolItems.mapNotNull { raw ->
                 val item = JSONObject(raw)
                 val type = item.optString("type")
+                if (type == "function_call") {
+                    val id = item.optString("call_id")
+                    require(id.isNotBlank() && pending.add(id)) { "摘要工具协议调用缺少标识或重复；保留原文" }
+                }
                 if (type == "function_call_output") {
                     val id = item.optString("call_id")
-                    if (id !in keys) replayable = false
+                    require(id.isNotBlank()) { "摘要工具协议结果缺少标识；保留原文" }
+                    if (id !in declared) {
+                        replayable = false
+                        historical += MessageBlock.Text("summary-orphan-${historical.size}",
+                            JSONObject().put("role", HISTORICAL_TOOL).put("tool_call_id", id)
+                                .put("evidence", "只有历史结果，无对应调用；不得重建或执行工具").put("output", item.opt("output")).toString())
+                        return@mapNotNull null
+                    }
+                    require(pending.remove(id)) { "摘要工具协议结果先于调用或重复；保留原文" }
                     changes[id]?.let { return@mapNotNull item.put("output", it).toString() }
                 }
                 // Other wire formats may duplicate the full tool body in an envelope.
@@ -72,8 +92,12 @@ internal object DaiyuSummaryEvidence {
                 }
                 raw
             }
-            if (changes.isEmpty()) row else row.copy(blocks = blocks, protocolItems = protocol)
-        }
+            pending.removeAll(keys.toSet()) // Canonical blocks already contain the paired result.
+            val normalized = if (changes.isEmpty() && historical.isEmpty()) row else row.copy(blocks = blocks, protocolItems = protocol)
+            if (historical.isEmpty()) listOf(normalized) else listOf(normalized, row.copy(role = HISTORICAL_TOOL,
+                blocks = historical, protocolItems = emptyList(), historySegments = emptyList(), reportedReasoning = emptyList()))
+        }.flatten()
+        require(pending.isEmpty()) { "摘要切点包含未闭合工具协议批次；保留原文" }
         return Prepared(messages, replayable)
     }
 }

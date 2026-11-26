@@ -9,7 +9,7 @@ class SummaryCheckpointTest {
     @Test fun exactEightSectionsAndNestedOrFencedHeadings() {
         val text = checkpoint()
         assertEquals(text, SummaryCheckpoint.validate(text))
-        assertNotNull(SummaryCheckpoint.validate(text.replace("- factual evidence", "- fact\n### Current Work")))
+        assertNotNull(SummaryCheckpoint.validate(text.replace("- factual evidence", "- fact\n### nested diagnostic")))
         assertNotNull(SummaryCheckpoint.validate(text.replace("- factual evidence", "- fact\n```\n## not a real section\n```")))
         assertNotNull(SummaryCheckpoint.validate("```markdown\n$text\n```"))
     }
@@ -23,8 +23,16 @@ class SummaryCheckpointTest {
         assertEquals(quoted, SummaryCheckpoint.validate(quoted))
         assertEquals(quoted, SummaryCheckpoint.withoutLegacyMarker(quoted))
         assertEquals("旧版自由格式正文", SummaryCheckpoint.withoutLegacyMarker(SummaryCheckpoint.marker + "\n旧版自由格式正文"))
-        assertNull(SummaryCheckpoint.validate(SummaryCheckpoint.marker + "\nextra preface\n" + text))
+        assertEquals(text, SummaryCheckpoint.validate(SummaryCheckpoint.marker + "\nextra preface\n" + text))
         assertNull(SummaryCheckpoint.validate(SummaryCheckpoint.marker))
+    }
+    @Test fun aliasHeadingsNormalizeWithoutAFormatRepairRequest() {
+        val headings = listOf("目标", "关键技术", "Files and identifiers", "错误与待办", "Pending Work",
+            "已核实证据", "下一步行动", "Constraints")
+        val candidate = headings.joinToString("\n") { "### [$it]\n- factual evidence" }
+        assertEquals(checkpoint(), SummaryCheckpoint.validate("```md\n[对话摘要]\n$candidate\n```"))
+        assertNull(SummaryCheckpoint.validate(candidate.replace("### [目标]", "## [目标]")))
+        assertNull(SummaryCheckpoint.validate(candidate.replace("### [目标]", "### [Unknown]")))
     }
     @Test fun missingEmptyDuplicateOutOfOrderAndUnclosedFencesFail() {
         val text = checkpoint()
@@ -35,7 +43,7 @@ class SummaryCheckpointTest {
         assertNull(SummaryCheckpoint.validate(text + "\n## Current Work\nextra"))
         assertNull(SummaryCheckpoint.validate(text.replace("## Current Work", "## Next Step")))
         assertNull(SummaryCheckpoint.validate(text + "\n```\nunclosed"))
-        assertNull(SummaryCheckpoint.validate("extra preface\n$text"))
+        assertEquals(text, SummaryCheckpoint.validate("extra preface\n$text"))
     }
     @Test fun expandedDuplicateMessageIdentityDoesNotPassThroughArchiveCodec() {
         val message = Message(MessageId("repeated"), ConversationId("c"), RunId("r"), "assistant",

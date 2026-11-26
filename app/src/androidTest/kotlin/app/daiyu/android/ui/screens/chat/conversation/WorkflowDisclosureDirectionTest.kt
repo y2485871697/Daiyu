@@ -1,5 +1,12 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import android.os.Handler
+import android.os.Looper
+import android.view.FrameMetrics
+import android.view.Window
+import app.daiyu.android.diagnostics.ChatGeometryTrace
+import java.io.File
+import org.json.JSONObject
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -47,6 +54,7 @@ import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.ui.app.AgentAppTheme
 
 class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
+    override val requiresWindowDraw get() = getName() == "testLongWorkflowOpeningDrawTrace"
     private var density = 1f
     private val work = WorkProcessUi(emptyList(), "已完成")
 
@@ -150,6 +158,78 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             }
         } finally { ui.mainClock.autoAdvance = true }
         assertTrue("The card must actually expand", bottom() - top() > initialHeight)
+    }
+
+    fun testLongWorkflowOpeningDrawTrace() {
+        val rows = ArrayList<JSONObject>()
+        var overflow = 0
+        var rateDroppedBefore = 0L
+        var rateDropped = 0L
+        var success = false
+        fun collect(row: JSONObject) {
+            if (rows.size < 8192) rows.add(row) else overflow++
+        }
+        val listener = Window.OnFrameMetricsAvailableListener { _, metrics, drops ->
+            collect(JSONObject().put("kind", "window_frame_metrics")
+                .put("at_ns", System.nanoTime())
+                .put("intended_vsync_ns", metrics.getMetric(FrameMetrics.INTENDED_VSYNC_TIMESTAMP))
+                .put("actual_vsync_ns", metrics.getMetric(FrameMetrics.VSYNC_TIMESTAMP))
+                .put("layout_measure_ns", metrics.getMetric(FrameMetrics.LAYOUT_MEASURE_DURATION))
+                .put("draw_ns", metrics.getMetric(FrameMetrics.DRAW_DURATION))
+                .put("total_ns", metrics.getMetric(FrameMetrics.TOTAL_DURATION))
+                .put("callback_drops", drops))
+        }
+        val window = activity.window
+        var lease: AutoCloseable? = null
+        try {
+            mainThread {
+                rateDroppedBefore = ChatGeometryTrace.droppedRows()
+                lease = ChatGeometryTrace.observe(::collect)
+                window.addOnFrameMetricsAvailableListener(listener, Handler(Looper.getMainLooper()))
+            }
+            // Short enough to close again by tapping the visible header, then exceed the viewport.
+            for (height in listOf(140.dp, 500.dp)) {
+                mountList(following = true, lower = true, status = RunStatus.COMPLETED, streaming = false,
+                    detailHeight = height)
+                assertHalf(lower = true)
+                val initialHeight = bottom() - top()
+                mainThread { collect(JSONObject().put("kind", "fixture_marker").put("phase", "open")
+                    .put("detail_dp", height.value).put("at_ns", System.nanoTime())) }
+                ui.mainClock.autoAdvance = false
+                try {
+                    touchHeader()
+                    repeat(42) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+                    assertTrue("The fixture must grow beyond its collapsed height", bottom() - top() > initialHeight)
+                    if (height == 140.dp) {
+                        mainThread { collect(JSONObject().put("kind", "fixture_marker").put("phase", "close")
+                            .put("at_ns", System.nanoTime())) }
+                        touchHeader()
+                        repeat(42) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+                        assertTrue("The fixture must close", bottom() - top() <= initialHeight + 2f)
+                    }
+                } finally { ui.mainClock.autoAdvance = true }
+            }
+            mainThread {
+                val phases = rows.filter { it.optString("event") == "disclosure_frame" }.map { it.optString("phase") }.toSet()
+                assertTrue("Expected both correction samples", phases.containsAll(listOf("pre_draw", "post_correction")))
+                assertTrue("Expected a real card draw", rows.any { it.optString("event") == "disclosure_draw" && it.optBoolean("owns_anchor") })
+                assertTrue("Expected window metrics", rows.any { it.optString("kind") == "window_frame_metrics" })
+            }
+            success = true
+        } finally {
+            mainThread {
+                lease?.close()
+                window.removeOnFrameMetricsAvailableListener(listener)
+                rateDropped = ChatGeometryTrace.droppedRows() - rateDroppedBefore
+            }
+            val directory = File(requireNotNull(activity.getExternalFilesDir(null)), "visual-diagnostics/workflow-disclosure")
+            check(directory.isDirectory || directory.mkdirs())
+            File(directory, "geometry.jsonl").bufferedWriter().use { output ->
+                rows.forEach { output.appendLine(it.toString()) }
+                output.appendLine(JSONObject().put("kind", "capture_end").put("passed", success)
+                    .put("rows", rows.size).put("buffer_dropped", overflow).put("rate_dropped", rateDropped).toString())
+            }
+        }
     }
 
     fun testStoppedReplyAtBottomUsesTheUpperHalfFallback() {

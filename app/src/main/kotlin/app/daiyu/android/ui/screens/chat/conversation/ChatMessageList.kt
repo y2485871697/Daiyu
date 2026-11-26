@@ -697,21 +697,92 @@ internal fun ChatMessageList(
             detachFollow = { followBottom = false; wasDragged = false },
             correctAnchor = { itemKey, remaining ->
                 var consumed = 0f
-                if (clearanceLayout.active && !clearanceLayout.correcting && nestedStates[itemKey]?.migrating != true) {
+                val trace = app.daiyu.android.diagnostics.ChatGeometryTrace.active
+                val nestedBefore = if (trace) nestedStates[itemKey] else null
+                val correctionId = if (trace) app.daiyu.android.diagnostics.ChatGeometryTrace.newId() else 0L
+                val correctionStarted = if (trace) System.nanoTime() else 0L
+                val eligible = clearanceLayout.active && !clearanceLayout.correcting && nestedStates[itemKey]?.migrating != true
+                if (trace) app.daiyu.android.diagnostics.ChatGeometryTrace.sample("list_anchor_correction",
+                    "phase" to "begin", "correction" to correctionId, "eligible" to eligible,
+                    "list_active" to clearanceLayout.active, "already_correcting" to clearanceLayout.correcting,
+                    "migrating" to (nestedBefore?.migrating == true),
+                    "scroll_serial_current" to (currentScrollSerial == null || currentScrollSerial == consumedScrollSerial),
+                    "follow_bottom" to followBottom, "dragging" to currentDragging, "page_active" to pageActive,
+                    "scroll_resumed" to scrollResumed, "safe_occlusion_px" to currentOcclusionPx,
+                    "follow_clearance_px" to currentFollowClearancePx,
+                    "nested_scroll_offset_px" to nestedBefore?.scrollOffset,
+                    "nested_viewport_offset_px" to nestedBefore?.viewportOffset,
+                    "nested_content_height_px" to nestedBefore?.contentHeight,
+                    "nested_max_offset_px" to nestedBefore?.maxOffset,
+                    "nested_bounded" to nestedBefore?.bounded,
+                    "nested_catchup" to nestedBefore?.followCatchup)
+                if (eligible) {
                     clearanceLayout.correcting = true
                     try {
                         val viewport = nestedStates[itemKey]
+                        val beforeMeasureStarted = if (trace) System.nanoTime() else 0L
                         // Finish pending item measurement before sampling its physical anchor.
                         clearanceLayout.remeasurement?.forceRemeasure()
+                        val beforeMeasureNs = if (trace) System.nanoTime() - beforeMeasureStarted else 0L
+
+                        val remainingStarted = if (trace) System.nanoTime() else 0L
                         val delta = remaining()
+                        val remainingNs = if (trace) System.nanoTime() - remainingStarted else 0L
                         // Move the reading window with its content; an inner offset would clip the headers at its old top.
-                        val before = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == itemKey }
+                        val beforeLayout = listState.layoutInfo
+                        val before = beforeLayout.visibleItemsInfo.firstOrNull { it.key == itemKey }
+                        val canScrollForwardBefore = if (trace) listState.canScrollForward else false
+                        val canScrollBackwardBefore = if (trace) listState.canScrollBackward else false
+
+                        val dispatchStarted = if (trace) System.nanoTime() else 0L
                         if (abs(delta) > .5f) consumed = listState.dispatchRawDelta(delta)
+                        val dispatchNs = if (trace) System.nanoTime() - dispatchStarted else 0L
+                        // Snapshot immediately after dispatch: the next forced remeasure may change these values.
+                        val canScrollForwardAfterDispatch = if (trace) listState.canScrollForward else false
+                        val canScrollBackwardAfterDispatch = if (trace) listState.canScrollBackward else false
+
+                        val afterMeasureStarted = if (trace) System.nanoTime() else 0L
                         if (abs(consumed) > .5f) clearanceLayout.remeasurement?.forceRemeasure()
-                        val after = listState.layoutInfo.visibleItemsInfo.firstOrNull { it.key == itemKey }
+                        val afterMeasureNs = if (trace) System.nanoTime() - afterMeasureStarted else 0L
+                        val afterLayout = listState.layoutInfo
+                        val after = afterLayout.visibleItemsInfo.firstOrNull { it.key == itemKey }
+                        val canScrollForwardAfterMeasure = if (trace) listState.canScrollForward else false
+                        val canScrollBackwardAfterMeasure = if (trace) listState.canScrollBackward else false
                         viewport?.anchorCorrection = "delta=$delta consumed=$consumed before=${before?.offset}/${before?.size} after=${after?.offset}/${after?.size}"
-                    } finally { clearanceLayout.correcting = false }
-                }
+                        if (trace) app.daiyu.android.diagnostics.ChatGeometryTrace.sample("list_anchor_correction",
+                            "phase" to "complete", "correction" to correctionId,
+                            "elapsed_ns" to (System.nanoTime() - correctionStarted),
+                            "force_remeasure_before_ns" to beforeMeasureNs, "remaining_geometry_ns" to remainingNs,
+                            "dispatch_raw_delta_ns" to dispatchNs, "force_remeasure_after_ns" to afterMeasureNs,
+                            "requested_delta_px" to delta, "consumed_delta_px" to consumed,
+                            "unconsumed_delta_px" to (delta - consumed),
+                            "before_item_offset_px" to before?.offset, "before_item_size_px" to before?.size,
+                            "after_item_offset_px" to after?.offset, "after_item_size_px" to after?.size,
+                            "item_offset_change_px" to if (before != null && after != null) after.offset - before.offset else null,
+                            "item_size_change_px" to if (before != null && after != null) after.size - before.size else null,
+                            "before_viewport_start_px" to beforeLayout.viewportStartOffset,
+                            "before_viewport_end_px" to beforeLayout.viewportEndOffset,
+                            "after_viewport_start_px" to afterLayout.viewportStartOffset,
+                            "after_viewport_end_px" to afterLayout.viewportEndOffset,
+                            "before_can_scroll_forward" to canScrollForwardBefore,
+                            "before_can_scroll_backward" to canScrollBackwardBefore,
+                            "after_dispatch_can_scroll_forward" to canScrollForwardAfterDispatch,
+                            "after_dispatch_can_scroll_backward" to canScrollBackwardAfterDispatch,
+                            "after_measure_can_scroll_forward" to canScrollForwardAfterMeasure,
+                            "after_measure_can_scroll_backward" to canScrollBackwardAfterMeasure,
+                            "nested_scroll_offset_px" to viewport?.scrollOffset,
+                            "nested_viewport_offset_px" to viewport?.viewportOffset,
+                            "nested_content_height_px" to viewport?.contentHeight,
+                            "nested_max_offset_px" to viewport?.maxOffset)
+                    } finally {
+                        clearanceLayout.correcting = false
+
+                    }
+                } else if (trace) app.daiyu.android.diagnostics.ChatGeometryTrace.sample("list_anchor_correction",
+                    "phase" to "skipped", "correction" to correctionId,
+                    "list_active" to clearanceLayout.active, "already_correcting" to clearanceLayout.correcting,
+                    "migrating" to (nestedBefore?.migrating == true),
+                    "elapsed_ns" to (System.nanoTime() - correctionStarted))
                 consumed
             },
         )

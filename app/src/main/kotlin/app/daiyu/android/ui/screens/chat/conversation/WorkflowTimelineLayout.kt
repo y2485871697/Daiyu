@@ -209,7 +209,7 @@ private class WorkflowSurfaceOutline {
 /** Keep the measured extent while closing the visible surface inside the safe edge. */
 @Composable
 internal fun Modifier.streamingWorkflowSurface(background: Color, border: Color, radius: Dp,
-    highlight: Color? = null, headerHeight: (() -> Int)? = null): Modifier {
+    highlight: Color? = null, headerHeight: (() -> Int)? = null, diagnosticMotion: WorkflowDisclosureMotion? = null): Modifier {
     val clearance = LocalStreamingTextClearance.current
     val frame = remember(clearance) { WorkflowPaintFrame() }
     val outline = remember { WorkflowSurfaceOutline() }
@@ -223,7 +223,9 @@ internal fun Modifier.streamingWorkflowSurface(background: Color, border: Color,
         val available = if (clearance == null) Float.POSITIVE_INFINITY else clearance.availableHeight(frame.coordinates)
         val height = minOf(size.height, available)
         val header = headerHeight?.invoke()
-        if (height > 0f && (frame.admitted || header == null || header > 0 && height + .01f >= header)) {
+        val paint = height > 0f && (frame.admitted || header == null || header > 0 && height + .01f >= header)
+        diagnosticMotion?.tracePaint(frame.coordinates, size.height, available, height, header, frame.admitted, paint)
+        if (paint) {
             frame.admitted = true
             val surfaceSize = Size(size.width, height)
             val corner = minOf(radius.toPx(), surfaceSize.width / 2f, surfaceSize.height / 2f)

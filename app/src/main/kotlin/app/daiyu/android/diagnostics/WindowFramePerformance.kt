@@ -210,6 +210,26 @@ internal class WindowFramePerformance private constructor(
         catch (_: RuntimeException) { /* Window may already have been removed by the platform. */ }
         handler?.post { session.batch.flush("window_detached"); session.incident.flush() }
     }
+    // Main-thread staging: use one writer task for a short burst rather than flooding its bounded queue.
+    private var geometryRows = ArrayList<org.json.JSONObject>(48)
+    private var geometryEpoch = -1L
+    private val geometryFlush = Runnable { flushGeometry() }
+    private fun flushGeometry() {
+        activity.window.decorView.removeCallbacks(geometryFlush)
+        if (geometryRows.isEmpty()) return
+        val batch = geometryRows
+        geometryRows = ArrayList(48)
+        log.appendRows(geometryEpoch, batch)
+    }
+
+    private fun queueGeometry(epoch: Long, row: org.json.JSONObject) {
+        if (geometryEpoch != epoch) flushGeometry()
+        geometryEpoch = epoch
+        if (geometryRows.isEmpty()) activity.window.decorView.postDelayed(geometryFlush, 32L)
+        geometryRows.add(row)
+        if (geometryRows.size >= 64) flushGeometry()
+    }
+
     private fun reconcile() {
         activity.window.decorView.removeCallbacks(heartbeat)
         if (enabled && resumed && !closed) {
@@ -217,9 +237,10 @@ internal class WindowFramePerformance private constructor(
             activity.window.decorView.postDelayed(heartbeat, 1000)
             looperProbe.update(handler.takeIf { log.captureEpoch() != null })
             ChatGeometryTrace.sink = if (log.captureEpoch() == null) null else { row ->
-                log.captureEpoch()?.let { epoch -> log.append(epoch, row) }
+                log.captureEpoch()?.let { epoch -> queueGeometry(epoch, row) }
             }
         } else {
+            flushGeometry()
             looperProbe.update(null)
             ChatGeometryTrace.sink = null
             scroll(BackPerformanceRecorder.Scroll.IDLE)
@@ -273,6 +294,7 @@ internal class WindowFramePerformance private constructor(
                 var retirement: CountDownLatch? = null
                 // Freeze worker/session membership together on their owner thread.
                 activity.runOnUiThread {
+                    host.flushGeometry()
                     val target = host.handler
                     val active = host.sessions.values.toList()
                     retirement = host.retired

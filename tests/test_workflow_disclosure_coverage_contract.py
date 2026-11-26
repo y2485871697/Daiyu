@@ -25,7 +25,8 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         correction = source.split('private fun correctAnchor(', 1)[1].split('private fun chooseDirection()', 1)[0]
         self.assertEqual(3, correction.count('anchorClearance()'))
         self.assertNotIn('viewport.anchorClearance(context.itemKey)', correction)
-        self.assertIn('val delta = maxOf(anchor, anchorClearance() ?: anchor)', correction)
+        self.assertIn('val clearance = anchorClearance()', correction)
+        self.assertIn('val delta = maxOf(anchor, clearance ?: anchor)', correction)
 
     def test_downward_opening_detaches_follow_and_ignores_composer_overflow(self):
         source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()

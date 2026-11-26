@@ -119,7 +119,8 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                 "bottom" to (it.positionInWindow().y + it.size.height), "height" to it.size.height)
         }
         .streamingWorkflowSurface(colors.surface, colors.line, 12.dp,
-            if (colors.dark) Color(0x05FFFFFF) else Color(0x40FFFFFF), headerHeight = { headerHeight.intValue })
+            if (colors.dark) Color(0x05FFFFFF) else Color(0x40FFFFFF), headerHeight = { headerHeight.intValue },
+            diagnosticMotion = disclosure)
         .testTag("work-process-surface")) {
         BoxWithConstraints(Modifier.fillMaxWidth().onSizeChanged { headerHeight.intValue = it.height }) {
             val summaryWidth = maxWidth * .56f
@@ -155,8 +156,9 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
                 val detail = measurable.measure(constraints)
                 detailExtent.fullHeight = detail.height
                 val height = detailExtent.measure(expanded, disclosure.closingDetailHeight)
-                if (app.daiyu.android.diagnostics.ChatGeometryTrace.active) app.daiyu.android.diagnostics.ChatGeometryTrace.record("extent",
-                    "full" to detail.height, "shown" to height, "offset" to detailExtent.contentOffset)
+                if (app.daiyu.android.diagnostics.ChatGeometryTrace.active) disclosure.trace("extent",
+                    "full" to detail.height, "shown" to height, "offset" to detailExtent.contentOffset,
+                    "expanded" to expanded, "closing_limit_px" to disclosure.closingDetailHeight)
                 layout(detail.width, height) { detail.placeRelative(0, detailExtent.contentOffset) }
             }) {
                 HorizontalDivider(thickness = 1.dp, color = colors.line)

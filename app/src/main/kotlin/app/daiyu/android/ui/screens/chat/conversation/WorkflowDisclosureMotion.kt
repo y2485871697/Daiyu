@@ -17,6 +17,7 @@ import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import app.daiyu.android.diagnostics.ChatGeometryTrace
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.findRootCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -70,7 +71,17 @@ internal class WorkflowDisclosureViewport(
 
     fun claimGesture() { disclosureClaimed = true }
 
-    fun correctBeforeDraw() { active?.correctBeforeDraw() }
+    var traceTraversal = 0L
+        private set
+
+    fun correctBeforeDraw() {
+        val tracing = ChatGeometryTrace.active
+        if (tracing) traceTraversal++
+        val motion = active ?: return
+        if (tracing) motion.traceFrame("pre_draw")
+        motion.correctBeforeDraw()
+        if (tracing) motion.traceFrame("post_correction")
+    }
 
     fun pointerUp() {
         followingOnPress = false
@@ -121,6 +132,67 @@ internal class WorkflowDisclosureMotion(
     private var detachedOpening = false
     private var finishPending = false
     private var anchorCorrectionPosted = false
+    private var anchoredOutput: Any? = null
+    var animationIdle = true
+
+    private var traceId = 0L
+    private val tracing get() = ChatGeometryTrace.active
+
+    // IDs are local counters, never derived from a turn, tool or conversation key.
+    internal fun trace(event: String, vararg values: Pair<String, Any?>) {
+        if (traceId == 0L) traceId = ChatGeometryTrace.newId()
+        ChatGeometryTrace.sample(event, "owner" to traceId,
+            "traversal" to context?.viewport?.traceTraversal, "gesture" to context?.viewport?.gesture, *values)
+    }
+
+    internal fun tracePaint(coordinates: LayoutCoordinates?, layoutHeight: Float, available: Float,
+        paintedHeight: Float, headerHeight: Int?, admitted: Boolean, paint: Boolean) {
+        if (!tracing) return
+        val actual = coordinates?.takeIf { it.isAttached } ?: container?.takeIf { it.isAttached }
+        val top = actual?.positionInWindow()?.y
+        trace("disclosure_draw", "top_px" to top, "layout_height_px" to layoutHeight,
+            "available_px" to available, "painted_height_px" to if (paint) paintedHeight else 0f,
+            "painted_bottom_px" to if (paint) top?.plus(paintedHeight) else null,
+            "header_height_px" to headerHeight, "previously_admitted" to admitted,
+            "paint" to paint, "owns_anchor" to (context?.viewport?.active === this))
+    }
+
+    internal fun traceFrame(phase: String) {
+        val placed = container?.takeIf { it.isAttached }
+        val origin = placed?.positionInWindow()?.y
+        val height = placed?.size?.height
+        val safe = context?.viewport?.bounds?.invoke()
+        val viewport = context?.viewport
+        trace("disclosure_frame",
+            "phase" to phase,
+            "active" to (viewport?.active === this),
+            "anchor_gesture" to anchorGesture,
+            "viewport_gesture" to (viewport?.gesture ?: -1L),
+            "scheduled" to anchorCorrectionPosted,
+            "correcting" to correctingAnchor,
+            "expanded" to expanded,
+            "up" to upwards,
+            "top_anchor" to anchorAtTop,
+            "detached_opening" to detachedOpening,
+            "animation_idle" to animationIdle,
+            "finish_pending" to finishPending,
+            "has_requester" to (anchorRequester != null),
+            "has_borrowed_boundary" to (borrowedBoundary != null),
+            "container_attached" to (placed != null),
+            "container_top_px" to origin,
+            "container_bottom_px" to if (origin != null && height != null) origin + height else null,
+            "container_height_px" to height,
+            "header_top_px" to header?.takeIf { it.isAttached }?.positionInWindow()?.y,
+            "header_height_px" to header?.takeIf { it.isAttached }?.size?.height,
+            "anchor_top_px" to if (anchorAtTop) anchorTop else null,
+            "anchor_bottom_px" to if (!anchorAtTop) anchorBottom else null,
+            "anchor_error_px" to if (placed != null) anchorDelta() else null,
+            "safe_top_px" to safe?.top,
+            "safe_bottom_px" to safe?.bottom,
+            "last_requested_px" to lastRequested,
+            "last_consumed_px" to lastConsumed)
+    }
+
     fun correctBeforeDraw() {
         if (!anchorCorrectionPosted) return
         anchorCorrectionPosted = false
@@ -130,8 +202,6 @@ internal class WorkflowDisclosureMotion(
             (anchorRequester ?: this).finishIfSettled()
         }
     }
-    private var anchoredOutput: Any? = null
-    var animationIdle = true
 
     val headerModifier: Modifier get() = Modifier.onGloballyPositioned {
         header = it
@@ -162,6 +232,11 @@ internal class WorkflowDisclosureMotion(
         if (viewport != null && viewport.active === this && anchorGesture == viewport.gesture && !correctingAnchor && !anchorCorrectionPosted) {
             anchorCorrectionPosted = true
         }
+        if (tracing && viewport?.active === this) trace("disclosure_placed",
+            "scheduled" to anchorCorrectionPosted, "correcting" to correctingAnchor,
+            "top_px" to coordinates.positionInWindow().y, "height_px" to coordinates.size.height,
+            "bottom_px" to (coordinates.positionInWindow().y + coordinates.size.height),
+            "top_anchor" to anchorAtTop, "anchor_error_px" to anchorDelta())
     }
 
     private fun anchorDelta(): Float {
@@ -191,22 +266,34 @@ internal class WorkflowDisclosureMotion(
         if (viewport.active !== this || anchorGesture != viewport.gesture) return true
         if (correctingAnchor) return false
         if (!viewport.canAnchor()) {
+            if (tracing) trace("disclosure_anchor", "phase" to "cancel_not_eligible", "settling" to settling,
+                "anchor_error_px" to anchorDelta())
             viewport.active = null
             return true
         }
         if (settling || abs(anchorDelta()) > .5f || (anchorClearance() ?: 0f) > .5f) {
+            if (tracing) trace("disclosure_anchor", "phase" to "evaluate", "settling" to settling,
+                "anchor_error_px" to anchorDelta(), "animation_idle" to animationIdle)
             correctingAnchor = true
             try {
                 lastConsumed = viewport.correctAnchor(context.itemKey) {
                     val anchor = anchorDelta()
-                    val delta = maxOf(anchor, anchorClearance() ?: anchor)
+                    val clearance = anchorClearance()
+                    val delta = maxOf(anchor, clearance ?: anchor)
                     // Keep the same scroll owner when the editor raises its safe bottom.
                     val shift = delta - anchor
                     anchorTop -= shift
                     anchorBottom -= shift
+                    if (tracing) trace("disclosure_anchor", "phase" to "request", "settling" to settling,
+                        "anchor_error_px" to anchor, "clearance_px" to clearance,
+                        "requested_scroll_px" to delta, "anchor_rebase_px" to shift,
+                        "anchor_top_px" to anchorTop, "anchor_bottom_px" to anchorBottom)
                     delta.also { lastRequested = it }
                 }
             } finally { correctingAnchor = false }
+            if (tracing) trace("disclosure_anchor", "phase" to "complete", "settling" to settling,
+                "anchor_error_px" to anchorDelta(), "requested_scroll_px" to lastRequested,
+                "consumed_scroll_px" to lastConsumed)
         }
         return abs(anchorDelta()) <= .5f && (anchorClearance() ?: 0f) <= .5f
     }
@@ -225,6 +312,12 @@ internal class WorkflowDisclosureMotion(
     fun retainAnchor(gesture: Long) { anchorGesture = gesture }
 
     fun toggle(opening: Boolean) {
+        if (tracing) trace("disclosure_toggle", "phase" to "begin", "opening" to opening,
+            "expanded_before" to expanded, "up_before" to upwards,
+            "header_center_px" to header?.takeIf { it.isAttached }?.let { it.positionInWindow().y + it.size.height / 2f },
+            "container_top_px" to container?.takeIf { it.isAttached }?.positionInWindow()?.y,
+            "container_height_px" to container?.takeIf { it.isAttached }?.size?.height,
+            "press_gesture" to pressGesture)
         context?.viewport?.claimGesture()
         closingDetailHeight = if (!opening) {
             val placedContainer = container?.takeIf { it.isAttached }
@@ -256,6 +349,12 @@ internal class WorkflowDisclosureMotion(
             val boundary = if (anchorAtTop) this else enclosingBoundary()
             boundary.captureAnchor(this, anchorAtTop, openingDownwards)
             borrowedBoundary = boundary.takeIf { it !== this && viewport.active === it }
+            if (tracing) trace("disclosure_toggle", "phase" to "anchor_captured", "opening" to opening,
+                "up" to upwards, "top_anchor" to anchorAtTop, "following_snapshot" to following,
+                "detached_opening" to openingDownwards, "active_owner" to (viewport.active === this),
+                "borrowed_boundary" to (borrowedBoundary != null), "anchor_top_px" to anchorTop,
+                "anchor_bottom_px" to anchorBottom, "container_top_px" to container?.takeIf { it.isAttached }?.positionInWindow()?.y,
+                "container_height_px" to container?.takeIf { it.isAttached }?.size?.height)
         }
     }
 
@@ -286,7 +385,16 @@ internal class WorkflowDisclosureMotion(
             anchorTop = it.positionInWindow().y
             anchorBottom = anchorTop + it.size.height
             viewport.active = this
-        } ?: run { anchorRequester = null; viewport.active = null }
+            if (tracing) trace("disclosure_anchor", "phase" to "captured", "top_anchor" to top,
+                "detached_opening" to detached, "is_requester" to (requester === this),
+                "requester_matches_boundary" to (anchorRequester === requester && requester !== this),
+                "container_top_px" to anchorTop, "container_bottom_px" to anchorBottom,
+                "container_height_px" to it.size.height, "gesture" to anchorGesture)
+        } ?: run {
+            if (tracing) trace("disclosure_anchor", "phase" to "capture_unavailable", "container_attached" to false)
+            anchorRequester = null
+            viewport.active = null
+        }
     }
 
     private fun releaseAnchor(force: Boolean) {
@@ -312,12 +420,15 @@ internal class WorkflowDisclosureMotion(
     private fun finishIfSettled() {
         if (!finishPending || !animationIdle) return
         if (expanded && anchorAtTop && borrowedBoundary == null && outputChanged()) {
+            if (tracing) trace("disclosure_finish", "phase" to "release_for_output")
             finishPending = false
             releaseAnchor(force = false)
             return
         }
         val boundary = borrowedBoundary ?: this
         if (!boundary.correctAnchor(settling = true)) return
+        if (tracing) trace("disclosure_finish", "phase" to "settled", "expanded" to expanded,
+            "top_anchor" to anchorAtTop, "borrowed_boundary" to (borrowedBoundary != null))
         finishPending = false
         if (!detachedOpening && expanded && anchorAtTop && borrowedBoundary == null && !outputChanged()) return
         releaseAnchor(force = false)
@@ -331,6 +442,7 @@ internal class WorkflowDisclosureMotion(
 
     fun releaseForOutput() {
         if (animationIdle && !finishPending && expanded && anchorAtTop && borrowedBoundary == null && outputChanged()) {
+            if (tracing) trace("disclosure_finish", "phase" to "release_for_output")
             releaseAnchor(force = false)
         }
     }

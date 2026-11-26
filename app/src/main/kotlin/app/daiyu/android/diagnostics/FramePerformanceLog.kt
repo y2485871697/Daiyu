@@ -141,7 +141,11 @@ internal class FramePerformanceLog(private val directory: File, private val maxF
         }
     }
     fun captureEpoch(): Long? = epoch.takeIf { enabled }
-    fun append(expectedEpoch: Long, row: JSONObject) {
+    fun append(expectedEpoch: Long, row: JSONObject) = appendRows(expectedEpoch, listOf(row))
+
+    /** The caller transfers ownership of the batch; each row retains its original JSONL format. */
+    fun appendRows(expectedEpoch: Long, rows: List<JSONObject>) {
+        if (rows.isEmpty()) return
         synchronized(lock) {
             if (!enabled || expectedEpoch != epoch) return
             val worker = executor ?: ThreadPoolExecutor(1, 1, 15, TimeUnit.SECONDS, ArrayBlockingQueue(8),
@@ -152,7 +156,9 @@ internal class FramePerformanceLog(private val directory: File, private val maxF
                 worker.execute {
                     synchronized(fileLock) write@{
                         if (expectedEpoch != epoch) return@write
-                        try { writeRow(row) } catch (_: Exception) { writeFailures.incrementAndGet() }
+                        rows.forEach { row ->
+                            try { writeRow(row) } catch (_: Exception) { writeFailures.incrementAndGet() }
+                        }
                     }
                 }
             } catch (_: java.util.concurrent.RejectedExecutionException) { queueDrops.incrementAndGet() }

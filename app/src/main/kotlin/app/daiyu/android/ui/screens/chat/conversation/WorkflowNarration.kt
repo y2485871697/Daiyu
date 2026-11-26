@@ -23,6 +23,9 @@ internal class WorkflowVisualAdmissions(initialOwners: Set<String>, sentReplyKey
 internal val LocalReasoningPaused = staticCompositionLocalOf { false }
 
 internal class WorkflowVisualScope(private val baseline: Boolean) {
+    private val paintedToolCards = mutableSetOf<String>()
+    fun awaitsToolPaint(key: String) = !baseline && key !in paintedToolCards
+    fun toolPainted(key: String) { paintedToolCards.add(key) }
     private val replyEntrances = mutableSetOf<ReplyEntrancePart>()
     fun claimReplyEntrance(part: ReplyEntrancePart) = !baseline && replyEntrances.add(part)
     private var replyControl: ReplyPresentationControl? = null

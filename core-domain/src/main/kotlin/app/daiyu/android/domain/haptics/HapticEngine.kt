@@ -13,7 +13,7 @@ class HapticEngine(private val clock: HapticClock) {
         var visible: Boolean,
         var enabled: Boolean,
     )
-    private data class Pending(val owner: Owner, val reasoning: Boolean, val background: Boolean)
+    private data class Pending(val owner: Owner, val reasoning: Boolean, val background: Boolean, val toolId: String? = null)
     private val hosts = linkedMapOf<Owner, Host>()
     private val tools = LinkedHashSet<String>()
     private val pending = ArrayDeque<Pending>()
@@ -147,15 +147,36 @@ class HapticEngine(private val clock: HapticClock) {
         schedule(background = true)
     }
 
-    /** Tools and completion markers are not lost in the 32ms text throttle. */
+    /** Network tool events can vibrate only when the chat is not presenting output. */
+    fun backgroundToolAppeared(owner: Owner, id: String) {
+        val host = hosts[owner] ?: return
+        if (backgroundVisible(host.conversation) || !allowed(host, false) || id.isBlank() ||
+            pending.any { it.owner === owner && it.toolId == id }) return
+        pending.addLast(Pending(owner, false, true, toolId = id))
+        schedule(background = false)
+    }
+
+    /** A foreground card either shares a nearby tick or plays on its first visible draw. */
+    fun toolCardDrawn(owner: Owner, id: String): HapticDelivery? {
+        val host = hosts[owner] ?: return null
+        if (!visible(host) || !allowed(host, false) || !claimTool(host, id)) return null
+        return visibleAdvance(owner)
+    }
+
+    /** Completion markers retain their independent notification behavior. */
     fun toolAppeared(owner: Owner, id: String) {
         val host = hosts[owner] ?: return
-        if (id.isBlank() || !allowed(host, false)) return
-        val key = "${host.conversation.length}:${host.conversation}:$id"
-        if (!tools.add(key)) return
-        while (tools.size > 256) tools.remove(tools.first())
+        if (!allowed(host, false) || !claimTool(host, id)) return
         pending.addLast(Pending(owner, false, false))
         schedule(background = false)
+    }
+
+    private fun claimTool(host: Host, id: String): Boolean {
+        if (id.isBlank()) return false
+        val key = "${host.conversation.length}:${host.conversation}:$id"
+        if (!tools.add(key)) return false
+        while (tools.size > 256) tools.remove(tools.first())
+        return true
     }
 
     fun reasoningCompleted(owner: Owner, id: String) {
@@ -190,8 +211,10 @@ class HapticEngine(private val clock: HapticClock) {
         }
         val item = pending.removeFirstOrNull() ?: return
         val host = hosts[item.owner] ?: return
-        lastTick = now
-        generation(host)
+        if (item.toolId == null || claimTool(host, item.toolId)) {
+            lastTick = now
+            generation(host)
+        }
         if (pending.isNotEmpty()) nextTick = now + 32L
     }
 

@@ -78,6 +78,32 @@ class HapticEngineTest {
             motorEffect(HapticRequest(HapticKind.TICK, HapticIntensity.DEFAULT, generation = true), 34, true, false))
     }
 
+    @Test fun foregroundToolArrivalIsSilentUntilFirstVisiblePaint() {
+        val f = Fixture()
+        f.engine.backgroundToolAppeared(f.owner, "new")
+        f.advance()
+        assertEquals(0, f.engine.pendingCount())
+        assertTrue(f.port.requests.isEmpty())
+        assertEquals(HapticDelivery.PLAYED, f.engine.toolCardDrawn(f.owner, "new"))
+        f.advance()
+        assertNull(f.engine.toolCardDrawn(f.owner, "new"))
+        assertEquals(1, f.port.requests.size)
+    }
+
+    @Test fun backgroundToolIsNotReplayedOnDrawAndUndeliveredQueueDoesNotBlockDraw() {
+        val f = Fixture()
+        f.engine.lifecycle(f.owner, resumed = true, visible = false)
+        f.engine.backgroundToolAppeared(f.owner, "delivered")
+        f.advance()
+        f.engine.backgroundToolAppeared(f.owner, "pending")
+        f.engine.lifecycle(f.owner, resumed = true, visible = true)
+        assertEquals(0, f.engine.pendingCount())
+        f.advance()
+        assertNull(f.engine.toolCardDrawn(f.owner, "delivered"))
+        assertEquals(HapticDelivery.PLAYED, f.engine.toolCardDrawn(f.owner, "pending"))
+        assertEquals(2, f.port.requests.size)
+    }
+
     @Test fun generationUsesThirtyTwoMillisAndDoesNotReplayDroppedText() {
         val f = Fixture()
         assertEquals(HapticDelivery.PLAYED, f.engine.visibleAdvance(f.owner))

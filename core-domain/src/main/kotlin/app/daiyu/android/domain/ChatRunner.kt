@@ -474,7 +474,9 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (admission != null) {
                     val expected = snapshot().copy(supplements = synchronized(terminalLock) { supplements.toList() } + admission.message)
                     try {
-                        (options.runtimeStore as AtomicSupplementRuntimeStore).commitSupplement(expected, admission.message)
+                        diagnostic(RunDiagnosticStage.SUPPLEMENT_DURABLE) {
+                            (options.runtimeStore as AtomicSupplementRuntimeStore).commitSupplement(expected, admission.message)
+                        }
                     } catch (failure: Exception) {
                         synchronized(terminalLock) { admittingSupplement = null }
                         completeAdmission(admission, SupplementAdmission.Unconfirmed(admission.message.id))

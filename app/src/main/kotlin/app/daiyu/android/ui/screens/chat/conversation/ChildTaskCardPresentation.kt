@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.domain.delegation.ChildTaskRecord
+import app.daiyu.android.domain.delegation.ChildTaskStatus
 import org.json.JSONObject
 import java.util.Locale
 
@@ -50,21 +52,23 @@ internal fun childTaskReceiptEntries(output: JSONObject?, clean: (String) -> Str
 
 internal fun childTaskInspectionSummary(output: JSONObject): String {
     val counts = output.optJSONObject("status_counts")
-    val total: Int
-    val statuses: Set<String>
-    if (counts != null) {
+    val byStatus = if (counts != null) {
         val value = output.opt("total_count") as? Number ?: return "任务状态暂不可用"
-        if (value.toString() != value.toLong().toString() || value.toLong() !in 0L..Int.MAX_VALUE.toLong())
-            return "任务状态暂不可用"
-        total = value.toInt()
-        val entries = counts.keys().asSequence().map { key -> key to (counts.opt(key) as? Number) }.toList()
-        if (entries.any { (_, number) -> number == null || number.toString() != number.toLong().toString() || number.toLong() <= 0 || number.toLong() > total.toLong() } ||
-            entries.sumOf { it.second!!.toLong() } != total.toLong()) return "任务状态暂不可用"
-        statuses = entries.map { it.first }.toSet()
+        val total = value.toLong()
+        if (value.toString() != total.toString() || total !in 0L..Int.MAX_VALUE.toLong()) return "任务状态暂不可用"
+        val entries = buildMap {
+            for (key in counts.keys()) {
+                val number = counts.opt(key) as? Number ?: return "任务状态暂不可用"
+                val count = number.toLong()
+                if (number.toString() != count.toString() || count !in 1L..total) return "任务状态暂不可用"
+                put(key, count)
+            }
+        }
+        if (entries.values.sum() != total) return "任务状态暂不可用"
+        entries
     } else {
         val tasks = output.optJSONArray("tasks") ?: return "任务状态暂不可用"
-        total = tasks.length()
-        statuses = (0 until total).map { index ->
+        (0 until tasks.length()).map { index ->
             val row = tasks.optJSONObject(index) ?: return "任务状态暂不可用"
             val recorded = row.optString("status").uppercase(Locale.ROOT)
             when {
@@ -75,27 +79,22 @@ internal fun childTaskInspectionSummary(output: JSONObject): String {
                     row.opt("stop_requested") == true -> "STOPPING"
                     row.optString("pause_state") == "PAUSED" -> "PAUSED"
                     row.optString("pause_state") == "PENDING" -> "PAUSING"
-                    row.optString("queue_state") == "PENDING" || row.optString("status") == "QUEUED" -> "QUEUED"
+                    row.optString("queue_state") == "PENDING" || recorded == "QUEUED" -> "QUEUED"
                     else -> "RUNNING"
                 }
                 else -> "UNKNOWN"
             }
-        }.toSet()
+        }.groupingBy { it }.eachCount().mapValues { it.value.toLong() }
     }
-    val status = when {
-        total == 0 -> "暂无任务"
-        statuses == setOf("COMPLETED") -> "已完成"
-        statuses == setOf("QUEUED") -> "排队中"
-        statuses == setOf("STOPPING") -> "停止中"
-        statuses == setOf("PAUSING") -> "暂停中"
-        statuses.any { it !in setOf("COMPLETED", "PAUSED", "FAILED", "NOT_EXECUTED", "RUNNING", "QUEUED", "STOPPING", "PAUSING") } -> "状态未确认"
-        statuses.any { it in setOf("RUNNING", "QUEUED", "STOPPING", "PAUSING") } -> "进行中"
-        "FAILED" in statuses -> if (statuses.size == 1) "失败" else "部分失败"
-        "NOT_EXECUTED" in statuses -> if (statuses.size == 1) "未执行" else "含未执行"
-        "PAUSED" in statuses -> "已暂停"
-        else -> "状态未确认"
-    }
-    return "${total}个子任务•$status"
+    if (byStatus.isEmpty()) return "暂无任务"
+    val labels = linkedMapOf("UNKNOWN" to "状态未确认", "COMPLETED" to "成功", "FAILED" to "失败",
+        "NOT_EXECUTED" to "未执行", "RUNNING" to "进行中", "QUEUED" to "排队中",
+        "PAUSED" to "已暂停", "PAUSING" to "暂停中", "STOPPING" to "停止中")
+    return labels.mapNotNull { (status, label) ->
+        val count = if (status == "UNKNOWN") byStatus.filterKeys { it == "UNKNOWN" || it !in labels }.values.sum()
+            else byStatus[status] ?: 0L
+        if (count > 0) "${count}个子代理•$label" else null
+    }.joinToString("\n")
 }
 
 /** Configuration belongs only to the configuration-query tool, not task history. */
@@ -117,3 +116,10 @@ internal fun childTaskConfigurationSummary(output: JSONObject, clean: (String) -
         else -> "本次未能读取可用子代理配置"
     }
 }
+
+/** Map only the fixed stored failure classification, never display raw provider diagnostics here. */
+internal fun childTaskUnconfirmedNetworkNotice(record: ChildTaskRecord): String? =
+    if (record.status == ChildTaskStatus.UNKNOWN &&
+        record.detail?.lineSequence()?.firstOrNull()?.endsWith(";phase=MODEL_REQUEST;type=NETWORK") == true)
+        "模型请求发生网络错误，未收到可确认的结果；未自动重派。"
+    else null

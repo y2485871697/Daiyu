@@ -1,5 +1,6 @@
 package app.daiyu.android.context
 
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.context.ContextRevision
 import app.daiyu.android.domain.context.estimateTokens
@@ -128,7 +129,9 @@ internal class ProductionRunContext(
                 anchor = boundary ?: app.daiyu.android.timeline.TimelineAnchor.at(logical, logical.lastIndex))
             lastActivity = activity
             progress(activity)
+            val prefixTokens = TokenTailCompression.historyTokens(prefix, includeLatestScreen = false)
             val text = HarnessContextSummarizer(model, cancellation, definitions, systemPrompt,
+                checkpointTargetTokens = compactionCheckpointTarget(prefixTokens),
                 nextModel = model.rebind?.let { rebind -> { rebind(usage()) } }).summarize(
                 CompressionInput(logical.take(cut), ContextRevision.digest(prefix))).trim()
             if (cancelled()) return null
@@ -137,7 +140,13 @@ internal class ProductionRunContext(
             val summary = Message(MessageId(id), parent.conversationId, RunId(id), Message.USER_ROLE,
                 listOf(MessageBlock.Text("summary", SummaryCheckpoint.frame(text))), RunStatus.COMPLETED)
             val result = logical.take(systemCount) + summary + logical.drop(cut)
-            require(this.localTokens(result, emptyList()) < this.localTokens(history, emptyList())) { "压缩未缩小；保留原文" }
+            val candidateTokens = this.localTokens(result, emptyList())
+            val originalTokens = this.localTokens(history, emptyList())
+            val reduced = candidateTokens < originalTokens
+            RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.SUMMARY_REDUCTION,
+                if (reduced) RuntimeDiagnostics.Code.SUMMARY_REDUCED else RuntimeDiagnostics.Code.SUMMARY_NOT_REDUCED,
+                count = originalTokens, size = candidateTokens)
+            require(reduced) { "压缩未缩小；保留原文" }
             return result
         } finally { this.cancellation = null }
     }

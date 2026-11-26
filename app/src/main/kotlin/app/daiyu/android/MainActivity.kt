@@ -3621,6 +3621,17 @@ class MainActivity : ComponentActivity() {
                 renderedRevealAdvance?.invoke()
             } else HapticTrace.mark(HC.HOST_REJECT)
         },
+        onVisibleToolCard = { key, callId ->
+            val active = controller.active
+            val turn = renderedRevealTurns[key]
+            if (activityUsable() && voiceForeground && retainedPage == "chat" && !sidebarVisible &&
+                selected?.id?.value == renderedConversation && editorGeneration == renderedEditorGeneration &&
+                active != null && renderedRevealOwner != null && active.id == renderedRevealOwner.id && active.runId == renderedRevealOwner.runId &&
+                active.conversationId.value == renderedConversation && active.id.value == turn?.ownerMessageId &&
+                active.status == RunStatus.RUNNING && controller.isRunUnfenced(active)) {
+                hapticsHost?.toolCardDrawn(renderedConversation, active.runId.value, active.id.value, callId)
+            }
+        },
         onTerminalTextAdvance = { key ->
             val tail = chatState.turns.lastOrNull() as? ChatTurnUi.Assistant
             if (tail != null && tail.listKey == key && tail.status == RunStatus.COMPLETED && !tail.stopRequested &&
@@ -7396,6 +7407,8 @@ class MainActivity : ComponentActivity() {
             if (draft.isNotEmpty()) return
         }
         val clear = supplementDraft.finish(ticket, result, current)
+        RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.SUPPLEMENT_ADMISSION, RuntimeDiagnostics.Code.SUPPLEMENT_EDITOR_SETTLED,
+            count = if (clear) 1L else 0L)
         if (userEntranceSupplementId == result.messageId) userEntranceSupplementId = null
         restoredSupplementEditor = null; supplementMountEditor = null
         if (clear) {
@@ -7936,6 +7949,8 @@ class MainActivity : ComponentActivity() {
             val remapTurns = rowsChanged || chatState.conversationKey != selected?.id?.value ||
                 workflowBoundaries != oldBoundaries ||
                 reconnects.map { it.id to it.position } != oldReconnects.map { it.id to it.position }
+            val traceProjection = app.daiyu.android.diagnostics.ChatGeometryTrace.active
+            val previousProjection = if (traceProjection) chatState else null
             chatState = chatState.copy(title = selected?.title ?: "代鱼", conversationKey = selected?.id?.value,
                 historyReady = historyWindowReady,
                 scrollRequest = scrollRequest,
@@ -7999,6 +8014,24 @@ class MainActivity : ComponentActivity() {
                         supplementDraft.pending != null,
                     executionPhase = state?.phase,
                 ).let(::withComposerAdmission))
+            if (previousProjection != null) {
+                val tail = chatState.turns.lastOrNull() as? ChatTurnUi.Assistant
+                val oldTail = previousProjection.turns.lastOrNull() as? ChatTurnUi.Assistant
+                val sameConversation = previousProjection.conversationKey == chatState.conversationKey
+                if (!sameConversation || previousProjection.turns.size != chatState.turns.size ||
+                    previousProjection.historyReady != chatState.historyReady || oldTail?.listKey != tail?.listKey ||
+                    oldTail?.status != tail?.status || oldTail?.isStreaming != tail?.isStreaming ||
+                    oldTail?.content?.size != tail?.content?.size || previousProjection.submissionPreview != chatState.submissionPreview) {
+                    app.daiyu.android.diagnostics.ChatGeometryTrace.record("chat_projection_transition",
+                        "same_conversation" to sameConversation, "rows_changed" to rowsChanged, "remap" to remapTurns,
+                        "history_ready" to chatState.historyReady, "display_window" to (displayWindow != null),
+                        "source_count" to (displayWindow?.rows?.size ?: shown.size), "old_turn_count" to previousProjection.turns.size,
+                        "turn_count" to chatState.turns.size, "old_tail_status" to oldTail?.status?.name,
+                        "tail_status" to tail?.status?.name, "same_tail" to (oldTail?.listKey == tail?.listKey),
+                        "old_tail_content_count" to oldTail?.content?.size, "tail_content_count" to tail?.content?.size,
+                        "tail_streaming" to tail?.isStreaming, "preview" to (submissionPreview != null))
+                }
+            }
             regeneration?.takeIf { preview -> preview.assistantId?.let { id -> chatState.turns.any { it.id == id } } == true }
                 ?.let(controller::acknowledgeRegenerationPreview)
             acceptedTextPreview?.takeIf { preview ->

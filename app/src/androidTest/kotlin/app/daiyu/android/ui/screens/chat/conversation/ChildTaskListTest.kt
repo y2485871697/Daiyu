@@ -463,9 +463,10 @@ class ChildTaskListTest : WiredActivityTestCase() {
             .put("available_profile_metadata", org.json.JSONArray()
                 .put(org.json.JSONObject().put("name", "执行"))
                 .put(org.json.JSONObject().put("name", "审查")))
-            .put("total_count", 25).put("status_counts", org.json.JSONObject().put("COMPLETED", 25))
+            .put("total_count", 6).put("status_counts", org.json.JSONObject().put("FAILED", 3).put("COMPLETED", 1).put("UNKNOWN", 2))
             .put("tasks", org.json.JSONArray().put(org.json.JSONObject()
                 .put("agent_name", "历史任务名称").put("status", "COMPLETED").put("text", "历史任务正文"))).toString()
+        val status = "2个子代理•状态未确认\n1个子代理•成功\n3个子代理•失败"
         for (tool in listOf("list_subagents", "inspect_child_tasks")) {
             mainThread { activity.setContent {
                 AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -475,8 +476,8 @@ class ChildTaskListTest : WiredActivityTestCase() {
                 }
             } }
             ui.waitForIdle()
-            ui.onNodeWithText(if (tool == "list_subagents") "可用子代理：执行、审查" else "25个子任务•已完成").assertIsDisplayed()
-            ui.onNodeWithText(if (tool == "list_subagents") "25个子任务•已完成" else "可用子代理：执行、审查").assertDoesNotExist()
+            ui.onNodeWithText(if (tool == "list_subagents") "可用子代理：执行、审查" else status).assertIsDisplayed()
+            ui.onNodeWithText(if (tool == "list_subagents") status else "可用子代理：执行、审查").assertDoesNotExist()
             ui.onNodeWithText("历史任务名称").assertDoesNotExist()
             ui.onNodeWithText("历史任务正文").assertDoesNotExist()
             ui.onNodeWithTag("tool-child-receipt-header:0").assertDoesNotExist()

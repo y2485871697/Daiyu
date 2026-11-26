@@ -6183,8 +6183,17 @@ class ChatController internal constructor(private val application:Application,
         val lifetime = synchronized(this) { resources?.takeIf { canSupplement(owner) } }
         val owned = lifetime?.runner
         val pausedChildrenEpoch = synchronized(this) { lifetime?.childPauseEpoch }
+        val trace = RuntimeDiagnostics.begin(RuntimeDiagnostics.Stage.SUPPLEMENT_ADMISSION,
+            revision = owned?.state()?.phase?.ordinal?.toLong() ?: -1)
         fun deliver(result:SupplementAdmission) {
+            trace.mark(when (result) {
+                is SupplementAdmission.Accepted -> RuntimeDiagnostics.Code.SUPPLEMENT_COMMIT_ACCEPTED
+                is SupplementAdmission.Rejected -> RuntimeDiagnostics.Code.SUPPLEMENT_COMMIT_REJECTED
+                is SupplementAdmission.Unconfirmed -> RuntimeDiagnostics.Code.SUPPLEMENT_COMMIT_UNCONFIRMED
+            })
             handler.post {
+                trace.mark(RuntimeDiagnostics.Code.SUPPLEMENT_UI_RECEIPT)
+                trace.end()
                 if (result is SupplementAdmission.Accepted && lifetime != null && pausedChildrenEpoch != null) synchronized(this) {
                     resumePausedChildren(lifetime, pausedChildrenEpoch)
                 }
@@ -6199,7 +6208,12 @@ class ChatController internal constructor(private val application:Application,
         val acceptedAt = System.currentTimeMillis()
         val user=Message(messageId,owner.conversationId,owner.runId,Message.USER_ROLE,
             listOf(MessageBlock.Text("user",text)),RunStatus.COMPLETED,createdAt=acceptedAt)
-        return owned.admitSupplement(user,::deliver)
+        return try {
+            owned.admitSupplement(user, ::deliver).also { if (it) trace.mark(RuntimeDiagnostics.Code.SUPPLEMENT_QUEUED) }
+        } catch (failure: Exception) {
+            trace.end(failure)
+            throw failure
+        }
     }
     internal fun pause(owner:Message):Boolean {
         val owned=synchronized(this) {ownedRunner(owner)} ?: return false

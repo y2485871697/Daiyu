@@ -35,6 +35,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
@@ -212,6 +215,24 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
 }
 
 /** A single compact timeline row shared by work summaries and ordered mixed content. */
+internal val LocalToolCardPaintFeedback = staticCompositionLocalOf<((String, LayoutCoordinates) -> Boolean)?> { null }
+
+private class ToolCardPaintFrame(var coordinates: LayoutCoordinates? = null)
+
+@Composable
+internal fun Modifier.toolCardPaintFeedback(step: WorkStepUi): Modifier {
+    val scope = LocalWorkflowVisualScope.current ?: return this
+    val report = LocalToolCardPaintFeedback.current ?: return this
+    if (!scope.awaitsToolPaint(step.renderKey)) return this
+    val frame = remember(scope, step.renderKey) { ToolCardPaintFrame() }
+    return onPlaced { frame.coordinates = it }.drawWithContent {
+        drawContent()
+        if (scope.awaitsToolPaint(step.renderKey) && frame.coordinates?.let { report(step.toolCallId, it) } == true) {
+            scope.toolPainted(step.renderKey)
+        }
+    }
+}
+
 @Composable
 internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowRunning: Boolean = false, toolContent: @Composable (WorkStepUi) -> Unit = {}) {
     if (!step.isVisibleInWorkflow) return
@@ -267,7 +288,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
                     disclosure.toggle(opening = !expanded); expanded = !expanded
                 }
                     .semantics { stateDescription = if (stateLabel.isEmpty()) disclosureLabel else "$stateLabel · $disclosureLabel" }
-                    .padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically,
+                    .padding(vertical = 5.dp).toolCardPaintFeedback(step), verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Icon(ToolOperationIcons.operation(step.operationGlyph), null, Modifier.size(18.dp).testTag("tool-operation-icon:${step.toolCallId}"), tint = colors.accent)
                     Column(Modifier.weight(1f)) {

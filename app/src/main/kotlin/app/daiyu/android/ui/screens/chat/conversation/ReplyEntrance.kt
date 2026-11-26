@@ -43,5 +43,5 @@ internal fun Modifier.replyEntrance(
         val offset = 6.dp.toPx() * (1f - progress())
         if (offset == 0f) drawContent()
         else clipRect { translate(top = offset) { this@drawWithContent.drawContent() } }
-    } else layer
+    } else layer.drawWithContent { if (progress() > 0f) drawContent() }
 }

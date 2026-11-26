@@ -38,5 +38,13 @@ internal object HarnessCompactionPrompt {
         - Output only the checkpoint text: do not call any tool or take any other action.
         - If the conversation already contains a <compacted-summary> block, it is a PRIOR checkpoint. Do not copy it forward verbatim: preserve still-true facts, drop stale ones, and merge newer information into a single consolidated summary under the same structure.
     """.trimIndent()
+    fun forCheckpointTarget(targetTokens: Long?): String = if (targetTokens == null) instruction else
+        instruction + "\n- Keep the entire checkpoint under about $targetTokens tokens, including headings. " +
+            "Record each fact once; omit completed routine steps and superseded detail before dropping active constraints or unresolved work."
+
     const val preamble = "This is an automatically generated checkpoint condensing an earlier span of the conversation to free up context. Treat the captured context as established background and build on it without restating it. Continue the task directly from the messages that follow, without acknowledging this checkpoint."
 }
+
+/** Leave room for headings and wrapping without setting a truncating transport limit. */
+internal fun compactionCheckpointTarget(prefixTokens: Long): Long? =
+    (prefixTokens / 2).takeIf { it >= 256 }?.coerceAtMost(4000)

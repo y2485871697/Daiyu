@@ -64,7 +64,7 @@ class ChildTaskCardPresentationTest {
         val value = rich(JSONObject().put("tasks", tasks).put("available_profile_metadata",
             JSONArray().put(JSONObject().put("name", "当前改名"))).toString(), "inspect_child_tasks")
         assertTrue(value.entries.isEmpty()); assertTrue(value.documents.isEmpty())
-        assertEquals("2个子任务•状态未确认", value.prose!!.text)
+        assertEquals("2个子代理•状态未确认", value.prose!!.text)
         assertFalse(visible(value).contains("同一段进度"))
         assertFalse(visible(value).contains("historical-")); assertFalse(visible(value).contains("当前改名"))
     }
@@ -99,7 +99,7 @@ class ChildTaskCardPresentationTest {
         assertTrue(launch.rich.entries.isEmpty()); assertTrue(launch.fields.isEmpty())
         assertFalse(visible(launch.rich).contains("伪造"))
         assertEquals("任务状态暂不可用", rich("{broken raw debug").prose!!.text)
-        assertEquals("0个子任务•暂无任务", rich("""{"tasks":[]}""", "inspect_child_tasks").prose!!.text)
+        assertEquals("暂无任务", rich("""{"tasks":[]}""", "inspect_child_tasks").prose!!.text)
     }
     private val frozenOwner = ChildRunOwner("conversation", "old-run", "old-group", 2, "old-child", "old-answer")
     private fun identity(owner: ChildRunOwner = frozenOwner) = JSONObject()
@@ -120,7 +120,7 @@ class ChildTaskCardPresentationTest {
             mapOf(frozenOwner to "历史审查"))
         val details = actual.details.rich
         assertTrue(details.entries.isEmpty()); assertTrue(details.documents.isEmpty())
-        assertEquals("1个子任务•已暂停", details.prose!!.text)
+        assertEquals("1个子代理•已暂停", details.prose!!.text)
         assertFalse(visible(details).contains("历史审查"))
         assertFalse(visible(details).contains("当前改名"))
     }
@@ -185,7 +185,7 @@ class ChildTaskCardPresentationTest {
         val actual = childTaskNamedPresentation(original, "conversation", "inspect_child_tasks", "{}", payload,
             mapOf(frozenOwner to "历史执行", second to "历史审查"))
         assertTrue(actual.details.rich.entries.isEmpty())
-        assertEquals("2个子任务•状态未确认", actual.details.rich.prose!!.text)
+        assertEquals("2个子代理•状态未确认", actual.details.rich.prose!!.text)
         val recorded = JSONObject().put("agent_name", "原名").put("status", "COMPLETED").put("text", "body").toString()
         val explicit = ToolCardPresentations.present("get_child_task", identity().toString(), recorded)
         assertSame(explicit, childTaskNamedPresentation(explicit, "conversation", "get_child_task", identity().toString(), recorded,
@@ -210,11 +210,11 @@ class ChildTaskCardPresentationTest {
         assertEquals("可用子代理：执行、审查", configuration.prose!!.text)
         assertTrue(configuration.entries.isEmpty()); assertFalse(visible(configuration).contains("子任务"))
         val empty = rich(payload.toString(), "inspect_child_tasks")
-        assertEquals("0个子任务•暂无任务", empty.prose!!.text)
+        assertEquals("暂无任务", empty.prose!!.text)
         assertTrue(empty.entries.isEmpty()); assertFalse(visible(empty).contains("执行、审查"))
         val task = JSONObject().put("agent_name", "历史名称").put("status", "COMPLETED").put("text", "历史结果")
         val existing = rich(JSONObject(payload.toString()).put("tasks", JSONArray().put(task)).toString(), "inspect_child_tasks")
-        assertEquals("1个子任务•已完成", existing.prose!!.text); assertTrue(existing.entries.isEmpty())
+        assertEquals("1个子代理•成功", existing.prose!!.text); assertTrue(existing.entries.isEmpty())
         assertFalse(visible(existing).contains("历史名称")); assertFalse(visible(existing).contains("历史结果"))
         assertEquals("没有可用子代理", rich(JSONObject(payload.toString())
             .put("available_profiles", JSONArray()).put("available_profile_metadata", JSONArray()).toString(), "list_subagents").prose!!.text)
@@ -234,14 +234,15 @@ class ChildTaskCardPresentationTest {
 
     @Test fun taskSummaryUsesCompleteCountsAndRejectsInconsistentOrUnknownStates() {
         val cases = listOf(
-            Triple(5, "COMPLETED:5", "5个子任务•已完成"),
-            Triple(25, "COMPLETED:24,FAILED:1", "25个子任务•部分失败"),
-            Triple(5, "COMPLETED:4,RUNNING:1", "5个子任务•进行中"),
-            Triple(5, "COMPLETED:4,PAUSED:1", "5个子任务•已暂停"),
-            Triple(1, "FUTURE_STATE:1", "1个子任务•状态未确认"),
-            Triple(2, "RUNNING:1,UNKNOWN:1", "2个子任务•状态未确认"),
-            Triple(2, "PAUSED:1,FAILED:1", "2个子任务•部分失败"),
-            Triple(2, "PAUSED:1,NOT_EXECUTED:1", "2个子任务•含未执行"),
+            Triple(5, "COMPLETED:5", "5个子代理•成功"),
+            Triple(25, "COMPLETED:24,FAILED:1", "24个子代理•成功\n1个子代理•失败"),
+            Triple(5, "COMPLETED:4,RUNNING:1", "4个子代理•成功\n1个子代理•进行中"),
+            Triple(5, "COMPLETED:4,PAUSED:1", "4个子代理•成功\n1个子代理•已暂停"),
+            Triple(1, "FUTURE_STATE:1", "1个子代理•状态未确认"),
+            Triple(2, "RUNNING:1,UNKNOWN:1", "1个子代理•状态未确认\n1个子代理•进行中"),
+            Triple(2, "PAUSED:1,FAILED:1", "1个子代理•失败\n1个子代理•已暂停"),
+            Triple(2, "PAUSED:1,NOT_EXECUTED:1", "1个子代理•未执行\n1个子代理•已暂停"),
+            Triple(6, "FAILED:3,UNKNOWN:1,COMPLETED:1,FUTURE_STATE:1", "2个子代理•状态未确认\n1个子代理•成功\n3个子代理•失败"),
             Triple(5, "COMPLETED:4", "任务状态暂不可用"),
             Triple(1, "COMPLETED:1.5", "任务状态暂不可用"),
             Triple(1, "COMPLETED:-1", "任务状态暂不可用"),

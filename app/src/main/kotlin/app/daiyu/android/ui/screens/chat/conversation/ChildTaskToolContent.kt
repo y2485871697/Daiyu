@@ -100,7 +100,9 @@ internal fun ChildTaskList(
             val text = (if (showPrompt) record?.prompt else childTaskProgressText(record?.text, progress[row.owner]))
                 ?.takeIf { it.isNotBlank() }?.let { ToolRichDetails.scrub(it) }
             ChildTaskDisclosure(row, taskTitle = agentName, details = {
-                ChildTaskProgressContent(text, childTaskStatusText(row.status), row.owner.childRunId, agentName)
+                val notice = record?.let(::childTaskUnconfirmedNetworkNotice)
+                ChildTaskProgressContent(listOfNotNull(notice, text).joinToString("\n\n").takeIf { it.isNotEmpty() },
+                    childTaskStatusText(row.status), row.owner.childRunId, agentName)
             })
         } }
     }

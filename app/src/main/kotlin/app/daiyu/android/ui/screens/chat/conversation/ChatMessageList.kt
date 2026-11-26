@@ -1495,11 +1495,17 @@ internal fun ChatMessageList(
                         val coords = clearanceLayout.coordinates?.takeIf { it.isAttached }
                         val layout = listState.layoutInfo
                         val first = layout.visibleItemsInfo.firstOrNull { it.size > 0 && it.offset + it.size > layout.viewportStartOffset }
+                        val tail = currentTurns.lastOrNull() as? ChatTurnUi.Assistant
                         app.daiyu.android.diagnostics.ChatGeometryTrace.record("chat_list_draw",
                             "drawing" to !initialPositionPending, "retaining_rows" to currentRetainingRows,
                             "list_top_px" to coords?.positionInWindow()?.y, "list_visible_top_px" to coords?.boundsInWindow()?.top,
                             "viewport_start_px" to layout.viewportStartOffset, "top_padding_px" to layout.beforeContentPadding,
                             "first_index" to first?.index, "first_offset_px" to first?.offset, "first_size_px" to first?.size,
+                            "last_visible_index" to layout.visibleItemsInfo.lastOrNull()?.index,
+                            "total_layout_items" to layout.totalItemsCount, "turn_count" to currentTurns.size,
+                            "history_ready" to currentHistoryReady, "page_active" to pageActive,
+                            "presentation_active" to presentationActive, "tail_run_status" to tail?.status?.name,
+                            "tail_streaming" to tail?.isStreaming, "tail_content_count" to tail?.content?.size,
                             "tail_bounded" to currentNestedTail.bounded, "tail_viewport_offset_px" to currentNestedTail.viewportOffset,
                             "tail_inner_scroll_px" to currentNestedTail.scrollOffset)
                     }
@@ -1544,6 +1550,20 @@ internal fun ChatMessageList(
                             LocalChatBottomFollowIntent provides followBottom,
                             LocalChatPresentationActive provides (presentationActive && pageActive && scrollResumed),
                             LocalWorkflowVisualScope provides visualScope,
+                            LocalToolCardPaintFeedback provides { callId, header ->
+                                val list = clearanceLayout.coordinates?.takeIf { it.isAttached }
+                                if (list != null && header.isAttached && presentationActive && pageActive && scrollResumed &&
+                                    !currentRetainingRows && !initialPositionPending && turn.status == RunStatus.RUNNING) {
+                                    val headerBounds = header.boundsInWindow()
+                                    val listBounds = list.boundsInWindow()
+                                    val visibleBottom = minOf(listBounds.bottom, list.positionInWindow().y + list.size.height - currentOcclusionPx)
+                                    if (headerBounds.width > 0f && headerBounds.height > 0f &&
+                                        headerBounds.bottom > listBounds.top && headerBounds.top < visibleBottom) {
+                                        actions.onVisibleToolCard(turn.listKey, callId)
+                                        true
+                                    } else false
+                                } else false
+                            },
                             LocalWorkflowDisclosureContext provides remember(turn.listKey, disclosureViewport) {
                                 WorkflowDisclosureContext(disclosureViewport, turn.listKey) {
                                     !currentRetainingRows && currentAssistants[turn.listKey]?.let { it.status == RunStatus.RUNNING && it.isStreaming } == true

@@ -152,8 +152,23 @@ class HapticsRuntime internal constructor(
         internal fun backgroundOutput(reasoning: Boolean = false, graphemes: () -> Int) = dispatch {
             if (!disposed) engine.backgroundOutput(owner, reasoning, graphemes)
         }
-        fun toolAppeared(id: String) = dispatch { if (!disposed) engine.toolAppeared(owner, id) }
-        fun reasoningCompleted(id: String) = dispatch { if (!disposed) engine.reasoningCompleted(owner, id) }
+        fun toolAppeared(id: String) = dispatch {
+            if (!disposed) {
+                HapticTrace.mark(HC.TOOL_CARD_ARRIVAL)
+                engine.backgroundToolAppeared(owner, id)
+            }
+        }
+        fun toolCardDrawn(id: String) = dispatch {
+            if (!disposed && engine.toolCardDrawn(owner, id) == HapticDelivery.PLAYED) {
+                HapticTrace.mark(HC.TOOL_CARD_MOTOR)
+            }
+        }
+        fun reasoningCompleted(id: String) = dispatch {
+            if (!disposed) {
+                HapticTrace.mark(HC.REASONING_COMPLETE_HAPTIC)
+                engine.reasoningCompleted(owner, id)
+            }
+        }
         override fun close() {
             synchronized(playbackLock) {
                 if (disposed) return

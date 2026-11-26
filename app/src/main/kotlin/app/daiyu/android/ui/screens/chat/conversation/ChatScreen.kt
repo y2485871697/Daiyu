@@ -145,6 +145,7 @@ data class ChatScreenActions(
     val onOpenWorkspace: () -> Unit = {},
     /** Actual typewriter growth in a visible row, never a network chunk or recomposition. */
     val onVisibleTextAdvance: (String) -> Unit = {},
+    val onVisibleToolCard: (String, String) -> Unit = { _, _ -> },
     val hasCompletionToRead: Boolean = true,
     val onTerminalTextAdvance: (String) -> Unit = onVisibleTextAdvance,
 )

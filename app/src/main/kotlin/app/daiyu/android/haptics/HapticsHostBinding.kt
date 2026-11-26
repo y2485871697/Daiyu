@@ -7,6 +7,8 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import app.daiyu.android.domain.haptics.HapticAgentAction
+import app.daiyu.android.diagnostics.HapticTrace
+import app.daiyu.android.diagnostics.RuntimeDiagnostics.Code as HC
 
 /**
  * 将触感会话绑定到一个页面生命周期，并转发运行事件。
@@ -28,6 +30,11 @@ class HapticsHostBinding(
     private var current: Run? = null
     private val closeListeners = linkedSetOf<() -> Unit>()
     internal val acceptsRuns: Boolean get() = !closed && enabled
+
+    internal fun toolCardDrawn(runId: String, messageId: String, callId: String) {
+        checkMain()
+        current?.takeIf { it.runId == runId && it.messageId == messageId }?.toolCardDrawn(callId)
+    }
 
     internal fun onClosed(listener: () -> Unit): AutoCloseable {
         checkMain()
@@ -80,6 +87,7 @@ class HapticsHostBinding(
         internal val session: HapticsRuntime.Session,
     ) {
         @Volatile internal var ended = false
+        private val cardDrawsPending = mutableSetOf<String>()
         private fun deliver(block: () -> Unit) {
             if (ended) return
             if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -99,7 +107,15 @@ class HapticsHostBinding(
         /** Call only when the actual visible text/reasoning reveal advances, not on recomposition. */
         fun visibleAdvance() = deliver { session.visibleAdvance() }
         fun toolAppeared(stableCallId: String) = deliver {
-            if (stableCallId.isNotBlank()) session.toolAppeared(key("tool", stableCallId))
+            if (stableCallId.isNotBlank() && cardDrawsPending.add(stableCallId)) {
+                session.toolAppeared(key("tool", stableCallId))
+            }
+        }
+        internal fun toolCardDrawn(stableCallId: String) = deliver {
+            if (cardDrawsPending.remove(stableCallId)) {
+                HapticTrace.mark(HC.TOOL_CARD_DRAW)
+                session.toolCardDrawn(key("tool", stableCallId))
+            }
         }
         fun reasoningCompleted(stableItemId: String) = deliver {
             if (stableItemId.isNotBlank()) session.reasoningCompleted(key("reasoning", stableItemId))

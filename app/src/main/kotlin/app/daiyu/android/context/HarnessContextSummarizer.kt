@@ -10,6 +10,7 @@ internal class HarnessContextSummarizer(
     private val tools: List<ToolDefinition> = emptyList(),
     private val systemPrompt: String = "",
     private val nextModel: (() -> BoundSummaryModel)? = null,
+    private val checkpointTargetTokens: Long? = null,
 ) : ContextSummarizer {
     override val displayIdentity get() = bound.displayIdentity
     override fun summarize(input: CompressionInput): String {
@@ -20,7 +21,8 @@ internal class HarnessContextSummarizer(
         val id = UUID.randomUUID().toString()
         val instruction = Message(MessageId("summary-directive-$id"), originals.first().conversationId,
             RunId("summary-request-$id"), Message.USER_ROLE,
-            listOf(MessageBlock.Text("compaction-directive", HarnessCompactionPrompt.instruction)), RunStatus.COMPLETED)
+            listOf(MessageBlock.Text("compaction-directive", HarnessCompactionPrompt.forCheckpointTarget(checkpointTargetTokens))),
+            RunStatus.COMPLETED)
         val replay = originals + instruction
         val inputTokens = app.daiyu.android.domain.context.HarnessTokenEstimate.system(systemPrompt) +
             TokenTailCompression.historyTokens(replay, includeLatestScreen = false) + TokenTailCompression.toolTokens(tools)

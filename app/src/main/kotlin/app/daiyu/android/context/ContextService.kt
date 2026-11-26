@@ -247,8 +247,16 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             onStarted()
             val summary = SummaryCheckpoint.withoutLegacyMarker(summarizer.summarize(CompressionInput(summaryInput, revision))).trim()
             checkCancellation(cancelled)
-            val reduced = if (policy.tokenTail) TokenTailCompression.messageTokens(summaryMessage(id, "candidate", summary)) <
-                TokenTailCompression.historyTokens(summaryInput.dropWhile { it.role == "system" }, includeLatestScreen = false) else summary.toByteArray(Charsets.UTF_8).size + 128 < estimateTokens(summaryInput)
+            val originalTokens = if (policy.tokenTail) TokenTailCompression.historyTokens(
+                summaryInput.dropWhile { it.role == "system" }, includeLatestScreen = false) else estimateTokens(summaryInput)
+            val candidateTokens = if (policy.tokenTail) TokenTailCompression.messageTokens(summaryMessage(id, "candidate", summary))
+                else summary.toByteArray(Charsets.UTF_8).size.toLong() + 128
+            val reduced = candidateTokens < originalTokens
+            RuntimeDiagnostics.event(Stage.SUMMARY_REDUCTION, when {
+                summary.isEmpty() -> RuntimeDiagnostics.Code.SUMMARY_EMPTY
+                reduced -> RuntimeDiagnostics.Code.SUMMARY_REDUCED
+                else -> RuntimeDiagnostics.Code.SUMMARY_NOT_REDUCED
+            }, count = originalTokens, size = candidateTokens)
             require(summary.isNotEmpty() && reduced) { "压缩未缩小；保留原文" }
             val archive = activity.id
             // Validate the actual wrapped summary plus retained tail and new input BEFORE publishing.

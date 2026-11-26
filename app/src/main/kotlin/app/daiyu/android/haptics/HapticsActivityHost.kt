@@ -83,6 +83,12 @@ internal class HapticsActivityHost(
         }
     }
 
+    fun toolCardDrawn(conversationId: String?, runId: String, messageId: String, callId: String) {
+        checkMain()
+        if (!closed) chat?.binding?.takeIf { it.conversationId == conversationId }
+            ?.toolCardDrawn(runId, messageId, callId)
+    }
+
     fun isCurrentSettings(owner: HapticsHostBinding): Boolean = !closed && settingsOwner === owner
 
     private fun closeSettings() { settingsOwner?.close(); settingsOwner = null }

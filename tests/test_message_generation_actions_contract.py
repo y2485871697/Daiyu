@@ -10,7 +10,7 @@ class MessageGenerationActionsContract(unittest.TestCase):
     def test_native_action_bar_and_long_press_menu_share_capability(self):
         bar = (SRC / "ui/screens/chat/conversation/MessageActionBar.kt").read_text()
         self.assertIn("messageActionsEnabled && actions.messageActionsEnabled", bar)
-        for call in ("onEditUser", "onSpeak", "onRegenerate", "onDeleteTurn"):
+        for call in ("onEditUser", "onRegenerate", "onDeleteTurn"):
             self.assertIn("actions." + call + "(id) }, enabled = actionsEnabled", bar)
         self.assertIn("if (actionsEnabled) 1f else .38f", bar)
         self.assertIn("branchEnabled && actions.messageBranchEnabled", bar)
@@ -27,6 +27,9 @@ class MessageGenerationActionsContract(unittest.TestCase):
         self.assertIn("controller.loadMessageBranchSnapshot(owner)", activity)
         for gate in ("return@regenerate", "return@delete"):
             self.assertIn("if (!controller.messageMutationsAvailable()) " + gate, activity)
+        speech = activity.split("onSpeak = speak@{ id ->", 1)[1].split("onBranch = branch@", 1)[0]
+        self.assertNotIn("messageMutationsAvailable()", speech)
+        self.assertIn("speechHost.owner != renderedSpeechOwner", speech)
         host = (SRC / "ControllerMessageActions.kt").read_text()
         self.assertIn("action != MessageAction.BRANCH && !controller.messageMutationsAvailable()", host)
 

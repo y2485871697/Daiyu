@@ -32,7 +32,7 @@ class ChatOverflowIconColorsContract(unittest.TestCase):
         self.assertIn("if (previewStyle) colors.text else scheme.onSurface", self.item)
         self.assertIn("get() = this == ChatMenuAction.INTERACTIVE_MODE || this == ChatMenuAction.AUTO_COMPRESS", self.overflow)
         self.assertIn("if (entry.action.isOverflowSwitch)", self.item)
-        self.assertRegex(self.overflow, r"if \(!entry\.action\.isOverflowSwitch\)\s*\{\s*removeMenu\(\)\s*onDismiss\(\)\s*\}\s*onAction\(entry\.action\)")
+        self.assertRegex(self.overflow, r"if \(!entry\.action\.isOverflowSwitch\)\s*onDismiss\(\)\s*onAction\(entry\.action\)")
         self.assertIn(".size(17.dp)", self.item)
         self.assertIn(".heightIn(min = 38.dp)", self.item)
 

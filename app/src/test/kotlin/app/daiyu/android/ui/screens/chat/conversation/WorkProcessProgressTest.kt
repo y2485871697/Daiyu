@@ -113,6 +113,18 @@ class WorkProcessProgressTest {
         assertEquals("已完成2步 · 进行中", process(source(), ToolReceiptUi(WorkStepState.OK)).progressSummary)
     }
 
+    @Test fun pendingReceiptAndEmptySummaryKeepAnExplicitStatus() {
+        for ((dispatched, label) in listOf(false to "待派发", true to "准备中")) {
+            val work = process(source(), ToolReceiptUi(WorkStepState.PENDING, dispatched = dispatched))
+            assertEquals(!dispatched, work.segments.flatMap { it.steps }.single().awaitingDispatch)
+            val expected = "已完成1步 · $label"
+            assertEquals(expected, work.progressSummary)
+            assertEquals(expected, work.copy(summary = " ", controlActivity = ToolActivityUi.PENDING).progressSummary)
+        }
+        assertEquals("已完成1步 · 进行中", WorkProcessUi(listOf(WorkSegmentUi(reasoning = before)), "", true).progressSummary)
+        assertEquals("已完成1步", WorkProcessUi(listOf(WorkSegmentUi(reasoning = before)), "").progressSummary)
+    }
+
     @Test fun pendingControlsPreserveTheirActualActivity() {
         for (activity in listOf(ToolActivityUi.QUEUED, ToolActivityUi.PREPARING, ToolActivityUi.WAITING,
             ToolActivityUi.PAUSING, ToolActivityUi.PAUSED, ToolActivityUi.STOPPING)) {

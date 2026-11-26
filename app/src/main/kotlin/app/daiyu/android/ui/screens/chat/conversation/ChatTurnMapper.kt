@@ -438,7 +438,9 @@ object ChatTurnMapper {
             }
         }
         val running = message.status == RunStatus.RUNNING
-        val activities = segments.flatMap { it.steps }.filter { it.state == WorkStepState.PENDING || running && it.activity.inFlight }.map { it.activity }
+        val steps = segments.flatMap { it.steps }
+        val activeSteps = steps.filter { it.state == WorkStepState.PENDING || it.activity.inFlight }
+        val activities = activeSteps.map { it.displayActivity }
         val summary = when {
             running -> when {
                 ToolActivityUi.STOPPING in activities -> ToolActivityUi.STOPPING.label
@@ -446,8 +448,10 @@ object ChatTurnMapper {
                 ToolActivityUi.PAUSED in activities -> ToolActivityUi.PAUSED.label
                 ToolActivityUi.RUNNING in activities -> "执行中"
                 ToolActivityUi.WAITING in activities -> ToolActivityUi.WAITING.label
-                segments.any { it.reasoning?.activeSinceNanos != null } -> "思考中"
-                else -> activities.lastOrNull()?.label ?: "进行中"
+                ToolActivityUi.PREPARING in activities -> ToolActivityUi.PREPARING.label
+                ToolActivityUi.QUEUED in activities -> ToolActivityUi.QUEUED.label
+                else -> activeSteps.asReversed().firstNotNullOfOrNull { it.pendingProgressLabel }
+                    ?: if (segments.any { it.reasoning?.activeSinceNanos != null }) "思考中" else "进行中"
             }
             message.status == RunStatus.FAILED -> "流程失败"
             message.status == RunStatus.STOPPED -> "已停止"

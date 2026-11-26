@@ -129,6 +129,7 @@ data class ChatScreenActions(
     val onOpenAssistant: () -> Unit = onAssistantClick,
     val messageActionsEnabled: Boolean = true,
     val messageBranchEnabled: Boolean = true,
+    val messageSpeechEnabled: Boolean = true,
     val onCopy: (String) -> Unit = {},
     val onRegenerate: (String) -> Unit = {},
     val onSpeak: (String) -> Unit = {},
@@ -154,7 +155,7 @@ data class ChatScreenActions(
 @Composable
 internal fun rememberStableChatActions(a: ChatScreenActions): ChatScreenActions {
     val latest = rememberUpdatedState(a)
-    return remember(a.messageActionsEnabled, a.messageBranchEnabled, a.editingMessageKey, a.hasCompletionToRead, a.onProjectedDraftEdit == null) { ChatScreenActions(
+    return remember(a.messageActionsEnabled, a.messageBranchEnabled, a.messageSpeechEnabled, a.editingMessageKey, a.hasCompletionToRead, a.onProjectedDraftEdit == null) { ChatScreenActions(
         onOpenSidebar = { latest.value.onOpenSidebar() },
         onMore = { latest.value.onMore() },
         onCompressionSendBlocked = { latest.value.onCompressionSendBlocked() },
@@ -180,6 +181,7 @@ internal fun rememberStableChatActions(a: ChatScreenActions): ChatScreenActions 
         onOpenAssistant = { latest.value.onOpenAssistant() },
         messageActionsEnabled = a.messageActionsEnabled,
         messageBranchEnabled = a.messageBranchEnabled,
+        messageSpeechEnabled = a.messageSpeechEnabled,
         onCopy = { p0 -> latest.value.onCopy(p0) },
         onRegenerate = { p0 -> latest.value.onRegenerate(p0) },
         onSpeak = { p0 -> latest.value.onSpeak(p0) },
@@ -230,6 +232,7 @@ internal fun DaiyuChatScreen(
         editingMessageKey = suppliedActions.editingMessageKey,
         messageActionsEnabled = suppliedActions.messageActionsEnabled,
         messageBranchEnabled = suppliedActions.messageBranchEnabled,
+        messageSpeechEnabled = false,
     )
     val suppliedCallActions = callActions
     val callActions = if (presentationActive) suppliedCallActions else DoubaoCallActions()

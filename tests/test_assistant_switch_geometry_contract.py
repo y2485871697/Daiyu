@@ -1,6 +1,7 @@
 """Source-only switch geometry contracts; device pixel tests run separately."""
 from pathlib import Path
 from math import floor
+import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -46,7 +47,8 @@ class AssistantSwitchGeometryContractTest(unittest.TestCase):
         self.assertIn('Color(0xFFB3A0C7) else Color(0xFFA18BB8)', self.switch)
         editor = (SRC / 'ui/screens/assistants/AssistantEditScreen.kt').read_text()
         compression = (SRC / 'ui/screens/chat/context/CompressionConversationDialog.kt').read_text()
-        self.assertEqual(2, editor.count('AssistantPreviewSwitch('))
+        for tag in ('assistant-memory-switch', 'assistant-auto-memory-switch', 'assistant-skill-${skill.id}'):
+            self.assertRegex(editor, r'AssistantPreviewSwitch\([^{}]+Modifier\.testTag\(' + re.escape('"' + tag + '"'))
         self.assertIn('AssistantPreviewSwitch(draft.customModel, enabled, ""', compression)
         self.assertNotIn('LocalDensity', self.switch)
         self.assertNotIn('absoluteOffset', self.switch)

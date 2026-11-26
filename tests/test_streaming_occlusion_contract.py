@@ -197,7 +197,7 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn('LocalChatBottomFollowIntent = staticCompositionLocalOf { true }', source)
         self.assertIn('LocalChatBottomFollowIntent provides followBottom', source)
         self.assertIn('val followIntent = LocalChatBottomFollowIntent.current', assistant)
-        self.assertIn('val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && (stoppedFooter || generationComplete && revealSettled)', assistant)
+        self.assertIn('else -> generationComplete && revealSettled', assistant)
         self.assertIn('val appended = assistantActionSlotAppended(previousActionSlotSources, actionSlotSources)', assistant)
         self.assertIn('val retainDetachedSlot = appended && actionSlotOwner && !followIntent && actionSlotHeightPx > 0', assistant)
         self.assertIn('if (appended && !retainDetachedSlot) actionSlotHeightPx = 0', assistant)

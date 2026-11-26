@@ -69,8 +69,15 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("更多").performTouchInput { click() }
         node("chat-overflow-menu").assertIsDisplayed()
         // Semantics is an independent navigation entry, not the menu's outside scrim.
-        ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction())
-            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction())
+                .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+            repeat(2) { ui.mainClock.advanceTimeByFrame() }
+            ui.onNodeWithTag("chat-menu-exiting", useUnmergedTree = true).assertExists()
+        } finally { ui.mainClock.autoAdvance = true }
+        val exiting = ui.onAllNodesWithTag("chat-menu-exiting", useUnmergedTree = true)
+        ui.waitUntil(5_000) { exiting.fetchSemanticsNodes().isEmpty() }
         node("chat-overflow-menu").assertDoesNotExist()
         val settings = ui.onNode(hasContentDescription(activity.getString(R.string.route_settings)) and hasClickAction())
         ui.waitUntil(5_000) { settings.isDisplayed() }

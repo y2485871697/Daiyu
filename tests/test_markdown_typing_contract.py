@@ -221,7 +221,7 @@ class MarkdownTypingContract(unittest.TestCase):
         self.assertIn('is MessageContentUi.Text -> "text:$itemId"', workflow)
         assistant = self.chat.split('private fun AssistantTextContent(', 1)[1].split(
             '\n@Composable\ninternal fun UserMessageText', 1)[0]
-        self.assertIn('val textBody = rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete, streamAnswer = true)', assistant)
+        self.assertIn('val textBody = rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete,\n        streamAnswer = true, reportNarrationDraw = leadingText.isNotEmpty())', assistant)
         text_body = self.chat.split('internal fun rememberAssistantTextBody(', 1)[1].split('private fun AssistantWorkflow(', 1)[0]
         for token in ('rememberUpdatedState(projection)', 'rememberUpdatedState(reveal)',
                       'RevealedMessageMarkdown(displayed, accepted?.blocksAt(index),',
@@ -257,15 +257,18 @@ class MarkdownTypingContract(unittest.TestCase):
         assistant = self.chat.split("internal fun AssistantTurn(", 1)[1].split(
             "private fun AssistantTextContent(", 1)[0]
         self.assertIn(
-            "    val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && (stoppedFooter || generationComplete && revealSettled)\n",
+            "    val actionsVisible = showActions && when {\n"
+            "        stoppedFooter -> true\n"
+            "        actionRunning -> hasTextActions\n"
+            "        else -> generationComplete && revealSettled\n",
             assistant)
         self.assertIn(
             "        if (actionsVisible) {\n"
-            "            val hasTextActions = actionTurn.hasBodyTextActions()\n"
             "            MessageActionBar(actionTurn.actionKey, actions, timestamp = actionTurn.timestamp,\n",
             assistant)
         reconnect = (BASE / "ReconnectedAssistantTurn.kt").read_text()
-        self.assertIn("val actionsReady = turn.status == app.daiyu.android.domain.RunStatus.STOPPED || LocalReplyPlayback.current?.control?.stopped == true || parts.parts.all { ready[it.turn.listKey] == it && settled[it.turn.listKey] == it }", reconnect)
+        self.assertIn("val actionsReady = turn.status == RunStatus.RUNNING || turn.status == RunStatus.STOPPED", reconnect)
+        self.assertIn("parts.parts.all { ready[it.turn.listKey] == it && settled[it.turn.listKey] == it }", reconnect)
         self.assertIn("showActions = index == parts.parts.lastIndex && actionsReady, actionTurn = turn", reconnect)
 
     def test_received_frontier_and_stale_target_guards_are_present(self):

@@ -2024,7 +2024,7 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                 }
             }
             assertEquals(1, calls.get())
-            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertExists()
             ui.runOnUiThread { turn = turn.copy(status = RunStatus.COMPLETED, isStreaming = false) }
             advanceUntilObserved("terminal Unicode text and actions") {
                 settled.get() && ui.onAllNodes(matcher, useUnmergedTree = true).fetchSemanticsNodes().size == 1 &&
@@ -2090,8 +2090,8 @@ class MessageMarkdownTest : WiredActivityTestCase() {
                 ui.onAllNodes(hasText(displayText), useUnmergedTree = true).fetchSemanticsNodes().size == 1
             }
             assertTrue(confirmed.none { turn.listKey in it })
-            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
-            ui.onNodeWithContentDescription("重新生成", useUnmergedTree = true).assertDoesNotExist()
+            ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertExists()
+            ui.onNodeWithContentDescription("重新生成", useUnmergedTree = true).assertIsNotEnabled()
             ui.runOnUiThread { turn = turn.copy(status = RunStatus.COMPLETED, isStreaming = false) }
             advanceUntilObserved("drawn terminal body and completed read") {
                 confirmed.any { turn.listKey in it } &&

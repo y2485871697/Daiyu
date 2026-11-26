@@ -33,11 +33,10 @@ class MessageTimestampStyleContractTest(unittest.TestCase):
         self.assertIn('val hasDisplayBody = projection?.sources?.any { it.isNotBlank() } == true', assistant)
         self.assertIn('val generationComplete = turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady', assistant)
         self.assertIn(
-            '    val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && (stoppedFooter || generationComplete && revealSettled)\n',
+            '    val actionsVisible = showActions && when {\n',
             assistant)
         self.assertIn(
             '        if (actionsVisible) {\n'
-            '            val hasTextActions = actionTurn.hasBodyTextActions()\n'
             '            MessageActionBar(actionTurn.actionKey, actions, timestamp = actionTurn.timestamp,\n',
             assistant)
         self.assertIn('allowSpeech = hasTextActions, showCopyAction = hasTextActions', turns)

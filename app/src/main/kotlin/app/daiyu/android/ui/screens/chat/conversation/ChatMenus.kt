@@ -73,7 +73,6 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
     interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true,
     automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false,
     readAutomaticCompression: (() -> ChatAutomaticCompressionState)? = null) {
-    val removeMenu = rememberImmediateChatMenuDismiss()
     val groups = listOf(
         listOf(
             MenuEntry("新建会话", ChatPreviewIcons.NewChat, ChatMenuAction.NEW_CHAT),
@@ -115,10 +114,7 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
                                 else -> true
                             }
                             ChatMenuItem(entry, onClick = {
-                                if (!entry.action.isOverflowSwitch) {
-                                    removeMenu()
-                                    onDismiss()
-                                }
+                                if (!entry.action.isOverflowSwitch) onDismiss()
                                 onAction(entry.action)
                             }, checked = checked, enabled = enabled, previewStyle = true)
                         }

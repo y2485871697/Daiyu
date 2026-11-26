@@ -19,7 +19,7 @@ class WorkflowBodySmokeScopeTests(unittest.TestCase):
         self.assertIn('val steps = content.subList(firstStep, split)', content)
         self.assertIn('ordered.pending, ordered.leading)', content)
         renderer = (chat_dir / 'ChatMessageList.kt').read_text().split('private fun AssistantTextContent(', 1)[1]
-        self.assertLess(renderer.index('MessageContent(ordered.leading,'), renderer.index('work?.let { AssistantWorkflow('))
+        self.assertLess(renderer.index('MessageContent(ordered.leading,'), renderer.index('AssistantWorkflow(it, ordered.steps,'))
         self.assertIn('(ordered.leading + ordered.body).filterIsInstance', (chat_dir / 'ChatMessageList.kt').read_text())
         reconnect = (chat_dir / 'ReconnectParts.kt').read_text()
         self.assertIn('index < sourceWorkflow.leading.size -> ReconnectContentRole.LEADING', reconnect)

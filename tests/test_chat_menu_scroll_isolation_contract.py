@@ -69,8 +69,10 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
         self.assertIn('menuAvailable: Boolean = true', screen)
         self.assertIn('menuAvailable = menuAvailable', screen)
         top = (CHAT / 'ChatTopBar.kt').read_text()
-        self.assertIn('remember(menuAvailable) { mutableStateOf(false) }', top)
-        self.assertIn('if (menuAvailable) ChatOverflowMenu(', top)
+        self.assertIn('val menuExpanded = expanded && menuAvailable', top)
+        self.assertIn('SideEffect { if (!menuAvailable && expanded) expanded = false }', top)
+        self.assertIn('ChatOverflowMenu(menuExpanded,', top)
+        self.assertNotIn('if (menuAvailable) ChatOverflowMenu(', top)
         self.assertIn('enabled = menuAvailable', top)
         self.assertIn('{ expanded = false; actions.onOpenSidebar() }', top)
         self.assertIn('{ expanded = false; actions.onMenuAction(ChatMenuAction.COLLABORATION) }', top)
@@ -224,7 +226,7 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
                       '0.15f + 0.85f * motion.fraction.value', 'TransformOrigin(1f, if (menu.preferAbove) 1f else 0f)',
                       'surface.place(x, y)', 'delay(PopupExitRetentionMillis)',
                       'if (!menu.expanded()) event.changes.forEach { it.consume() }',
-                      'else Modifier.clearAndSetSemantics {}', 'menu.onDismiss()',
+                      'else Modifier.clearAndSetSemantics { testTag = "chat-menu-exiting" }', 'menu.onDismiss()',
                       '.verticalScroll(rememberScrollState())'):
             self.assertIn(token, source)
         messages = (CHAT / 'ChatMessageList.kt').read_text()

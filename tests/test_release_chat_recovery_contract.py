@@ -45,7 +45,7 @@ class ReleaseChatRecoveryContract(unittest.TestCase):
         self.assertIn('testHistoricalExpandAndUpdateAreSilent', (DEVICE / 'ReportedReasoningTypingTest.kt').read_text())
         self.assertIn('testSameLiveItemReplacementIsSilentAndLaterAppendStillTypes', (DEVICE / 'ReportedReasoningTypingTest.kt').read_text())
         self.assertIn('testColdFirstSummaryAndHiddenAppendReopenUseSilentBaselines', (DEVICE / 'ReportedReasoningTypingTest.kt').read_text())
-        self.assertLess(source.index('val summaryDisplays'), source.index('AnimatedVisibility('))
+        self.assertLess(source.index('val summaryDisplays'), source.index('WorkflowAnimatedDetail(visibility, disclosure,'))
         self.assertNotIn('withFrameNanos', source)
         self.assertIn('delay(100L)', source)
         test = (DEVICE / 'ReportedReasoningTypingTest.kt').read_text()

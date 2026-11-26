@@ -15,7 +15,8 @@ internal fun ChatTurnUi.Assistant.hasVisibleResponse(): Boolean {
             }
         }
     } else {
-        finalText.isNotBlank() || workProcess?.segments.orEmpty().any {
+        leadingContent.any { it.text.isNotBlank() } || finalContent.any { it.text.isNotBlank() } ||
+            finalText.isNotBlank() || workProcess?.segments.orEmpty().any {
             !it.narration.isNullOrBlank() || it.steps.any { step -> step.isVisibleInWorkflow } ||
                 it.reasoning?.let { reasoning -> hasReportedReasoningText(reasoning.text) } == true
         }

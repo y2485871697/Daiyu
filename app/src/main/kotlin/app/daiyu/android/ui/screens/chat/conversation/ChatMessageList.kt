@@ -1801,7 +1801,13 @@ internal fun AssistantTurn(
     }
     val followIntent = LocalChatBottomFollowIntent.current
     val stoppedFooter = actionTurn.status == RunStatus.STOPPED || LocalReplyPlayback.current?.control?.stopped == true
-    val actionsVisible = showActions && actionTurn.status != RunStatus.RUNNING && (stoppedFooter || generationComplete && revealSettled)
+    val actionRunning = actionTurn.status == RunStatus.RUNNING
+    val hasTextActions = remember(actionTurn) { actionTurn.hasMessageActionText() }
+    val actionsVisible = showActions && when {
+        stoppedFooter -> true
+        actionRunning -> hasTextActions
+        else -> generationComplete && revealSettled
+    }
     if (previousActionSlotSources != actionSlotSources) {
         val appended = assistantActionSlotAppended(previousActionSlotSources, actionSlotSources)
         val retainDetachedSlot = appended && actionSlotOwner && !followIntent && actionSlotHeightPx > 0
@@ -1843,9 +1849,9 @@ internal fun AssistantTurn(
                 maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         }
         if (actionsVisible) {
-            val hasTextActions = actionTurn.hasBodyTextActions()
             MessageActionBar(actionTurn.actionKey, actions, timestamp = actionTurn.timestamp,
                 modifier = Modifier.onSizeChanged { actionSlotHeightPx = it.height },
+                messageActionsEnabled = !actionRunning, branchEnabled = !actionRunning,
                 allowSpeech = hasTextActions, showCopyAction = hasTextActions, speaking = speaking, preparing = preparing)
         } else if (holdActionSlot) {
             Box(Modifier.fillMaxWidth().height(

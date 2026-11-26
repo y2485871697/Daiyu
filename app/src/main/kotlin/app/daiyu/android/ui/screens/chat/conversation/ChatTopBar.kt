@@ -39,6 +39,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -67,7 +68,9 @@ internal fun ChatTopBar(title: String, actions: ChatScreenActions, modifier: Mod
     interactiveModeEnabled: Boolean = false, interactiveModeChangeEnabled: Boolean = true,
     automaticCompression: Boolean? = null, automaticCompressionPending: Boolean = false, modelLabel: String = "",
     readAutomaticCompression: (() -> ChatAutomaticCompressionState)? = null, menuAvailable: Boolean = true) {
-    var expanded by remember(menuAvailable) { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(false) }
+    val menuExpanded = expanded && menuAvailable
+    SideEffect { if (!menuAvailable && expanded) expanded = false }
     val chrome = chatChromeColors()
     Row(modifier.testTag("chat-top-bar").fillMaxWidth().heightIn(min = 64.dp).padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -91,9 +94,9 @@ internal fun ChatTopBar(title: String, actions: ChatScreenActions, modifier: Mod
         Box {
             val moreShape = RoundedCornerShape(10.dp)
             ChatIconButton(ChatPreviewIcons.More, "更多", { actions.onMore(); expanded = true },
-                Modifier.size(40.dp).semantics { selected = expanded },
-                tint = if (expanded) chrome.accent else chrome.text, iconSize = 22.dp, shape = moreShape, indication = null, enabled = menuAvailable)
-            if (menuAvailable) ChatOverflowMenu(expanded, { expanded = false }, actions.onMenuAction,
+                Modifier.size(40.dp).semantics { selected = menuExpanded },
+                tint = if (menuExpanded) chrome.accent else chrome.text, iconSize = 22.dp, shape = moreShape, indication = null, enabled = menuAvailable)
+            ChatOverflowMenu(menuExpanded, { expanded = false }, actions.onMenuAction,
                 interactiveModeEnabled, interactiveModeChangeEnabled, automaticCompression, automaticCompressionPending,
                 readAutomaticCompression = readAutomaticCompression)
         }

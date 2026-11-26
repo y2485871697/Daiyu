@@ -117,8 +117,11 @@ data class WorkProcessUi(
     }
     val progressSummary: String get() = buildList {
         add("已完成${completedStepCount}步")
-        val status = controlActivity?.label ?: summary
-        if (running || status != "已完成") add(status)
+        val status = controlActivity?.label?.takeIf { it.isNotBlank() }
+            ?: summary.takeIf { it.isNotBlank() && (!running || (it != "进行中" && it != "已完成")) }
+            ?: if (running) segments.asReversed().asSequence().flatMap { it.steps.asReversed().asSequence() }
+                .firstNotNullOfOrNull { it.pendingProgressLabel } ?: "进行中" else null
+        if (status != null && (running || status != "已完成")) add(status)
     }.joinToString(" · ")
 }
 
@@ -158,6 +161,11 @@ data class WorkStepUi(
 ) {
     val displayActivity: ToolActivityUi get() =
         if (awaitingExecutionTarget && activity == ToolActivityUi.RUNNING) ToolActivityUi.PREPARING else activity
+    internal val pendingProgressLabel: String? get() = when {
+        state != WorkStepState.PENDING -> null
+        activity == ToolActivityUi.PENDING -> if (awaitingDispatch) "待派发" else "准备中"
+        else -> displayActivity.label
+    }
     val isVisibleInWorkflow: Boolean get() =
         !awaitingDispatch && (category !in setOf("terminal", "background_job") || !executionTargetLabel.isNullOrBlank())
     val toolCallId: String get() = id

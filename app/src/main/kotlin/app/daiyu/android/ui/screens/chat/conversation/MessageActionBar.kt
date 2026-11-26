@@ -42,6 +42,7 @@ internal fun MessageActionBar(
 ) {
     val colors = conversationColors()
     val actionsEnabled = interactionEnabled && messageActionsEnabled && actions.messageActionsEnabled
+    val canSpeak = interactionEnabled && actions.messageSpeechEnabled
     val canBranch = interactionEnabled && branchEnabled && actions.messageBranchEnabled
     val actionTint = colors.muted.copy(alpha = if (actionsEnabled) 1f else .38f)
     var copied by remember(id) { mutableStateOf(false) }
@@ -68,8 +69,8 @@ internal fun MessageActionBar(
         if (showEditAction) ConversationIconButton(onClick = { actions.onEditUser(id) }, enabled = actionsEnabled) {
             Icon(DaiyuIcons.Edit, "编辑", Modifier.size(13.dp), tint = actionTint)
         }
-        if (allowSpeech) ConversationIconButton(onClick = { actions.onSpeak(id) }, enabled = actionsEnabled) {
-            MessageSpeechIcon(speaking, Modifier.size(13.dp).alpha(if (actionsEnabled) 1f else .38f), preparing)
+        if (allowSpeech) ConversationIconButton(onClick = { actions.onSpeak(id) }, enabled = canSpeak) {
+            MessageSpeechIcon(speaking, Modifier.size(13.dp).alpha(if (canSpeak) 1f else .38f), preparing)
         }
         TooltipBox(text = "分支", enabled = canBranch) {
             ConversationIconButton(onClick = { actions.onBranch(id) }, enabled = canBranch) {

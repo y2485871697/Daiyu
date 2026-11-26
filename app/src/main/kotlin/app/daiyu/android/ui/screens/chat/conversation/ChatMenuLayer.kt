@@ -68,6 +68,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.ui.components.captureForTopBar
@@ -94,13 +95,6 @@ private class MenuOverlay(
 private typealias MenuLayerState = ChatMenuLayerState<MenuOverlay>
 
 private val LocalMenuLayer = staticCompositionLocalOf<MenuLayerState?> { null }
-// Menu actions hand off without retaining the old menu or its backdrop.
-@Composable
-internal fun rememberImmediateChatMenuDismiss(): () -> Unit {
-    val layer = LocalMenuLayer.current
-    return remember(layer) { { layer?.active = null } }
-}
-
 internal val LocalChatMenuPlacementDiagnostic = staticCompositionLocalOf<((() -> String) -> Unit)?> { null }
 
 private class MenuPlacementDiagnostic {
@@ -186,7 +180,7 @@ private fun BoxScope.ChatMenuOverlay(
                         }
                         .onGloballyPositioned { if (diagnostic != null) probe.surface = it }
                         .then(if (menu.expanded()) Modifier.semantics { paneTitle = "会话菜单" }
-                        else Modifier.clearAndSetSemantics {}), motion = motion, preferAbove = menu.preferAbove) {
+                        else Modifier.clearAndSetSemantics { testTag = "chat-menu-exiting" }), motion = motion, preferAbove = menu.preferAbove) {
                         CompositionLocalProvider(LocalPopupMotion provides motion) { menu.content() }
                     }
                 },

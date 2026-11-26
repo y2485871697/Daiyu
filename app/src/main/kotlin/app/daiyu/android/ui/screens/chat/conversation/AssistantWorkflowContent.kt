@@ -83,6 +83,18 @@ internal fun ChatTurnUi.Assistant.hasBodyTextActions(): Boolean =
     else leadingContent.any { it.text.isNotBlank() } ||
         if (finalContent.isNotEmpty()) finalContent.any { it.text.isNotBlank() } else finalText.isNotBlank()
 
+/** Assistant prose in reading order, without protected workflow tail text, tool payloads or thinking. */
+private fun ChatTurnUi.Assistant.actionProse(): Sequence<String> {
+    val workflow = workflowContent()
+    return (workflow.leading.asSequence() + workflow.steps.asSequence() + workflow.body.asSequence())
+        .filterIsInstance<MessageContentUi.Text>().map { it.text }.filter { it.isNotBlank() }
+}
+
+internal fun ChatTurnUi.Assistant.hasMessageActionText(): Boolean = actionProse().any()
+
+internal fun ChatTurnUi.Assistant.messageActionText(): String? =
+    actionProse().joinToString("\n\n").takeIf { it.isNotEmpty() }
+
 /** The latest step of a running workflow is a thought whose text is still arriving. */
 internal fun ChatTurnUi.Assistant.hasLiveWorkflowReasoning(): Boolean {
     if (status != RunStatus.RUNNING) return false

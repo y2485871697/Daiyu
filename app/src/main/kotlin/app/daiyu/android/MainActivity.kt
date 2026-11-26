@@ -3615,6 +3615,7 @@ class MainActivity : ComponentActivity() {
         return ChatScreenActions(
         messageActionsEnabled = chatRouteSelected && !sidebarVisible && controller.messageMutationsAvailable(),
         messageBranchEnabled = chatRouteSelected && !sidebarVisible && controller.messageBranchAvailable(),
+        messageSpeechEnabled = chatRouteSelected && !sidebarVisible && displayWindow == null && controller.ready,
         onOpenWorkspace = { if (currentChat()) openConversationWorkspace() },
         onReferenceShortcut = { trigger, expected ->
             if (editorMatches() && inlineMessageEditor == null && chatState.composer.enabled && draft == expected)
@@ -3712,7 +3713,7 @@ class MainActivity : ComponentActivity() {
                     action = { messageCallbacks.onRegenerate(id) }, showCloseButton = false, secondaryCancel = true)
             } else messageCallbacks.onRegenerate(id)
         }, onSpeak = speak@{ id ->
-            if (!controller.messageMutationsAvailable() || displayWindow != null || !activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
+            if (displayWindow != null || !activityUsable() || !voiceForeground || retainedPage != "chat" || sidebarVisible ||
                 speechHost.owner != renderedSpeechOwner || selected?.id?.value != renderedConversation ||
                 editorGeneration != renderedEditorGeneration) return@speak
             val playback = speechHost.state.value
@@ -3720,7 +3721,7 @@ class MainActivity : ComponentActivity() {
                 invalidatePreparedSpeech()
                 speechHost.stop(renderedSpeechOwner, id)
             } else if (editorMatches() && controller.ready && !controller.dataBusy) {
-                // Resolve the CURRENT displayed answer, never a captured stream/tool payload.
+                // Resolve the current reply prose, never a captured stream/tool payload.
                 voiceHostText(chatState.turns, id)?.let { text ->
                     requestConfiguredSpeech(renderedSpeechOwner, id, text)
                 }
@@ -9016,9 +9017,9 @@ internal fun copyableImageHostText(message: Message): String? {
     } }
 }
 
-/** Only the current assistant's visible answer; never flatten work-process/tool payloads. */
+/** Resolve the current reply, not a captured payload from a stale row. */
 internal fun voiceHostText(turns: List<ChatTurnUi>, id: String): String? =
-    turns.filterIsInstance<ChatTurnUi.Assistant>().firstOrNull { it.matchesKey(id) }?.finalText
+    turns.asSequence().filterIsInstance<ChatTurnUi.Assistant>().firstOrNull { it.matchesKey(id) }?.messageActionText()
 
 internal fun voiceHostIsActive(state: SpeechPlaybackState) = state.phase in setOf(
     SpeechPhase.INITIALIZING, SpeechPhase.QUEUED, SpeechPhase.SPEAKING,

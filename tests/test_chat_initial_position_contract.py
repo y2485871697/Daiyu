@@ -54,7 +54,9 @@ class ChatInitialPositionContract(unittest.TestCase):
         self.assertIn('it.serial != consumedSerial', policy)
         self.assertIn('it.followBottom && it.messageId == null && it.listKey == null', policy)
         self.assertIn('} ?: followBottom', policy)
-        self.assertIn('.drawWithContent { if (!initialPositionPending) drawContent() }', chat)
+        list_draw = chat.split('LazyColumn(state = listState, userScrollEnabled', 1)[1].split('.then(if (initialPositionPending)', 1)[0]
+        self.assertIn('.drawWithContent {', list_draw)
+        self.assertTrue(list_draw.strip().endswith('if (!initialPositionPending) drawContent()\n                }'))
 
     def test_initial_alignment_waits_for_measured_ready_content_and_snaps(self):
         chat = CHAT.read_text()

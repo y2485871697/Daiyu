@@ -158,10 +158,14 @@ class ChatOverflowDismissHapticsTest : WiredActivityTestCase() {
             ui.mainClock.autoAdvance = false
             try {
                 row.performTouchInput { click() }
-                // Assert in the unmerged tree before an ordinary retained exit could finish.
                 repeat(2) { ui.mainClock.advanceTimeByFrame() }
                 ui.waitForIdle()
+                ui.onNodeWithTag("chat-menu-exiting", useUnmergedTree = true).assertExists()
+                ui.onNodeWithTag("chat-menu:${action.name}").assertDoesNotExist()
+                ui.mainClock.advanceTimeBy(PopupExitRetentionMillis + 32)
+                ui.waitForIdle()
                 menu.assertDoesNotExist()
+                ui.onNodeWithTag("chat-menu-exiting", useUnmergedTree = true).assertDoesNotExist()
             } finally {
                 ui.mainClock.autoAdvance = true
             }

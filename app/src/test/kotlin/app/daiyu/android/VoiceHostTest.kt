@@ -217,24 +217,28 @@ class VoiceHostTest {
         assertEquals(SpeechPhase.CLOSED, f.host.state.value.phase)
     }
 
-    @Test fun textUsesOnlyCurrentAssistantFinalAnswerNotToolParametersResultsOrUser() {
+    @Test fun textUsesOrderedAssistantProseNotThinkingToolParametersResultsOrUser() {
         val tool = MessageBlock.Tool(
             ToolInvocation(ToolCallId("tool"), "search", "SECRET TOOL PARAMETERS"), "SECRET TOOL RESULT")
         val assistant = Message(MessageId("assistant"), ConversationId("A"), RunId("run"),
             Message.ASSISTANT_ROLE, listOf(MessageBlock.Text("work", "work narration"), tool,
-                MessageBlock.Text("answer", "visible answer")), RunStatus.COMPLETED)
+                MessageBlock.Text("between", "workflow prose"), tool.copy(invocation = tool.invocation.copy(id = ToolCallId("second"))),
+                MessageBlock.Text("answer", "visible answer")), RunStatus.STOPPED,
+            reportedReasoning = listOf(app.daiyu.android.domain.ReportedReasoning("thought", "SECRET THINKING", blockOffset = 0)))
         val turns = ChatTurnMapper.map(listOf(assistant)) + ChatTurnUi.User("user", "user text")
-        assertEquals("visible answer", voiceHostText(turns, "assistant"))
+        assertEquals("work narration\n\nworkflow prose\n\nvisible answer", voiceHostText(turns, "assistant"))
         assertNull(voiceHostText(turns, "user"))
         assertNull(voiceHostText(turns, "missing"))
-        val updated = turns.map { if (it is ChatTurnUi.Assistant) it.copy(finalText = "latest answer") else it }
-        assertEquals("latest answer", voiceHostText(updated, "assistant"))
+        val updated = ChatTurnMapper.map(listOf(assistant.copy(blocks = assistant.blocks.dropLast(1) +
+            MessageBlock.Text("answer", "latest answer"))))
+        val latest = "work narration\n\nworkflow prose\n\nlatest answer"
+        assertEquals(latest, voiceHostText(updated, "assistant"))
         val grouped = updated.map { if (it is ChatTurnUi.Assistant) it.copy(
             sourceListKeys = listOf(it.listKey, "exact-tail"), sourceSegmentIndices = listOf(0, 1)) else it }
-        assertEquals("latest answer", voiceHostText(grouped, "exact-tail"))
+        assertEquals(latest, voiceHostText(grouped, "exact-tail"))
         assertNull(voiceHostText(grouped, "unrelated-tail"))
         val onlyTool = ChatTurnMapper.map(listOf(assistant.copy(blocks = listOf(tool))))
-        assertEquals("", voiceHostText(onlyTool, "assistant"))
+        assertNull(voiceHostText(onlyTool, "assistant"))
     }
 
     @Test fun allErrorEnumsHaveSanitizedUiAndActivePhasesHaveStop() {

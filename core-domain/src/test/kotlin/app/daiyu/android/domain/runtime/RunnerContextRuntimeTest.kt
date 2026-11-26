@@ -510,23 +510,20 @@ class RunnerContextRuntimeTest {
         assertTrue(store.snapshots.all { it.context?.capacity == null })
     }
 
-    @Test fun pauseDuringSurfaceEstimateRemainsExplicitlyResumable() {
+    @Test fun pauseDuringCloudTriggeredCompactionEstimateRemainsExplicitlyResumable() {
         val estimating = java.util.concurrent.CountDownLatch(1)
         val estimateReleased = java.util.concurrent.CountDownLatch(1)
         val userPaused = java.util.concurrent.CountDownLatch(1)
-        val limited = java.util.concurrent.CountDownLatch(1)
-        val firstEstimate = java.util.concurrent.atomic.AtomicBoolean(true)
         val compressed = java.util.concurrent.atomic.AtomicBoolean()
         val opens = java.util.concurrent.atomic.AtomicInteger()
         val runtime = object : RunContextRuntime {
-            override val automatic = false
             override val windowTokens = 1000L
+            override val pressureThresholdTokens = 800L
+            override val initialMeter = ContextMeterCheckpoint(cloudInputTokens = 800L)
             override fun localTokens(history: List<Message>, tools: List<ToolDefinition>): Long {
-                if (firstEstimate.compareAndSet(true, false)) {
-                    estimating.countDown()
-                    check(estimateReleased.await(5, java.util.concurrent.TimeUnit.SECONDS))
-                }
-                return if (compressed.get()) 100L else 1100L
+                estimating.countDown()
+                check(estimateReleased.await(5, java.util.concurrent.TimeUnit.SECONDS))
+                return 1100L
             }
             override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
                 request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
@@ -536,9 +533,7 @@ class RunnerContextRuntimeTest {
         }
         val store = object : AtomicRuntimeStore {
             override fun commitCheckpoint(checkpoint: RunCheckpoint) {
-                if (checkpoint.phase == ExecutionPhase.PAUSED) {
-                    if (checkpoint.context?.capacity == null) userPaused.countDown() else limited.countDown()
-                }
+                if (checkpoint.phase == ExecutionPhase.PAUSED && checkpoint.context?.capacity == null) userPaused.countDown()
             }
             override fun reconcileCheckpoint(checkpoint: RunCheckpoint) = error("no recovery")
         }
@@ -559,11 +554,12 @@ class RunnerContextRuntimeTest {
             assertTrue(estimating.await(5, java.util.concurrent.TimeUnit.SECONDS))
             assertTrue(runner.pause())
             estimateReleased.countDown()
-            assertTrue("user pause must commit before the capacity stop", userPaused.await(2, java.util.concurrent.TimeUnit.SECONDS))
+            assertTrue("user pause must commit before the provider request", userPaused.await(2, java.util.concurrent.TimeUnit.SECONDS))
             assertFalse(runner.state().contextLimited)
             assertTrue(runner.resume())
             assertEquals(RunStatus.COMPLETED, result.get(5, java.util.concurrent.TimeUnit.SECONDS).status)
             assertEquals(1, opens.get())
+            assertFalse(compressed.get())
         } finally { estimateReleased.countDown(); runner.stop(); worker.join(5000) }
     }
 

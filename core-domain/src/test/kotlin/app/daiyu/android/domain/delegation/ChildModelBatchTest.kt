@@ -30,15 +30,14 @@ class ChildModelBatchTest {
         }
     }
 
-    @Test fun ordinaryChildUsesForcedContextBeforeItsFirstProviderSend() {
+    @Test fun ordinaryChildDoesNotCompactBeforeItsFirstCloudReceipt() {
         val compacted = AtomicInteger(); val requests = AtomicInteger()
         val child = port { history, sink ->
-            assertEquals(1, compacted.get()); assertTrue(history.any { row -> row.blocks.any { it is MessageBlock.Text && it.text == "child summary" } })
+            assertEquals(0, compacted.get()); assertEquals("task", (history.single().blocks.single() as MessageBlock.Text).text)
             requests.incrementAndGet(); sink(ModelEvent.TextFinal("answer", "done"))
         }
         val runtime = object : app.daiyu.android.domain.runtime.RunContextRuntime {
             override val windowTokens = 272000L
-            override val automatic = false
             override val pressureThresholdTokens = 100L
             override fun localTokens(history: List<Message>, tools: List<app.daiyu.android.domain.ToolDefinition>) = if (compacted.get() == 0) 200L else 50L
             override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
@@ -53,20 +52,20 @@ class ChildModelBatchTest {
         val batch = bind(ChildModelBatch(mapOf("one" to childDefinition), store = records))
         try {
             val receipt = batch.execute(context(), listOf(ChildModelTask("one", "task"))) as ExecutionReceipt.Confirmed
-            assertFalse(receipt.isError); assertEquals(1, compacted.get()); assertEquals(1, requests.get())
+            assertFalse(receipt.isError); assertEquals(0, compacted.get()); assertEquals(1, requests.get())
             assertEquals(ChildTaskStatus.COMPLETED, records.rows.values.single().status)
         } finally { batch.close() }
     }
 
-    @Test fun ordinaryChildRecoversOneConfirmedOverflowUsingItsOwnSummaryRuntime() {
+    @Test fun ordinaryChildReportsConfirmedOverflowWithoutCompactingOrRetrying() {
         val summaries = AtomicInteger(); val requests = AtomicInteger()
-        val child = port { _, sink ->
-            if (requests.incrementAndGet() == 1) throw ModelRequestException(ModelFailure.CONTEXT_LIMIT)
-            sink(ModelEvent.TextFinal("answer", "recovered"))
+        val child = port { _, _ ->
+            requests.incrementAndGet()
+            throw ModelRequestException(ModelFailure.CONTEXT_LIMIT)
         }
         val runtime = object : app.daiyu.android.domain.runtime.RunContextRuntime {
             override val windowTokens = 272000L
-            override val pressureThresholdTokens = 999999L
+            override val pressureThresholdTokens = 100L
             override fun localTokens(history: List<Message>, tools: List<app.daiyu.android.domain.ToolDefinition>) = 100L
             override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
                 request: app.daiyu.android.domain.runtime.RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
@@ -78,8 +77,9 @@ class ChildModelBatchTest {
         val batch = bind(ChildModelBatch(mapOf("one" to ChildModelDefinition("pool", 0) { child }.withContext { runtime }), store = records))
         try {
             val receipt = batch.execute(context(), listOf(ChildModelTask("one", "task"))) as ExecutionReceipt.Confirmed
-            assertFalse(receipt.isError); assertEquals(1, summaries.get()); assertEquals(2, requests.get())
-            assertEquals(ChildTaskStatus.COMPLETED, records.rows.values.single().status)
+            assertTrue(receipt.isError); assertEquals(0, summaries.get()); assertEquals(1, requests.get())
+            assertEquals(ChildTaskStatus.FAILED, records.rows.values.single().status)
+            assertTrue(records.rows.values.single().detail.orEmpty().contains(ModelFailure.CONTEXT_LIMIT.userMessage))
         } finally { batch.close() }
     }
 

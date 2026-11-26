@@ -100,7 +100,7 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
             db.execSQL("UPDATE $TABLE SET send_observed=1 WHERE task_id=? AND request_id=? AND request_owner=? AND usage_source='MAIN'" +
                 " AND EXISTS(SELECT 1 FROM child_tasks WHERE task_id=$TABLE.task_id AND conversation_id=?" +
                 " AND parent_run_id=? AND task_group_id=? AND generation=? AND assistant_message_id=?)",
-                arrayOf(owner.childRunId, request.requestId, request.owner, owner.conversationId, owner.parentRunId,
+                arrayOf<Any>(owner.childRunId, request.requestId, request.owner, owner.conversationId, owner.parentRunId,
                     owner.taskGroupId, owner.generation, owner.assistantMessageId))
         }
     }

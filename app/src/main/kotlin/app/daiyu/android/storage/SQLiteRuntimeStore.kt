@@ -97,7 +97,7 @@ internal class SQLiteRuntimeStore private constructor(
         override fun record(task: ChildTaskRecord, checkpoint: RunCheckpoint) = childAccess { childUsageStore.record(task, checkpoint) }
         override fun record(task: ChildTaskRecord, checkpoint: RunCheckpoint, model: app.daiyu.android.domain.delegation.ChildRequestModel?) =
             childAccess { childUsageStore.record(task, checkpoint, model) }
-        override fun sent(owner: ChildRunOwner, request: app.daiyu.android.domain.runtime.RequestCheckpoint) =
+        override fun sent(owner: ChildRunOwner, request: RequestCheckpoint) =
             childAccess { childUsageStore.sent(owner, request) }
     }
     private val childStore = SQLiteChildTaskStore(database)

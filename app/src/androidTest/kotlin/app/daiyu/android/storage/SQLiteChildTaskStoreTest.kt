@@ -184,7 +184,7 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
         fun planned(id: String, model: String, order: Int, usage: Int = 0, source: String = "MAIN"): RequestCheckpoint {
             sql.execSQL("INSERT INTO child_request_usage(task_id,request_id,request_owner,attempt_id,operation,checkpoint_revision," +
                 "usage_source,has_usage,api_model_snapshot,request_sequence) VALUES(?,?,?,?,?,?,?,?,?,?)",
-                arrayOf(task.owner.childRunId, id, "model-run", "attempt", "NEXT", order, source, usage, model, order))
+                arrayOf<Any>(task.owner.childRunId, id, "model-run", "attempt", "NEXT", order, source, usage, model, order))
             return RequestCheckpoint(id, "attempt", "model-run", RequestOperation.NEXT)
         }
         val first = planned("first", "first-model", 1)

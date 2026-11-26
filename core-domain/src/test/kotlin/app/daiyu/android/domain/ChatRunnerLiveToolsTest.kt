@@ -60,11 +60,13 @@ class ChatRunnerLiveToolsTest {
             RunnerOptions(reconnect = ReconnectPolicy(maxAttempts = 1))) {}.run(message, emptyList())
         assertEquals(RunStatus.COMPLETED, result.status); assertEquals(1, opens); assertEquals(1, resumes); assertEquals(1, updates.size)
     }
-    @Test fun capacityCheckAndBothOpenAndNextUseTheSameToolSnapshot() {
+    @Test fun openedRequestKeepsItsToolSnapshotForNextAndInputEstimate() {
         val catalog = Catalog()
         val original = catalog.tools
         val oversized = listOf(definition("oversized"))
-        val checked = mutableListOf<List<ToolDefinition>>()
+        val measured = mutableListOf<List<ToolDefinition>>()
+        var openedWith: List<ToolDefinition>? = null
+        var updatedWith: List<ToolDefinition>? = null
         var updates = 0
         val runtime = object : app.daiyu.android.domain.runtime.RunContextRuntime {
             override val automatic = true
@@ -72,26 +74,25 @@ class ChatRunnerLiveToolsTest {
             override val pressureThresholdTokens: Long? = 90L
             override fun fixedSurfaceTokens(history: List<Message>): Long = 0L
             override fun localTokens(history: List<Message>, tools: List<ToolDefinition>): Long {
-                checked.add(tools)
-                catalog.tools = oversized // Settings change after the budget sees its snapshot.
-                return if (tools == original) 10 else 1000
+                measured.add(tools)
+                return 1000L // The local estimate must not trigger automatic compaction.
             }
             override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
                 request: app.daiyu.android.domain.runtime.RequestCheckpoint,
-                observe: (ModelEvent.Usage) -> Unit, admit: () -> Unit, cancelled: () -> Boolean): List<Message>? = null
+                observe: (ModelEvent.Usage) -> Unit, admit: () -> Unit, cancelled: () -> Boolean): List<Message>? = error("no confirmed cloud input")
         }
         val port = object : ModelPort {
             override fun open(history: List<Message>) = error("catalog overload required")
             override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
-                assertSame(checked.last(), definitions)
-                assertEquals(original, definitions)
+                openedWith = definitions
+                catalog.tools = oversized // Settings change after this request is prepared.
                 return object : ModelSession {
                     override fun updateToolDefinitions(definitions: List<ToolDefinition>) {
                         updates++
-                        assertSame(checked.last(), definitions)
-                        assertEquals(original, definitions)
+                        updatedWith = definitions
                     }
                     override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                        sink(ModelEvent.InputEstimate(1000))
                         sink(ModelEvent.TextFinal("answer", "done"))
                     }
                     override fun cancel() {}
@@ -101,7 +102,9 @@ class ChatRunnerLiveToolsTest {
         val result = ChatRunner(port, object : ConversationStore { override fun save(message: Message) {} }, catalog,
             RunnerOptions(contextRuntime = runtime)) {}.run(message, emptyList())
         assertEquals(RunStatus.COMPLETED, result.status)
-        assertEquals(2, checked.size)
+        assertEquals(original, openedWith)
+        assertSame(openedWith, updatedWith)
+        assertSame(openedWith, measured.single())
         assertEquals(1, updates)
         assertEquals(oversized, catalog.tools)
     }

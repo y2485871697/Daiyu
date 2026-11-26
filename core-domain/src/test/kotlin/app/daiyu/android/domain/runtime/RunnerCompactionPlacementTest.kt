@@ -118,6 +118,8 @@ class RunnerCompactionPlacementTest {
         assertEquals(RunStatus.COMPLETED, result.status)
         assertEquals(2, opens); assertEquals(2, nexts); assertEquals(1, tools)
         assertEquals(1, failures); assertEquals(1, finished)
+        assertTrue(checkpoints.last().context!!.meter!!.cloudCompactionAttempted)
+        assertNull(checkpoints.last().context!!.meter!!.pressureTokens)
         assertTrue(checkpoints.all { it.context?.compactions == 0 })
         val segments = MessageHistory.expand(listOf(result))
         assertEquals(2, segments.size)

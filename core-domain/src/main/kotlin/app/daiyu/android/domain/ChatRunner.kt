@@ -559,10 +559,16 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 runtime = selectedRuntime
                 compactingRuntime = selectedRuntime
                 if (cancelled()) return false
-                if (cloudPressure != null) {
-                    val state = checkNotNull(contextState)
-                    contextState = state.copy(meter = checkNotNull(state.meter).copy(cloudCompactionAttempted = true, pressureTokens = null))
-                    persistSummary() // Consume the receipt even if there is no useful range or the summary fails.
+                val state = checkNotNull(contextState)
+                val meter = state.meter
+                val acceptedCloudInput = meter?.let { it.pressureTokens ?: it.cloudInputTokens }
+                val manualCoversPressure = manual != null && acceptedCloudInput != null &&
+                    base.pressureThresholdTokens?.let { acceptedCloudInput >= it } == true
+                // A manual attempt already handles this cloud pressure; do not retry it automatically.
+                if (meter != null && (cloudPressure != null || manualCoversPressure) &&
+                    (!meter.cloudCompactionAttempted || meter.pressureTokens != null)) {
+                    contextState = state.copy(meter = meter.copy(cloudCompactionAttempted = true, pressureTokens = null))
+                    persistSummary()
                 }
                 selectedRuntime.beginCompaction(compactionBoundary)
                 val before = meterHistory()

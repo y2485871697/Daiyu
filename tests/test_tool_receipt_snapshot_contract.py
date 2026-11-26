@@ -24,21 +24,29 @@ class ReceiptSnapshotContract(unittest.TestCase):
         self.assertIn('status != RunStatus.RUNNING', pending)
         self.assertNotIn('WorkStepState.OK', pending)
         self.assertNotIn('JSONObject', pending)
-    def test_pending_io_is_explicit_and_fenced_for_both_display_paths(self):
+    def test_both_display_paths_prefer_exact_committed_evidence_without_waiting_for_io(self):
         host = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         visible = host.split('val currentReceipts =', 1)[1].split('val visibleChildNames', 1)[0]
-        self.assertIn('val receiptPending = !toolReceiptReadFailed && toolReceiptRead?.isActive == true', visible)
-        self.assertIn('toolReceiptRequested?.canDisplayFor(currentReceipts) == true', visible)
-        self.assertEqual(2, visible.count('receiptPending = receiptPending'))
+        self.assertIn('controller.active?.takeIf { it.conversationId == selected?.id }?.let(controller::committedToolReceipts)', visible)
+        self.assertIn('currentReceipts.sources)', visible)
+        for path, committed, retained in (
+            ('visibleToolReceipts', 'committedReceipts(WorkStepOwnerUi(', 'retainedReceipts?.invoke(message, block)'),
+            ('visibleDisplayReceipts', 'committedReceipts(owner, block)', 'retainedDisplayReceipts?.invoke(owner, block)'),
+        ):
+            with self.subTest(path=path):
+                body = visible.split(f'val {path} =', 1)[1].split('\n            val ', 1)[0]
+                self.assertLess(body.index(committed), body.index(retained))
+                self.assertLess(body.index(retained), body.index('RetainedToolOutcomes.pendingProjection('))
         source = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/RetainedToolOutcomes.kt').read_text()
-        pending = source.split('fun pendingProjection(', 1)[1].split('fun projectionReader(database:', 1)[0]
-        for guard in ('!receiptPending', 'status != RunStatus.RUNNING', 'liveState == null',
-                      'liveState.phase == ExecutionPhase.IDLE', 'liveState.phase == ExecutionPhase.TERMINAL',
-                      'projected.activity != ToolActivityUi.UNKNOWN'):
-            self.assertIn(guard, pending)
-        self.assertIn('return ToolReceiptUi(WorkStepState.PENDING, activity)', pending)
-        self.assertNotIn('WorkStepState.OK', pending)
-        self.assertNotIn('读取结果', pending)
+        reader = source.split('fun committedReader(', 1)[1].split('internal class Snapshot', 1)[0]
+        for fence in ('it.conversation == message.conversationId.value', 'it.run == message.runId.value',
+                      'it.message == message.id.value', 'identity != owner || block.result == null',
+                      'positions[block] ?: return@reader null', 'committed[Result(block.invocation, block.result, index)]'):
+            self.assertIn(fence, reader)
+        self.assertIn('ToolDisposition.SUCCEEDED, ToolDisposition.FAILED, ToolDisposition.NOT_EXECUTED ->', reader)
+        self.assertIn('else -> null', reader)
+        self.assertNotIn('ToolDisposition.UNKNOWN', reader)
+        self.assertNotIn('database', reader)
 
     def test_display_fallback_uses_same_exact_live_aware_unknown_projection(self):
         activity = (ROOT / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ToolActivityUi.kt').read_text()
@@ -53,7 +61,7 @@ class ReceiptSnapshotContract(unittest.TestCase):
         self.assertNotIn('ToolActivityUi.RUNNING', display)
         self.assertNotIn('WorkStepState.OK', display)
 
-    def test_the_ui_publisher_uses_only_a_worker_prepared_immutable_snapshot(self):
+    def test_the_ui_publisher_keeps_database_reads_on_the_worker(self):
         text = (ROOT / 'app/src/main/kotlin/app/daiyu/android/MainActivity.kt').read_text()
         publish = text.split('private fun publishChat(rowsChanged:', 1)[1].split('private fun requestScroll', 1)[0]
         self.assertNotIn('RetainedToolOutcomes.projectionReader(controller.database', publish)

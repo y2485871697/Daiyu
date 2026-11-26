@@ -76,10 +76,17 @@ class ToolReceiptPauseContract(unittest.TestCase):
         self.assertIn('if (message.historySegments.isEmpty()) message.blocks else message.historySegments', blocks)
         self.assertIn('filter { it.role == Message.ASSISTANT_ROLE }', blocks)
         self.assertNotIn('message.blocks +', source)
+        outcomes = source.split('private fun outcomes(', 1)[1].split('fun committedReader(', 1)[0]
+        self.assertIn('if (tailStart < 0 || projected.subList(tailStart, projected.size) != physical) return emptyMap()', outcomes)
+        self.assertIn('it.invocation == block.invocation && it.result == block.result', outcomes)
+        self.assertIn('projected.take(tailStart).count { it is MessageBlock.Tool }', outcomes)
+        self.assertIn('position >= physicalOffset', outcomes)
+        self.assertIn('occurrences[block.invocation.id] == 1', outcomes)
+        self.assertIn('Result(block.invocation, block.result, position) to record.disposition', outcomes)
         read = source.split('fun read(database:', 1)[1].split('fun pendingProjection(', 1)[0]
-        self.assertIn('projected.subList(tailStart, projected.size) != physical', read)
-        self.assertIn('it.invocation == block.invocation && it.result == block.result', read)
-        self.assertIn('offset + position', read)
+        self.assertIn('put(owner, outcomes(snapshot.message, snapshot.tools))', read)
+        reader = source.split('fun committedReader(', 1)[1].split('internal class Snapshot', 1)[0]
+        self.assertIn('val committed = outcomes(message, receipts.tools)', reader)
 
     def test_host_regression_observes_pending_frames_at_actual_pause_and_resume(self):
         test = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ToolReceiptPauseActivityTest.kt').read_text()

@@ -1,6 +1,5 @@
 package app.daiyu.android.ui.screens.chat.context
 
-import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
@@ -10,17 +9,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
 import app.daiyu.android.context.CatalogSummaryBindings
 import app.daiyu.android.context.ContextManagementControllerAdapter
 import app.daiyu.android.context.SummaryModelBinding
 import app.daiyu.android.context.ContextManagementSelection
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.storage.ProviderCatalogRunTarget
-import app.daiyu.android.ui.components.UsageGlassDialog
-import app.daiyu.android.ui.components.UsageBody
-import app.daiyu.android.ui.screens.assistants.AssistantPreviewButton
 import app.daiyu.android.ui.screens.settings.SettingsModelPicker
 import app.daiyu.android.ui.screens.settings.SettingsModelSource
 
@@ -77,23 +71,7 @@ internal fun ContextManagementRoute(
         if (presentation.draft == null && initial != null)
             presentation.retain(initial, state?.snapshot?.savedConfiguration?.summaryModel)
     }
-    if (draft == null) {
-        BackHandler(onBack = dismiss)
-        if (adapter == null || state?.notice != null) {
-            UsageGlassDialog(title = "压缩会话", onDismiss = dismiss) {
-                UsageBody(state?.notice ?: "会话已暂停，请重新读取配置")
-                AssistantPreviewButton("刷新后重新选择", {
-                    if (isCurrent()) {
-                        presentation.reset()
-                        if (adapter == null) onResume() else adapter.refresh()
-                    }
-                }, Modifier.testTag("compression-dialog-refresh"), enabled = state?.operation == null)
-                AssistantPreviewButton("取消", dismiss, Modifier.testTag("context-close"))
-            }
-        }
-        return
-    }
-    if (presentation.choosingModel) {
+    if (presentation.choosingModel && draft != null) {
         SettingsModelPicker("压缩模型", source, draft.modelKey,
             protocols = setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS),
             onSelect = select@ { choice ->
@@ -107,18 +85,18 @@ internal fun ContextManagementRoute(
             }, onDismiss = { if (isCurrent()) presentation.choosingModel = false })
     } else {
         CompressionConversationDialog(draft, onChange = change@ {
-                if (!isCurrent() || adapter == null) return@change
+                if (!isCurrent() || adapter == null || draft == null) return@change
                 adapter.dismissCompression()
                 presentation.retain(it, binding)
                 presentation.notice = null
             }, onChooseModel = {
-                if (isCurrent() && adapter != null) {
+                if (isCurrent() && adapter != null && draft != null) {
                     adapter.dismissCompression()
                     presentation.retain(draft, binding)
                     presentation.choosingModel = true
                 }
             }, onDismiss = dismiss, onConfirm = confirm@ {
-                if (!isCurrent() || adapter == null) return@confirm
+                if (!isCurrent() || adapter == null || draft == null) return@confirm
                 val configuration = state?.snapshot?.configuration
                 when {
                     configuration != null && configuration.contextWindowTokens == null ->
@@ -132,8 +110,14 @@ internal fun ContextManagementRoute(
                             presentation.notice = adapter.state.value.notice ?: "当前不可准备压缩，请刷新后重试"
                     }
                 }
-            }, enabled = adapter != null && state?.snapshot != null && state.operation == null && !state.confirmingCompression,
-            notice = presentation.notice ?: state?.notice, requiresRefresh = state?.requiresRefresh == true,
+            }, enabled = draft != null && adapter != null && state?.snapshot != null && state.operation == null && !state.confirmingCompression,
+            notice = presentation.notice ?: state?.notice ?: when {
+                adapter == null -> "会话已暂停，请重新读取配置"
+                state?.snapshot == null -> "正在读取会话配置…"
+                draft == null -> "压缩配置不可用，请重新读取"
+                else -> null
+            }, requiresRefresh = adapter == null || state?.requiresRefresh == true ||
+                (draft == null && (state?.notice != null || state?.snapshot != null)),
             onRefresh = {
                 if (isCurrent()) {
                     presentation.reset()

@@ -111,10 +111,10 @@ class ContextToolDefinitionStabilityTest {
         }
         for (definition in first) {
             val schema = JSONObject(definition.parameters)
-            assertEquals(0, schema.getJSONArray("required").length())
+            assertEquals(if (definition.name == "read_compacted_history") 1 else 0, schema.getJSONArray("required").length())
             assertFalse(schema.getBoolean("additionalProperties"))
         }
-        assertEquals(listOf("context_usage"), tools(a, archive = null).map { it.definition.name })
+        assertEquals(listOf("read_compacted_history", "context_usage"), tools(a, archive = null).map { it.definition.name })
         val runOnly = ContextRegistryScope(a.owner, authorizedRuns = setOf(ContextRunOwner(a.owner, a.runs.first())))
         assertEquals(listOf("context_usage"), tools(a, scope = runOnly).map { it.definition.name })
     }

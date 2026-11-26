@@ -163,7 +163,7 @@ class NativeCompletionModel internal constructor(
                 trace.phase = ModelTransportPhase.READING_STREAM
                 trace.reader(conn.inputStream).useProviderResponse { reader ->
                     val row = NativeCompletionStream.read(settings.protocol, reader, cancelled::get, deliver,
-                        if (settings.requestOptions.nativeSearchEnabled(settings.protocol, settings.model, settings.endpoint, tools)) NativeSearchPolicy.family(endpoint) else null)
+                        if (settings.requestOptions.nativeSearchEnabled(settings.protocol, settings.model, settings.endpoint, tools)) NativeSearchPolicy.family(endpoint) else null, summaryRequest)
                     trace.completionReceived()
                     voiceSearch?.completed()
                     checkCancelled()

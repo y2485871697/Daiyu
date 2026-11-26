@@ -91,6 +91,7 @@ internal class ContextManagementWorker(
         val configuration = CatalogSummaryExecutionPolicy.chatConfiguration(snapshot, window)
         requireNotNull(ProviderSummaryModelResolver { configuration }.resolve(configuration.binding, usage))
     },
+    private val replayProtocol: () -> ProviderProtocol? = { null },
 ) : ContextManagementBackend {
     override fun snapshot(lease: ContextManagementLease): ContextManagementSnapshot {
         checkLease(lease)
@@ -99,14 +100,14 @@ internal class ContextManagementWorker(
         val target = try { configuration?.summaryModel?.let(profiles::describe) }
             catch (_: Exception) { null }
         checkLease(lease)
-        return service.readQuery {
-            // Never take the parent monitor while holding SQLite's transaction/connection lock.
-            lease.cancellation.check()
-            val id = lease.owner.conversationId
-            require(service.isUsageOwner(id.value)) { "会话不存在" }
-            val (originals, effective) = service.managementHistory(id)
-            ContextManagementSnapshot(id, ContextRevision.digest(originals), originals, effective, configuration, target)
-        }
+        val id = lease.owner.conversationId
+        val (read, prepared) = service.managementHistory(id, revisionOnly = true)
+        lease.cancellation.check()
+        val originals = freezeContextMessages(read)
+        val messages = if (prepared.messages === read) originals else freezeContextMessages(prepared.messages)
+        val effective = prepared.copy(messages = messages,
+            estimatedTokens = app.daiyu.android.domain.context.estimateTokens(messages))
+        return ContextManagementSnapshot(id, ContextRevision.digest(originals), originals, effective, configuration, target)
     }
 
     override fun selectCompression(lease: ContextManagementLease, expected: ContextManagementSnapshot,
@@ -163,8 +164,9 @@ internal class ContextManagementWorker(
             require(settings() == saved) { "压缩设置已改变，请重新选择" }
             if (frozenCurrent != null) chatModel(frozenCurrent, windowTokens, usage)
             else requireNotNull(profiles.freeze(checkNotNull(target), usage)) { "压缩模型不可用" }
-        }, automatic = false, systemPrompt = systemPrompt,
-            requestHeader = currentProvider?.let { HarnessRequestPolicy.header(it, systemPrompt) }.orEmpty(), progress = progress)
+        }, automatic = false, systemPrompt = systemPrompt, replayProtocol = currentProvider?.protocol,
+            requestHeader = currentProvider?.let { HarnessRequestPolicy.header(it, systemPrompt) }.orEmpty(),
+            archiveToolResult = service::archiveToolResult, progress = progress)
     }
 
     override fun compress(lease: ContextManagementLease,
@@ -193,13 +195,14 @@ internal class ContextManagementWorker(
                 return checkNotNull(bound.rebind) { "摘要模型不支持独立请求用量绑定" }.invoke(next.port)
             }
             val summarizer: ContextSummarizer = if (policy.tokenTail)
-                HarnessContextSummarizer(bound, lease.cancellation, nextModel = ::nextSummaryModel)
+                HarnessContextSummarizer(bound, lease.cancellation, nextModel = ::nextSummaryModel,
+                    archiveToolResult = service::archiveToolResult)
                 else ModelContextSummarizer(bound, lease.cancellation, nextModel = ::nextSummaryModel)
             checkLease(lease)
             require(settings() == saved) { "压缩设置已改变；请刷新后重新确认" }
             val archive = service.compress(expected.conversationId, policy, summarizer,
                 pendingMessages = emptyList(), cancelled = { lease.cancellation.isCancelled },
-                onStarted = lease::compressionStarted, retainTail = false)
+                onStarted = lease::compressionStarted, retainTail = false, replayProtocol = replayProtocol())
             // No post-publication history check or second request. Usage close remains in finally;
             // a close failure is an accounting error, never permission to repeat paid work.
             success = true
@@ -224,7 +227,7 @@ internal class ContextManagementWorker(
         lease.cancellation.check()
         val id = lease.owner.conversationId
         require(id == expected.conversationId && service.isUsageOwner(id.value)) { "会话已变化或已删除" }
-        val (originals, effective) = service.managementHistory(id)
+        val (originals, effective) = service.managementHistory(id, revisionOnly = true)
         require(ContextRevision.digest(originals) == expected.historyRevision) { "完整历史已变化；请刷新" }
         require(effective.archiveId == expected.effective.archiveId) { "活动档案已变化；请刷新" }
     }
@@ -261,6 +264,11 @@ internal class ContextManagementWorker(
                     }
                 }
             }, policies = ProductionCompressionPolicyResolver,
+                replayProtocol = {
+                    val repository = ProviderRepository(app)
+                    val binding = conversationModel?.invoke() ?: repository.selectedConversationModel()
+                    binding?.let { repository.conversationEditing(it).second.settings.protocol }
+                },
                 profiles = object : ContextManagementSummaryProfiles {
                     override fun describeSelection(selection: ContextManagementSelection): SummaryProfileDescriptor {
                         requireWorker()

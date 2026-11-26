@@ -7,7 +7,6 @@ import app.daiyu.android.diagnostics.RuntimeDiagnostics.Code
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.context.estimateTokens
 import java.util.UUID
-import java.util.concurrent.CancellationException
 
 /** One monotonic absolute deadline shared by preparation, transport and result acceptance.
  * Signed subtraction also handles nanoTime wraparound; the duration must fit in a Long. */
@@ -73,6 +72,14 @@ data class BoundSummaryModel(
     val reasoningLevels: List<app.daiyu.android.model.SummaryReasoningLevel> = listOf(app.daiyu.android.model.SummaryReasoningLevel.OFF),
 ) {
     internal var rebind: ((BoundSummaryUsagePort) -> BoundSummaryModel)? = null
+    internal val outputPolicy get() = transport as? DaiyuSummaryOutputPolicy
+
+    internal fun replacement(next: (() -> BoundSummaryModel)?): BoundSummaryModel =
+        requireNotNull(next) { "摘要需要独立用量准入" }.invoke().also {
+            require(it.binding == binding && it.contextWindowTokens == contextWindowTokens &&
+                it.inputBudgetTokens == inputBudgetTokens && it.reasoningLevels == reasoningLevels &&
+                it.outputPolicy?.initialOutputLimit == outputPolicy?.initialOutputLimit)
+        }
     init {
         require(contextWindowTokens > 0 && inputBudgetTokens in 1..contextWindowTokens)
         require(reasoningLevels.isNotEmpty() && reasoningLevels.first() == app.daiyu.android.model.SummaryReasoningLevel.OFF)
@@ -113,60 +120,22 @@ class ModelContextSummarizer(
         fun fits(evidence: String, task: String): Boolean =
             price(prompt(evidence, task)) + 16 <= budget
         val task = "保留所给历史前缀的真实进度；未压缩的后续尾部优先。"
-        var requests = 0
+        val requests = DaiyuSummaryRequest(bound, cancellation, deadline, nextModel)
         fun request(evidence: String, taskText: String): String {
-            var reasoningIndex = 0
-            while (true) {
-                checkLive()
-                require(fits(evidence, taskText)) { "摘要模型输入预算不足；保留原文" }
-                check(requests < 64) { "摘要请求数量超过上限；保留原文" }
-                val model = if (requests++ == 0) bound else requireNotNull(nextModel) { "摘要需要独立分块用量准入" }.invoke()
-                require(model.binding == bound.binding && model.inputBudgetTokens == bound.inputBudgetTokens &&
-                    model.reasoningLevels == bound.reasoningLevels)
-                checkLive()
-                val id = UUID.randomUUID().toString()
-                val rows = listOf(Message(MessageId("summary-input-$id"), conversation, RunId("summary-request-$id"),
-                    Message.USER_ROLE, listOf(MessageBlock.Text("evidence", prompt(evidence, taskText))), RunStatus.COMPLETED))
-                val session = RuntimeDiagnostics.measure(Stage.SUMMARY_OPEN, revision = requests.toLong(), size = reasoningIndex.toLong()) {
-                    model.transport.openWithoutTools(rows, deadline, bound.reasoningLevels[reasoningIndex], cancellation)
-                }
-                val registration = cancellation.register { session.cancel() }
-                try {
-                    checkLive()
-                    val text = linkedMapOf<String, StringBuilder>()
-                    RuntimeDiagnostics.measure(Stage.SUMMARY_SESSION, revision = requests.toLong()) {
-                        session.next(emptyList()) { event ->
-                            checkLive()
-                            when (event) {
-                                is ModelEvent.TextDelta -> text.getOrPut(event.itemId) { StringBuilder() }.append(event.text)
-                                is ModelEvent.TextFinal -> text[event.itemId] = StringBuilder(event.text)
-                                is ModelEvent.ToolReady -> error("摘要模型请求了工具；未执行，保留原文")
-                                else -> Unit
-                            }
-                        }
-                    }
-                    checkLive()
-                    return text.values.joinToString("\n").trim().also { require(it.isNotEmpty()) { "摘要模型返回为空" } }
-                } catch (interrupted: InterruptedException) {
-                    Thread.currentThread().interrupt()
-                    throw CancellationException("摘要准备已取消").also { it.initCause(interrupted) }
-                } catch (failure: Exception) {
-                    checkLive()
-                    if (failure is ModelRequestException && failure.failure == ModelFailure.REQUEST &&
-                        failure.diagnostic?.reasoningLevelRejected == true && reasoningIndex < bound.reasoningLevels.lastIndex) {
-                        reasoningIndex++
-                    } else throw failure
-                } finally {
-                    registration.close()
-                    runCatching { session.cancel() }
-                }
-            }
+            checkLive()
+            val body = prompt(evidence, taskText)
+            val inputTokens = price(body) + 16
+            require(inputTokens <= budget) { "摘要模型输入预算不足；保留原文" }
+            val id = UUID.randomUUID().toString()
+            val rows = listOf(Message(MessageId("summary-input-$id"), conversation, RunId("summary-request-$id"),
+                Message.USER_ROLE, listOf(MessageBlock.Text("evidence", body)), RunStatus.COMPLETED))
+            return requests.complete(rows, inputTokens)
         }
         fun checkpoint(evidence: String, taskText: String): String {
             val candidate = request(evidence, taskText)
             if (!bound.requireCheckpointFormat) return candidate
             SummaryCheckpoint.validate(candidate)?.let { return it }
-            RuntimeDiagnostics.event(Stage.SUMMARY_PREPARE, Code.FORMAT_REPAIR, count = requests.toLong())
+            RuntimeDiagnostics.event(Stage.SUMMARY_PREPARE, Code.FORMAT_REPAIR, count = requests.attempts.toLong())
             val repairTask = "只修复下列完整候选摘要的八节格式，不添加事实、不继续任务；保留所有有效事实。"
             require(fits(candidate, repairTask)) { "摘要格式修复输入超限；保留原文" }
             return RuntimeDiagnostics.measure(Stage.SUMMARY_REPAIR) {

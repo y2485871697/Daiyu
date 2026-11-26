@@ -26,10 +26,11 @@ internal object ResponsesStream {
     private fun decode(reader:BufferedReader, cancelled:()->Boolean, sink:(ModelEvent)->Unit):List<String> =
         State().read(reader, cancelled, sink)
 
-    fun readBuffered(reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit): List<String> {
+    fun readBuffered(reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit,
+        summaryRequest: Boolean = false): List<String> {
         var deliveryFailure: Exception? = null
         try {
-            return State(bufferDeltas = true).read(reader, cancelled, { event ->
+            return State(bufferDeltas = true, summaryRequest = summaryRequest).read(reader, cancelled, { event ->
                 try { sink(event) } catch (failure: Exception) { deliveryFailure = failure; throw failure }
             })
         } catch (failure: org.json.JSONException) {
@@ -39,7 +40,8 @@ internal object ResponsesStream {
     }
 
     /** Working deltas are bounded; only an accepted batch advances the resumable cursor. */
-    class State(private val bufferDeltas: Boolean = false, private val nanoTime: () -> Long = System::nanoTime) {
+    class State(private val bufferDeltas: Boolean = false, private val nanoTime: () -> Long = System::nanoTime,
+        private val summaryRequest: Boolean = false) {
         var responseId: String? = null
             private set
         var acknowledgedSequence: Long? = null
@@ -512,9 +514,15 @@ internal object ResponsesStream {
                     event.optString("request_id").takeIf(String::isNotBlank))
                 "response.incomplete" -> {
                     val reason = event.optJSONObject("response")?.optJSONObject("incomplete_details")?.optString("reason")
+                    if (summaryRequest && reason == "max_output_tokens" && calls.isEmpty() && searchIds.isEmpty()) {
+                        val terminalItems = event.optJSONObject("response")?.optJSONArray("output")
+                        if (terminalItems == null || (0 until terminalItems.length()).all {
+                            terminalItems.optJSONObject(it)?.optString("type") in setOf("message", "reasoning")
+                        }) throw ModelRequestException(ModelFailure.INCOMPLETE, ModelRequestDiagnostic(confirmedOutputLimit = true))
+                    }
                     val texts = (parts + pendingText).map { (id, values) -> id to values.values.joinToString("") }
                         .filter { it.second.isNotEmpty() }
-                    if (reason == "max_output_tokens" && calls.isEmpty() && texts.isNotEmpty()) throw OutputLimitReached(texts)
+                    if (!summaryRequest && reason == "max_output_tokens" && calls.isEmpty() && texts.isNotEmpty()) throw OutputLimitReached(texts)
                     throw ModelRequestException(ModelFailure.INCOMPLETE)
                 }
             }

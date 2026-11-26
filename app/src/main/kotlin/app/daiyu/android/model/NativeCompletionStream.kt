@@ -19,7 +19,7 @@ internal object NativeCompletionStream {
         read(protocol, reader, cancelled, sink, null)
 
     fun read(protocol: ProviderProtocol, reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit,
-             nativeSearchFamily: NativeSearchPolicy.Family?): JSONObject {
+             nativeSearchFamily: NativeSearchPolicy.Family?, summaryRequest: Boolean = false): JSONObject {
         var deliveryFailure: Exception? = null
         fun deliver(event: ModelEvent) {
             if (cancelled()) throw InterruptedException()
@@ -27,7 +27,7 @@ internal object NativeCompletionStream {
         }
         try {
             return when (protocol) {
-                ProviderProtocol.CHAT_COMPLETIONS -> chat(reader, cancelled, ::deliver, nativeSearchFamily)
+                ProviderProtocol.CHAT_COMPLETIONS -> chat(reader, cancelled, ::deliver, nativeSearchFamily, summaryRequest)
                 ProviderProtocol.GEMINI -> gemini(reader, cancelled, ::deliver)
                 else -> throw UnsupportedProviderException(protocol.wireName)
             }
@@ -43,7 +43,7 @@ internal object NativeCompletionStream {
     /* Adapted from RikkaHub ChatCompletionsStreamDecoder (AGPL-3.0); completion
        remains Daiyu's confirmed-terminal contract, never upstream's EOF success. */
     private fun chat(reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit,
-                     nativeSearchFamily: NativeSearchPolicy.Family?): JSONObject {
+                     nativeSearchFamily: NativeSearchPolicy.Family?, summaryRequest: Boolean): JSONObject {
         val text = StringBuilder()
         val reasoning = StringBuilder()
         val details = sortedMapOf<Int, JSONObject>()
@@ -214,6 +214,8 @@ internal object NativeCompletionStream {
             } }
             if (!choice.isNull("finish_reason")) {
                 reason = choice.string("finish_reason")
+                if (summaryRequest && reason == "length" && calls.isEmpty() && !serverSearchSeen)
+                    throw ModelRequestException(ModelFailure.INCOMPLETE, ModelRequestDiagnostic(confirmedOutputLimit = true))
                 if (reason !in setOf("stop", "tool_calls")) throw ModelRequestException(ModelFailure.INCOMPLETE)
                 protocol((reason == "tool_calls") == calls.isNotEmpty())
             }

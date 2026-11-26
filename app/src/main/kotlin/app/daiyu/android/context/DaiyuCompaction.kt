@@ -3,6 +3,7 @@ package app.daiyu.android.context
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.context.DaiyuContextEstimate
 import app.daiyu.android.media.NativeScreenImage
+import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.model.TerminalToolResultProjection
 import org.json.JSONArray
 import org.json.JSONObject
@@ -73,11 +74,14 @@ internal object DaiyuCompaction {
     }
 
     fun cut(history: List<Message>, window: Long?, billed: Long? = null, local: Long? = null,
-        overflow: Boolean = false, idle: Boolean = false): Int {
+        overflow: Boolean = false, idle: Boolean = false, protocol: ProviderProtocol? = null): Int {
         val system = history.takeWhile { it.role == "system" }.size
         if (history.size <= system || window == null || window <= 0) return 0
-        val cuts = TokenTailCompression.availableCuts(history).filter { it > system && (idle || it < history.size) }
+        val available = TokenTailCompression.availableCuts(history)
+        val cuts = available.filter { it > system && (idle || it < history.size) }
         if (cuts.isEmpty()) return 0
+        val protectedStart = opaqueTailCut(history, available, protocol)
+        if (protectedStart != null) return protectedStart.takeIf { it in cuts } ?: 0
         if (idle) return cuts.last()
         val weights = weights(history, includeScreen = true)
         fun boundary(budget: Long): Int {
@@ -99,6 +103,37 @@ internal object DaiyuCompaction {
             ?: boundary(1)
     }
 
-    fun reduced(prefix: List<Message>, summary: Message): Boolean =
-        history(listOf(summary), includeScreen = false) < history(prefix, includeScreen = false)
+    fun replayedOpaqueItems(row: Message, protocol: ProviderProtocol?): Int {
+        if (protocol != ProviderProtocol.RESPONSES || row.role != "assistant" ||
+            row.status != RunStatus.COMPLETED) return 0
+        return row.protocolItems.count { JSONObject(it).optString("type") == "reasoning" }
+    }
+
+    private fun opaqueTailCut(rows: List<Message>, cuts: List<Int>, protocol: ProviderProtocol?): Int? {
+        val opaque = rows.map { replayedOpaqueItems(it, protocol) > 0 }
+        if (opaque.none { it }) return null
+        val newestComplete = cuts.getOrNull(cuts.lastIndex - 1) ?: return null
+        val lastUser = rows.indexOfLast { it.role == Message.USER_ROLE &&
+            it.blocks.filterIsInstance<MessageBlock.Text>().none { block -> SummaryCheckpoint.unframe(block.text) != null } }
+        val userBoundary = cuts.lastOrNull { it in 1..lastUser } ?: 0
+        return if (userBoundary > 0 && userBoundary <= newestComplete &&
+            opaque.subList(userBoundary, newestComplete).none { it }) userBoundary
+        else newestComplete.takeIf { it > 0 }
+    }
+
+    fun summaryProgressBudget(window: Long): Long = if (window <= 0) 0 else minOf(
+        maxOf(1, window.coerceAtMost(Int.MAX_VALUE.toLong()) * 16 / 100),
+        (window - 4096 - maxOf(512L, window / 20) - window / 100 * 12 - window % 100 * 12 / 100)
+            .coerceAtLeast(0))
+
+    fun reduced(before: List<Message>, after: List<Message>, tailSize: Int,
+        window: Long, protocol: ProviderProtocol?): Boolean {
+        if (tailSize !in 0..minOf(before.size, after.size) || before.takeLast(tailSize) != after.takeLast(tailSize)) return false
+        val replayedBefore = before.count { replayedOpaqueItems(it, protocol) > 0 }
+        val replayedAfter = after.count { replayedOpaqueItems(it, protocol) > 0 }
+        if (replayedAfter > replayedBefore) return false
+        if (history(after, includeScreen = false) < history(before, includeScreen = false)) return true
+        return replayedAfter < replayedBefore &&
+            history(after.dropLast(tailSize), includeScreen = false) <= summaryProgressBudget(window)
+    }
 }

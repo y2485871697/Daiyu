@@ -50,7 +50,7 @@ internal data class CompressionDialogDraft(
 
 @Composable
 internal fun CompressionConversationDialog(
-    draft: CompressionDialogDraft,
+    draft: CompressionDialogDraft?,
     onChange: (CompressionDialogDraft) -> Unit,
     onChooseModel: () -> Unit,
     onConfirm: () -> Unit,
@@ -65,49 +65,51 @@ internal fun CompressionConversationDialog(
     var showHelp by remember { mutableStateOf(false) }
     UsageGlassDialog(title = "压缩会话", onDismiss = onDismiss) {
         LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 430.dp)
-            .testTag("context-management"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            item("custom-model") {
-                Row(Modifier.fillMaxWidth().heightIn(min = 44.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("自定义压缩模型", fontSize = 14.sp)
-                    AssistantPreviewSwitch(draft.customModel, enabled, "",
-                        Modifier.testTag("compression-dialog-custom").semantics { contentDescription = "自定义压缩模型" },
-                        onToggle = { onChange(draft.copy(customModel = it)) })
+            .testTag(if (draft != null) "context-management" else "context-management-loading"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (draft != null) {
+                item("custom-model") {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 44.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("自定义压缩模型", fontSize = 14.sp)
+                        AssistantPreviewSwitch(draft.customModel, enabled, "",
+                            Modifier.testTag("compression-dialog-custom").semantics { contentDescription = "自定义压缩模型" },
+                            onToggle = { onChange(draft.copy(customModel = it)) })
+                    }
                 }
-            }
-            if (draft.customModel) item("model") {
-                Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("compression-dialog-model")
-                    .clip(RoundedCornerShape(12.dp)).background(colors.fieldBackground)
-                    .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null,
-                        onClick = onChooseModel).padding(horizontal = 14.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(draft.modelLabel ?: "选择模型", Modifier.weight(1f), fontSize = 14.sp,
-                        maxLines = 2)
-                    Icon(DaiyuIcons.ChevronRight, null, Modifier.size(18.dp), tint = colors.muted)
+                if (draft.customModel) item("model") {
+                    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("compression-dialog-model")
+                        .clip(RoundedCornerShape(12.dp)).background(colors.fieldBackground)
+                        .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null,
+                            onClick = onChooseModel).padding(horizontal = 14.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(draft.modelLabel ?: "选择模型", Modifier.weight(1f), fontSize = 14.sp,
+                            maxLines = 2)
+                        Icon(DaiyuIcons.ChevronRight, null, Modifier.size(18.dp), tint = colors.muted)
+                    }
                 }
-            }
-            item("protocol-title") {
-                Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("请求接口", fontSize = 14.sp)
-                    Text("仅用于摘要，不影响正常对话。", color = colors.muted, fontSize = 12.sp)
+                item("protocol-title") {
+                    Column(Modifier.padding(top = 6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("请求接口", fontSize = 14.sp)
+                        Text("仅用于摘要，不影响正常对话。", color = colors.muted, fontSize = 12.sp)
+                    }
                 }
-            }
-            item("protocols") {
-                Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(colors.soft)) {
-                    listOf(ProviderProtocol.CHAT_COMPLETIONS to "Chat Completions API",
-                        ProviderProtocol.RESPONSES to "Responses API").forEach { (protocol, label) ->
-                        val selected = draft.protocol == protocol
-                        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
-                            .testTag("compression-dialog-api:${protocol.wireName}")
-                            .background(if (selected) colors.fieldBackground else androidx.compose.ui.graphics.Color.Transparent)
-                            .selectable(selected, enabled = enabled, role = Role.RadioButton,
-                                interactionSource = remember { MutableInteractionSource() }, indication = null,
-                                onClick = { onChange(draft.copy(protocol = protocol)) })
-                            .padding(start = 14.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text(label, Modifier.weight(1f), fontSize = 14.sp)
-                            RadioButton(selected, onClick = null, colors = RadioButtonDefaults.colors(
-                                selectedColor = DaiyuPalette.selectionAccent, unselectedColor = colors.muted))
+                item("protocols") {
+                    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(colors.soft)) {
+                        listOf(ProviderProtocol.CHAT_COMPLETIONS to "Chat Completions API",
+                            ProviderProtocol.RESPONSES to "Responses API").forEach { (protocol, label) ->
+                            val selected = draft.protocol == protocol
+                            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                                .testTag("compression-dialog-api:${protocol.wireName}")
+                                .background(if (selected) colors.fieldBackground else androidx.compose.ui.graphics.Color.Transparent)
+                                .selectable(selected, enabled = enabled, role = Role.RadioButton,
+                                    interactionSource = remember { MutableInteractionSource() }, indication = null,
+                                    onClick = { onChange(draft.copy(protocol = protocol)) })
+                                .padding(start = 14.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text(label, Modifier.weight(1f), fontSize = 14.sp)
+                                RadioButton(selected, onClick = null, colors = RadioButtonDefaults.colors(
+                                    selectedColor = DaiyuPalette.selectionAccent, unselectedColor = colors.muted))
+                            }
                         }
                     }
                 }
@@ -119,14 +121,14 @@ internal fun CompressionConversationDialog(
                 AssistantPreviewButton("刷新后重新选择", onRefresh,
                     Modifier.fillMaxWidth().testTag("compression-dialog-refresh"), enabled = operation == null)
             }
-            item("help") {
+            if (draft != null) item("help") {
                 CompressionProtocolHelp(expanded = showHelp, onToggle = { showHelp = !showHelp },
                     tag = "compression-dialog-help")
             }
         }
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f).testTag("context-close"))
-            AssistantPreviewButton("确定", onConfirm, Modifier.weight(1f).testTag("context-compress"),
+            if (draft != null) AssistantPreviewButton("确定", onConfirm, Modifier.weight(1f).testTag("context-compress"),
                 primary = true, enabled = enabled && !requiresRefresh && operation == null)
         }
     }

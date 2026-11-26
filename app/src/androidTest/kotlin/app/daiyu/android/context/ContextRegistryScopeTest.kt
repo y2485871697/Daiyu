@@ -247,7 +247,7 @@ class ContextRegistryScopeTest : InstrumentationTestCase() {
         assertTrue(registry.executeLocal("context_archive_page", archive(b.archive)).getBoolean("ok"))
         assertTrue(registry.executeLocal("context_usage", usage(b.owner)).getBoolean("ok"))
         val schemas = registry.forModel(ContextRegistryScope(a.owner)).schemas
-        assertEquals(2, schemas.length())
+        assertEquals(3, schemas.length())
         for (i in 0 until schemas.length()) {
             val schema = schemas.getJSONObject(i); val parameters = schema.getJSONObject("parameters")
             assertEquals("none", schema.getString("sideEffect")); assertFalse(parameters.getBoolean("additionalProperties"))
@@ -260,7 +260,7 @@ class ContextRegistryScopeTest : InstrumentationTestCase() {
         fun tools(scope:ContextRegistryScope, locator:String?=a.archive)=
             app.daiyu.android.integration.tools.ScopedContextTools.create(registry,scope,a.runs.first(),locator)
         val full=tools(ContextRegistryScope(a.owner))
-        assertEquals(setOf("context_archive_page","context_usage"),full.map {it.definition.name}.toSet())
+        assertEquals(setOf("context_archive_page","context_usage","read_compacted_history"),full.map {it.definition.name}.toSet())
         val archive=full.single {it.definition.name=="context_archive_page"}.definition
         val parameters=JSONObject(archive.schema.jsonSchema())
         assertFalse(parameters.getBoolean("additionalProperties"))
@@ -274,7 +274,7 @@ class ContextRegistryScopeTest : InstrumentationTestCase() {
             ContextRegistryScope(a.owner,authorizedRuns=setOf(ContextRunOwner(a.owner,a.runs.first()))))) {
             assertEquals(listOf("context_usage"),tools(scope).map {it.definition.name})
         }
-        assertEquals(listOf("context_usage"),tools(ContextRegistryScope(a.owner),null).map {it.definition.name})
+        assertEquals(listOf("read_compacted_history", "context_usage"),tools(ContextRegistryScope(a.owner),null).map {it.definition.name})
     }
     fun testCentralScopedContextUsesOriginalOwnerChecksAndWholeBatchValidation() {
         val a=seed();val b=seed()

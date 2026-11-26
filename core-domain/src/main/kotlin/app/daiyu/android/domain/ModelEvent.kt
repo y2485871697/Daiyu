@@ -221,6 +221,7 @@ data class ModelRequestDiagnostic(
     val providerCode: ProviderErrorCode? = null,
     val transport: ModelTransportDiagnostic? = null,
     val providerDetail: ModelProviderDetail? = null,
+    val confirmedOutputLimit: Boolean = false,
 ) {
     init {
         require(httpStatus == null || httpStatus in 300..599)

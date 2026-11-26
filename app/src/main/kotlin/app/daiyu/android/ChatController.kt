@@ -4815,7 +4815,8 @@ class ChatController internal constructor(private val application:Application,
                                 initialMeter = app.daiyu.android.storage.CloudContextUsageStore.meter(database.readableDatabase,
                                     conversationId, checkNotNull(runtimeStore).contextUsageModel(conversationId)))
                         else app.daiyu.android.context.ProductionRunContext(preparedContext.frozen, assistant,
-                            systemPrompt = assistantContext.systemPrompt,
+                            replayProtocol = requestProvider.protocol, systemPrompt = assistantContext.systemPrompt,
+                            archiveToolResult = contextService::archiveToolResult,
                             requestHeader = app.daiyu.android.context.HarnessRequestPolicy.header(requestProvider, assistantContext.systemPrompt),
                             initialMeter = app.daiyu.android.storage.CloudContextUsageStore.meter(database.readableDatabase,
                                 conversationId, checkNotNull(runtimeStore).contextUsageModel(conversationId))) { activity ->

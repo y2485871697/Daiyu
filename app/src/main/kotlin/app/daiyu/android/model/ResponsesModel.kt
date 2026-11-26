@@ -492,7 +492,7 @@ class ResponsesModel internal constructor(
                     resumeAllowed = backgroundResume != null
                     val items = if (backgroundResume != null) decoder.read(reader, cancelled::get,
                         prefix = ownItems.toList(), acknowledgedSink = requireNotNull(deliverAcknowledged))
-                    else try { ResponsesStream.readBuffered(reader, cancelled::get, deliver) }
+                    else try { ResponsesStream.readBuffered(reader, cancelled::get, deliver, summaryRequest) }
                     catch (limit: ResponsesStream.OutputLimitReached) {
                         eventBuffer.flush()
                         continueAfterOutputLimit(limit)

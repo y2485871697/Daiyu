@@ -11,62 +11,37 @@ internal class HarnessContextSummarizer(
     private val tools: List<ToolDefinition> = emptyList(),
     private val systemPrompt: String = "",
     private val nextModel: (() -> BoundSummaryModel)? = null,
+    private val archiveToolResult: ((Message, ContextPreparationCancellation) -> String)? = null,
 ) : ContextSummarizer {
     override val displayIdentity get() = bound.displayIdentity
     override fun summarize(input: CompressionInput): String {
         cancellation.check()
         require(input.originals.isNotEmpty()) { "摘要原文为空" }
         val originals = freezeContextMessages(input.originals)
+        val evidence = DaiyuSummaryEvidence.prepare(originals, cancellation, archiveToolResult)
         val id = UUID.randomUUID().toString()
         val instruction = Message(MessageId("summary-directive-$id"), originals.first().conversationId,
             RunId("summary-request-$id"), Message.USER_ROLE,
-            listOf(MessageBlock.Text("compaction-directive", HarnessCompactionPrompt.forCheckpointTarget(input.checkpointTargetTokens))),
+            listOf(MessageBlock.Text("compaction-directive", if (bound.requireCheckpointFormat) SummaryCheckpoint.instruction
+                else HarnessCompactionPrompt.forCheckpointTarget(input.checkpointTargetTokens))),
             RunStatus.COMPLETED)
-        val replay = originals + instruction
+        val replay = evidence.messages + instruction
         val budget = minOf(bound.inputBudgetTokens, DaiyuContextEstimate.summaryInputLimit(
             bound.contextWindowTokens, DaiyuContextEstimate.summaryOutputLimit(bound.contextWindowTokens)))
         val inputTokens = DaiyuCompaction.request(replay, tools, systemPrompt, includeScreen = false)
-        if (inputTokens > budget) return ModelContextSummarizer(bound, cancellation, nextModel,
-            planningBudget = budget).summarize(input)
+        if (inputTokens > budget || !evidence.replayable || !DaiyuSummaryEvidence.canReplay(replay, bound.outputPolicy?.protocol)) return ModelContextSummarizer(bound, cancellation, nextModel,
+            planningBudget = budget).summarize(input.copy(originals = evidence.messages))
         val deadline = bound.startDeadline()
-        var model = bound
-        var reasoningIndex = 0
-        while (true) {
-            cancellation.check(); deadline.check()
-            var session: ModelSession? = null
-            var registration: AutoCloseable? = null
-            try {
-                val opened = model.transport.openReplay(replay, tools, systemPrompt, deadline,
-                    bound.reasoningLevels[reasoningIndex], cancellation)
-                session = opened
-                registration = cancellation.register { opened.cancel() }
-                val text = linkedMapOf<String, StringBuilder>()
-                opened.next(emptyList()) { event ->
-                    cancellation.check(); deadline.check()
-                    when (event) {
-                        is ModelEvent.TextDelta -> text.getOrPut(event.itemId) { StringBuilder() }.append(event.text)
-                        is ModelEvent.TextFinal -> text[event.itemId] = StringBuilder(event.text)
-                        is ModelEvent.ToolReady -> error("摘要模型请求工具；未执行，原文保留")
-                        else -> Unit
-                    }
-                }
-                cancellation.check(); deadline.check()
-                return text.values.joinToString("\n").trim().also { require(it.isNotBlank()) { "摘要为空；原文保留" } }
-            } catch (failure: Exception) {
-                cancellation.check(); deadline.check()
-                if (failure !is ModelRequestException || failure.failure != ModelFailure.REQUEST ||
-                    failure.diagnostic?.reasoningLevelRejected != true || reasoningIndex != 0 ||
-                    bound.reasoningLevels.size < 2 || nextModel == null) throw failure
-                reasoningIndex++
-            } finally {
-                registration?.close()
-                session?.let { runCatching { it.cancel() } }
-            }
-            cancellation.check(); deadline.check()
-            model = checkNotNull(nextModel).invoke().also {
-                require(it.binding == bound.binding && it.contextWindowTokens == bound.contextWindowTokens &&
-                    it.inputBudgetTokens == bound.inputBudgetTokens && it.reasoningLevels == bound.reasoningLevels)
-            }
+        val requests = DaiyuSummaryRequest(bound, cancellation, deadline, nextModel)
+        val candidate = requests.complete(replay, inputTokens, tools, systemPrompt)
+        if (!bound.requireCheckpointFormat) return candidate
+        SummaryCheckpoint.validate(candidate)?.let { return it }
+        val repair = instruction.copy(blocks = listOf(MessageBlock.Text("compaction-repair",
+            SummaryCheckpoint.repairPrompt(candidate))))
+        val repairTokens = DaiyuCompaction.request(listOf(repair), emptyList(), "", includeScreen = false)
+        require(repairTokens <= budget) { "摘要格式修复输入超限；保留原文" }
+        return requireNotNull(SummaryCheckpoint.validate(requests.complete(listOf(repair), repairTokens))) {
+            "摘要八节格式不完整；保留原文"
         }
     }
 }

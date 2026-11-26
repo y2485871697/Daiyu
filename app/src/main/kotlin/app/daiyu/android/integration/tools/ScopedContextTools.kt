@@ -21,6 +21,10 @@ internal object ScopedContextTools {
                     if (preparedArchiveId == null || !scope.allowsArchive(conversationId)) return@mapNotNull null
                     "；省略archive_id时读取宿主本轮准备的档案；显式ID仍按原授权校验"
                 }
+                "read_compacted_history" -> {
+                    if (!scope.allowsArchive(conversationId)) return@mapNotNull null
+                    "；archive_id 填原文引用中的档案 ID"
+                }
                 "context_usage" -> "；省略branch_id时使用当前会话；两个ID均省略时读取本轮任务；" +
                     "仅提供branch_id时读取该会话总量；显式run_id仍按原授权校验；零条回执不代表零消耗，不用估算补齐"
                 else -> error("unsupported_context_tool")
@@ -28,7 +32,11 @@ internal object ScopedContextTools {
             check(source.getString("sideEffect") == "none")
             val definition = ToolDefinition(name, 1, source.getString("description") + hint,
                 "context.read.$name", ToolEffect.READ_ONLY,
-                schema(source.getJSONObject("parameters"), if (name == "context_usage") "branch_id" else "archive_id"))
+                schema(source.getJSONObject("parameters"), when (name) {
+                    "context_usage" -> "branch_id"
+                    "context_archive_page" -> "archive_id"
+                    else -> ""
+                }))
             object : RegisteredTool {
                 override val definition = definition
                 override fun prepare(arguments: ToolArguments): PreparedTool {

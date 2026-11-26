@@ -17,19 +17,19 @@ class ContextDialogInitializationContractTest(unittest.TestCase):
         self.assertLess(initializer.index('if (!configurationReady) return@remember null'),
                         initializer.index('CompressionDialogDraft('))
         self.assertIn('val draft = presentation.draft ?: initial', source)
-        gate = source.split('if (draft == null) {', 1)[1].split('if (presentation.choosingModel)', 1)[0]
-        self.assertIn('return', gate)
-        self.assertNotIn('CompressionConversationDialog(', gate)
+        self.assertIn('if (!isCurrent() || adapter == null || draft == null) return@confirm', source)
+        self.assertIn('enabled = draft != null && adapter != null', source)
 
     def test_pending_and_failure_paths_preserve_close_and_explicit_resume(self):
         source = SOURCE.read_text()
-        gate = source.split('if (draft == null) {', 1)[1].split('if (presentation.choosingModel)', 1)[0]
-        for token in ('BackHandler(onBack = dismiss)', 'if (isCurrent())',
-                      'if (adapter == null) onResume() else adapter.refresh()',
-                      'Modifier.testTag("context-close")'):
-            self.assertIn(token, gate)
+        dialog = SOURCE.with_name('CompressionConversationDialog.kt').read_text()
+        self.assertEqual(1, source.count('CompressionConversationDialog('))
+        self.assertIn('正在读取会话配置', source)
+        self.assertIn('if (adapter == null) onResume() else', source)
+        self.assertIn('val dismiss = { if (isCurrent()) { adapter?.close(); onClose() } }', source)
+        self.assertIn('Modifier.weight(1f).testTag("context-close")', dialog)
+        self.assertIn('if (draft != null) AssistantPreviewButton("确定"', dialog)
         self.assertNotIn('ProductionCompressionSettingsStore', source)
-        self.assertNotIn('submitCompression(', gate)
 
     def test_delayed_saved_enabled_disabled_and_failed_states_have_route_regressions(self):
         tests = ANDROID_TEST.read_text()

@@ -115,7 +115,23 @@ internal class ProviderSummaryModelPort(
     private val deadlines: SummaryDeadlineScheduler,
     private val usagePort: BoundSummaryUsagePort? = null,
     private val oauthHeaders: (app.daiyu.android.model.oauth.CodexAuth) -> Map<String, String> = app.daiyu.android.model.oauth.CodexOAuthRuntime::headers,
-) : ModelPort, SummaryModelTransport {
+) : ModelPort, SummaryModelTransport, DaiyuSummaryOutputPolicy {
+    override val protocol get() = configuration.provider.protocol
+    override val initialOutputLimit get() = configuration.maxOutputTokens
+    override fun retryLimit(current: Int, inputTokens: Long): Int? =
+        app.daiyu.android.domain.context.DaiyuContextEstimate.summaryRetryLimit(current,
+            configuration.contextWindowTokens, inputTokens,
+            configuration.inputBudgetTokens + initialOutputLimit - inputTokens)
+
+    override fun openSummary(history: List<Message>, tools: List<ToolDefinition>, systemPrompt: String?,
+        deadline: SummaryRequestDeadline, reasoning: app.daiyu.android.model.SummaryReasoningLevel,
+        cancellation: ContextPreparationCancellation, outputLimit: Int, inputTokens: Long): ModelSession {
+        require(inputTokens <= configuration.inputBudgetTokens &&
+            (outputLimit == initialOutputLimit || outputLimit == retryLimit(initialOutputLimit, inputTokens)))
+        fun checkLive() { cancellation.check(); deadline.check() }
+        return if (systemPrompt == null) openSession(history, deadline, reasoning, outputLimit, ::checkLive)
+        else openReplaySession(history, tools, systemPrompt, deadline, reasoning, cancellation, outputLimit)
+    }
     // Legacy direct callers still get a deadline before any adapter preparation.
     override fun open(history: List<Message>): ModelSession = openWithoutTools(history,
         SummaryRequestDeadline(configuration.deadlineMillis, deadlines::nanoTime))
@@ -132,12 +148,12 @@ internal class ProviderSummaryModelPort(
 
     override fun openWithoutTools(history: List<Message>, deadline: SummaryRequestDeadline,
         reasoning: app.daiyu.android.model.SummaryReasoningLevel): ModelSession =
-        openSession(history, deadline, reasoning) { deadline.check() }
+        openSession(history, deadline, reasoning, initialOutputLimit) { deadline.check() }
 
     override fun openWithoutTools(history: List<Message>, deadline: SummaryRequestDeadline,
         reasoning: app.daiyu.android.model.SummaryReasoningLevel,
         cancellation: ContextPreparationCancellation): ModelSession =
-        openSession(history, deadline, reasoning) { cancellation.check(); deadline.check() }
+        openSession(history, deadline, reasoning, initialOutputLimit) { cancellation.check(); deadline.check() }
 
     override fun openReplay(history: List<Message>, tools: List<ToolDefinition>, systemPrompt: String,
         deadline: SummaryRequestDeadline, cancellation: ContextPreparationCancellation): ModelSession =
@@ -145,7 +161,12 @@ internal class ProviderSummaryModelPort(
 
     override fun openReplay(history: List<Message>, tools: List<ToolDefinition>, systemPrompt: String,
         deadline: SummaryRequestDeadline, reasoning: app.daiyu.android.model.SummaryReasoningLevel,
-        cancellation: ContextPreparationCancellation): ModelSession {
+        cancellation: ContextPreparationCancellation): ModelSession =
+        openReplaySession(history, tools, systemPrompt, deadline, reasoning, cancellation, initialOutputLimit)
+
+    private fun openReplaySession(history: List<Message>, tools: List<ToolDefinition>, systemPrompt: String,
+        deadline: SummaryRequestDeadline, reasoning: app.daiyu.android.model.SummaryReasoningLevel,
+        cancellation: ContextPreparationCancellation, replayOutput: Int): ModelSession {
         fun checkLive() { cancellation.check(); deadline.check() }
         checkLive()
         val frozen = freezeContextMessages(history)
@@ -163,17 +184,18 @@ internal class ProviderSummaryModelPort(
         val system = listOf(systemPrompt, leadingSystem.flatMap { it.blocks }.filterIsInstance<MessageBlock.Text>()
             .joinToString("") { it.text }).filter { it.isNotEmpty() }.joinToString("\n\n")
         val inputTokens = DaiyuCompaction.request(messages, tools, system, includeScreen = false)
-        require(inputTokens <= configuration.inputBudgetTokens) { "摘要模型输入超过其配置预算；保留原文" }
+        require(inputTokens <= configuration.inputBudgetTokens + initialOutputLimit - replayOutput) {
+            "摘要模型输入超过其配置预算；保留原文"
+        }
         usagePort?.let { port ->
             require(frozen.all { it.conversationId.value == port.conversationId })
             port.claim()
         }
         checkLive()
-        val replayOutput = configuration.maxOutputTokens
         val provider = SummaryProviderFactory.create(configuration.provider, replayOutput,
             system, connect = connect, beforeConnect = ::checkLive, oauthHeaders = oauthHeaders, reasoning = reasoning, replay = true)
         val session = app.daiyu.android.model.usage.UsageRecorder.wrap(provider, configuration.provider,
-            usagePort?.conversationId ?: frozen.first().conversationId.value).open(messages, tools)
+            usagePort?.conversationId ?: frozen.first().conversationId.value).open(messages, emptyList<ToolDefinition>())
         return try {
             checkLive()
             TerminalSession(session, configuration.provider.protocol, deadline, deadlines, usagePort,
@@ -182,7 +204,7 @@ internal class ProviderSummaryModelPort(
     }
 
     private fun openSession(history: List<Message>, deadline: SummaryRequestDeadline,
-        reasoning: app.daiyu.android.model.SummaryReasoningLevel, checkLive: () -> Unit): ModelSession {
+        reasoning: app.daiyu.android.model.SummaryReasoningLevel, outputLimit: Int, checkLive: () -> Unit): ModelSession {
         checkLive()
         // Do not let callers replay protocol/tool history or use the summary adapter for images.
         require(history.isNotEmpty() && history.all { message ->
@@ -199,7 +221,7 @@ internal class ProviderSummaryModelPort(
             port.claim() // A bound host request/attempt cannot silently open another POST.
         }
         checkLive()
-        val provider = SummaryProviderFactory.create(configuration.provider, configuration.maxOutputTokens,
+        val provider = SummaryProviderFactory.create(configuration.provider, outputLimit,
             INSTRUCTIONS, connect = connect, beforeConnect = checkLive,
             oauthHeaders = oauthHeaders, reasoning = reasoning)
         checkLive()
@@ -208,7 +230,7 @@ internal class ProviderSummaryModelPort(
         try {
             checkLive()
             return TerminalSession(session, configuration.provider.protocol, deadline, deadlines, usagePort,
-                if (configuration.provider.oauth != null) SummaryOutputBudget(configuration.maxOutputTokens) else null)
+                if (configuration.provider.oauth != null) SummaryOutputBudget(outputLimit) else null)
         } catch (failure: Exception) {
             runCatching { session.cancel() }
             throw failure

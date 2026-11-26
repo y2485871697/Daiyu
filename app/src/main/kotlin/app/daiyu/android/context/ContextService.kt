@@ -50,14 +50,14 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         // probe in the same snapshot as the existing event/archive and anchor validation.
         val hasEvidence = db.rawQuery(
             "SELECT 1 FROM chat_timeline_events WHERE conversation_id=? UNION ALL " +
-                "SELECT 1 FROM context_archives WHERE conversation_id=? LIMIT 1",
+                "SELECT 1 FROM context_archives WHERE conversation_id=? AND id NOT LIKE 'tool-prune-%' LIMIT 1",
             arrayOf(id.value, id.value),
         ).use { it.moveToFirst() }
         if (!hasEvidence) return@run emptyList<app.daiyu.android.timeline.ChatTimelineEntry>()
         val anchors = displayAnchors ?: app.daiyu.android.timeline.TimelineAnchor.keys(read(db, id))
         val saved = app.daiyu.android.timeline.ChatTimelineStore.read(db, id.value).filter { it.anchor.listKey in anchors }
         val known = saved.map { it.id }.toSet()
-        val legacy = db.rawQuery("SELECT id,summary,blob_hash,created FROM context_archives WHERE conversation_id=? ORDER BY created,id", arrayOf(id.value)).use { c ->
+        val legacy = db.rawQuery("SELECT id,summary,blob_hash,created FROM context_archives WHERE conversation_id=? AND id NOT LIKE 'tool-prune-%' ORDER BY created,id", arrayOf(id.value)).use { c ->
             buildList { while (c.moveToNext()) {
                 if (c.getString(0) in known) continue
                 val document = ArchiveCodec.decodeDocument(blobs.forConversation(id.value).read(c.getString(2)))
@@ -70,7 +70,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         }
         (saved + legacy).filter { it.anchor.listKey in anchors }.map { entry ->
             if (entry is app.daiyu.android.timeline.ChatTimelineEntry.Compression)
-                entry.copy(summary = SummaryCheckpoint.withoutLegacyMarker(entry.summary)) else entry
+                entry.copy(summary = SummaryCheckpoint.display(entry.summary)) else entry
         }.sortedWith(compareBy({ it.created }, { it.id }))
     }
 
@@ -162,20 +162,19 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         return ArchiveFit(physicalCount, logical.drop(cut))
     }
 
-    internal fun managementHistory(id: ConversationId): Pair<List<Message>, PreparedContext> =
+    internal fun managementHistory(id: ConversationId, revisionOnly: Boolean = false): Pair<List<Message>, PreparedContext> =
         RuntimeDiagnostics.measure(Stage.CONTEXT_READ) {
             transactions.run { db ->
-                val originals = freezeContextMessages(read(db, id))
-                val prepared = effective(db, id, originals, activeOnly = true)
-                originals to if (prepared.messages === originals) prepared
-                else prepared.copy(messages = freezeContextMessages(prepared.messages))
+                require(RecordedContextUsageAdapter.isOwner(db, id.value, null)) { "会话不存在" }
+                val originals = readHistory(db, id, null)
+                originals to effective(db, id, originals, activeOnly = true, estimate = !revisionOnly)
             }
         }
 
     private fun effective(db: SQLiteDatabase, id: ConversationId, supplied: List<Message>? = null,
-        activeOnly: Boolean = supplied == null): PreparedContext {
+        activeOnly: Boolean = supplied == null, estimate: Boolean = true): PreparedContext {
         val original = supplied ?: read(db, id)
-        db.rawQuery("SELECT id,prefix_count,revision,summary,blob_hash FROM context_archives WHERE conversation_id=?" +
+        db.rawQuery("SELECT id,prefix_count,revision,summary,blob_hash FROM context_archives WHERE conversation_id=? AND id NOT LIKE 'tool-prune-%'" +
             (if (activeOnly) " AND active=1" else "") + " ORDER BY created DESC,id DESC", arrayOf(id.value)).use { c ->
             while (c.moveToNext()) {
                 val document = ArchiveCodec.decodeDocument(blobs.forConversation(id.value).read(c.getString(4)))
@@ -186,22 +185,24 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                 val system = original.takeWhile { it.role == "system" }
                 if (fit.tail.any { it.role == "system" }) continue
                 val messages = system + summaryMessage(id, c.getString(0), c.getString(3)) + fit.tail
-                return PreparedContext(messages, estimateTokens(messages), c.getString(0))
+                return PreparedContext(messages, if (estimate) estimateTokens(messages) else 0L, c.getString(0))
             }
         }
-        return PreparedContext(original, estimateTokens(original), null)
+        return PreparedContext(original, if (estimate) estimateTokens(original) else 0L, null)
     }
     fun compress(id: ConversationId, policy: CompressionPolicy, summarizer: ContextSummarizer,
         pendingMessages: List<Message> = emptyList(), cancelled: () -> Boolean = { false },
-        onStarted: () -> Unit = {}, retainTail: Boolean = true): String? =
+        onStarted: () -> Unit = {}, retainTail: Boolean = true,
+        replayProtocol: app.daiyu.android.model.ProviderProtocol? = null): String? =
         RuntimeDiagnostics.measure(
             Stage.SUMMARY_TOTAL,
             size = pendingMessages.size.toLong()) {
-            compressInternal(id, policy, summarizer, pendingMessages, cancelled, onStarted, retainTail)
+            compressInternal(id, policy, summarizer, pendingMessages, cancelled, onStarted, retainTail, replayProtocol)
         }
 
     private fun compressInternal(id: ConversationId, policy: CompressionPolicy, summarizer: ContextSummarizer,
-        pendingMessages: List<Message>, cancelled: () -> Boolean, onStarted: () -> Unit, retainTail: Boolean): String? {
+        pendingMessages: List<Message>, cancelled: () -> Boolean, onStarted: () -> Unit, retainTail: Boolean,
+        replayProtocol: app.daiyu.android.model.ProviderProtocol?): String? {
         checkCancellation(cancelled)
         val pending = pendingMessages.toList()
         require(pending.all { it.conversationId == id }) { "待发送消息不属于当前会话" }
@@ -217,7 +218,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             val expanded = if (policy.tokenTail) MessageHistory.expandWithSources(snapshot) else emptyList()
             val originalLogical = expanded.map { it.message }
             val logical = if (policy.tokenTail) MessageHistory.expand(currentSurface) else emptyList()
-            val surfaceCut = if (policy.tokenTail) DaiyuCompaction.cut(logical, policy.contextTokens, idle = !retainTail) else null
+            val surfaceCut = if (policy.tokenTail) DaiyuCompaction.cut(logical, policy.contextTokens, idle = !retainTail, protocol = replayProtocol) else null
             var logicalCut: Int? = null
             val count: Int
             val summaryInput: List<Message>
@@ -265,8 +266,9 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             val candidateTokens = if (policy.tokenTail) DaiyuCompaction.history(
                 listOf(summaryMessage(id, "candidate", summary)), includeScreen = false)
                 else summary.toByteArray(Charsets.UTF_8).size.toLong() + 128
-            val reduced = if (policy.tokenTail) DaiyuCompaction.reduced(summaryInput.dropWhile { it.role == "system" },
-                summaryMessage(id, "candidate", summary)) else candidateTokens < originalTokens
+            val reduced = if (policy.tokenTail) DaiyuCompaction.reduced(summaryInput.dropWhile { it.role == "system" } + tail,
+                listOf(summaryMessage(id, "candidate", summary)) + tail, tail.size,
+                checkNotNull(policy.contextTokens), replayProtocol) else candidateTokens < originalTokens
             RuntimeDiagnostics.event(Stage.SUMMARY_REDUCTION, when {
                 summary.isEmpty() -> RuntimeDiagnostics.Code.SUMMARY_EMPTY
                 reduced -> RuntimeDiagnostics.Code.SUMMARY_REDUCED
@@ -384,8 +386,29 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         ManualSummaryUsageOperation(transactions, lease)
 
     /** Archive IDs are not capabilities. Resolve the persisted, still-existing conversation owner. */
+    internal fun archiveToolResult(message: Message, cancellation: ContextPreparationCancellation): String {
+        cancellation.check()
+        val id = "tool-prune-${UUID.randomUUID()}"
+        val entries = listOf(message)
+        val owner = message.conversationId.value
+        val hash = blobs.forConversation(owner).put(ArchiveCodec.encode(entries))
+        transactions.run { db ->
+            cancellation.check()
+            require(RecordedContextUsageAdapter.isOwner(db, owner, null)) { "工具原文所属会话不可用" }
+            db.insertOrThrow("context_archives", null, ContentValues().apply {
+                put("id", id); put("conversation_id", owner); put("prefix_count", entries.size)
+                put("revision", ContextRevision.digest(entries)); put("summary", "started"); put("blob_hash", hash)
+                put("created", System.currentTimeMillis()); put("active", 0)
+            })
+            check(db.update("context_archives", ContentValues().apply { put("summary", "ready") },
+                "id=? AND summary='started'", arrayOf(id)) == 1)
+            cancellation.check()
+        }
+        return id
+    }
+
     fun archiveOwner(archiveId: String): ConversationId? = transactions.run { db ->
-        db.rawQuery("SELECT a.conversation_id FROM context_archives a JOIN conversations c ON c.id=a.conversation_id WHERE a.id=?",
+        db.rawQuery("SELECT a.conversation_id FROM context_archives a JOIN conversations c ON c.id=a.conversation_id WHERE a.id=? AND (a.id NOT LIKE 'tool-prune-%' OR a.summary='ready')",
             arrayOf(archiveId)).use { c -> if (c.moveToFirst()) ConversationId(c.getString(0)) else null }
     }
 
@@ -401,7 +424,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         expectedOwner: ConversationId? = null): ArchivePage {
         require(offset >= 0 && limit in 1..200)
         val messages = transactions.run { db ->
-            db.rawQuery("SELECT blob_hash,revision,conversation_id FROM context_archives WHERE id=?", arrayOf(archiveId)).use { c ->
+            db.rawQuery("SELECT blob_hash,revision,conversation_id FROM context_archives WHERE id=? AND (id NOT LIKE 'tool-prune-%' OR summary='ready')", arrayOf(archiveId)).use { c ->
                 require(c.moveToFirst()) { "档案不存在" }; val m = ArchiveCodec.decode(blobs.forConversation(c.getString(2)).read(c.getString(0))).also { MessageHistory.expand(it) }
                 require(ContextRevision.digest(m) == c.getString(1))
                 if (expectedOwner != null) require(m.all { it.conversationId == expectedOwner }) { "档案消息归属不一致" }
@@ -599,7 +622,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
     internal fun retainActionArchives(db: SQLiteDatabase, id: ConversationId, retained: List<Message>) {
         data class Retention(val archive: String, val oldCount: Int, val oldRevision: String,
             val cut: Int?, val fit: ArchiveFit?)
-        val plans = db.rawQuery("SELECT id,prefix_count,revision,blob_hash FROM context_archives WHERE conversation_id=?",
+        val plans = db.rawQuery("SELECT id,prefix_count,revision,blob_hash FROM context_archives WHERE conversation_id=? AND id NOT LIKE 'tool-prune-%'",
             arrayOf(id.value)).use { c -> buildList { while (c.moveToNext()) {
                 val document = ArchiveCodec.decodeDocument(blobs.forConversation(id.value).read(c.getString(3)))
                 add(Retention(c.getString(0), c.getInt(1), c.getString(2), document.logicalPrefixCount,
@@ -622,7 +645,7 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
                 }
             }
         }
-        val active = db.rawQuery("SELECT id FROM context_archives WHERE conversation_id=? ORDER BY created DESC,id DESC LIMIT 1",
+        val active = db.rawQuery("SELECT id FROM context_archives WHERE conversation_id=? AND id NOT LIKE 'tool-prune-%' ORDER BY created DESC,id DESC LIMIT 1",
             arrayOf(id.value)).use { if (it.moveToFirst()) it.getString(0) else null }
         if (active != null) {
             db.execSQL("UPDATE context_archives SET active=CASE WHEN id=? THEN 1 ELSE 0 END WHERE conversation_id=?", arrayOf(active, id.value))

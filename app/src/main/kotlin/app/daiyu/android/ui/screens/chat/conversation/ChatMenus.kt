@@ -114,10 +114,11 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
                                 ChatMenuAction.AUTO_COMPRESS -> compression.enabled != null && !compression.pending
                                 else -> true
                             }
-                            ChatMenuItem(entry, onDismiss, { action ->
-                                if (action == ChatMenuAction.COMPRESS_CONTEXT) removeMenu()
-                                onAction(action)
-                            }, checked = checked, enabled = enabled, previewStyle = true)
+                            val dismiss = if (entry.action == ChatMenuAction.COMPRESS_CONTEXT) ({
+                                removeMenu()
+                                onDismiss()
+                            }) else onDismiss
+                            ChatMenuItem(entry, dismiss, onAction, checked = checked, enabled = enabled, previewStyle = true)
                         }
                     }
                 }

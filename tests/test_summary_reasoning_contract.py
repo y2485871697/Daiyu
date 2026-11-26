@@ -14,14 +14,17 @@ class SummaryReasoningContract(unittest.TestCase):
             self.assertIn("summaryRequest: Boolean = false", code)
             self.assertIn("if (summaryRequest) null else settings.reasoningOverride", code)
     def test_retry_uses_new_admission_and_same_deadline(self):
-        code = (APP / "context/ModelContextSummarizer.kt").read_text()
-        self.assertEqual(1, code.count("bound.startDeadline()"))
-        self.assertIn("requests++ == 0", code)
-        self.assertIn("requireNotNull(nextModel)", code)
+        for name in ('ModelContextSummarizer', 'HarnessContextSummarizer'):
+            code = (APP / f"context/{name}.kt").read_text()
+            self.assertEqual(1, code.count("bound.startDeadline()"))
+            self.assertIn("DaiyuSummaryRequest(bound, cancellation, deadline, nextModel)", code)
+        code = (APP / "context/DaiyuSummaryRequest.kt").read_text()
+        self.assertIn("attempts++ == 0", code)
+        self.assertIn("bound.replacement(nextModel)", code)
         self.assertIn("failure.failure == ModelFailure.REQUEST", code)
         self.assertIn("failure.diagnostic?.reasoningLevelRejected == true", code)
-        self.assertIn("reasoningIndex < bound.reasoningLevels.lastIndex", code)
-        self.assertIn("requests < 64", code)
+        self.assertIn("failure.diagnostic?.confirmedOutputLimit == true && !increased", code)
+        self.assertIn("opened.next(emptyList())", code)
     def test_other_errors_never_become_reasoning_retries(self):
         parser = (APP / "model/ProviderHttpFailure.kt").read_text()
         self.assertIn("rejection == RequestRejection.UNSUPPORTED_VALUE", parser)

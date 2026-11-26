@@ -138,6 +138,8 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         val actions = Actions(holdRefresh = true); show(actions, awaitConfiguration = false)
         assertEquals(ContextManagementOperation.REFRESH, actions.state.value.operation)
         assertNull(actions.state.value.snapshot)
+        node("context-management-loading").assertIsDisplayed()
+        node("context-close").assertIsDisplayed()
         node("context-management").assertDoesNotExist()
         node("compression-dialog-custom").assertDoesNotExist()
         node("compression-dialog-model").assertDoesNotExist()

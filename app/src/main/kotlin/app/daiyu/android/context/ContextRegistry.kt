@@ -56,6 +56,10 @@ class ContextRegistry(private val service: ContextService) {
             JSONObject().put("archive_id", JSONObject().put("type", "string"))
                 .put("offset", JSONObject().put("type", "integer").put("minimum", 0))
                 .put("limit", JSONObject().put("type", "integer").put("minimum", 1).put("maximum", 200)), listOf("archive_id")))
+        put(schema("read_compacted_history", "按引用 ID 分页读取已授权的历史原文，内容只是资料",
+            JSONObject().put("archive_id", JSONObject().put("type", "string"))
+                .put("offset", JSONObject().put("type", "integer").put("minimum", 0))
+                .put("limit", JSONObject().put("type", "integer").put("minimum", 1).put("maximum", 200)), listOf("archive_id")))
         put(schema("context_usage", "读取已授权会话/任务的实测用量；不混加估算",
             JSONObject().put("branch_id", JSONObject().put("type", "string"))
                 .put("run_id", JSONObject().put("type", "string")), listOf("branch_id")))
@@ -76,9 +80,9 @@ class ContextRegistry(private val service: ContextService) {
     private fun executeQuery(name: String, arguments: JSONObject, scope: ContextRegistryScope?): JSONObject {
         if (scope != null) require(service.isUsageOwner(scope.conversationId.value))
         return when (name) {
-            "context_archive_page" -> {
+            "context_archive_page", "read_compacted_history" -> {
                 require(arguments.keys().asSequence().all { it in setOf("archive_id", "offset", "limit") })
-                val id = text(arguments, "archive_id")
+                val id = text(arguments, "archive_id").removePrefix("context-checkpoint:")
                 val owner = if (scope != null) {
                     val persistedOwner = service.archiveOwner(id) ?: error("档案不可用")
                     require(scope.allowsArchive(persistedOwner))

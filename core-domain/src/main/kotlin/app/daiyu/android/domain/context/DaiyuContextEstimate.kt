@@ -34,6 +34,13 @@ object DaiyuContextEstimate {
     fun summaryOutputLimit(window: Long): Int =
         minOf(16_384L, maxOf(8192L, window / 8), maxOf(1024L, window / 4)).toInt()
 
+    fun summaryRetryLimit(current: Int, window: Long, input: Long, providerRoom: Long = Long.MAX_VALUE): Int? {
+        if (current <= 0 || window <= 0 || input < 0) return null
+        val realInputCeiling = window - maxOf(512L, window / 20)
+        val limit = minOf(2L * current, 32_768L, realInputCeiling.coerceAtLeast(0) - input, providerRoom)
+        return limit.takeIf { it >= current.toLong() + minOf(current, 4096) }?.toInt()
+    }
+
     fun summaryInputLimit(window: Long, output: Int): Long {
         val planningWindow = minOf(window, 128_000L)
         return (planningWindow - output - maxOf(512L, planningWindow / 20)).coerceAtLeast(0)

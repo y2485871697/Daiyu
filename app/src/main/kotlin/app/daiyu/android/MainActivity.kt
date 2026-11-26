@@ -2649,7 +2649,7 @@ class MainActivity : ComponentActivity() {
                                                 refreshFloatingCall()
                                             }
                                         },
-                                        menuAvailable = chatRouteSelected && !sidebarVisible,
+                                        menuAvailable = chatRouteSelected && retainedPage == "chat" && !sidebarVisible,
                                         readAutomaticCompression = { pageCompression },
                                         dedicatedTool = { step -> DedicatedQuestion(step, routeActive && pageCurrent && presented) },
                                         toolContent = { step -> ToolTrustedContent(step, routeActive && pageCurrent && presented) },

@@ -22,7 +22,7 @@ internal object MessagesStream {
         readWithStopReason(reader, cancelled, sink, null)
 
     fun readWithStopReason(reader: BufferedReader, cancelled: () -> Boolean, sink: (ModelEvent) -> Unit,
-                           stopReason: ((String) -> Unit)?): String {
+                           stopReason: ((String) -> Unit)?, summaryRequest: Boolean = false): String {
         var deliveryFailure: Exception? = null
         fun deliver(event: ModelEvent) {
             if (cancelled()) throw InterruptedException()
@@ -205,6 +205,9 @@ internal object MessagesStream {
                     }
                     "message_stop" -> {
                         protocol(id != null && reason != null && blocks.isNotEmpty() && blocks.values.all { it.stopped })
+                        if (summaryRequest && reason == "max_tokens" && blocks.values.all {
+                            it.wire.getString("type") in setOf("text", "thinking", "redacted_thinking")
+                        }) throw ModelRequestException(ModelFailure.INCOMPLETE, ModelRequestDiagnostic(confirmedOutputLimit = true))
                         if (reason !in setOf("end_turn", "tool_use", "stop_sequence") && !(reason == "pause_turn" && stopReason != null))
                             throw ModelRequestException(ModelFailure.INCOMPLETE)
                         protocol((reason == "tool_use") == blocks.values.any { it.wire.getString("type") == "tool_use" })

@@ -56,10 +56,13 @@ internal object ProductionContextPreparation {
             if (CatalogSummaryBindings.decode(binding) == null) SummaryProfileStore(app).configuration(binding)
             else catalogSummaryConfiguration(app, binding)
         }
+        val archiveService by lazy { ContextService(app) }
         return ProductionRunContext(policy, parent, { usage ->
             requireNotNull(ProviderSummaryModelResolver { configuration }.resolve(configuration.binding, usage)) { "子代理摘要模型不可用" }
         }, automatic = true, agentLabel = agentLabel, taskId = parent.runId.value,
             systemPrompt = systemPrompt, requestHeader = HarnessRequestPolicy.header(snapshot, systemPrompt),
+            replayProtocol = snapshot.protocol,
+            archiveToolResult = { message, cancellation -> archiveService.archiveToolResult(message, cancellation) },
             runtimeSnapshot = {
                 requireWorker()
                 val current = ProductionCompressionSettingsStore(app).snapshot().childSettings(snapshot)

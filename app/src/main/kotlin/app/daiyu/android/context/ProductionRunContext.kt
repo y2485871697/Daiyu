@@ -24,20 +24,24 @@ internal class ProductionRunContext(
     override val systemPrompt: String = "",
     private val requestHeader: String = "",
     override val initialMeter: ContextMeterCheckpoint? = null,
+    private val replayProtocol: app.daiyu.android.model.ProviderProtocol? = null,
+    private val archiveToolResult: ((Message, ContextPreparationCancellation) -> String)? = null,
     private val runtimeSnapshot: (() -> RuntimeCompressionConfiguration)? = null,
     private val progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit = {},
 ) : RunContextRuntime {
     constructor(frozen: FrozenContextPreparation, parent: Message,
         systemPrompt: String = "", requestHeader: String = "", initialMeter: ContextMeterCheckpoint? = null,
+        replayProtocol: app.daiyu.android.model.ProviderProtocol? = null,
+        archiveToolResult: ((Message, ContextPreparationCancellation) -> String)? = null,
         progress: (app.daiyu.android.timeline.CompressionActivity) -> Unit = {}) :
         this(frozen.policy, parent, frozen.runtimeModel, frozen.policy.enabled && frozen.runtimeModel != null,
             systemPrompt = systemPrompt, requestHeader = requestHeader, initialMeter = initialMeter,
-            runtimeSnapshot = frozen.runtimeSnapshot, progress = progress)
+            runtimeSnapshot = frozen.runtimeSnapshot, replayProtocol = replayProtocol, archiveToolResult = archiveToolResult, progress = progress)
     override fun compressionSnapshot(): RunContextRuntime {
         val current = runtimeSnapshot?.invoke() ?: return this
         return ProductionRunContext(policy, parent, current.resolve, current.automatic,
             agentLabel = agentLabel, taskId = taskId, canCompact = canCompact, systemPrompt = systemPrompt,
-            requestHeader = requestHeader, initialMeter = initialMeter, progress = progress)
+            requestHeader = requestHeader, initialMeter = initialMeter, replayProtocol = replayProtocol, archiveToolResult = archiveToolResult, progress = progress)
             .also { it.definitions = definitions.toList() }
     }
     override val windowTokens = checkNotNull(policy.contextTokens)
@@ -111,7 +115,7 @@ internal class ProductionRunContext(
     private fun compactRegion(history: List<Message>, billedTokens: Long?, localTokens: Long,
         requests: RunSummaryRequests, cancelled: () -> Boolean, overflow: Boolean): List<Message>? {
         val logical = MessageHistory.expand(history)
-        val cut = DaiyuCompaction.cut(logical, windowTokens, billedTokens, localTokens, overflow = overflow)
+        val cut = DaiyuCompaction.cut(logical, windowTokens, billedTokens, localTokens, overflow = overflow, protocol = replayProtocol)
         if (cut <= 0 || cancelled()) return null
         fun usage(): BoundSummaryUsagePort {
             val request = requests.create()
@@ -133,7 +137,7 @@ internal class ProductionRunContext(
             progress(activity)
             val prefixTokens = DaiyuCompaction.history(prefix, includeScreen = false)
             val text = HarnessContextSummarizer(model, cancellation, definitions, systemPrompt,
-                nextModel = model.rebind?.let { rebind -> { rebind(usage()) } }).summarize(
+                nextModel = model.rebind?.let { rebind -> { rebind(usage()) } }, archiveToolResult = archiveToolResult).summarize(
                 CompressionInput(logical.take(cut), ContextRevision.digest(prefix),
                     checkpointTargetTokens = compactionCheckpointTarget(prefixTokens))).trim()
             if (cancelled()) return null
@@ -144,7 +148,8 @@ internal class ProductionRunContext(
             val result = logical.take(systemCount) + summary + logical.drop(cut)
             val candidateTokens = DaiyuCompaction.history(listOf(summary), includeScreen = false)
             val originalTokens = prefixTokens
-            val reduced = DaiyuCompaction.reduced(prefix, summary)
+            val reduced = DaiyuCompaction.reduced(logical.drop(systemCount), result.drop(systemCount),
+                logical.size - cut, windowTokens, replayProtocol)
             RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.SUMMARY_REDUCTION,
                 if (reduced) RuntimeDiagnostics.Code.SUMMARY_REDUCED else RuntimeDiagnostics.Code.SUMMARY_NOT_REDUCED,
                 count = originalTokens, size = candidateTokens)

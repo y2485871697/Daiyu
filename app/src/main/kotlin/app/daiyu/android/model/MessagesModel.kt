@@ -186,7 +186,7 @@ class MessagesModel internal constructor(
                 trace.reader(conn.inputStream).useProviderResponse { reader ->
                     val raw = MessagesStream.readWithStopReason(reader, cancelled::get, deliver,
                         if (settings.requestOptions.nativeSearchEnabled(ProviderProtocol.MESSAGES, settings.model, settings.endpoint, tools))
-                            { reason: String -> serverContinuation = reason == "pause_turn" } else null)
+                            { reason: String -> serverContinuation = reason == "pause_turn" } else null, summaryRequest)
                     trace.completionReceived()
                     checkCancelled()
                     if (serverContinuation) {

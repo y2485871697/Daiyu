@@ -350,7 +350,6 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var contextState = contextRuntime?.let { RunContextCheckpoint(meter = it.initialMeter?.copy(overflowRetries = 0) ?: ContextMeterCheckpoint()) }
         var acceptedContextSegments = 0
         var reopenAfterCompaction = false
-        var contextInputOverhead = 0L
         var pressureChecked = false
         var sessionAwaitingFirstNext = false
         var requestDefinitions = emptyList<ToolDefinition>()
@@ -379,11 +378,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var pendingCheckpoint: PendingToolCheckpoint? = null
         val records = linkedMapOf<ToolCallId, ToolRecord>()
         fun snapshot(message: Message = current, usageSnapshot: List<RequestUsageCheckpoint> = usage): RunCheckpoint {
-            val surface = contextRuntime?.fixedSurfaceTokens(meterHistory(message))
             return synchronized(terminalLock) {
                 val now = reasoningInterruptedAtNanos ?: System.nanoTime()
-                contextState = contextState?.let { state -> state.copy(meter = (state.meter ?: ContextMeterCheckpoint()).copy(
-                    surfaceTokens = checkNotNull(surface))) }
                 RunCheckpoint(message.frozenReasoning(now), effectiveHistory(message).map { it.frozenReasoning(now) },
                     if (message.status != RunStatus.RUNNING) ExecutionPhase.TERMINAL else execution.phase,
                     records.values.toList(), outputs, supplements.toList(), round, requestUnconfirmed,
@@ -849,9 +845,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 transportCheckpoint = null
                 request = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
                 usageRequests = usageRequests + checkNotNull(request)
-                contextState = contextState?.let { state -> state.copy(input = null,
-                    meter = (state.meter ?: ContextMeterCheckpoint()).copy(inputFixedSurfaceTokens =
-                        checkNotNull(contextRuntime).fixedSurfaceTokens(meterHistory()))) }
+                contextState = contextState?.copy(input = null)
                 requestUnconfirmed = true
                 checkpoint()
                 val sink: (ModelEvent) -> Unit = { event ->
@@ -871,9 +865,6 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 val surface = checkNotNull(contextRuntime).localTokens(meterHistory(), requestDefinitions)
                                 state.copy(input = RequestInputCheckpoint(checkNotNull(request), surface, historyTokens = surface))
                             }
-                            contextState = contextState?.let { state -> state.copy(meter = (state.meter ?: ContextMeterCheckpoint()).copy(
-                                inputFixedSurfaceTokens = checkNotNull(contextRuntime).fixedSurfaceTokens(meterHistory()))) }
-                            contextState?.input?.let { contextInputOverhead = it.localTokens - it.historyTokens }
                             checkpoint()
                         }
                         is ModelEvent.Usage -> {
@@ -1334,8 +1325,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 requestUnconfirmed = false
                 contextRuntime?.let { runtime ->
                     val state = checkNotNull(contextState)
-                    val surface = runtime.localTokens(meterHistory(), requestDefinitions)
-                    val estimate = surface
+                    val estimate = state.input?.takeIf { it.request == request }?.localTokens
                     val receipt = usage.lastOrNull { it.source == UsageRequestSource.MAIN && it.request == request }?.snapshot
                     val reportedTotal = receipt?.inputTokens?.let { prompt ->
                         receipt.outputTokens?.takeIf { it >= 0 && prompt in 0..Long.MAX_VALUE - it }?.let { prompt + it }
@@ -1348,7 +1338,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     val threshold = runtime.pressureThresholdTokens
                     val rearm = cloudInput != null && threshold != null && cloudInput < threshold
                     contextState = state.copy(meter = meter.copy(anchorHeader = header, anchorEstimate = estimate,
-                        anchorSurface = surface, anchorUsageTotal = reportedTotal, overflowRetries = 0,
+                        anchorSurface = estimate, anchorUsageTotal = reportedTotal, overflowRetries = 0,
                         cloudInputTokens = cloudInput,
                         cloudCompactionAttempted = meter.anchorHeader == header && meter.cloudCompactionAttempted && !rearm))
                 }

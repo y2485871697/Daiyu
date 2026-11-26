@@ -64,12 +64,15 @@ class ContextUsageWiringContractTest(unittest.TestCase):
 
     def test_recovery_read_is_rearmed_by_ready_without_polling_or_writes(self):
         helper = text('ui/screens/chat/conversation/ChatContextUsage.kt')
-        self.assertIn('phase: ComposerPhase, ready: Boolean', helper)
-        self.assertIn('phase, ready, active)', helper)
+        self.assertIn('modelRevision: Long, ready: Boolean', helper)
+        self.assertNotIn('ComposerPhase', helper)
+        self.assertIn('modelRevision, ready, active)', helper)
         self.assertIn('active: Boolean = true', helper)
         self.assertIn('if (!ready || !active) return@LaunchedEffect', helper)
-        self.assertIn('active = routeActive && !sidebarVisible && displayWindow == null', text('MainActivity.kt'))
-        self.assertIn('ready = controller.ready', text('MainActivity.kt'))
+        call = text('MainActivity.kt').split('rememberChatContextUsage(', 1)[1].split('val usageConfiguration', 1)[0]
+        self.assertIn('active = routeActive && !sidebarVisible', call)
+        self.assertIn('ready = controller.ready && selectionReady', call)
+        self.assertNotIn('displayWindow', call)
         for forbidden in ('delay(', '.save(', 'while (', 'NonCancellable'):
             self.assertNotIn(forbidden, helper)
         self.assertIn('testFileReopenRestoresStableActualWithoutRelaxingLegacyOrInvalidation',
@@ -136,7 +139,9 @@ class ContextUsageWiringContractTest(unittest.TestCase):
 
     def test_actual_zero_survives_validation_and_receipt_restore(self):
         model = text('ui/model/CloudContextUsage.kt')
-        self.assertIn('usage.inputTokens?.takeIf { it >= 0 }', model)
+        self.assertIn('CodexContextPolicy.acceptedInput(usage, window)', model)
+        policy = (ROOT / 'core-domain/src/main/kotlin/app/daiyu/android/domain/context/CodexContextPolicy.kt').read_text()
+        self.assertIn('usage.inputTokens?.takeIf { it >= 0 }', policy)
         self.assertIn('inputTokens?.takeIf { it >= 0 }', model)
         self.assertIn('it.input >= 0', text('storage/CloudContextUsageStore.kt'))
         self.assertIn('"${compact(inputTokens)}/${compact(windowTokens?.takeIf { it > 0 })}"', model)

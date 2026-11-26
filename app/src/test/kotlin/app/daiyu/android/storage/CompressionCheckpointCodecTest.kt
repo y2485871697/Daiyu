@@ -122,13 +122,19 @@ class CompressionCheckpointCodecTest {
         val meter = ContextMeterCheckpoint(anchorHeader = "header", anchorEstimate = 123,
             anchorSurface = 100, anchorUsageTotal = 999, pressureTokens = 900,
             sampledSurfaceTokens = 80, surfaceTokens = 120, inputFixedSurfaceTokens = 90,
-            overflowRetries = 1)
+            overflowRetries = 1, cloudInputTokens = 901, cloudCompactionAttempted = true)
         val value = base.copy(context = base.context!!.copy(meter = meter))
         val encoded = RunCheckpointCodec.encode(value)
         assertEquals(11, JSONObject(encoded).getInt("version"))
         assertEquals(value, RunCheckpointCodec.decode(encoded))
         assertEquals(meter, ProcessRecovery.interrupt(RunCheckpointCodec.decode(encoded)).context!!.meter)
         assertEquals(value.usage, RunCheckpointCodec.decode(encoded).usage)
+        val legacy = JSONObject(encoded)
+        legacy.getJSONObject("context").getJSONObject("meter").apply {
+            remove("cloud_input"); remove("cloud_compaction_attempted")
+        }
+        assertEquals(meter.copy(cloudInputTokens = null, cloudCompactionAttempted = false),
+            RunCheckpointCodec.decode(legacy.toString()).context!!.meter)
         val invalid = JSONObject(encoded)
         invalid.getJSONObject("context").getJSONObject("meter").put("overflow_retries", 4294967296L)
         assertThrows(IllegalArgumentException::class.java) { RunCheckpointCodec.decode(invalid.toString()) }

@@ -47,7 +47,7 @@ class CatalogSummaryExecutionPolicyTest {
             assertFalse(result.provider.requestOptions.openAiWebSearchEnabled)
             assertFalse(result.provider.requestOptions.customBody.contains("reasoning"))
             assertTrue(snapshot.requestOptions.customBody.contains("reasoning"))
-            assertEquals(8192, result.maxOutputTokens)
+            assertEquals(8000, result.maxOutputTokens)
         }
     }
 

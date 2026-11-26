@@ -147,8 +147,23 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
     fun testCompressionSheetNeverSlidesOrRemountsChatOnRepeatedOpenAndClose() {
         val drawingWasEnabled = androidx.test.platform.graphics.HardwareRendererCompat.isDrawingEnabled()
         if (!drawingWasEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(true)
+        val probe = app.daiyu.android.ui.screens.chat.conversation.ChatPageHostProbe
+        val oldObserver = probe.observer
+        data class Draw(val root: Any, val visit: Any)
+        val draws = java.util.concurrent.CopyOnWriteArrayList<Draw>()
+        val disposed = java.util.concurrent.CopyOnWriteArrayList<Any>()
         try {
-            seedAndSelect()
+            val owner = seedAndSelect().id.value
+            mainThread {
+                probe.observer = app.daiyu.android.ui.screens.chat.conversation.ChatPageHostProbe.Observer(
+                    onDraw = { key, root, visit -> if (key == owner) draws += Draw(root, visit) },
+                    onDisposed = { disposed += it },
+                )
+                probe.drawEpoch++
+                activity.window.decorView.invalidate()
+            }
+            ui.waitUntil(5_000) { draws.isNotEmpty() }
+            val initialDraw = draws.last()
             awaitLocalReaders()
             dismissIme()
             ui.waitForIdle()
@@ -165,7 +180,8 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
                     node("page-back-departure").assertDoesNotExist()
                     node("page-back-target").assertDoesNotExist()
                     assertEquals(initial, node("page-back-surface").fetchSemanticsNode().boundsInRoot)
-                    assertEquals(originalDraftId, node("chat-draft").fetchSemanticsNode().id)
+                    assertFalse("retained chat must not be disposed while the modal owns input", initialDraw.visit in disposed)
+                    assertEquals(initialDraw, draws.last())
                 }
             }
             repeat(2) { attempt ->
@@ -196,11 +212,13 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
                 } finally { ui.mainClock.autoAdvance = true }
                 assertChatRoute()
                 assertDraft("retained unsent draft")
+                assertEquals(originalDraftId, node("chat-draft").fetchSemanticsNode().id)
             }
             assertEquals(before, fixture.database.exportBackup())
             assertEquals(0, fixture.opens.get())
         } finally {
             ui.mainClock.autoAdvance = true
+            mainThread { probe.observer = oldObserver }
             if (!drawingWasEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(false)
         }
     }

@@ -72,7 +72,7 @@ class TokenTailEstimateTest {
         val policy = app.daiyu.android.domain.context.CompressionPolicy(
             contextTokens = 272000, reserveTokens = 4096, tokenTail = true)
         val local = estimateSendContextTokens(policy, listOf(row))
-        assertEquals(4L + TokenTailCompression.imageReferenceTokens(image), local)
+        assertEquals(3L + maxOf(85L, image.bytes.toLong() / 4096), local)
         assertTrue(policy.fitsSendBudget(local))
         val legacy = policy.copy(tokenTail = false)
         assertEquals(385214L, estimateSendContextTokens(legacy, listOf(row)))

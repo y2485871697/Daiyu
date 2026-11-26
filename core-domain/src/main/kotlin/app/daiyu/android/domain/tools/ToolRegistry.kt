@@ -74,7 +74,8 @@ class PreparedTool private constructor(
     private val contextAdmission: ((ToolExecutionContext) -> ExecutionReceipt.NotExecuted?)? = null,
     internal val approveWrite: ((ToolExecutionContext) -> TaskAuthorization?)? = null,
     internal val repeatConfirmed: Boolean = false,
-    private val beforeReservation: (() -> PreparedTool)? = null
+    private val beforeReservation: (() -> PreparedTool)? = null,
+    private val beforeReplay: (() -> ExecutionReceipt.NotExecuted?)? = null
 ) {
     constructor(writeEffect: WriteEffect? = null, execute: () -> ExecutionReceipt) : this(writeEffect, execute, null)
     internal val requiresContext: Boolean get() = contextualExecution != null
@@ -89,13 +90,20 @@ class PreparedTool private constructor(
      */
     fun refreshBeforeReservation(refresh: () -> PreparedTool): PreparedTool =
         PreparedTool(writeEffect, execute, contextualExecution, isUserBarrier,
-            contextAdmission, approveWrite, repeatConfirmed, refresh)
+            contextAdmission, approveWrite, repeatConfirmed, refresh, beforeReplay)
 
     internal fun forReservation(): PreparedTool = beforeReservation?.invoke()?.also {
         check(it.beforeReservation == null) { "recursive_preparation_refresh" }
     } ?: this
 
+    internal fun admitReplay(): ExecutionReceipt.NotExecuted? = beforeReplay?.invoke()
+
     companion object {
+        /** Revalidate a cached read result before delivery. May perform bounded reads,
+         * but must not execute the original adapter, write, or change the cached receipt. */
+        fun guardedRead(checkReplay: () -> ExecutionReceipt.NotExecuted?, execute: () -> ExecutionReceipt): PreparedTool =
+            PreparedTool(null, execute, null, beforeReplay = checkReplay)
+
         /** A host consent callback for one exact effect; never mutates the run's frozen grant.
          * Called only for a fresh ledger reservation, outside validation and admission. */
         fun approvedWrite(effect: WriteEffect, approve: (ToolExecutionContext) -> TaskAuthorization?,

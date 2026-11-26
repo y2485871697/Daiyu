@@ -124,8 +124,14 @@ class ToolDispatcher(
                 // An earlier call in this batch may have revoked access since whole-batch admission.
                 // Fence delivery without executing the tool or rewriting the original receipt.
                 val denial = if (stop || cancelled()) ExecutionReceipt.NotExecuted("batch_stopped_before_execution")
-                    else try { plans[index].admit(contexts[index]) }
-                    catch (_: Exception) { ExecutionReceipt.NotExecuted("context_admission_failed") }
+                    else try {
+                        val plan = plans[index]
+                        plan.admit(contexts[index]) ?: plan.admitReplay()
+                            ?: if (cancelled()) ExecutionReceipt.NotExecuted("batch_stopped_before_execution") else null
+                    } catch (failure: Exception) {
+                        if (failure is InterruptedException) Thread.currentThread().interrupt()
+                        ExecutionReceipt.NotExecuted("context_admission_failed")
+                    }
                 return@mapIndexed ToolDispatchResult(call.id, if (denial != null)
                     DispatchOutcome.NotExecuted(denial.code)
                 else DispatchOutcome.Confirmed(entry.payload, entry.isError, replayed = true))

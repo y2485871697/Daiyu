@@ -11,7 +11,7 @@ internal fun toolOperationGlyph(toolName: String, argumentJson: ToolPresentation
     val args by lazy { argumentJson.read(Int.MAX_VALUE) }
     return when (toolName) {
         "assistant_memory_search", "skills_list" -> "search"
-        "assistant_memory_read", "skills_read" -> "book"
+        "assistant_memory_read", "assistant_memory_write", "skills_read" -> "book"
         "skills_read_resource" -> "resource"
         "run_child_models" -> "batch"
         "start_child_tasks" -> "launchBackground"

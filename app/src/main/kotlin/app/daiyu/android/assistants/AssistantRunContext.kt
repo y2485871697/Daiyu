@@ -1,13 +1,14 @@
 package app.daiyu.android.assistants
 
 import java.util.Collections
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MissingAssistantBindingException : IllegalArgumentException("会话未绑定助手")
 class AssistantNotFoundException(val assistantId: String) : IllegalArgumentException("会话绑定的助手不存在或已删除")
 
 /**
- * One run's frozen assistant input. Only the optional revision-scoped read port retains
- * store/assets; skill IDs are metadata only, never a tool or device permission.
+ * One run's frozen assistant input. Revision-scoped memory ports retain store/assets;
+ * skill IDs are metadata only, never a tool or device permission.
  */
 class AssistantRunContext private constructor(
     val assistantId: String,
@@ -19,11 +20,16 @@ class AssistantRunContext private constructor(
     enabledSkillIds: List<String>,
     val memoryRevision: String? = null,
     val memoryReadPort: AssistantMemoryReadPort? = null,
+    internal val memoryWritePort: AssistantMemoryWritePort? = null,
 ) {
     val enabledSkillIds: List<String> = Collections.unmodifiableList(ArrayList(enabledSkillIds))
     val systemPrompt: String = AssistantPrompt.build(name, prompt).let { personality ->
         val base = if (resolvedMemory.isEmpty()) personality else "$personality\n\n记忆：\n$resolvedMemory"
-        val withMemoryPolicy = if (memoryReadPort == null) base else "$base\n\n${AssistantMemoryLimits.MODEL_POLICY}"
+        val withMemoryPolicy = when {
+            memoryWritePort != null -> "$base\n\n${AssistantMemoryLimits.COMMON_POLICY}${AutomaticMemoryPolicy.MODEL_POLICY}"
+            memoryReadPort != null -> "$base\n\n${AssistantMemoryLimits.MODEL_POLICY}"
+            else -> base
+        }
         "$withMemoryPolicy\n\n$EXECUTION_POLICY"
     }
 
@@ -48,10 +54,16 @@ class AssistantRunContext private constructor(
                 ?: throw AssistantNotFoundException(assistantId)
             val snapshot = if (profile.memoryEnabled) assets.memory(profile.id) else null
             if (store.read(assistantId) != profile) throw StaleAssistantProfileException()
-            val port = snapshot?.let { RevisionAssistantMemoryReadPort(profile.id, it.revision, store, assets) }
+            val superseded = AtomicBoolean(false)
+            val port = snapshot?.let { RevisionAssistantMemoryReadPort(profile.id, it.revision, store, assets, superseded::get) }
+            val writer = snapshot?.takeIf { profile.autoMemoryWriteEnabled }?.let {
+                store.automaticMemoryWriteGrant(profile)?.let { grant ->
+                    AssistantMemoryWritePort(profile.id, it.revision, grant, store, assets) { superseded.set(true) }
+                }
+            }
             return AssistantRunContext(profile.id, profile.name, profile.prompt, profile.avatarFileName,
                 profile.memoryEnabled, boundedAssistantMemoryCore(snapshot?.content.orEmpty()),
-                profile.enabledSkillIds, snapshot?.revision, port)
+                profile.enabledSkillIds, snapshot?.revision, port, writer)
         }
 
         /** 限制调用方提供的记忆长度；需要按版本校验并按需读取时，使用 assets 重载。 */

@@ -90,7 +90,7 @@ class GenerationProtocolMigrationTest : InstrumentationTestCase() {
             val outputs = rows(db, "generation_outputs"); val attempts = rows(db, "generation_attempts")
             db.version = version; initial.close()
             val migrated = helper(context); val upgraded = migrated.writableDatabase
-            assertEquals(34, upgraded.version)
+            assertEquals(35, upgraded.version)
             assertTrue(upgraded.rawQuery("SELECT sql FROM sqlite_master WHERE name='generation_attempts'", null)
                 .use { it.moveToFirst(); it.getString(0).contains("BETWEEN 1 AND ${GenerationAttemptCodec.MAX_ENCODED_BYTES}") })
             assertEquals(outputs, rows(upgraded, "generation_outputs"))
@@ -107,7 +107,7 @@ class GenerationProtocolMigrationTest : InstrumentationTestCase() {
                 .use { it.moveToFirst(); it.getInt(0) })
             migrated.close()
             val reopened = helper(context).writableDatabase
-            assertEquals(34, reopened.version)
+            assertEquals(35, reopened.version)
             assertEquals(outputs, rows(reopened, "generation_outputs"))
             assertEquals(attempts, rows(reopened, "generation_attempts"))
             val reserved = SQLiteGenerationAttemptStore({ reopened }, binding)

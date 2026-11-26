@@ -33,7 +33,24 @@ class SqliteAssistantStore(private val database: ConversationDatabase) : Assista
 
     override fun read(id: String): AssistantProfile? = current().snapshot.profiles.firstOrNull { it.id == id }
 
-    private fun <T> change(work: (SQLiteDatabase) -> T): T {
+    override fun automaticMemoryWriteGrant(profile: AssistantProfile): Long? = synchronized(mutationLock) {
+        val state = current()
+        state.revision.takeIf { profile.memoryEnabled && profile.autoMemoryWriteEnabled &&
+            state.snapshot.profiles.any { it == profile } }
+    }
+
+    override fun withAutomaticMemoryWrite(id: String, grant: Long, commit: () -> AssistantMemorySnapshot): AssistantMemorySnapshot =
+        synchronized(mutationLock) {
+            val state = current()
+            if (state.revision != grant || state.snapshot.profiles.none {
+                    it.id == id && it.memoryEnabled && it.autoMemoryWriteEnabled
+                }) throw AssistantMemoryUnavailable()
+            // The read transaction has ended, but profile modifications cannot pass this gate.
+            commit()
+        }
+
+    private fun <T> change(work: (SQLiteDatabase) -> T): T = synchronized(mutationLock) {
+
         val db = database.writableDatabase
         db.beginTransaction()
         val result: T
@@ -44,7 +61,7 @@ class SqliteAssistantStore(private val database: ConversationDatabase) : Assista
             next = publication(db)
             db.setTransactionSuccessful()
         } finally { db.endTransaction() }
-        // No monitor spans SQLite I/O. A late publisher cannot overwrite a newer commit.
+        // Publish only after SQLite commits.
         synchronized(publicationLock) {
             if(next.revision > publishedRevision) {
                 profiles.value = next.snapshot.profiles
@@ -52,7 +69,7 @@ class SqliteAssistantStore(private val database: ConversationDatabase) : Assista
                 publishedRevision = next.revision
             }
         }
-        return result
+        result
     }
 
     override fun save(profile: AssistantProfile): AssistantProfile = change { db ->
@@ -108,12 +125,23 @@ class SqliteAssistantStore(private val database: ConversationDatabase) : Assista
     }
 
     companion object {
+        // Process-wide, including across multiple instances of this store.
+        private val mutationLock = Any()
+        private const val AUTO_MEMORY_COLUMN = "auto_memory_write_enabled INTEGER NOT NULL DEFAULT 0 CHECK(auto_memory_write_enabled IN (0,1))"
+
+        internal fun installAutoMemoryColumn(db: SQLiteDatabase) {
+            val present = db.rawQuery("PRAGMA table_info(assistants)", null).use { cursor ->
+                generateSequence { if (cursor.moveToNext()) cursor.getString(1) else null }.any { it == "auto_memory_write_enabled" }
+            }
+            if (!present) db.execSQL("ALTER TABLE assistants ADD COLUMN $AUTO_MEMORY_COLUMN")
+        }
+
         /** Called only in SQLiteOpenHelper's create/upgrade transaction. A parse failure rolls
          * back schema AND data/version. The source preferences remain intact even on success. */
         internal fun install(db: SQLiteDatabase, legacy: String?) {
             val seed = legacy?.let(LegacyAssistantCodec::decode) ?: LegacyAssistantCodec.Snapshot(
                 listOf(SharedPreferencesAssistantStore.defaultProfile()), AssistantPrompt.DEFAULT_ID)
-            db.execSQL("CREATE TABLE assistants(id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,prompt TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',avatar_file_name TEXT,created_at INTEGER NOT NULL,memory_enabled INTEGER NOT NULL CHECK(memory_enabled IN (0,1)),enabled_skill_ids TEXT NOT NULL,position INTEGER NOT NULL UNIQUE)")
+            db.execSQL("CREATE TABLE assistants(id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,prompt TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',avatar_file_name TEXT,created_at INTEGER NOT NULL,memory_enabled INTEGER NOT NULL CHECK(memory_enabled IN (0,1)),enabled_skill_ids TEXT NOT NULL,position INTEGER NOT NULL UNIQUE,$AUTO_MEMORY_COLUMN)")
             db.execSQL("CREATE TABLE assistant_selection(id INTEGER PRIMARY KEY CHECK(id=1),selected_id TEXT NOT NULL,revision INTEGER NOT NULL DEFAULT 0)")
             seed.profiles.forEachIndexed { index, profile -> check(db.insertOrThrow("assistants", null, values(profile, index.toLong())) != -1L) }
             check(db.insertOrThrow("assistant_selection", null, ContentValues().apply { put("id", 1); put("selected_id", seed.selectedId) }) != -1L)
@@ -123,15 +151,16 @@ class SqliteAssistantStore(private val database: ConversationDatabase) : Assista
         private fun values(p: AssistantProfile, position: Long) = ContentValues().apply {
             put("id", p.id); put("name", p.name); put("prompt", p.prompt); put("description", p.description); put("avatar_file_name", p.avatarFileName)
             put("created_at", p.createdAt); put("memory_enabled", if (p.memoryEnabled) 1 else 0)
+            put("auto_memory_write_enabled", if (p.autoMemoryWriteEnabled) 1 else 0)
             put("enabled_skill_ids", JSONArray(p.enabledSkillIds).toString()); put("position", position)
         }
 
         private fun readSnapshot(db: SQLiteDatabase): LegacyAssistantCodec.Snapshot {
-            val profiles = db.rawQuery("SELECT id,name,prompt,avatar_file_name,created_at,memory_enabled,enabled_skill_ids,description FROM assistants ORDER BY position", null).use { c ->
+            val profiles = db.rawQuery("SELECT id,name,prompt,avatar_file_name,created_at,memory_enabled,enabled_skill_ids,description,auto_memory_write_enabled FROM assistants ORDER BY position", null).use { c ->
                 buildList { while (c.moveToNext()) {
                     val skills = JSONArray(c.getString(6))
                     add(AssistantProfile(AssistantStorage.id(c.getString(0)), c.getString(1), c.getString(2), c.getString(3),
-                        c.getLong(4), c.getInt(5) == 1, (0 until skills.length()).map { skills.getString(it) }, c.getString(7)))
+                        c.getLong(4), c.getInt(5) == 1, (0 until skills.length()).map { skills.getString(it) }, c.getString(7), c.getInt(8) == 1))
                 } }
             }
             val selected = db.rawQuery("SELECT selected_id FROM assistant_selection WHERE id=1", null).use { check(it.moveToFirst()); it.getString(0) }

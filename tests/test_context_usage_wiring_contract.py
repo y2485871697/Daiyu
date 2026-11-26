@@ -147,7 +147,7 @@ class ContextUsageWiringContractTest(unittest.TestCase):
         self.assertIsNotNone(schema_version)
         self.assertGreaterEqual(int(schema_version.group(1)), 32)
         upgrade = schema.split('override fun onUpgrade(', 1)[1]
-        guard = 'oldVersion in 1..33 && newVersion == 34'
+        guard = 'oldVersion in 1..34 && newVersion == 35'
         self.assertIn(guard, upgrade)
         schema_33_path = re.search(
             r'if\s*\(\s*oldVersion\s*==\s*33\s*\)\s*\{(?P<body>[^{}]*)\}', upgrade)

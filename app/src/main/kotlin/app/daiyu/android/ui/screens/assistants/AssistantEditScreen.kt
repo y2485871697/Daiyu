@@ -46,6 +46,7 @@ import app.daiyu.android.assistants.AssistantMemoryDraft
 import app.daiyu.android.assistants.AssistantEditSession
 import app.daiyu.android.assistants.AssistantSkill
 import app.daiyu.android.assistants.AssistantStore
+import app.daiyu.android.assistants.SqliteAssistantStore
 import app.daiyu.android.ui.components.AssistantAvatar
 import app.daiyu.android.ui.components.EditorScrollIsolation
 import app.daiyu.android.ui.components.editorPageGestures
@@ -82,6 +83,7 @@ fun AssistantEditScreen(
     var prompt by remember(session) { mutableStateOf(original.prompt) }
     var avatarFileName by remember(session) { mutableStateOf(original.avatarFileName) }
     var memoryEnabled by remember(session) { mutableStateOf(original.memoryEnabled) }
+    var autoMemoryWrite by remember(session) { mutableStateOf(original.autoMemoryWriteEnabled) }
     var enabledSkillIds by remember(session) { mutableStateOf(original.enabledSkillIds.toSet()) }
     var memoryDraft by remember(session) { mutableStateOf("") }
     var memoryRevision by remember(session) { mutableStateOf("") }
@@ -92,7 +94,7 @@ fun AssistantEditScreen(
     val memoryBytes = remember(memoryDraft) { memoryDraft.toByteArray(Charsets.UTF_8).size }
     val memoryOverLimit = memoryBytes > AssistantAssets.MAX_MEMORY_BYTES
     val dirty = description != original.description || name.trim() != original.name || prompt != original.prompt || avatarFileName != original.avatarFileName ||
-        memoryEnabled != original.memoryEnabled || enabledSkillIds != original.enabledSkillIds.toSet() || memoryDraft != memorySaved
+        memoryEnabled != original.memoryEnabled || autoMemoryWrite != original.autoMemoryWriteEnabled || enabledSkillIds != original.enabledSkillIds.toSet() || memoryDraft != memorySaved
 
     LaunchedEffect(session) {
         val result = withContext(Dispatchers.IO) { runCatching { assets.memory(assistantId) } }
@@ -119,13 +121,14 @@ fun AssistantEditScreen(
         val targetName = name
         val targetDescription = description
         val targetPrompt = prompt
+        val targetAutoMemoryWrite = autoMemoryWrite
         val targetMemoryEnabled = memoryEnabled
         val targetSkills = enabledSkillIds.toSet()
         val memoryChanged = targetMemory != memorySaved
         saving = true
         scope.launch {
             val result = runCatching {
-                session.save(targetName, targetPrompt, targetMemoryEnabled, targetSkills, targetDescription) {
+                session.save(targetName, targetPrompt, targetMemoryEnabled, targetSkills, targetDescription, targetAutoMemoryWrite) {
                     if (memoryChanged) assets.saveMemory(assistantId, targetMemory, baseRevision) else null
                 }
             }
@@ -217,7 +220,23 @@ fun AssistantEditScreen(
                     }
                     AssistantPreviewSwitch(memoryEnabled, !saving, stringResource(R.string.assistant_enable),
                         Modifier.testTag("assistant-memory-switch")) {
-                        if (session.isActive && !saving) { memoryEnabled = it }
+                        if (session.isActive && !saving) {
+                            memoryEnabled = it
+                            if (!it) autoMemoryWrite = false
+                        }
+                    }
+                }
+                if (store is SqliteAssistantStore) Row(Modifier.fillMaxWidth().padding(bottom = 12.dp * s),
+                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp * s)) {
+                    Column(Modifier.weight(1f)) {
+                        Text(stringResource(R.string.assistant_auto_memory), color = colors.text,
+                            fontSize = (14f * s).sp, lineHeight = (21f * s).sp, fontWeight = FontWeight(550))
+                        Text(stringResource(R.string.assistant_auto_memory_caption), color = colors.muted,
+                            fontSize = (11f * s).sp, lineHeight = (16f * s).sp)
+                    }
+                    AssistantPreviewSwitch(memoryEnabled && autoMemoryWrite, !saving && memoryEnabled,
+                        stringResource(R.string.assistant_auto_memory), Modifier.testTag("assistant-auto-memory-switch")) {
+                        if (session.isActive && !saving && memoryEnabled) autoMemoryWrite = it
                     }
                 }
                 AssistantPreviewField(memoryDraft, {

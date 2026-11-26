@@ -26,7 +26,8 @@ class AssistantEditSession(private val store: AssistantStore, original: Assistan
         requireActive()
         withContext(Dispatchers.IO) {
             requireActive()
-            store.compareAndSet(expected, expected.copy(memoryEnabled = memory, enabledSkillIds = skills.toList()))
+            store.compareAndSet(expected, expected.copy(memoryEnabled = memory, enabledSkillIds = skills.toList(),
+                autoMemoryWriteEnabled = memory && expected.autoMemoryWriteEnabled))
         }.also { expected = it }
     }
 
@@ -48,12 +49,14 @@ class AssistantEditSession(private val store: AssistantStore, original: Assistan
      */
     suspend fun save(name: String, prompt: String, memory: Boolean, skills: Set<String>,
         description: String = expected.description,
+        autoMemoryWriteEnabled: Boolean = expected.autoMemoryWriteEnabled,
         saveMemory: () -> AssistantMemorySnapshot?): AssistantEditReceipt = writes.withLock {
         requireActive()
         withContext(Dispatchers.IO) {
             requireActive()
             expected = store.compareAndSet(expected, expected.copy(name = name, prompt = prompt,
-                memoryEnabled = memory, enabledSkillIds = skills.toList(), description = description))
+                memoryEnabled = memory, enabledSkillIds = skills.toList(), description = description,
+                autoMemoryWriteEnabled = memory && autoMemoryWriteEnabled))
             requireActive()
             AssistantEditReceipt(expected, saveMemory())
         }

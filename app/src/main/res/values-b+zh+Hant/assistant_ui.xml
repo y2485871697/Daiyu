@@ -38,6 +38,8 @@
   <string name="assistant_save_changes">儲存修改</string>
   <string name="assistant_skills_caption">開啟此助手需要的技能</string>
   <string name="assistant_independent_switches">獨立開關</string>
+  <string name="assistant_auto_memory">自動寫入記憶</string>
+  <string name="assistant_auto_memory_caption">允許此助理將長期偏好和事實加入記憶。</string>
   <string name="assistant_memory_caption">為這個助手保留偏好與背景</string>
   <string name="assistant_memory_content">記憶內容</string>
   <string name="assistant_memory_placeholder">例如：預設使用繁體中文，回答先給結論。</string>

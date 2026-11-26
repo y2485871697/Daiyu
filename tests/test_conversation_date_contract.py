@@ -8,8 +8,8 @@ MAIN = ROOT / 'app/src/main/kotlin/app/daiyu/android'
 class ConversationDateContractTest(unittest.TestCase):
     def test_migration_is_atomic_and_precedes_modern_upgrade_return(self):
         schema = (MAIN / 'storage/ConversationDatabase.kt').read_text()
-        self.assertIn('"conversations.db", null, 34)', schema)
-        self.assertIn('oldVersion in 1..33 && newVersion == 34', schema)
+        self.assertIn('"conversations.db", null, 35)', schema)
+        self.assertIn('oldVersion in 1..34 && newVersion == 35', schema)
         upgrade = schema.split('override fun onUpgrade(', 1)[1]
         self.assertLess(upgrade.index('UsageStatisticsStore.install(db)'), upgrade.index('ConversationSidebarDates.install(db)'))
         self.assertLess(upgrade.index('ConversationSidebarDates.install(db)'), upgrade.index('if (oldVersion >= 13) return'))

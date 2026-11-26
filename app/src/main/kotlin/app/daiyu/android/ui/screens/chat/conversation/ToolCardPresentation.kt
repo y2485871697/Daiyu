@@ -8,7 +8,7 @@ internal object ToolCardPresentations {
     data class Presentation(val category: String, val title: String, val summary: String, val sections: List<ToolDetailSectionUi>, val details: ToolCategoryDetailsUi, val targetLabel: String? = null, val hasScreenScreenshot: Boolean = false, val hasBrowserScreenshot: Boolean = false, val operationGlyph: String = "generic")
     private val tools = buildMap {
         fun group(category: String, vararg entries: Pair<String, String>) { entries.forEach { (name, title) -> put(name, category to title) } }
-        group("memory", "assistant_memory_search" to "检索记忆", "assistant_memory_read" to "读取记忆")
+        group("memory", "assistant_memory_search" to "检索记忆", "assistant_memory_read" to "读取记忆", "assistant_memory_write" to "写入记忆")
         group("skills", "skills_list" to "查找技能", "skills_read" to "读取技能说明", "skills_read_resource" to "读取技能资源")
         group("delegation", "run_child_models" to "批量委派", "start_child_tasks" to "后台委派")
         group("child_control", "direct_child_task" to "指导子任务", "list_subagents" to "查看可用子代理", "inspect_child_tasks" to "查看子任务状态",

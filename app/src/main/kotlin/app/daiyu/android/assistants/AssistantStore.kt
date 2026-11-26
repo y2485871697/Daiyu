@@ -20,7 +20,12 @@ interface AssistantStore {
      * A default failure is intentional: an unimplemented CAS must never fall back to upsert. */
     fun compareAndSet(expected: AssistantProfile, updated: AssistantProfile): AssistantProfile =
         throw UnsupportedOperationException("此助手存储不支持安全编辑")
+    /** An explicit opt-in bound to the authoritative profile snapshot. Unsupported stores fail closed. */
+    fun automaticMemoryWriteGrant(profile: AssistantProfile): Long? = null
+    fun withAutomaticMemoryWrite(id: String, grant: Long, commit: () -> AssistantMemorySnapshot): AssistantMemorySnapshot =
+        throw AssistantMemoryUnavailable()
     fun delete(id: String)
+
     fun select(id: String)
 }
 
@@ -101,5 +106,5 @@ fun AssistantStore.create(name: String = "新助手", prompt: String = ""): Assi
 fun AssistantStore.duplicate(id: String): AssistantProfile {
     val source = requireNotNull(read(id)) { "助手不存在" }
     return save(source.copy(id = UUID.randomUUID().toString(), name = source.name.trim().ifBlank { AssistantPrompt.DEFAULT_NAME } + " 副本",
-        avatarFileName = null, createdAt = System.currentTimeMillis()))
+        avatarFileName = null, createdAt = System.currentTimeMillis(), autoMemoryWriteEnabled = false))
 }

@@ -50,7 +50,7 @@ class ConversationHistoryDatabaseTest : InstrumentationTestCase() {
             old.version = 4
         }
         var db = open(context)
-        assertEquals(34, db.readableDatabase.version)
+        assertEquals(35, db.readableDatabase.version)
         assertEquals("[]", db.readableDatabase.rawQuery("SELECT history_segments FROM messages", null).use { it.moveToFirst(); it.getString(0) })
         db.close(); databases.remove(db)
         db = open(context)

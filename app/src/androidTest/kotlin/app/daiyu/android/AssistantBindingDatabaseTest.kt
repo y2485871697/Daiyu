@@ -63,7 +63,7 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         prefs(source)
         val db = database()
         val store = SqliteAssistantStore(db).also { it.requireReady() }
-        assertEquals(34, db.readableDatabase.version)
+        assertEquals(35, db.readableDatabase.version)
         assertEquals(listOf(second, first), store.list())
         assertEquals(first.id, store.selectedId.value)
         assertEquals(source, raw())
@@ -100,7 +100,7 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         helper.close()
         val upgraded = database()
         val restored = SqliteAssistantStore(upgraded).also { it.requireReady() }
-        assertEquals(34, upgraded.readableDatabase.version)
+        assertEquals(35, upgraded.readableDatabase.version)
         assertEquals(profile, restored.read(profile.id))
         assertEquals(profile.id, restored.selectedId.value)
         assertEquals(profile.id, upgraded.assistantId(conversation.id))
@@ -110,6 +110,73 @@ class AssistantBindingDatabaseTest : InstrumentationTestCase() {
         assertEquals(edited.description, duplicate.description)
         upgraded.close()
         assertEquals(edited, SqliteAssistantStore(database()).read(profile.id))
+    }
+
+    fun testV34MigrationDefaultsAutomaticMemoryOffAndPersistsExplicitOptIn() {
+        val old = database()
+        val profile = SqliteAssistantStore(old).save(AssistantProfile("memory", "Memory", "", description = "kept"))
+        val sql = old.writableDatabase
+        sql.execSQL("ALTER TABLE assistants RENAME TO assistants_v35")
+        sql.execSQL("CREATE TABLE assistants(id TEXT PRIMARY KEY NOT NULL,name TEXT NOT NULL,prompt TEXT NOT NULL,description TEXT NOT NULL DEFAULT '',avatar_file_name TEXT,created_at INTEGER NOT NULL,memory_enabled INTEGER NOT NULL,enabled_skill_ids TEXT NOT NULL,position INTEGER NOT NULL UNIQUE)")
+        sql.execSQL("INSERT INTO assistants SELECT id,name,prompt,description,avatar_file_name,created_at,memory_enabled,enabled_skill_ids,position FROM assistants_v35")
+        sql.execSQL("DROP TABLE assistants_v35")
+        sql.version = 34
+        old.close()
+
+        val upgraded = database()
+        val store = SqliteAssistantStore(upgraded)
+        assertEquals(35, upgraded.readableDatabase.version)
+        assertEquals(profile, store.read(profile.id))
+        assertNull(store.automaticMemoryWriteGrant(profile))
+        val enabled = store.compareAndSet(profile, profile.copy(autoMemoryWriteEnabled = true))
+        assertFalse(store.duplicate(profile.id).autoMemoryWriteEnabled)
+        upgraded.close()
+        val reopened = SqliteAssistantStore(database())
+        assertEquals(enabled, reopened.read(profile.id))
+        assertNotNull(reopened.automaticMemoryWriteGrant(enabled))
+    }
+
+    fun testAutomaticMemoryCommitAndDisableShareGateAcrossStoreInstances() {
+        val helper = database()
+        val store = SqliteAssistantStore(helper)
+        val editor = SqliteAssistantStore(helper)
+        val profile = store.save(AssistantProfile("memory", "Memory", "", autoMemoryWriteEnabled = true))
+        val grant = checkNotNull(store.automaticMemoryWriteGrant(profile))
+        val inCommit = java.util.concurrent.CountDownLatch(1)
+        val editorStarted = java.util.concurrent.CountDownLatch(1)
+        val releaseCommit = java.util.concurrent.CountDownLatch(1)
+        val seconds = java.util.concurrent.TimeUnit.SECONDS
+        val pool = java.util.concurrent.Executors.newFixedThreadPool(2)
+        try {
+            val write = pool.submit<AssistantMemorySnapshot> {
+                store.withAutomaticMemoryWrite(profile.id, grant) {
+                    inCommit.countDown()
+                    check(releaseCommit.await(5, seconds))
+                    AssistantMemorySnapshot("one", "v2")
+                }
+            }
+            assertTrue(inCommit.await(5, seconds))
+            val disable = pool.submit<AssistantProfile> {
+                editorStarted.countDown()
+                editor.compareAndSet(profile, profile.copy(memoryEnabled = false, autoMemoryWriteEnabled = false))
+            }
+            assertTrue(editorStarted.await(5, seconds))
+            try {
+                disable.get(200, java.util.concurrent.TimeUnit.MILLISECONDS)
+                fail("disable crossed admitted commit")
+            } catch (_: java.util.concurrent.TimeoutException) { }
+            releaseCommit.countDown()
+            assertEquals("v2", write.get(5, seconds).revision)
+            assertFalse(disable.get(5, seconds).memoryEnabled)
+            try {
+                store.withAutomaticMemoryWrite(profile.id, grant) { error("must not enter commit") }
+                fail("revoked grant accepted")
+            } catch (_: AssistantMemoryUnavailable) { }
+        } finally {
+            releaseCommit.countDown()
+            pool.shutdownNow()
+            pool.awaitTermination(5, seconds)
+        }
     }
 
     fun testDescriptionCodecAndPreferenceRoundTripIncludingOldMissingField() {

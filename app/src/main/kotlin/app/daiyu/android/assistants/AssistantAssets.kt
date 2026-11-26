@@ -73,7 +73,7 @@ class FileAssistantAssets(context: Context) : AssistantAssets {
     }
     @Synchronized
     override fun saveMemory(id: String, content: String, revision: String): AssistantMemorySnapshot {
-        check(memory(id).revision == revision) { "记忆已被其他操作更新" }
+        if (memory(id).revision != revision) throw AssistantMemoryRevisionConflict()
         val bytes = content.toByteArray(Charsets.UTF_8)
         require(bytes.size <= AssistantAssets.MAX_MEMORY_BYTES) { "记忆文件不能超过 1 MiB UTF-8 字节" }
         val file = memoryFile(id)
@@ -81,7 +81,9 @@ class FileAssistantAssets(context: Context) : AssistantAssets {
         val output = file.startWrite()
         try { output.write(bytes); file.finishWrite(output) }
         catch (error: Throwable) { file.failWrite(output); throw error }
-        return snapshot(bytes)
+        val committed = memory(id)
+        check(committed.revision == snapshot(bytes).revision) { "无法确认记忆保存结果" }
+        return committed
     }
     @Synchronized
     override fun copyMemory(fromId: String, toId: String) {

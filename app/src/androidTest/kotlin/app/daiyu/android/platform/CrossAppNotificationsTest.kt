@@ -119,7 +119,7 @@ class CrossAppNotificationsTest : InstrumentationTestCase() {
             old.close()
             val upgraded = ConversationDatabase(context)
             try {
-                assertEquals(34, upgraded.readableDatabase.version)
+                assertEquals(35, upgraded.readableDatabase.version)
                 val upgradedStore = NotificationHistoryStore(upgraded)
                 assertTrue(upgradedStore.enabled())
                 assertEquals(0L, upgradedStore.since())

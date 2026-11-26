@@ -85,7 +85,7 @@ class ChildCommandSchemaMigrationTest : InstrumentationTestCase() {
         val conversation = legacy(context, helper)
         val before = context.openOrCreateDatabase("conversations.db", 0, null).use { raw -> witnesses(raw) to messages(raw) }
         val sql = helper.readableDatabase
-        assertEquals(34, sql.version)
+        assertEquals(35, sql.version)
         val rows = SQLiteChildTaskStore(helper).list(conversation.value)
         assertEquals(1, rows.size)
         val old = rows.single()
@@ -121,7 +121,7 @@ class ChildCommandSchemaMigrationTest : InstrumentationTestCase() {
             })
         }
         val sql = helper.readableDatabase
-        assertEquals(34, sql.version)
+        assertEquals(35, sql.version)
         assertEquals(before.first, messages(sql)); assertEquals(before.second, witnesses(sql))
         assertEquals(before.third, sidecars(sql))
         val history = helper.messages(conversation)
@@ -166,7 +166,7 @@ class ChildCommandSchemaMigrationTest : InstrumentationTestCase() {
             raw.version = 30
         }
         val sql = helper.writableDatabase
-        assertEquals(34, sql.version); assertEquals(oldColumns + "tool_access_json", columns(sql))
+        assertEquals(35, sql.version); assertEquals(oldColumns + "tool_access_json", columns(sql))
         assertEquals(oldMessages, messages(sql)); assertEquals(oldWitnesses, witnesses(sql))
         sql.rawQuery("PRAGMA table_info(child_tasks)", null).use { c ->
             var found = false
@@ -183,7 +183,7 @@ class ChildCommandSchemaMigrationTest : InstrumentationTestCase() {
         assertEquals(app.daiyu.android.domain.delegation.ChildToolAccess.NONE, task.access)
         SQLiteChildTaskStore.installAccessSchema(sql)
         assertEquals(oldColumns + "tool_access_json", columns(sql))
-        helper.close(); assertEquals(34, helper.readableDatabase.version)
+        helper.close(); assertEquals(35, helper.readableDatabase.version)
         assertEquals(task, SQLiteChildTaskStore(helper).list(conversation.value).single())
     }
 
@@ -195,7 +195,7 @@ class ChildCommandSchemaMigrationTest : InstrumentationTestCase() {
             raw.version = 20
         }
         val migrated = helper.readableDatabase
-        assertEquals(34, migrated.version)
+        assertEquals(35, migrated.version)
         assertTrue(columns(migrated).containsAll(listOf("agent_name_snapshot", "model_id_snapshot", "model_name_snapshot")))
         val task = SQLiteChildTaskStore(helper).list(conversation.value).single()
         assertNull(task.display)

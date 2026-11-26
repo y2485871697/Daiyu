@@ -15,7 +15,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 
-class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 34), ConversationStore {
+class ConversationDatabase internal constructor(context: Context, private val afterSendRowsWritten: () -> Unit) : SQLiteOpenHelper(context, "conversations.db", null, 35), ConversationStore {
     constructor(context: Context) : this(context, {})
     init {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -85,8 +85,11 @@ class ConversationDatabase internal constructor(context: Context, private val af
         db.execSQL("INSERT INTO composer(id,draft) VALUES(1,'')")
     }
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
-        check(oldVersion in 1..33 && newVersion == 34) { "不支持此数据库版本，保留原数据" }
+        check(oldVersion in 1..34 && newVersion == 35) { "不支持此数据库版本，保留原数据" }
+        if (oldVersion >= 10) app.daiyu.android.assistants.SqliteAssistantStore.installAutoMemoryColumn(db)
+        if (oldVersion == 34) return
         if (oldVersion == 33) {
+
             SQLiteGenerationOutputStore.upgradeProtocols(db)
             SQLiteGenerationAttemptStore.upgradeOutcomeLimit(db)
             return

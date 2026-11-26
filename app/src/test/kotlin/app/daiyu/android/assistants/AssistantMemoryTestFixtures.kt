@@ -7,8 +7,22 @@ internal class MemoryTestStore(vararg values: AssistantProfile) : AssistantStore
     override val assistants = MutableStateFlow(values.toList())
     override val selectedId: MutableStateFlow<String> get() = error("must not consult global assistant")
     var beforeCas: (() -> Unit)? = null
+    private var epoch = 0L
+    @Synchronized override fun automaticMemoryWriteGrant(profile: AssistantProfile): Long? =
+        epoch.takeIf { profile.memoryEnabled && profile.autoMemoryWriteEnabled && read(profile.id) == profile }
+
+    @Synchronized override fun withAutomaticMemoryWrite(
+        id: String, grant: Long, commit: () -> AssistantMemorySnapshot,
+    ): AssistantMemorySnapshot {
+        if (epoch != grant || read(id)?.let { it.memoryEnabled && it.autoMemoryWriteEnabled } != true) {
+            throw AssistantMemoryUnavailable()
+        }
+        return commit()
+    }
+
     @Synchronized override fun read(id: String) = assistants.value.firstOrNull { it.id == id }
     @Synchronized override fun save(profile: AssistantProfile): AssistantProfile {
+        epoch++
         assistants.value = assistants.value.filterNot { it.id == profile.id } + profile
         return profile
     }
@@ -20,7 +34,10 @@ internal class MemoryTestStore(vararg values: AssistantProfile) : AssistantStore
             save(updated)
         }
     }
-    @Synchronized override fun delete(id: String) { assistants.value = assistants.value.filterNot { it.id == id } }
+    @Synchronized override fun delete(id: String) {
+        epoch++
+        assistants.value = assistants.value.filterNot { it.id == id }
+    }
     override fun select(id: String) = error("not used")
 }
 
@@ -28,6 +45,7 @@ internal class MemoryTestAssets(vararg values: Pair<String, String>) : Assistant
     private val snapshots = values.associate { it.first to AssistantMemorySnapshot(it.second, "${it.first}-v1") }.toMutableMap()
     val reads = mutableListOf<String>()
     var afterRead: (() -> Unit)? = null
+    var afterSaveMemory: (() -> Unit)? = null
     @Synchronized override fun memory(id: String): AssistantMemorySnapshot {
         reads += id
         val result = snapshots.getValue(id)
@@ -36,8 +54,8 @@ internal class MemoryTestAssets(vararg values: Pair<String, String>) : Assistant
     }
     @Synchronized fun replace(id: String, content: String, revision: String) { snapshots[id] = AssistantMemorySnapshot(content, revision) }
     override fun saveMemory(id: String, content: String, revision: String): AssistantMemorySnapshot = synchronized(this) {
-        check(snapshots.getValue(id).revision == revision)
-        AssistantMemorySnapshot(content, "$revision-next").also { snapshots[id] = it }
+        if (snapshots.getValue(id).revision != revision) throw AssistantMemoryRevisionConflict()
+        AssistantMemorySnapshot(content, "$revision-next").also { snapshots[id] = it; afterSaveMemory?.invoke() }
     }
     override fun avatarBitmap(fileName: String?): Bitmap? = null
     override fun saveAvatar(id: String, bitmap: Bitmap): String = error("unused")

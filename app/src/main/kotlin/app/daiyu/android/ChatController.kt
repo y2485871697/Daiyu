@@ -4529,6 +4529,7 @@ class ChatController internal constructor(private val application:Application,
                     setOf(SkillRunSession.READ, SkillRunSession.RESOURCE,
                         app.daiyu.android.integration.tools.RunChildTaskAccess.CAPABILITY) +
                     (if (assistantContext.memoryReadPort == null) emptySet() else setOf(ScopedAssistantMemoryTools.READ)) +
+                    (if (assistantContext.memoryWritePort == null) emptySet() else setOf(ScopedAssistantMemoryTools.WRITE)) +
                     (if (!voiceConversation && interactiveSnapshot.enabled && gui == null) setOf(AndroidToolRegistry.ASK_USER_CAPABILITY) else emptySet()) +
                     (if (children == null) emptySet() else setOf(RunChildModels.CAPABILITY,RunChildTasks.CAPABILITY)) +
                     (if (platformAction == null) emptySet() else setOf(platformAction.action.kind.capability)) +

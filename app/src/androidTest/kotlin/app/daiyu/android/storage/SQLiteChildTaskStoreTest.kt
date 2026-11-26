@@ -456,7 +456,7 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
             old.version = 7
         }
         val db = ConversationDatabase(context).also { databases.add(it) }
-        assertEquals(34, db.readableDatabase.version); assertEquals(before, db.messages(conversation))
+        assertEquals(35, db.readableDatabase.version); assertEquals(before, db.messages(conversation))
         assertTrue(SQLiteChildTaskStore(db).list(conversation.value, 20).isEmpty())
         val runtime = lease(db)
         assertEquals(before, db.messages(conversation))

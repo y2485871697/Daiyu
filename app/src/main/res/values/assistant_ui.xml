@@ -38,6 +38,8 @@
   <string name="assistant_save_changes">Save changes</string>
   <string name="assistant_skills_caption">Enable skills for this assistant</string>
   <string name="assistant_independent_switches">Independent toggles</string>
+  <string name="assistant_auto_memory">Automatic memory</string>
+  <string name="assistant_auto_memory_caption">Allow this assistant to add lasting preferences and facts to its memory.</string>
   <string name="assistant_memory_caption">Keep preferences and context for this assistant</string>
   <string name="assistant_memory_content">Memory content</string>
   <string name="assistant_memory_placeholder">For example: use concise answers and lead with the conclusion.</string>

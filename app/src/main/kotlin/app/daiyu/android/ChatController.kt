@@ -1684,6 +1684,12 @@ class ChatController internal constructor(private val application:Application,
     private var recoveryFailed=false
     private var runtimeStore:SQLiteRuntimeStore?=null
     private var childSupervisor:app.daiyu.android.domain.delegation.RetainedChildTasks?=null
+    private val childRequestHistory = app.daiyu.android.domain.delegation.ChildRequestHistory()
+    private val childTaskDiagnostics = app.daiyu.android.domain.delegation.ChildTaskDiagnostics { event ->
+        childRequestHistory.record(event)
+        RuntimeDiagnostics.childTask(event)
+        if (event.phase == app.daiyu.android.domain.delegation.ChildTaskDiagnosticPhase.REQUEST_SENT) notifyChanged()
+    }
     private val backgroundRuns=linkedMapOf<RunId,RunChildTasks>()
     private class ChildRunModelFactory(val systemPrompt: String,
         private val create: (ProviderSnapshot) -> ModelPort) : (ProviderSnapshot) -> ModelPort {
@@ -2244,6 +2250,9 @@ class ChatController internal constructor(private val application:Application,
         check(!closed && ready && !recoveryFailed) { "child_tasks_unavailable" }
         return checkNotNull(runtimeStore).childTasks.list(conversationId.value, limit)
     }
+    internal fun childRequestedModels(owners: Set<ChildRunOwner>): Map<ChildRunOwner, List<String>> =
+        app.daiyu.android.model.usage.SQLiteChildUsageStore.requestedModels(database.readableDatabase, owners)
+
     @Synchronized internal fun childTaskStatuses(conversationId: ConversationId): Map<ChildRunOwner, ChildTaskStatus> {
         check(!closed && ready && !recoveryFailed) { "child_tasks_unavailable" }
         return checkNotNull(runtimeStore).childTasks.statuses(conversationId.value)
@@ -2402,7 +2411,7 @@ class ChatController internal constructor(private val application:Application,
             }
             app.daiyu.android.voice.control.VoiceCallTempFiles.recover(application.cacheDir)
             childSupervisor=app.daiyu.android.domain.delegation.RetainedChildTasks(runtime.childTasks, usageRecorder=runtime.childUsage,
-                diagnostics = app.daiyu.android.domain.delegation.ChildTaskDiagnostics(RuntimeDiagnostics::childTask))
+                diagnostics = childTaskDiagnostics)
             val history=questions.records()
             synchronized(this) {rememberQuestions(history)}
             false
@@ -4508,7 +4517,11 @@ class ChatController internal constructor(private val application:Application,
                 currentProfiles = currentChildProfiles,
                 currentProfileMetadata = { currentChildConfiguration()?.descriptors.orEmpty() },
                 initialProfiles = childPreparation?.descriptors.orEmpty(),
-                takeOver = ::takeOverChildTask)
+                takeOver = ::takeOverChildTask,
+                recentRequests = childRequestHistory::recent,
+                requestedModels = { owner -> childRequestedModels(setOf(owner))[owner].orEmpty() },
+                configuredRoute = { row -> currentChildModels()[row.assignedProfileId]
+                    ?.takeIf { it.role == row.originalRole }?.requestModel })
             val executionChildren = if (!withChildren || !ordinaryRun) null else executionChildTools(application,
                 checkNotNull(ordinaryAssistant), toolLedger, workspace, checkNotNull(ordinaryBrowserSettings), platformSnapshot.resultPolicy, shizukuAccess)
             val children = if (!withChildren) null else RunChildModels(
@@ -4516,7 +4529,7 @@ class ChatController internal constructor(private val application:Application,
                     onProfilesChanged = ::scheduleDeletedModelCleanup,
                     usageRecorder = checkNotNull(runtimeStore).childUsage,
                     currentModels = currentChildModels, toolAssembly = executionChildren,
-                    diagnostics = app.daiyu.android.domain.delegation.ChildTaskDiagnostics(RuntimeDiagnostics::childTask)).also { batch ->
+                    diagnostics = childTaskDiagnostics).also { batch ->
                     synchronized(this) { childModelBatches[batch] = conversationId.value; childRunFactories[run] = childRunFactory }
                 }, childModels.keys, currentProfiles = currentChildProfiles,
                 initialProfiles = childPreparation?.descriptors.orEmpty())

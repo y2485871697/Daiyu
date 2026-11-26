@@ -1,7 +1,9 @@
 package app.daiyu.android.domain.usage
 
 import app.daiyu.android.domain.Message
+import app.daiyu.android.domain.delegation.ChildRunOwner
 import app.daiyu.android.domain.delegation.ChildTaskRecord
+import app.daiyu.android.domain.runtime.RequestCheckpoint
 import app.daiyu.android.domain.runtime.RequestOperation
 import app.daiyu.android.domain.runtime.RunCheckpoint
 
@@ -10,6 +12,7 @@ import app.daiyu.android.domain.runtime.RunCheckpoint
 fun interface ChildUsageRecorder {
     fun record(task: ChildTaskRecord, checkpoint: RunCheckpoint)
     fun record(task: ChildTaskRecord, checkpoint: RunCheckpoint, model: app.daiyu.android.domain.delegation.ChildRequestModel?) = record(task, checkpoint)
+    fun sent(owner: ChildRunOwner, request: RequestCheckpoint) {}
 }
 
 fun childRequestUsage(task: ChildTaskRecord, checkpoint: RunCheckpoint): List<AttributedRequestUsage> {

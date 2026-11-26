@@ -7,14 +7,15 @@ import app.daiyu.android.domain.delegation.ChildTaskStatus
 import app.daiyu.android.domain.delegation.RetainedChildTask
 
 internal data class SubAgentStatusRow(val owner: ChildRunOwner, val agent: String, val status: String,
-    val completed: Boolean = false, val model: String = "模型未记录", val contextLimited: Boolean = false)
+    val completed: Boolean = false, val model: String = "", val contextLimited: Boolean = false)
 
 internal fun subAgentStatusItemKey(owner: ChildRunOwner): String = with(owner) {
     listOf(conversationId, parentRunId, taskGroupId, generation.toString(), childRunId, assistantMessageId)
         .joinToString("") { "${it.length}:$it" }
 }
 
-internal fun subAgentStatusRows(records: List<ChildTaskRecord>, live: List<RetainedChildTask>): List<SubAgentStatusRow> {
+internal fun subAgentStatusRows(records: List<ChildTaskRecord>, live: List<RetainedChildTask>,
+    requestedModels: Map<ChildRunOwner, List<String>> = emptyMap()): List<SubAgentStatusRow> {
     val current = live.associateBy { it.record.owner }
     val merged = records.associateByTo(linkedMapOf()) { it.owner }
     live.forEach { merged[it.record.owner] = it.record }
@@ -37,6 +38,7 @@ internal fun subAgentStatusRows(records: List<ChildTaskRecord>, live: List<Retai
         }
         SubAgentStatusRow(record.owner, record.display?.agentName ?: record.profileId, status,
             record.status == ChildTaskStatus.COMPLETED && task?.journalUnconfirmed != true,
-            record.display?.modelName ?: "模型未记录", task?.contextLimited == true)
+            requestedModels[record.owner].orEmpty().distinct().joinToString(" ") { ToolRichDetails.scrub(it, limit = 500) },
+            task?.contextLimited == true)
     }
 }

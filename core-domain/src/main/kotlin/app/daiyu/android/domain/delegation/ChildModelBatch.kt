@@ -122,9 +122,9 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val war
     }
     private val activeChildren = mutableMapOf<ChildRunOwner, ActiveChild>()
 
-    private fun trace(child: ActiveChild, phase: ChildTaskDiagnosticPhase) {
+    private fun trace(child: ActiveChild, phase: ChildTaskDiagnosticPhase, includeRequest: Boolean = true) {
         val event = synchronized(gate) { ChildTaskDiagnosticEvent(child.record.owner, child.record.assignedProfileId,
-            child.record.originalRole, phase, child.selected?.requestModel, child.request, child.requestIds.size) }
+            child.record.originalRole, phase, child.selected?.requestModel, child.request.takeIf { includeRequest }, child.requestIds.size) }
         runCatching { diagnostics?.record(event) }
     }
     fun contains(owner: ChildRunOwner): Boolean = synchronized(gate) { owner in activeChildren }
@@ -522,10 +522,10 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val war
                                             started.set(true)
                                         }
                                         failureStage = ChildFailureStage.OPEN
-                                        trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_OPEN)
+                                        trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_OPEN, includeRequest = false)
                                         val transport = try { port.open(history, definitions) }
                                         catch (failure: Exception) {
-                                            trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_FAILED)
+                                            trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_FAILED, includeRequest = false)
                                             executionFailure = failure
                                             requestFailure = failure as? ModelRequestException
                                             throw failure
@@ -560,13 +560,20 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val war
                                                 if (!first && (!selectedModel.sameRequest(checkNotNull(preparedModel)) ||
                                                     !selectedModel.sameRequest(currentDefinition()))) throw ModelPreparationChangedException()
                                                 trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_STARTED)
+                                                var sent = false
+                                                fun requestSent() {
+                                                    if (sent) return
+                                                    sent = true
+                                                    val request = synchronized(gate) { activeChild.request }
+                                                    if (request != null) runCatching { usageRecorder?.sent(child, request) }
+                                                    trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_SENT)
+                                                }
                                                 var firstEvent = true
                                                 val texts = mutableMapOf<String, Int>()
                                                 val progress = linkedMapOf<String, String>()
                                                 var rejected: Exception? = null
                                                 val checkedSink: (ModelEvent) -> Unit = checkedSink@ { event ->
                                                     if (cancelled()) return@checkedSink
-                                                    if (firstEvent) { firstEvent = false; trace(activeChild, ChildTaskDiagnosticPhase.FIRST_EVENT) }
                                                     rejected?.let { throw it }
                                                     try { when (event) {
                                                         is ModelEvent.TextDelta, is ModelEvent.TextFinal -> {
@@ -587,7 +594,13 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val war
                                                         is ModelEvent.ToolReady -> if (assembly == null) throw ModelRequestException(ModelFailure.PROTOCOL) else sink(event)
                                                         is ModelEvent.Usage -> sink(event)
                                                         else -> if (assembly != null) sink(event)
-                                                    } } catch (failure: Exception) { rejected = failure; throw failure }
+                                                    }
+                                                        if (firstEvent && event !is ModelEvent.InputEstimate) {
+                                                            requestSent()
+                                                            firstEvent = false
+                                                            trace(activeChild, ChildTaskDiagnosticPhase.FIRST_EVENT)
+                                                        }
+                                                    } catch (failure: Exception) { rejected = failure; throw failure }
                                                 }
                                                 var continuing = false
                                                 while (true) {
@@ -597,8 +610,14 @@ class ChildModelBatch(models: Map<String, ChildModelDefinition>, private val war
                                                             val attemptSink: (ModelEvent) -> Unit = { event ->
                                                                 delivery.deliver { checkedSink(event) }
                                                             }
-                                                            if (continuing) (transport as ResumableModelSession).resume(attemptSink)
-                                                            else { failureStage = ChildFailureStage.RESPONSE; transport.next(outputs, attemptSink) }
+                                                            if (continuing) {
+                                                                trace(activeChild, ChildTaskDiagnosticPhase.REQUEST_RESUMED)
+                                                                (transport as ResumableModelSession).resume(attemptSink)
+                                                            }
+                                                            else {
+                                                                failureStage = ChildFailureStage.RESPONSE
+                                                                ChildModelPostObservation.observe(::requestSent) { transport.next(outputs, attemptSink) }
+                                                            }
                                                         } finally {
                                                             // Fence late callbacks and drain acknowledged delivery
                                                             // before publishing a resumable pause boundary.

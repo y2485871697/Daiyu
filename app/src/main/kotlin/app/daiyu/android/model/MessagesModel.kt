@@ -1,5 +1,6 @@
 package app.daiyu.android.model
 
+import app.daiyu.android.domain.delegation.ChildModelPostObservation
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.model.sessiongateway.SessionGateway
@@ -176,7 +177,10 @@ class MessagesModel internal constructor(
                 trace.phase = ModelTransportPhase.SENDING
                 conn.send(requestBytes.size.toLong()) { requestBytes.writeTo(it, cancelled::get) }
                 checkCancelled()
-                val status = conn.responseCode { trace.phase = ModelTransportPhase.WAITING_HEADERS }
+                val status = conn.responseCode {
+                    ChildModelPostObservation.sent()
+                    trace.phase = ModelTransportPhase.WAITING_HEADERS
+                }
                 trace.headersReceived(); trace.responseHeaders(conn)
                 checkCancelled()
                 if (status !in 200..299) throw ProviderHttpFailure.from(conn, status, cancelled::get, request = request)

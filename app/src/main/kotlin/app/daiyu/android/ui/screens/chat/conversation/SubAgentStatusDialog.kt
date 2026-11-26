@@ -61,7 +61,10 @@ internal fun SubAgentStatusHost(controller: ChatController, conversationId: Stri
                 for (event in changed) {
                     val result = withContext(Dispatchers.IO) { runCatching {
                         val id = ConversationId(conversationId)
-                        subAgentStatusRows(controller.childTasks(id, 20), controller.liveChildTasks(id))
+                        val records = controller.childTasks(id, 20)
+                        val live = controller.liveChildTasks(id)
+                        val owners = (records.map { it.owner } + live.map { it.record.owner }).toSet()
+                        subAgentStatusRows(records, live, controller.childRequestedModels(owners))
                     } }
                     result.onSuccess { rows = it }.onFailure { rows = emptyList() }
                     failed = result.isFailure
@@ -118,7 +121,10 @@ internal fun SubAgentStatusDialog(rows: List<SubAgentStatusRow>, loading: Boolea
                         }
                         if (expanded) androidx.compose.foundation.text.selection.SelectionContainer {
                             Column(Modifier.padding(start = 1.dp, end = 1.dp, bottom = 10.dp)) {
-                                Text(ToolRichDetails.scrub(row.model, limit = 160), fontSize = 10.sp, lineHeight = 17.sp, color = colors.taskMuted)
+                                if (row.model.isNotEmpty()) {
+                                    Text(row.model, fontSize = 10.sp, lineHeight = 17.sp, color = colors.taskMuted,
+                                        modifier = Modifier.testTag("subagent-requested-models:${row.owner.childRunId}"))
+                                }
                                 Text(row.owner.childRunId, fontFamily = FontFamily.Monospace, fontSize = 10.sp, lineHeight = 17.sp, color = colors.taskMuted)
                             }
                         }

@@ -22,6 +22,9 @@ internal class RunChildTaskAccess(
     private val recordedStatuses: () -> Map<ChildRunOwner, ChildTaskStatus> = {
         records().associate { it.owner to it.status }
     },
+    private val recentRequests: (ChildRunOwner) -> List<ChildRequestObservation> = { emptyList() },
+    private val requestedModels: (ChildRunOwner) -> List<String> = { emptyList() },
+    private val configuredRoute: (ChildTaskRecord) -> ChildRequestModel? = { null },
 ) {
     fun tools(): List<RegisteredTool> = listOf(object : RegisteredTool {
         override val definition = ToolDefinition("list_subagents", 1,
@@ -145,7 +148,7 @@ internal class RunChildTaskAccess(
         }
     }, object : RegisteredTool {
         override val definition = ToolDefinition("get_child_task", 1,
-            "按完整身份精确读取本会话任意已有子任务的具体进度、结果正文和诊断详情（不限总览20条）。当前可用子代理配置使用list_subagents，任务总数和状态汇总使用inspect_child_tasks。配置变更、暂停或停止不影响读取；offset为字符偏移，可分页读取结果和当前进程保留的进度。max_chars为可选正整数，默认结果、进度和诊断详情各4096字符；超过4096时按4096读取，使用返回的next偏移继续分页。若 parent_next_step=continue_independent_work_no_replay，读取已有结果后继续无重叠的主任务，不等待、不重派、不重放副作用。",
+            "按完整身份精确读取本会话任意已有子任务的具体进度、结果正文和诊断详情（不限总览20条）。request_routing列出本进程观测到的近期模型请求，按发送顺序；configured_route只是当前配置，recent_requests才是客户端实际选路，send_observed表示已观测到请求发出；response_observed表示收到模型事件或正常完成。requested_model_ids只列出有实发证据的模型。历史为空表示无观测证据，不代表没发过请求。当前可用子代理配置使用list_subagents，任务总数和状态汇总使用inspect_child_tasks。配置变更、暂停或停止不影响读取；offset为字符偏移，可分页读取结果和当前进程保留的进度。max_chars为可选正整数，默认结果、进度和诊断详情各4096字符；超过4096时按4096读取，使用返回的next偏移继续分页。若 parent_next_step=continue_independent_work_no_replay，读取已有结果后继续无重叠的主任务，不等待、不重派、不重放副作用。",
             CAPABILITY, ToolEffect.READ_ONLY, ToolSchema(listOf(
                 ArgumentField("parent_run_id", ArgumentType.Text(200, minimumLength = 1)),
                 ArgumentField("task_group_id", ArgumentType.Text(200, minimumLength = 1)),
@@ -171,6 +174,7 @@ internal class RunChildTaskAccess(
                     .withControlState(row, state)
                     .put("assigned_profile_id", row.assignedProfileId).put("original_role", row.originalRole?.name ?: JSONObject.NULL)
                     .put("agent_name", row.display?.agentName ?: JSONObject.NULL).put("status", row.status.name)
+                    .put("request_routing", requestRouting(row))
                     .put("queue_state", state?.let { if (it.settled) ChildTaskQueueState.FINISHED.name else it.queueState.name }).put("pause_state", state?.let { if (it.settled) ChildTaskPauseState.FINISHED.name else it.pauseState.name }).put("settled", state?.settled ?: JSONObject.NULL)
                     .put("snapshot_available", state != null).put("live_state_available", state != null && !state.settled)
                     .put("configuration_paused", state?.configurationPaused ?: JSONObject.NULL)
@@ -186,6 +190,26 @@ internal class RunChildTaskAccess(
             }
         }
     })
+    private fun requestRouting(row: ChildTaskRecord): JSONObject {
+        val configured = runCatching { configuredRoute(row) }.getOrNull()
+        val recent = recentRequests(row.owner)
+        val latest = recent.lastOrNull()
+        fun ChildRequestModel.toJson() = JSONObject().put("provider_id", providerId).put("model_id", modelId)
+        return JSONObject().put("history_scope", "current_process")
+            .put("configured_route", configured?.toJson() ?: JSONObject.NULL)
+            .put("route_relation", when {
+                configured == null -> "CONFIGURATION_UNAVAILABLE"
+                latest == null -> "NO_OBSERVED_REQUEST"
+                configured == latest.model -> "MATCHES_LATEST_REQUEST"
+                else -> "DIFFERS_FROM_LATEST_REQUEST"
+            })
+            .put("requested_model_ids", JSONArray(runCatching { requestedModels(row.owner) }.getOrDefault(emptyList())))
+            .put("recent_requests", JSONArray(recent.map { request -> request.model.toJson()
+                .put("request_id", request.requestId).put("assigned_profile_id", request.profileId)
+                .put("state", request.state.name).put("send_observed", request.sentObserved)
+                .put("response_observed", request.responseObserved) }))
+    }
+
     private fun JSONObject.withControlState(row: ChildTaskRecord, state: RetainedChildTask?): JSONObject {
         val reason = when {
             state == null -> "child_owner_handle_unavailable"

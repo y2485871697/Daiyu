@@ -69,20 +69,21 @@ class SubAgentStatusHeightContractTest(unittest.TestCase):
 
     def test_long_list_restores_start_and_commits_each_disclosure_before_query(self):
         text = (ROOT / "app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/SubAgentStatusDialogTest.kt").read_text()
-        body = text.split('fun testLongListUsesFrozenModelAndScrollsInBothThemes()', 1)[1]
+        body = text.split('fun testLongListShowsOnlyRequestedModelsAndScrollsInBothThemes()', 1)[1]
         for token in ('(0 until 40)', 'listOf(AppearanceThemeMode.LIGHT, AppearanceThemeMode.DARK)',
                       'performScrollToIndex(0)\n            awaitVisualIdle()',
                       'performScrollToIndex(rows.lastIndex)',
                       'ui.onNodeWithText("已完成").assertIsDisplayed()',
                       'ui.onNodeWithTag("subagent-status").assertDoesNotExist()'):
             self.assertIn(token, body)
-        for index in (0, 39):
-            hidden = f'ui.onNodeWithText("冻结模型 {index}").assertDoesNotExist()'
+        for index, label in ((0, "task-0"), (39, "model-39 other-model")):
+            hidden = f'ui.onNodeWithText("{label}").assertDoesNotExist()'
             committed = (f'ui.onNodeWithTag("subagent-status:task-{index}").performClick()'
                          '\n            awaitVisualIdle()')
-            shown = f'ui.onNodeWithText("冻结模型 {index}").scrollToVisible().assertIsDisplayed()'
+            shown = f'ui.onNodeWithText("{label}").scrollToVisible().assertIsDisplayed()'
             self.assertLess(body.index(hidden), body.index(committed))
             self.assertLess(body.index(committed), body.index(shown))
+        self.assertIn('onNodeWithTag("subagent-requested-models:task-0").assertDoesNotExist()', body)
         self.assertNotIn('Thread.sleep', body)
         self.assertNotIn('performScrollToNode(hasText("冻结模型', body)
 

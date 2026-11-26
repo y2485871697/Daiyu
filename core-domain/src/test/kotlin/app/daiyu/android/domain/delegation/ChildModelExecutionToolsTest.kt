@@ -172,6 +172,7 @@ class ChildModelExecutionToolsTest {
     }
     @Test fun completedToolRoundRebindsSameTaskOnlyAfterOldCancelReturns() {
         val parent = Parent(); val assembly = Assembly(); val old = Port(); val next = Port(useTool = false)
+        val routing = ChildRequestHistory()
         val enqueues = AtomicInteger(); val events = CopyOnWriteArrayList<ChildTaskDiagnosticEvent>()
         val releaseCancel = CountDownLatch(1); val cancelConfirmed = AtomicBoolean(false)
         val journal = object : ChildTaskStore {
@@ -180,7 +181,7 @@ class ChildModelExecutionToolsTest {
             override fun finished(task: ChildTaskRecord, status: ChildTaskStatus, text: String, detail: String?) {}
             override fun list(conversationId: String, limit: Int) = emptyList<ChildTaskRecord>()
         }
-        val supervisor = RetainedChildTasks(journal, diagnostics = ChildTaskDiagnostics { events += it })
+        val supervisor = RetainedChildTasks(journal, diagnostics = ChildTaskDiagnostics { routing.record(it); events += it })
         fun definition(selection: String, modelId: String, port: ModelPort) =
             ChildModelDefinition("pool", 1, null, latest = null, selection = selection, role = ChildModelRole.IMPLEMENTATION) { port }
                 .routed("fixture-provider", modelId)
@@ -197,6 +198,10 @@ class ChildModelExecutionToolsTest {
             await { supervisor.snapshots(binding).single().pauseState == ChildTaskPauseState.PAUSED }
             assertEquals(1, old.requests.get()); assertEquals(1, assembly.executions.get())
             assertEquals(1L, old.cancelled.count); assertEquals(0, next.opens.get())
+            val before = routing.recent(task.owner).single()
+            assertEquals("old-model", before.model.modelId)
+            assertTrue(before.responseObserved)
+            assertEquals(ChildRequestState.COMPLETED, before.state)
             next.onOpen = { history ->
                 assertTrue("old cancel must finish before replacement open", cancelConfirmed.get())
                 val expanded = MessageHistory.expand(history)
@@ -207,6 +212,7 @@ class ChildModelExecutionToolsTest {
             assertEquals(ChildTaskControlReceipt.RESUMED, supervisor.resume(binding, task.owner))
             assertTrue(old.cancelled.await(5, TimeUnit.SECONDS))
             assertFalse(cancelConfirmed.get()); assertEquals(0, next.opens.get()); assertEquals(0, next.requests.get())
+            assertEquals(listOf(before), routing.recent(task.owner))
             releaseCancel.countDown()
             await { supervisor.snapshots(binding).single().settled }
             val result = supervisor.snapshots(binding).single().record
@@ -219,6 +225,11 @@ class ChildModelExecutionToolsTest {
             assertEquals(listOf(ChildRequestModel("fixture-provider", "old-model"),
                 ChildRequestModel("fixture-provider", "new-model")), requests.map { it.model })
             assertTrue(requests.all { it.owner == task.owner })
+            val observed = routing.recent(task.owner)
+            assertEquals(listOf("old-model", "new-model"), observed.map { it.model.modelId })
+            assertEquals(2, observed.map { it.requestId }.distinct().size)
+            assertTrue(observed.all { it.responseObserved && it.state == ChildRequestState.COMPLETED })
+            assertTrue(routing.recent(task.owner.copy(generation = task.owner.generation + 1)).isEmpty())
         } finally {
             releaseCancel.countDown()
             val idle = CountDownLatch(1); supervisor.closeWhenIdle { idle.countDown() }

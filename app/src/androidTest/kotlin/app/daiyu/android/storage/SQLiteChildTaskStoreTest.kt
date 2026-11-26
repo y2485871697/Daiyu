@@ -176,6 +176,29 @@ class SQLiteChildTaskStoreTest : InstrumentationTestCase() {
         catch (_: IllegalStateException) { }
     }
 
+    fun testRequestedModelsRequireSendOrUsageEvidenceAndStayWithTheirOwner() {
+        val db = fresh(); val runtime = lease(db); val parent = parent(db)
+        val (task, waiting) = tasks(parent, 2)
+        runtime.childTasks.enqueue(parent, listOf(task, waiting))
+        val sql = db.writableDatabase
+        fun planned(id: String, model: String, order: Int, usage: Int = 0, source: String = "MAIN"): RequestCheckpoint {
+            sql.execSQL("INSERT INTO child_request_usage(task_id,request_id,request_owner,attempt_id,operation,checkpoint_revision," +
+                "usage_source,has_usage,api_model_snapshot,request_sequence) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                arrayOf(task.owner.childRunId, id, "model-run", "attempt", "NEXT", order, source, usage, model, order))
+            return RequestCheckpoint(id, "attempt", "model-run", RequestOperation.NEXT)
+        }
+        val first = planned("first", "first-model", 1)
+        planned("unsent", "never-sent", 2)
+        planned("from-usage", "second-model", 3, usage = 1)
+        planned("old-model-again", "first-model", 4, usage = 1)
+        planned("summary", "summary-only", 5, usage = 1, source = "SUMMARY")
+        runtime.childUsage.sent(waiting.owner, first)
+        fun observed() = app.daiyu.android.model.usage.SQLiteChildUsageStore.requestedModels(sql, setOf(task.owner, waiting.owner))
+        assertEquals(listOf("second-model", "first-model"), observed()[task.owner])
+        runtime.childUsage.sent(task.owner, first)
+        assertEquals(mapOf(task.owner to listOf("first-model", "second-model")), observed())
+    }
+
     fun testActualModelSelectionPersistsWithoutWeakeningTerminalValidationOrOwner() {
         val db = fresh(); val runtime = lease(db); val owner = parent(db)
         val source = tasks(owner, 1).single()

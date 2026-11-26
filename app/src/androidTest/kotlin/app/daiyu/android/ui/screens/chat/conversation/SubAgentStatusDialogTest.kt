@@ -71,28 +71,29 @@ class SubAgentStatusDialogTest : WiredActivityTestCase() {
         }
     }
 
-    fun testLongListUsesFrozenModelAndScrollsInBothThemes() {
+    fun testLongListShowsOnlyRequestedModelsAndScrollsInBothThemes() {
         val rows = (0 until 40).map { index ->
             SubAgentStatusRow(ChildRunOwner("chat", "run", "group", 1, "task-$index", "answer"),
                 "代理 $index", if (index == 39) "已完成" else "执行中", completed = index == 39,
-                model = "冻结模型 $index")
+                model = if (index == 0) "" else "model-$index other-model")
         }
         for (mode in listOf(AppearanceThemeMode.LIGHT, AppearanceThemeMode.DARK)) {
             show(rows, mode)
             ui.onNodeWithTag("subagent-status-list").performScrollToIndex(0)
             awaitVisualIdle()
-            ui.onNodeWithText("冻结模型 0").assertDoesNotExist()
+            ui.onNodeWithText("task-0").assertDoesNotExist()
             ui.onNodeWithTag("subagent-status:task-0").performClick()
             awaitVisualIdle()
-            ui.onNodeWithText("冻结模型 0").scrollToVisible().assertIsDisplayed()
+            ui.onNodeWithTag("subagent-requested-models:task-0").assertDoesNotExist()
+            ui.onNodeWithText("task-0").scrollToVisible().assertIsDisplayed()
             ui.onNodeWithTag("subagent-status-list").performScrollToIndex(rows.lastIndex)
             ui.mainClock.advanceTimeByFrame()
             ui.waitForIdle()
             ui.onNodeWithTag("subagent-status:task-39").scrollToVisible().assertIsDisplayed()
-            ui.onNodeWithText("冻结模型 39").assertDoesNotExist()
+            ui.onNodeWithText("model-39 other-model").assertDoesNotExist()
             ui.onNodeWithTag("subagent-status:task-39").performClick()
             awaitVisualIdle()
-            ui.onNodeWithText("冻结模型 39").scrollToVisible().assertIsDisplayed()
+            ui.onNodeWithText("model-39 other-model").scrollToVisible().assertIsDisplayed()
             ui.onNodeWithText("已完成").assertIsDisplayed()
             dismissWithBack()
             ui.onNodeWithTag("subagent-status").assertDoesNotExist()

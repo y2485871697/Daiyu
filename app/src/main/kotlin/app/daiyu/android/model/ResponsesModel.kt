@@ -1,5 +1,6 @@
 package app.daiyu.android.model
 
+import app.daiyu.android.domain.delegation.ChildModelPostObservation
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.model.sessiongateway.SessionGateway
@@ -476,6 +477,7 @@ class ResponsesModel internal constructor(
                 conn.send(requestBytes.size.toLong()) { requestBytes.writeTo(it, cancelled::get) }
                 checkCancelled()
                 val status = conn.responseCode {
+                    ChildModelPostObservation.sent()
                     trace.phase = ModelTransportPhase.WAITING_HEADERS
                     voiceSearch?.sent()
                 }

@@ -5,6 +5,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteException
 import app.daiyu.android.context.DatabaseTransactions
 import app.daiyu.android.domain.ModelEvent
+import app.daiyu.android.domain.delegation.ChildRunOwner
 import app.daiyu.android.domain.delegation.ChildTaskRecord
 import app.daiyu.android.domain.runtime.RequestCheckpoint
 import app.daiyu.android.domain.runtime.RequestOperation
@@ -94,6 +95,16 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
         }
     }
 
+    override fun sent(owner: ChildRunOwner, request: RequestCheckpoint) {
+        transactions.run { db ->
+            db.execSQL("UPDATE $TABLE SET send_observed=1 WHERE task_id=? AND request_id=? AND request_owner=? AND usage_source='MAIN'" +
+                " AND EXISTS(SELECT 1 FROM child_tasks WHERE task_id=$TABLE.task_id AND conversation_id=?" +
+                " AND parent_run_id=? AND task_group_id=? AND generation=? AND assistant_message_id=?)",
+                arrayOf(owner.childRunId, request.requestId, request.owner, owner.conversationId, owner.parentRunId,
+                    owner.taskGroupId, owner.generation, owner.assistantMessageId))
+        }
+    }
+
     private data class Observation(val request: RequestCheckpoint,
         val source: app.daiyu.android.domain.runtime.UsageRequestSource, val snapshot: ModelEvent.Usage?)
 
@@ -117,9 +128,28 @@ internal class SQLiteChildUsageStore(database: ConversationDatabase) : ChildUsag
                 while (columns.moveToNext()) add(columns.getString(1))
             } }
             mapOf("provider_id_snapshot" to "TEXT", "api_model_snapshot" to "TEXT", "requested_at_ms" to "INTEGER",
-                "request_sequence" to "INTEGER", "assigned_profile_snapshot" to "TEXT", "original_role_snapshot" to "TEXT").forEach { (column, type) ->
+                "request_sequence" to "INTEGER", "assigned_profile_snapshot" to "TEXT", "original_role_snapshot" to "TEXT",
+                "send_observed" to "INTEGER NOT NULL DEFAULT 0").forEach { (column, type) ->
                 if (column !in present) db.execSQL("ALTER TABLE $TABLE ADD COLUMN $column $type")
             }
+        }
+
+        fun requestedModels(db: SQLiteDatabase, owners: Set<ChildRunOwner>): Map<ChildRunOwner, List<String>> {
+            val result = linkedMapOf<ChildRunOwner, MutableList<String>>()
+            owners.map { it.childRunId }.distinct().chunked(200).forEach { ids ->
+                db.rawQuery("SELECT t.conversation_id,t.parent_run_id,t.task_group_id,t.generation,t.task_id,t.assistant_message_id,u.api_model_snapshot" +
+                    " FROM $TABLE u JOIN child_tasks t ON t.task_id=u.task_id WHERE t.task_id IN (${ids.joinToString { "?" }})" +
+                    " AND u.usage_source='MAIN' AND (u.send_observed=1 OR u.has_usage=1) AND u.api_model_snapshot IS NOT NULL" +
+                    " GROUP BY t.task_id,u.api_model_snapshot ORDER BY t.task_id,MIN(u.request_sequence),u.api_model_snapshot",
+                    ids.toTypedArray()).use { cursor ->
+                    while (cursor.moveToNext()) {
+                        val key = ChildRunOwner(cursor.getString(0), cursor.getString(1), cursor.getString(2),
+                            cursor.getLong(3), cursor.getString(4), cursor.getString(5))
+                        if (key in owners) result.getOrPut(key) { mutableListOf() }.add(cursor.getString(6))
+                    }
+                }
+            }
+            return result
         }
 
         /** Shares the caller's read transaction with parent checkpoint reading. */

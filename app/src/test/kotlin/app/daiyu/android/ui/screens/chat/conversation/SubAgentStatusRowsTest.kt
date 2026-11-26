@@ -32,7 +32,7 @@ class SubAgentStatusRowsTest {
             pauseState = ChildTaskPauseState.PAUSED)
         val row = subAgentStatusRows(listOf(task), listOf(live)).single()
         assertEquals(task.owner, row.owner)
-        assertEquals("冻结模型", row.model)
+        assertEquals("", row.model)
         assertEquals("审查", row.agent)
         assertEquals("已暂停", row.status)
         assertFalse(row.completed)
@@ -58,10 +58,19 @@ class SubAgentStatusRowsTest {
         val old = task().copy(status = ChildTaskStatus.UNKNOWN, display = null)
         val row = subAgentStatusRows(listOf(old), emptyList()).single()
         assertEquals("结果未知", row.status)
-        assertEquals("模型未记录", row.model)
+        assertEquals("", row.model)
         assertEquals("profile", row.agent)
         assertFalse(row.completed)
         assertTrue(subAgentStatusRows(emptyList(), emptyList()).isEmpty())
+    }
+
+    @Test fun requestedModelsKeepFirstRequestOrderAndNeverFollowAnotherTaskOrConfiguredSnapshot() {
+        val task = task()
+        val other = task.copy(owner = task.owner.copy(assistantMessageId = "other"))
+        val rows = subAgentStatusRows(listOf(task, other), emptyList(),
+            mapOf(task.owner to listOf("first-model", "second-model", "first-model")))
+        assertEquals("first-model second-model", rows.first().model)
+        assertEquals("", rows.last().model)
     }
 
     @Test fun knownFailureIsNotUnknownRunningOrCompleted() {

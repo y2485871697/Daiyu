@@ -133,6 +133,45 @@ class RunChildTaskAccessTest {
         assertEquals("cde", body.getString("text")); assertEquals(5, body.getInt("next_text_offset"))
         assertEquals("rti", body.getString("progress")); assertEquals("COMPLETED", body.getString("status"))
     }
+    @Test fun taskDetailsDistinguishSavedRouteFromRequestAndResponseEvidence() {
+        val task = old.copy(originalRole = ChildModelRole.REVIEW, status = ChildTaskStatus.RUNNING)
+        val oldRoute = ChildRequestModel("provider-a", "model-a")
+        val newRoute = ChildRequestModel("provider-b", "model-b")
+        var observed = emptyList<ChildRequestObservation>()
+        var configured: ChildRequestModel? = newRoute
+        val access = RunChildTaskAccess("conversation", { listOf(task) }, { key -> task.takeIf { it.owner == key } },
+            { listOf(RetainedChildTask(task, false, false, false)) }, { "partial" },
+            { error("must not resume") }, { error("must not pause") }, { error("must not stop") },
+            { error("must not list configurations") },
+            recentRequests = { key -> assertEquals(task.owner, key); observed },
+            configuredRoute = { row -> assertEquals(task, row); checkNotNull(configured) })
+        fun routing(): JSONObject {
+            val result = invoke(access, caller("conversation"), "get_child_task", queryArguments().toString()) as DispatchOutcome.Confirmed
+            return JSONObject(result.payload).getJSONObject("request_routing")
+        }
+        assertEquals("NO_OBSERVED_REQUEST", routing().getString("route_relation"))
+        val first = ChildRequestObservation("req-1", task.assignedProfileId, oldRoute, ChildRequestState.COMPLETED, responseObserved = true)
+        observed = listOf(first)
+        val pending = routing()
+        assertEquals("DIFFERS_FROM_LATEST_REQUEST", pending.getString("route_relation"))
+        assertEquals("model-b", pending.getJSONObject("configured_route").getString("model_id"))
+        assertEquals("model-a", pending.getJSONArray("recent_requests").getJSONObject(0).getString("model_id"))
+        val second = ChildRequestObservation("req-2", task.assignedProfileId, newRoute, ChildRequestState.STARTED)
+        observed = listOf(first, second)
+        val starting = routing()
+        assertEquals("MATCHES_LATEST_REQUEST", starting.getString("route_relation"))
+        assertFalse(starting.getJSONArray("recent_requests").getJSONObject(1).getBoolean("response_observed"))
+        observed = listOf(first, second.copy(state = ChildRequestState.RESPONDING, responseObserved = true))
+        configured = null
+        val receiving = routing()
+        assertEquals("current_process", receiving.getString("history_scope"))
+        assertEquals("CONFIGURATION_UNAVAILABLE", receiving.getString("route_relation"))
+        assertTrue(receiving.isNull("configured_route"))
+        val latest = receiving.getJSONArray("recent_requests").getJSONObject(1)
+        assertEquals("req-2", latest.getString("request_id")); assertEquals("provider-b", latest.getString("provider_id"))
+        assertTrue(latest.getBoolean("response_observed"))
+    }
+
     @Test fun stoppedTaskKeepsQueryableContentButCannotContinue() {
         val stopped = old.copy(status = ChildTaskStatus.UNKNOWN, detail = "child_result_unconfirmed")
         val access = RunChildTaskAccess("conversation", { listOf(stopped) }, { stopped.takeIf { row -> row.owner == it } },

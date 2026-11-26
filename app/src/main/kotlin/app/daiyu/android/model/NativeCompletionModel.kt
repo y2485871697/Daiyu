@@ -1,5 +1,6 @@
 package app.daiyu.android.model
 
+import app.daiyu.android.domain.delegation.ChildModelPostObservation
 import app.daiyu.android.domain.*
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.model.images.FrozenMessageImagePlan
@@ -152,6 +153,7 @@ class NativeCompletionModel internal constructor(
                 conn.send(bytes.size.toLong()) { bytes.writeTo(it, cancelled::get) }
                 checkCancelled()
                 val status = conn.responseCode {
+                    ChildModelPostObservation.sent()
                     trace.phase = ModelTransportPhase.WAITING_HEADERS
                     voiceSearch?.sent()
                 }

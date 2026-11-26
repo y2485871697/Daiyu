@@ -60,7 +60,7 @@ class ChildTaskCardContractTest(unittest.TestCase):
         self.assertIn('titleOverride = agentName, plainText = true', source)
         self.assertIn('var expanded by rememberSaveable(index, entry.title)', source)
         self.assertIn('tool-child-receipt-arrow:$index', source)
-        self.assertIn('WorkflowExpandableContent(visibility, disclosure)', source)
+        self.assertIn('WorkflowExpandableContent(visibility, disclosure, leadingSpace = 5.dp)', source)
         self.assertIn('ChildTaskProgressContent(entry.documents.firstOrNull()?.text', source)
         self.assertNotIn('toolOutputPreview(body)', source)
         self.assertNotIn('Int.MAX_VALUE', source)
@@ -77,8 +77,8 @@ class ChildTaskCardContractTest(unittest.TestCase):
         self.assertIn('.heightIn(min = 28.dp)', source)
         self.assertIn('var expanded by rememberSaveable(row.owner)', source)
         self.assertIn('tool-child-arrow:${row.owner.childRunId}', source)
-        self.assertIn('WorkflowExpandableContent(visibility, disclosure)', source)
-        expanded = source.split('WorkflowExpandableContent(visibility, disclosure) {', 1)[1]
+        self.assertIn('WorkflowExpandableContent(visibility, disclosure, leadingSpace = 5.dp)', source)
+        expanded = source.split('WorkflowExpandableContent(visibility, disclosure, leadingSpace = 5.dp) {', 1)[1]
         self.assertIn('details()', expanded)
         self.assertNotIn('ToolCardAction.PAUSE_TASK', source)
         self.assertNotIn('ToolCardAction.STOP_TASK', source)

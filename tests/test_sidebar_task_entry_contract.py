@@ -40,7 +40,7 @@ class SidebarTaskEntryContractTest(unittest.TestCase):
         self.assertIn('if (retainedPage == "child-tasks" || state?.containsKey("task-records-conversation") == true) retainedPage = "chat"', host)
         task_card = source('ui/screens/chat/conversation/ChildTaskToolContent.kt')
         self.assertNotIn('READ_TASK_RESULT', task_card)
-        self.assertIn('ChildTaskProgressContent(text, childTaskStatusText(row.status)', task_card)
+        self.assertRegex(task_card, r'ChildTaskProgressContent\(listOfNotNull\(notice, text\)[^\n]*\n\s*childTaskStatusText\(row.status\)')
         self.assertIn('ChildTaskFrame(Modifier.testTag("tool-child-frame:', task_card)
 
     def test_shared_status_queries_and_task_controls_are_not_deleted(self):

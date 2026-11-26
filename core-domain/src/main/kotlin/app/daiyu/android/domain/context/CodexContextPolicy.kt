@@ -2,15 +2,15 @@ package app.daiyu.android.domain.context
 
 import app.daiyu.android.domain.ModelEvent
 
-/** Codex caps the configured trigger at 90% of the full window. Daiyu configures 80%. */
+/** The configured default is 80% of the full cloud context window. */
 object CodexContextPolicy {
     fun autoCompactLimit(window: Long, configuredPercent: Int = 80): Long? =
         window.takeIf { it > 0 }?.let { (it / 100) * minOf(configuredPercent, 90) +
-            ((it % 100) * minOf(configuredPercent, 90) + 99) / 100 }
+            ((it % 100) * minOf(configuredPercent, 90)) / 100 }
 
     /** The meter and automatic gate share the same normalized cloud input (cache is a subset). */
     fun acceptedInput(usage: ModelEvent.Usage, window: Long?): Long? {
-        val input = usage.inputTokens?.takeIf { it >= 0 } ?: return null
+        val input = usage.inputTokens?.takeIf { it > 0 } ?: return null
         if (window != null && window > 0 && input.toDouble() > window.toDouble() * 1.3) return null
         val cached = usage.cachedTokens
         if (cached != null && (cached > input || (window != null && window > 0 && cached > window))) return null

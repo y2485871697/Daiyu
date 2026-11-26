@@ -82,7 +82,7 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         assertEquals("user", history.last().role)
         val directive = (history.last().blocks.single() as MessageBlock.Text).text
         val prefix = history.dropLast(1).dropWhile { it.role == "system" }
-        val prefixTokens = TokenTailCompression.codexHistoryTokens(prefix, includeLatestScreen = false)
+        val prefixTokens = DaiyuCompaction.history(prefix, includeScreen = false)
         assertEquals(HarnessCompactionPrompt.forCheckpointTarget(compactionCheckpointTarget(prefixTokens)), directive)
         assertTrue(history.dropLast(1).none { it.id.value.startsWith("summary-directive-") })
         object : ModelSession {
@@ -227,8 +227,7 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         assertFalse(configuration.automatic)
         assertEquals(expected.originals, service.displayHistory(id))
         val logical = MessageHistory.expand(expected.originals)
-        val cut = TokenTailCompression.selectStart(logical, configuration.contextWindowTokens, overflow = true,
-            reservedCompletionTokens = ProductionCompressionPolicyResolver.resolve(configuration).outputReservationTokens)
+        val cut = DaiyuCompaction.cut(logical, configuration.contextWindowTokens, idle = true)
         assertTrue(cut > 0)
         assertEquals(logical.drop(cut), service.prepareSend(id).messages.drop(1))
         assertEquals(expected.originals.take(cut), service.archivePage(receipt.archiveId!!, expectedOwner = id).messages)
@@ -236,9 +235,9 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
     }
 
     fun testManualCompressionSizesThePromptAndNeverPublishesAnOversizedCheckpoint() {
-        val lease = seed(2); val id = lease.owner.conversationId
+        val lease = seed(1); val id = lease.owner.conversationId
         val before = service.prepareSend(id)
-        val originalTokens = TokenTailCompression.codexHistoryTokens(before.messages)
+        val originalTokens = DaiyuCompaction.history(before.messages)
         modelReply = { directive ->
             if (directive.contains("no headings or empty sections")) "保留事实0及已确认结果"
             else "未按短前缀预算生成的摘要".repeat(500)
@@ -247,7 +246,7 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         val compressed = service.prepareSend(id)
         assertNotNull(receipt.archiveId)
         assertEquals(receipt.archiveId, compressed.archiveId)
-        assertTrue(TokenTailCompression.codexHistoryTokens(compressed.messages) < originalTokens)
+        assertTrue(DaiyuCompaction.history(compressed.messages) < originalTokens)
         assertEquals(1, requests)
         modelReply = { "模型无视预算，返回没有真正缩小的摘要".repeat(500) }
         val rejected = failure { worker.compress(lease, worker.snapshot(lease)) }

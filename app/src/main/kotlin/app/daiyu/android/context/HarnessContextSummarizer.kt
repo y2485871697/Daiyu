@@ -1,9 +1,10 @@
 package app.daiyu.android.context
 
 import app.daiyu.android.domain.*
+import app.daiyu.android.domain.context.DaiyuContextEstimate
 import java.util.UUID
 
-/** One replayed prefix and one final user directive; no shard rewriting or format-repair call. */
+/** Replay a fitting prefix once; larger histories use bounded, text-only evidence chunks. */
 internal class HarnessContextSummarizer(
     private val bound: BoundSummaryModel,
     private val cancellation: ContextPreparationCancellation,
@@ -16,16 +17,18 @@ internal class HarnessContextSummarizer(
         cancellation.check()
         require(input.originals.isNotEmpty()) { "摘要原文为空" }
         val originals = freezeContextMessages(input.originals)
-        val deadline = bound.startDeadline()
         val id = UUID.randomUUID().toString()
         val instruction = Message(MessageId("summary-directive-$id"), originals.first().conversationId,
             RunId("summary-request-$id"), Message.USER_ROLE,
             listOf(MessageBlock.Text("compaction-directive", HarnessCompactionPrompt.forCheckpointTarget(input.checkpointTargetTokens))),
             RunStatus.COMPLETED)
         val replay = originals + instruction
-        val inputTokens = app.daiyu.android.domain.context.CodexTokenEstimate.text(systemPrompt) +
-            TokenTailCompression.codexHistoryTokens(replay, includeLatestScreen = false) + TokenTailCompression.toolTokens(tools, codex = true)
-        require(inputTokens <= bound.inputBudgetTokens) { "摘要模型输入超过其配置预算；保留原文" }
+        val budget = minOf(bound.inputBudgetTokens, DaiyuContextEstimate.summaryInputLimit(
+            bound.contextWindowTokens, DaiyuContextEstimate.summaryOutputLimit(bound.contextWindowTokens)))
+        val inputTokens = DaiyuCompaction.request(replay, tools, systemPrompt, includeScreen = false)
+        if (inputTokens > budget) return ModelContextSummarizer(bound, cancellation, nextModel,
+            planningBudget = budget).summarize(input)
+        val deadline = bound.startDeadline()
         var model = bound
         var reasoningIndex = 0
         while (true) {

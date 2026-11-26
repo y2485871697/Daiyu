@@ -113,7 +113,7 @@ internal object TokenTailCompression {
 
     fun isSafeCut(history: List<Message>, cut: Int): Boolean = cut in availableCuts(history)
 
-    private fun availableCuts(history: List<Message>): List<Int> {
+    fun availableCuts(history: List<Message>): List<Int> {
         val cuts = mutableListOf(0)
         var blocked = false
         history.forEachIndexed { index, message ->

@@ -1,13 +1,14 @@
 package app.daiyu.android.context
 
 import android.content.Context
+import app.daiyu.android.domain.context.DaiyuContextEstimate
 import app.daiyu.android.model.SummaryProviderFactory
 import app.daiyu.android.storage.ModelSettings
 import app.daiyu.android.storage.ProviderRepository
 
 /** Application request limits, not provider capability metadata. Only the selected model supplies capacity. */
 internal object CatalogSummaryExecutionPolicy {
-    const val OUTPUT_CAP_TOKENS = app.daiyu.android.domain.context.HarnessContextPolicy.SUMMARY_MAX_TOKENS
+    const val OUTPUT_CAP_TOKENS = 16_384
     const val DEADLINE_MILLIS = 120_000L
     private const val EXTRA_FRAMING_RESERVE = 512L
 
@@ -46,7 +47,7 @@ internal object CatalogSummaryExecutionPolicy {
         SummaryProviderFactory.validate(snapshot)
         val overhead = ProviderSummaryModelPort.nativeInstructionReserveTokens + EXTRA_FRAMING_RESERVE
         // The wire output cap bounds generated output; no additional reasoning capacity is inferred.
-        val output = minOf(OUTPUT_CAP_TOKENS, (window / 2).toInt())
+        val output = DaiyuContextEstimate.summaryOutputLimit(window)
         val input = window - output.toLong() - overhead
         require(input > 0) { "摘要模型窗口不足以容纳应用执行预算" }
         return SummaryProviderConfiguration(binding, snapshot, snapshot.model, window, input,

@@ -161,8 +161,9 @@ class RunnerContextRuntimeTest {
                 assertTrue(history.any { row -> row.blocks.any { it is MessageBlock.Tool && it.result == "done" } })
                 val anchor = store.snapshots.last().context!!.calibration!!
                 assertEquals(900L, anchor.billedTokens)
-                assertEquals(20L, anchor.localTokens)
-                assertEquals(900L, billedTokens)
+                assertEquals(100L, anchor.localTokens)
+                assertEquals(20L, anchor.historyTokens)
+                assertEquals(900L + localTokens - anchor.localTokens, billedTokens)
                 admit()
                 assertEquals(request, store.snapshots.last().context!!.summaries.single())
                 observe(ModelEvent.Usage(40, 5))
@@ -216,7 +217,7 @@ class RunnerContextRuntimeTest {
         assertEquals(RunStatus.COMPLETED, result.status); assertEquals(0, compact)
         assertNull(store.snapshots.last().context!!.calibration)
     }
-    @Test fun latestCloudCorrectionWinsAndDoesNotLeaveAStickyPressureFlag() {
+    @Test fun latestCloudCorrectionUpdatesOccupancyButKeepsPendingMaintenance() {
         for (correction in listOf<Long?>(900L, 100L, null)) {
             val store = Store(); var compact = 0
             val runtime = object : RunContextRuntime {
@@ -237,6 +238,8 @@ class RunnerContextRuntimeTest {
                 BatteryTool { "unused" }, RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}.run(initial, emptyList())
             assertEquals(RunStatus.COMPLETED, result.status); assertEquals(0, compact)
             assertEquals(correction, store.snapshots.last().usage.single().snapshot.inputTokens)
+            assertEquals(correction ?: 900L, store.snapshots.last().context!!.meter!!.cloudInputTokens)
+            assertEquals(900L, store.snapshots.last().context!!.meter!!.pressureTokens)
             assertNull(store.snapshots.last().context!!.pressure)
         }
     }
@@ -266,7 +269,7 @@ class RunnerContextRuntimeTest {
         }
     }
 
-    @Test fun normalizedCloudSnapshotUpdatesTheCalibrationWithoutWindowHeuristics() {
+    @Test fun invalidCloudSnapshotDoesNotOverwriteSameRequestCalibration() {
         for (receipt in listOf(0L, 1301L, 1200L)) {
             val store = Store()
             val runtime = object : RunContextRuntime {
@@ -286,7 +289,7 @@ class RunnerContextRuntimeTest {
             val result = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
                 BatteryTool { "unused" }, RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}.run(initial, emptyList())
             assertEquals(RunStatus.COMPLETED, result.status)
-            assertEquals(receipt, store.snapshots.last().context!!.calibration!!.billedTokens)
+            assertEquals(if (receipt == 1200L) 1200L else 700L, store.snapshots.last().context!!.calibration!!.billedTokens)
         }
     }
 
@@ -305,8 +308,8 @@ class RunnerContextRuntimeTest {
         }
         fun assertAnchors(checkpoint: RunCheckpoint, request: RequestCheckpoint) {
             val state = checkNotNull(checkpoint.context)
-            assertEquals(RequestInputCheckpoint(request, 70L, historyTokens = 70L), state.input)
-            assertEquals(RequestInputCheckpoint(request, 70L, 900L, 70L), state.calibration)
+            assertEquals(RequestInputCheckpoint(request, 100L, historyTokens = 70L), state.input)
+            assertEquals(RequestInputCheckpoint(request, 100L, 900L, 70L), state.calibration)
             assertNull(state.pressure)
             assertEquals(listOf(request), checkpoint.usageRequests)
         }
@@ -354,7 +357,7 @@ class RunnerContextRuntimeTest {
         val last = store.snapshots.last(); val request = checkNotNull(last.request)
         assertEquals(ExecutionPhase.TERMINAL, last.phase); assertFalse(last.requestUnconfirmed)
         assertEquals(RequestOperation.RESUME, request.operation)
-        assertEquals(RequestInputCheckpoint(request, 70L, 100L, 70L), last.context!!.calibration)
+        assertEquals(RequestInputCheckpoint(request, 100L, 100L, 70L), last.context!!.calibration)
         assertNull(last.context!!.pressure)
         assertEquals(0, summaries)
         assertEquals(RequestUsageCheckpoint(request, ModelEvent.Usage(100, 12)), last.usage.single())
@@ -722,6 +725,7 @@ class RunnerContextRuntimeTest {
                 assertEquals(listOf(0, 1, 1, 1, 2)[requests - 1], summaries)
                 if (requests < 5) {
                     sink(ModelEvent.Usage(listOf(800L, 920L, 799L, 801L)[requests - 1], 2000))
+                    if (requests == 1) sink(ModelEvent.Usage(750L, 2000)) // Accepted high receipt stays queued.
                     sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("read-$requests"), "read", "{}")))
                 } else sink(ModelEvent.TextFinal("answer", "done"))
             }

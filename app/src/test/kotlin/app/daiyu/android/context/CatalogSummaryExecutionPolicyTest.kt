@@ -47,7 +47,7 @@ class CatalogSummaryExecutionPolicyTest {
             assertFalse(result.provider.requestOptions.openAiWebSearchEnabled)
             assertFalse(result.provider.requestOptions.customBody.contains("reasoning"))
             assertTrue(snapshot.requestOptions.customBody.contains("reasoning"))
-            assertEquals(minOf(CatalogSummaryExecutionPolicy.OUTPUT_CAP_TOKENS, (result.contextWindowTokens / 2).toInt()), result.maxOutputTokens)
+            assertEquals(8192, result.maxOutputTokens)
         }
     }
 
@@ -79,7 +79,7 @@ class CatalogSummaryExecutionPolicyTest {
                 assertEquals(32768L, config.contextWindowTokens)
                 assertEquals(config.contextWindowTokens - config.maxOutputTokens - config.reasoningReserveTokens - config.providerOverheadTokens,
                     config.inputBudgetTokens)
-                assertEquals(minOf(CatalogSummaryExecutionPolicy.OUTPUT_CAP_TOKENS, (config.contextWindowTokens / 2).toInt()), config.maxOutputTokens)
+                assertEquals(app.daiyu.android.domain.context.DaiyuContextEstimate.summaryOutputLimit(config.contextWindowTokens), config.maxOutputTokens)
                 assertEquals(reasoning, config.provider.reasoningOverride)
                 assertEquals(false, config.provider.visionOverride)
                 assertFalse(config.provider.asModelSettings().batteryEnabled)

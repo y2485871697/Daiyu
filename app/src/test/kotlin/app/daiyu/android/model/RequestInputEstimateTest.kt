@@ -5,6 +5,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RequestInputEstimateTest {
+    @Test fun chineseAndLatinHaveDifferentWeightsAndStructuredCallsAreCountedTogether() {
+        val request = JSONObject("""{"messages":[{"role":"assistant","content":"中文abcd","tool_calls":[{"id":"a"},{"id":"b"}]}]}""")
+        val calls = request.getJSONArray("messages").getJSONObject(0).getJSONArray("tool_calls")
+        assertEquals(7L + app.daiyu.android.domain.context.DaiyuContextEstimate.text(calls.toString()),
+            RequestInputEstimate.from(request, null))
+    }
+
     @Test fun countsInstructionsToolsAndResultsButNotOpaqueProtocolBytes() {
         val base = JSONObject("""{"input":[{"type":"reasoning","encrypted_content":"opaque","summary":[{"type":"summary_text","text":"visible"}]}],"instructions":"instruction","tools":[{"name":"lookup","parameters":{"type":"object"}}]}""")
         val measured = RequestInputEstimate.from(base, null)
@@ -25,8 +32,8 @@ class RequestInputEstimateTest {
         val text = "\"\\\n中".repeat(80)
         val body = JSONObject().put("model", "model").put("stream", true).put("instructions", "guide")
             .put("input", org.json.JSONArray().put(JSONObject().put("role", "user").put("content", text)))
-        val expected = 3 + app.daiyu.android.context.TokenTailCompression.textTokens("guide") +
-            app.daiyu.android.context.TokenTailCompression.textTokens(text)
+        val expected = 3 + app.daiyu.android.domain.context.DaiyuContextEstimate.text("guide") +
+            app.daiyu.android.domain.context.DaiyuContextEstimate.text(text)
         assertEquals(expected, RequestInputEstimate.from(body, null))
         body.put("model", "long model".repeat(1000)).put("metadata", JSONObject().put("label", "x".repeat(10000)))
             .put("include", org.json.JSONArray().put("reasoning.encrypted_content"))
@@ -43,7 +50,7 @@ class RequestInputEstimateTest {
                     .put("call_id", "call").put("name", "lookup").put("arguments", args))
                 .put(JSONObject().put("type", "function_call_output").put("call_id", "call").put("output", "done")))
         val expected = 6 + listOf(tools.toString(), format.toString(), "call", "lookup", args, "call", "done")
-            .sumOf(app.daiyu.android.context.TokenTailCompression::textTokens)
+            .sumOf(app.daiyu.android.domain.context.DaiyuContextEstimate::text)
         assertEquals(expected, RequestInputEstimate.from(body, null))
         body.getJSONArray("input").getJSONObject(0).put("id", "opaque".repeat(1000))
         assertEquals(expected, RequestInputEstimate.from(body, null))
@@ -68,13 +75,13 @@ class RequestInputEstimateTest {
 
     @Test fun chatReasoningIsCountedAndOnlyFrozenImagesHaveVisualCost() {
         val chat = JSONObject("""{"messages":[{"role":"assistant","content":"answer","reasoning_content":"thought"}]}""")
-        assertEquals(3 + listOf("answer", "thought").sumOf(app.daiyu.android.context.TokenTailCompression::textTokens),
+        assertEquals(3 + listOf("answer", "thought").sumOf(app.daiyu.android.domain.context.DaiyuContextEstimate::text),
             RequestInputEstimate.from(chat, null, protocol = ProviderProtocol.CHAT_COMPLETIONS))
         val image = JSONObject().put("type", "input_image").put("image_url", "data:image/png;base64,AAAA")
         val body = JSONObject().put("input", org.json.JSONArray().put(JSONObject().put("role", "user")
             .put("content", org.json.JSONArray().put(image))))
         val size = 640 to 480
-        val expected = 3 + app.daiyu.android.context.TokenTailCompression.imageTokens(size.first, size.second)
+        val expected = 3 + app.daiyu.android.domain.context.DaiyuContextEstimate.image(size.first, size.second)
         assertEquals(expected, RequestInputEstimate.from(body, null, mapOf(image.getString("image_url") to size)))
         image.put("image_url", "data:image/png;base64," + "A".repeat(20000))
         assertEquals(expected, RequestInputEstimate.from(body, null, mapOf(image.getString("image_url") to size)))

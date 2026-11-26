@@ -163,7 +163,7 @@ internal class ContextManagementWorker(
             require(settings() == saved) { "压缩设置已改变，请重新选择" }
             if (frozenCurrent != null) chatModel(frozenCurrent, windowTokens, usage)
             else requireNotNull(profiles.freeze(checkNotNull(target), usage)) { "压缩模型不可用" }
-        }, automatic = false, manualRetention = true, systemPrompt = systemPrompt,
+        }, automatic = false, systemPrompt = systemPrompt,
             requestHeader = currentProvider?.let { HarnessRequestPolicy.header(it, systemPrompt) }.orEmpty(), progress = progress)
     }
 

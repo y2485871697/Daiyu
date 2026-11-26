@@ -355,7 +355,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
         var modelHistory = sourceHistory
         var segmentHistory = RunnerHistorySegments(initial) { reasoningInterruptedAtNanos ?: System.nanoTime() }
         val contextRuntime = options.contextRuntime
-        var contextState = contextRuntime?.let { RunContextCheckpoint(meter = it.initialMeter?.copy(overflowRetries = 0) ?: ContextMeterCheckpoint()) }
+        var contextState = contextRuntime?.let { RunContextCheckpoint(meter = it.initialMeter?.copy(overflowRetries = 0, pressureTokens = null) ?: ContextMeterCheckpoint()) }
         var acceptedContextSegments = 0
         var reopenAfterCompaction = false
         var pressureChecked = false
@@ -561,15 +561,15 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (cancelled()) return false
                 if (cloudPressure != null) {
                     val state = checkNotNull(contextState)
-                    contextState = state.copy(meter = checkNotNull(state.meter).copy(cloudCompactionAttempted = true))
+                    contextState = state.copy(meter = checkNotNull(state.meter).copy(cloudCompactionAttempted = true, pressureTokens = null))
                     persistSummary() // Consume the receipt even if there is no useful range or the summary fails.
                 }
                 selectedRuntime.beginCompaction(compactionBoundary)
                 val before = meterHistory()
                 val historyLocal = selectedRuntime.localTokens(before, (tool as? CatalogTool)?.definitions.orEmpty())
-                val anchor = contextState?.calibration ?: contextState?.input
+                val anchor = contextState?.calibration
                 val local = anchor?.let { (it.localTokens + historyLocal - it.historyTokens).coerceAtLeast(0) } ?: historyLocal
-                val billed = cloudPressure ?: anchor?.billedTokens
+                val billed = anchor?.billedTokens?.let { (it + local - anchor.localTokens).coerceAtLeast(1) }
                 if (cancelled()) return false
                 val summaryRequests = object : RunSummaryRequests {
                     override fun create() = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
@@ -601,7 +601,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 transportCheckpoint = null
                 contextState = checkNotNull(contextState).let { state -> state.copy(input = null, calibration = null, pressure = null,
                     meter = (state.meter ?: ContextMeterCheckpoint()).copy(inputFixedSurfaceTokens = null,
-                        cloudInputTokens = null, cloudCompactionAttempted = true),
+                        cloudInputTokens = null, cloudCompactionAttempted = true, pressureTokens = null),
                     compactions = state.compactions + 1) }
                 val expected = snapshot()
                 val store = options.runtimeStore
@@ -669,7 +669,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             if (pressureChecked || !runtime.automatic || !runtime.canCompact) return
             pressureChecked = true
             val meter = contextState?.meter ?: return
-            val input = meter.cloudInputTokens ?: return
+            val input = meter.pressureTokens ?: meter.cloudInputTokens ?: return
             if (meter.anchorHeader != preparedContextHeader) return
             val threshold = runtime.pressureThresholdTokens ?: return
             if (input < threshold || meter.cloudCompactionAttempted) {
@@ -875,7 +875,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         is ModelEvent.InputEstimate -> {
                             contextState = contextState?.let { state ->
                                 val surface = checkNotNull(contextRuntime).localTokens(meterHistory(), requestDefinitions)
-                                state.copy(input = RequestInputCheckpoint(checkNotNull(request), surface, historyTokens = surface))
+                                state.copy(input = RequestInputCheckpoint(checkNotNull(request), event.tokens, historyTokens = surface))
                             }
                             checkpoint()
                         }
@@ -888,20 +888,22 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             }.toList()
                             val local = contextState?.input
                             val window = contextRuntime?.windowTokens
-                            val billed = event.inputTokens
                             if (window != null) {
-                                val plausible = billed != null && billed >= 0 &&
-                                    (event.cachedTokens == null || event.cachedTokens <= billed)
+                                val acceptedInput = app.daiyu.android.domain.context.CodexContextPolicy.acceptedInput(event, window)
                                 val state = checkNotNull(contextState)
                                 val meter = state.meter ?: ContextMeterCheckpoint()
+                                val header = preparedContextHeader
+                                val pressure = acceptedInput?.takeIf { input ->
+                                    checkNotNull(contextRuntime).pressureThresholdTokens?.let { input >= it } == true &&
+                                        !(meter.anchorHeader == header && meter.cloudCompactionAttempted)
+                                }
+                                val latched = listOfNotNull(meter.pressureTokens, pressure).maxOrNull()
                                 contextState = state.copy(
-                                    calibration = if (plausible && local?.request == request) local?.copy(billedTokens = billed)
-                                        else null,
+                                    calibration = if (acceptedInput != null && local?.request == request)
+                                        local?.copy(billedTokens = acceptedInput) else state.calibration,
                                     pressure = null,
-                                    meter = if (plausible) meter.copy(pressureTokens = billed,
-                                        sampledSurfaceTokens = meter.inputFixedSurfaceTokens)
-                                    else meter.copy(pressureTokens = null, sampledSurfaceTokens = null))
-
+                                    meter = meter.copy(pressureTokens = latched,
+                                        cloudInputTokens = acceptedInput ?: meter.cloudInputTokens))
                             }
                             checkpoint(snapshot(usageSnapshot = nextUsage))
                             usage = nextUsage
@@ -1342,10 +1344,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     val reportedTotal = receipt?.inputTokens?.let { prompt ->
                         receipt.outputTokens?.takeIf { it >= 0 && prompt in 0..Long.MAX_VALUE - it }?.let { prompt + it }
                     }
-                    val cloudInput = receipt?.let {
-                        app.daiyu.android.domain.context.CodexContextPolicy.acceptedInput(it, runtime.windowTokens)
-                    }
                     val meter = state.meter ?: ContextMeterCheckpoint()
+                    val cloudInput = meter.cloudInputTokens
                     val header = runtime.headerIdentity(requestDefinitions)
                     val threshold = runtime.pressureThresholdTokens
                     val rearm = cloudInput != null && threshold != null && cloudInput < threshold

@@ -25,8 +25,8 @@ fun interface ContextSummarizer {
     val displayIdentity: app.daiyu.android.timeline.SummaryModelIdentity? get() = null
 }
 internal fun estimateSendContextTokens(policy: CompressionPolicy, messages: List<Message>): Long =
-    if (policy.tokenTail) TokenTailCompression.historyTokens(
-        MessageHistory.expand(ModelHistory.project(messages)), includeLatestScreen = false)
+    if (policy.tokenTail) DaiyuCompaction.history(
+        MessageHistory.expand(ModelHistory.project(messages)), includeScreen = false)
     else estimateTokens(messages)
 
 data class PreparedContext(val messages: List<Message>, val estimatedTokens: Long, val archiveId: String?)
@@ -210,15 +210,14 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
             val messages = read(db, id)
             Triple(messages, messages.indexOfFirst {
                 app.daiyu.android.storage.SQLiteMessageVideoStore.read(db, it).isNotEmpty()
-            }, if (policy.tokenTail) effective(db, id).messages else messages)
+            }, if (policy.tokenTail) effective(db, id, messages, activeOnly = true).messages else messages)
         } }
         data class Selection(val count: Int, val input: List<Message>, val tail: List<Message>, val logicalCut: Int?)
         val selected = RuntimeDiagnostics.measure(Stage.SUMMARY_SELECT) {
             val expanded = if (policy.tokenTail) MessageHistory.expandWithSources(snapshot) else emptyList()
             val originalLogical = expanded.map { it.message }
             val logical = if (policy.tokenTail) MessageHistory.expand(currentSurface) else emptyList()
-            val surfaceCut = if (policy.tokenTail) TokenTailCompression.selectStart(logical, policy.contextTokens,
-                overflow = !retainTail, reservedCompletionTokens = policy.outputReservationTokens, codex = true) else null
+            val surfaceCut = if (policy.tokenTail) DaiyuCompaction.cut(logical, policy.contextTokens, idle = !retainTail) else null
             var logicalCut: Int? = null
             val count: Int
             val summaryInput: List<Message>
@@ -257,16 +256,17 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         try {
             onCompression(activity)
             onStarted()
-            val originalTokens = if (policy.tokenTail) TokenTailCompression.codexHistoryTokens(
-                summaryInput.dropWhile { it.role == "system" }, includeLatestScreen = false) else estimateTokens(summaryInput)
+            val originalTokens = if (policy.tokenTail) DaiyuCompaction.history(
+                summaryInput.dropWhile { it.role == "system" }, includeScreen = false) else estimateTokens(summaryInput)
             val target = if (policy.tokenTail) compactionCheckpointTarget(originalTokens) else null
             val summary = SummaryCheckpoint.withoutLegacyMarker(summarizer.summarize(
                 CompressionInput(summaryInput, revision, checkpointTargetTokens = target))).trim()
             checkCancellation(cancelled)
-            val candidateTokens = if (policy.tokenTail) TokenTailCompression.codexHistoryTokens(
-                listOf(summaryMessage(id, "candidate", summary)), includeLatestScreen = false)
+            val candidateTokens = if (policy.tokenTail) DaiyuCompaction.history(
+                listOf(summaryMessage(id, "candidate", summary)), includeScreen = false)
                 else summary.toByteArray(Charsets.UTF_8).size.toLong() + 128
-            val reduced = candidateTokens < originalTokens
+            val reduced = if (policy.tokenTail) DaiyuCompaction.reduced(summaryInput.dropWhile { it.role == "system" },
+                summaryMessage(id, "candidate", summary)) else candidateTokens < originalTokens
             RuntimeDiagnostics.event(Stage.SUMMARY_REDUCTION, when {
                 summary.isEmpty() -> RuntimeDiagnostics.Code.SUMMARY_EMPTY
                 reduced -> RuntimeDiagnostics.Code.SUMMARY_REDUCED

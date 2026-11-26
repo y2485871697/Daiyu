@@ -1,6 +1,6 @@
 package app.daiyu.android.model
 
-import app.daiyu.android.context.TokenTailCompression
+import app.daiyu.android.domain.context.DaiyuContextEstimate
 import app.daiyu.android.model.images.FrozenMessageImagePlan
 import org.json.JSONArray
 import org.json.JSONObject
@@ -25,7 +25,7 @@ internal object RequestInputEstimate {
         val sizes = images?.estimateImageSizes().orEmpty() + screenImages
         var tokens = 0L
         fun add(value: Any?) {
-            if (value != null && value !== JSONObject.NULL) tokens += TokenTailCompression.textTokens(value.toString())
+            if (value != null && value !== JSONObject.NULL) tokens += DaiyuContextEstimate.text(value.toString())
         }
         fun each(array: JSONArray?, consume: (JSONObject) -> Unit) {
             if (array != null) for (i in 0 until array.length()) array.optJSONObject(i)?.let(consume)
@@ -56,17 +56,17 @@ internal object RequestInputEstimate {
                     }
                     "image", "image_url", "input_image" -> {
                         val size = requireNotNull(payload(value)?.let(sizes::get)) { "Unrecognized frozen image estimate" }
-                        tokens += TokenTailCompression.imageTokens(size.first, size.second)
+                        tokens += DaiyuContextEstimate.image(size.first, size.second)
                     }
                 }
             }
         }
         fun message(value: JSONObject) {
-            tokens += 3
+            tokens += DaiyuContextEstimate.MESSAGE_OVERHEAD
             content(value.opt("content"))
             if (protocol == ProviderProtocol.CHAT_COMPLETIONS) add(value.opt("reasoning_content"))
-            add(value.opt("tool_call_id")); add(value.opt("name"))
-            each(value.optJSONArray("tool_calls")) { add(it) }
+            add(value.opt("tool_call_id"))
+            value.optJSONArray("tool_calls")?.takeIf { it.length() > 0 }?.let(::add)
             add(value.opt("function_call"))
         }
         request.optJSONArray("tools")?.takeIf { it.length() > 0 }?.let(::add)
@@ -76,13 +76,13 @@ internal object RequestInputEstimate {
             ProviderProtocol.RESPONSES -> {
                 content(request.opt("instructions"))
                 val input = request.opt("input")
-                if (input is String) { tokens += 3; add(input) }
+                if (input is String) { tokens += DaiyuContextEstimate.MESSAGE_OVERHEAD; add(input) }
                 else each(input as? JSONArray) { item -> when (item.optString("type")) {
                     "", "message" -> message(item)
                     "function_call" -> {
-                        tokens += 3; add(item.opt("name")); add(item.opt("arguments")); add(item.opt("call_id"))
+                        tokens += DaiyuContextEstimate.MESSAGE_OVERHEAD; add(item.opt("name")); add(item.opt("arguments")); add(item.opt("call_id"))
                     }
-                    "function_call_output" -> { tokens += 3; add(item.opt("call_id")); content(item.opt("output")) }
+                    "function_call_output" -> { tokens += DaiyuContextEstimate.MESSAGE_OVERHEAD; add(item.opt("call_id")); content(item.opt("output")) }
                     "reasoning" -> {
                         content(item.opt("summary")); content(item.opt("content")); add(item.opt("reasoning_text"))
                     }
@@ -103,7 +103,7 @@ internal object RequestInputEstimate {
                     }
                 }
                 request.optJSONObject("systemInstruction")?.let(::parts)
-                each(request.optJSONArray("contents")) { tokens += 3; parts(it) }
+                each(request.optJSONArray("contents")) { tokens += DaiyuContextEstimate.MESSAGE_OVERHEAD; parts(it) }
                 add(request.optJSONObject("generationConfig")?.opt("responseSchema"))
             }
             ProviderProtocol.UNKNOWN -> throw UnsupportedProviderException(protocol.wireName)

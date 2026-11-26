@@ -2,6 +2,7 @@ package app.daiyu.android.model
 
 import app.daiyu.android.domain.*
 import org.json.JSONObject
+import java.util.SortedMap
 import java.io.BufferedReader
 
 internal object ResponsesStream {
@@ -46,8 +47,11 @@ internal object ResponsesStream {
         private var output:List<String>?=null
         private var usage:ModelEvent.Usage?=null
         private val calls=linkedMapOf<String,ToolInvocation>()
-        private val parts=mutableMapOf<String,java.util.SortedMap<Int,String>>()
-        private val summaries=mutableMapOf<String,java.util.SortedMap<Int,String>>()
+        private val parts=mutableMapOf<String,SortedMap<Int,String>>()
+        private val textIds = linkedMapOf<Int, String>()
+        private val textAliases = linkedMapOf<String, String>()
+        private val pendingText = linkedMapOf<String, SortedMap<Int, String>>()
+        private val summaries=mutableMapOf<String,SortedMap<Int,String>>()
         private val reasoningIds = linkedMapOf<Int, String>()
         private val searchIds = linkedMapOf<Int, String>()
         private val reasoningAliases = linkedMapOf<String, String>()
@@ -57,10 +61,13 @@ internal object ResponsesStream {
         val canResume: Boolean get() = !poisoned && output == null && responseId != null && acknowledgedSequence != null
         private fun snapshot(sequence: Long): String = JSONObject().apply {
             put("response_id", responseId); put("sequence", sequence); put("chars", chars)
-            fun map(source: Map<String, java.util.SortedMap<Int,String>>) = JSONObject().apply {
+            fun map(source: Map<String, SortedMap<Int,String>>) = JSONObject().apply {
                 source.forEach { (id, values) -> put(id, JSONObject().apply { values.forEach { (k,v) -> put(k.toString(),v) } }) }
             }
             put("parts", map(parts)); put("summaries", map(summaries))
+            put("text_ids", JSONObject().apply { textIds.forEach { (index, id) -> put(index.toString(), id) } })
+            put("text_aliases", JSONObject(textAliases))
+            put("pending_text", map(pendingText))
             put("search_ids", JSONObject().apply { searchIds.forEach { (index, id) -> put(index.toString(), id) } })
             put("reasoning_ids", JSONObject().apply { reasoningIds.forEach { (index, id) -> put(index.toString(), id) } })
             put("reasoning_aliases", JSONObject().apply { reasoningAliases.forEach { (raw, id) -> put(raw, id) } })
@@ -71,19 +78,25 @@ internal object ResponsesStream {
 
         private data class Memory(val id: String?, val sequence: Long?, val output: List<String>?,
             val usage: ModelEvent.Usage?, val calls: Map<String, ToolInvocation>,
-            val parts: Map<String, java.util.SortedMap<Int, String>>,
-            val summaries: Map<String, java.util.SortedMap<Int, String>>,
+            val parts: Map<String, SortedMap<Int, String>>,
+            val textIds: Map<Int, String>, val textAliases: Map<String, String>,
+            val pendingText: Map<String, SortedMap<Int, String>>,
+            val summaries: Map<String, SortedMap<Int, String>>,
             val searchIds: Map<Int, String>, val reasoningIds: Map<Int, String>, val aliases: Map<String, String>,
             val pendingReasoning: Map<String, String>, val chars: Int)
         private fun capture(): Memory {
-            fun copy(values: Map<String, java.util.SortedMap<Int, String>>) = values.mapValues { java.util.TreeMap(it.value) }
-            return Memory(responseId, acknowledgedSequence, output, usage, LinkedHashMap(calls), copy(parts), copy(summaries),
+            fun copy(values: Map<String, SortedMap<Int, String>>) = values.mapValues { java.util.TreeMap(it.value) }
+            return Memory(responseId, acknowledgedSequence, output, usage, LinkedHashMap(calls), copy(parts),
+                LinkedHashMap(textIds), LinkedHashMap(textAliases), copy(pendingText), copy(summaries),
                 LinkedHashMap(searchIds), LinkedHashMap(reasoningIds), LinkedHashMap(reasoningAliases), LinkedHashMap(pendingReasoning), chars)
         }
         private fun restore(saved: Memory) {
             responseId = saved.id; acknowledgedSequence = saved.sequence; output = saved.output; usage = saved.usage
             calls.clear(); calls.putAll(saved.calls)
             parts.clear(); parts.putAll(saved.parts)
+            textIds.clear(); textIds.putAll(saved.textIds)
+            textAliases.clear(); textAliases.putAll(saved.textAliases)
+            pendingText.clear(); pendingText.putAll(saved.pendingText)
             summaries.clear(); summaries.putAll(saved.summaries)
             searchIds.clear(); searchIds.putAll(saved.searchIds)
             reasoningIds.clear(); reasoningIds.putAll(saved.reasoningIds)
@@ -197,15 +210,69 @@ internal object ResponsesStream {
             else -> a == b
         }
         fun sameCall(a: ToolInvocation, b: ToolInvocation): Boolean = a.id == b.id && a.name == b.name && sameJson(MessagesRequest.jsonObject(a.arguments), MessagesRequest.jsonObject(b.arguments))
+        fun fullText(item: JSONObject): String {
+            val content = item.getJSONArray("content")
+            return (0 until content.length()).joinToString("") { j ->
+                val part = content.getJSONObject(j)
+                when (part.getString("type")) {
+                    "output_text" -> part.getString("text")
+                    "refusal" -> part.getString("refusal")
+                    else -> ""
+                }
+            }.also { checkProtocol(it.length <= 2_000_000) }
+        }
         fun text(event:JSONObject, value:String, final:Boolean) {
-            val id=event.getString("item_id")
-            val index=index(event, "content_index")
-            checkProtocol(index>=0)
-            val content=parts.getOrPut(id) {sortedMapOf()}
-            content[index]=if(final) value else content.getOrDefault(index,"")+value
-            val combined=content.values.joinToString("")
-            checkProtocol(combined.length<=2_000_000)
-            sink(ModelEvent.TextFinal(id,combined))
+            val rawId = event.getString("item_id")
+            val slot = outputIndex(event)
+            val index = index(event, "content_index")
+            val known = textAliases[rawId] ?: rawId.takeIf(parts::containsKey)
+            val indexed = slot?.let(textIds::get)
+            checkProtocol(known == null || indexed == null || known == indexed)
+            val id = indexed ?: known ?: rawId
+            if (slot == null && known == null && final && value.isNotBlank() &&
+                parts.values.any { it[index] == value }) {
+                // A legacy gateway may rename an item in its closing frame. Wait for the terminal
+                // output before treating an identical, unindexed part as a second item.
+                pendingText.getOrPut(rawId) { sortedMapOf() }[index] = value
+                return
+            }
+            if (slot != null) {
+                checkProtocol(textIds.none { (other, value) -> other != slot && value == id })
+                textIds[slot] = id
+                textAliases[rawId] = id
+            }
+            val content = parts.getOrPut(id) { sortedMapOf() }
+            pendingText.remove(rawId)?.forEach { (part, text) ->
+                if (part != index) content.putIfAbsent(part, text)
+            }
+            content[index] = if (final) value else content.getOrDefault(index, "") + value
+            val combined = content.values.joinToString("")
+            checkProtocol(combined.length <= 2_000_000)
+            sink(ModelEvent.TextFinal(id, combined))
+        }
+        fun resolveTextIds(finalText: Map<Int, Pair<String, String>>): Map<Int, String> {
+            val resolved = linkedMapOf<Int, String>()
+            val claimed = mutableSetOf<String>()
+            // Reserve exact IDs before aliases so terminal items cannot share a display ID.
+            for ((slot, entry) in finalText) {
+                val id = entry.first
+                if (id in parts && claimed.add(id)) resolved[slot] = id
+            }
+            for ((slot, entry) in finalText) {
+                if (slot in resolved) continue
+                val id = textAliases[entry.first] ?: textIds[slot]
+                if (id != null && claimed.add(id)) resolved[slot] = id
+            }
+            // Without indexes, only pair one orphan and one final item with unique, exact text.
+            val orphan = parts.keys.filterNot(claimed::contains).singleOrNull()
+            val unmatched = finalText.keys.filterNot(resolved::containsKey).singleOrNull()
+            if (orphan != null && unmatched != null && orphan !in textIds.values) {
+                val text = finalText.getValue(unmatched).second
+                if (text.isNotBlank() && parts.getValue(orphan).values.joinToString("") == text &&
+                    finalText.values.count { it.second == text } == 1 &&
+                    parts.values.count { it.values.joinToString("") == text } == 1) resolved[unmatched] = orphan
+            }
+            return resolved
         }
         fun reasoningId(rawId: String, outputIndex: Int?): String {
             val known = reasoningAliases[rawId]
@@ -399,23 +466,32 @@ internal object ResponsesStream {
                             }
                         }
                     }
+                    val finalText = buildMap {
+                        for (i in 0 until out.length()) {
+                            val item = out.getJSONObject(i)
+                            if (item.optString("type") == "message") put(i, item.getString("id") to fullText(item))
+                        }
+                    }
+                    val displayIds = resolveTextIds(finalText)
                     for(i in 0 until out.length()) {
                         val item=out.getJSONObject(i)
                         if (item.optString("type") == "reasoning" && finalSummary(item) == null)
                             pendingReasoning[item.getString("id")]?.let { summaryItem(JSONObject(it), i) }
                         summaryItem(item, i)
                         searchItem(item)
-                        if(item.getString("type")=="message") {
-                            val content=item.getJSONArray("content")
-                            val full=(0 until content.length()).joinToString("") { j ->
-                                val part=content.getJSONObject(j)
-                                when(part.getString("type")) {"output_text"->part.getString("text");"refusal"->part.getString("refusal");else->""}
-                            }
+                        finalText[i]?.let { (id, full) ->
+                            pendingText.remove(id)
                             val displayed = ResponsesSearchProtocol.displayText(item, full)
                             checkProtocol(displayed.length<=2_000_000)
-                            sink(ModelEvent.TextFinal(item.getString("id"),displayed))
+                            sink(ModelEvent.TextFinal(displayIds[i] ?: id, displayed))
                         }
                     }
+                    pendingText.forEach { (id, values) ->
+                        val full = values.values.joinToString("")
+                        checkProtocol(full.length <= 2_000_000)
+                        sink(ModelEvent.TextFinal(id, full))
+                    }
+                    pendingText.clear()
                     val terminalIds = finalReasoning.map { it.second.getString("id") }.toSet()
                     pendingReasoning.filterKeys { it !in terminalIds }.values.forEach { summaryItem(JSONObject(it)) }
                     pendingReasoning.clear()
@@ -436,7 +512,8 @@ internal object ResponsesStream {
                     event.optString("request_id").takeIf(String::isNotBlank))
                 "response.incomplete" -> {
                     val reason = event.optJSONObject("response")?.optJSONObject("incomplete_details")?.optString("reason")
-                    val texts = parts.map { (id, values) -> id to values.values.joinToString("") }.filter { it.second.isNotEmpty() }
+                    val texts = (parts + pendingText).map { (id, values) -> id to values.values.joinToString("") }
+                        .filter { it.second.isNotEmpty() }
                     if (reason == "max_output_tokens" && calls.isEmpty() && texts.isNotEmpty()) throw OutputLimitReached(texts)
                     throw ModelRequestException(ModelFailure.INCOMPLETE)
                 }

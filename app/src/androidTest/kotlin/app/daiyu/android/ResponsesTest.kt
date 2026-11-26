@@ -319,6 +319,32 @@ class ResponsesTest:InstrumentationTestCase() {
         assertEquals(RunStatus.COMPLETED,result.status)
         assertEquals(text,(result.blocks.single() as MessageBlock.Text).text)
     }
+    fun testRenamedCompletedTextReusesStreamIdentityWithoutMergingDistinctItems() {
+        val text = "同一段正文只显示一次。"
+        val stream = delta(0, text).put("item_id", "stream")
+        val closing = done(0, text).put("item_id", "terminal")
+        val terminal = message(text).put("id", "terminal")
+        for (prefix in listOf(listOf(stream), listOf(stream, closing))) {
+            val result = run(listOf(Connection(frames(*(prefix + completed(terminal)).toTypedArray()))))
+            assertEquals(RunStatus.COMPLETED, result.status)
+            assertEquals(listOf(MessageBlock.Text("stream", text)), result.blocks)
+            assertEquals(result.blocks, result.historySegments.single().blocks)
+            assertEquals("terminal", result.protocolItems.map { JSONObject(it) }
+                .single { it.optString("type") == "message" }.getString("id"))
+        }
+        val indexed = delta(0, "初稿").put("item_id", "stream").put("output_index", 1)
+        val corrected = message("修正正文").put("id", "terminal")
+        val replaced = run(listOf(Connection(frames(indexed, completed(reasoning("思考"), corrected)))))
+        assertEquals(RunStatus.COMPLETED, replaced.status)
+        assertEquals(listOf(MessageBlock.Text("stream", "修正正文")), replaced.blocks)
+        val distinct = run(listOf(Connection(frames(stream, closing, completed(message(text).put("id", "stream"), terminal)))))
+        assertEquals(RunStatus.COMPLETED, distinct.status)
+        assertEquals(listOf(MessageBlock.Text("stream", text), MessageBlock.Text("terminal", text)), distinct.blocks)
+        val distinctAfterAlias = run(listOf(Connection(frames(stream.put("output_index", 0),
+            closing.put("output_index", 0), completed(terminal, message(text).put("id", "stream"))))))
+        assertEquals(RunStatus.COMPLETED, distinctAfterAlias.status)
+        assertEquals(listOf(MessageBlock.Text("stream", text), MessageBlock.Text("terminal", text)), distinctAfterAlias.blocks)
+    }
     fun testCompletedOnlyRepetitiveAnswerFails() {
         val result=run(listOf(Connection(frames(completed(message("OK.\n".repeat(2000)))))))
         assertEquals(RunStatus.FAILED,result.status)

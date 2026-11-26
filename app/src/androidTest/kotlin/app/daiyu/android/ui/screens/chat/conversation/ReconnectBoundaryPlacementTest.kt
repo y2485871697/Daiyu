@@ -151,7 +151,7 @@ class ReconnectBoundaryPlacementTest : WiredActivityTestCase() {
         assertEquals("Manually reading accepted reasoning must be silent", before, advances.get())
         mainThread { entries = entries.map { it.copy(status = "succeeded") }; content = listOf(old, fresh) }
         ui.onNodeWithTag("reasoning-step-state:fresh", useUnmergedTree = true)
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "思考中"))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "正在思考"))
     }
 
     fun testThoughtContinuationUsesTwoIndependentWorkflowCardsAroundTheDivider() {

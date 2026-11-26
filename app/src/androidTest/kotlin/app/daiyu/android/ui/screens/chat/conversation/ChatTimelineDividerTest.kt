@@ -24,6 +24,14 @@ import androidx.compose.ui.test.*
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
+import app.daiyu.android.domain.ConversationId
+import app.daiyu.android.domain.Message
+import app.daiyu.android.domain.MessageBlock
+import app.daiyu.android.domain.MessageId
+import app.daiyu.android.domain.RunId
+import app.daiyu.android.domain.RunStatus
+import app.daiyu.android.domain.ToolCallId
+import app.daiyu.android.domain.ToolInvocation
 import app.daiyu.android.timeline.*
 import app.daiyu.android.ui.app.AgentAppTheme
 import top.yukonga.miuix.kmp.theme.MiuixTheme
@@ -295,6 +303,48 @@ class ChatTimelineDividerTest : WiredActivityTestCase() {
         ui.onNodeWithText("主代理 · 已压缩 2 条消息").performClick()
         ui.onNodeWithText("压缩模型：未记录").assertIsDisplayed()
     }
+    fun testReconnectTimerLeavesNoLayoutGapForEmptyRunningTail() {
+        val source = Message(MessageId(anchor.messageId), ConversationId(anchor.conversationId), RunId(anchor.runId),
+            "assistant", listOf(MessageBlock.Tool(ToolInvocation(ToolCallId("lookup"), "lookup", "{}"), "done")),
+            RunStatus.RUNNING)
+        var runStatus by mutableStateOf(RunStatus.RUNNING)
+        var entry by mutableStateOf(ChatTimelineEntry.Reconnect("empty-tail", anchor, 1L,
+            "running", 11_000L, "NETWORK", 5, "main-model", ReconnectPosition(1)))
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                val reconnects = listOf(entry)
+                val turn = ChatTurnMapper.map(listOf(source.copy(status = runStatus)),
+                    reconnects = reconnects).single() as ChatTurnUi.Assistant
+                Box(Modifier.fillMaxWidth().statusBarsPadding().testTag("empty-reconnect-reply")) {
+                    ReconnectedAssistantTurn(turn, reconnectParts(turn, reconnects), ChatScreenActions())
+                }
+            } } }
+            val reply = ui.onNodeWithTag("empty-reconnect-reply")
+            val divider = ui.onNodeWithTag("timeline:empty-tail")
+            var baseline = 0f
+            for (second in 11..13) {
+                mainThread { entry = entry.copy(elapsedMs = second * 1_000L) }
+                repeat(8) { frame ->
+                    ui.mainClock.advanceTimeByFrame()
+                    val dividerBottom = divider.assertIsDisplayed().fetchSemanticsNode().boundsInRoot.bottom
+                    val replyBottom = reply.fetchSemanticsNode().boundsInRoot.bottom
+                    assertEquals("An empty running tail must not add space at second $second, frame $frame",
+                        dividerBottom, replyBottom, 1f)
+                    if (second == 11 && frame == 0) baseline = dividerBottom
+                    assertEquals("The timer must not move the divider", baseline, dividerBottom, 1f)
+                }
+                ui.onNodeWithText("正在重连：0:$second").assertIsDisplayed()
+                ui.onAllNodesWithContentDescription("重新生成", useUnmergedTree = true).assertCountEquals(0)
+            }
+            mainThread { entry = entry.copy(status = "succeeded"); runStatus = RunStatus.COMPLETED }
+            ui.mainClock.advanceTimeBy(256)
+            val footer = ui.onAllNodesWithContentDescription("重新生成", useUnmergedTree = true)
+            footer.assertCountEquals(1)
+            assertTrue(footer[0].fetchSemanticsNode().boundsInRoot.top >= divider.fetchSemanticsNode().boundsInRoot.bottom)
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     fun testReconnectClockUpdatesAndTerminalStopsTheClock() {
         ui.mainClock.autoAdvance = false
         var now = 0L

@@ -37,11 +37,15 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import app.daiyu.android.ui.components.chatInputDismissTapModifier
 import app.daiyu.android.ui.components.hideChatInputIme
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.positionOnScreen
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.positionInWindow
+import app.daiyu.android.diagnostics.ChatGeometryTrace
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.Modifier
@@ -56,6 +60,27 @@ private class NativeChatStatusBarInsets(
         val composeTop = source.getTop(density)
         return ViewCompat.getRootWindowInsets(view)
             ?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.statusBars())?.top ?: composeTop
+    }
+}
+
+private class ChatHeaderGeometry {
+    var title: LayoutCoordinates? = null
+    var status: LayoutCoordinates? = null
+    var messages: LayoutCoordinates? = null
+
+    fun trace(statusVisible: Boolean) {
+        if (!ChatGeometryTrace.active) return
+        val bar = title?.takeIf { it.isAttached } ?: return
+        val list = messages?.takeIf { it.isAttached } ?: return
+        val line = status?.takeIf { statusVisible && it.isAttached }
+        val barTop = bar.positionInWindow().y
+        val barBottom = barTop + bar.size.height
+        val listTop = list.positionInWindow().y
+        ChatGeometryTrace.record("chat_header_draw", "title_top_px" to barTop, "title_bottom_px" to barBottom,
+            "status_visible" to statusVisible, "status_height_px" to line?.size?.height,
+            "status_top_px" to line?.positionInWindow()?.y,
+            "messages_top_px" to listTop, "messages_visible_top_px" to list.boundsInWindow().top,
+            "messages_visible_height_px" to list.boundsInWindow().height, "title_to_messages_px" to listTop - barBottom)
     }
 }
 
@@ -311,6 +336,7 @@ internal fun DaiyuChatScreen(
             }
         }
     }
+    val headerGeometry = remember { ChatHeaderGeometry() }
     ChatMenuLayer(modifier.fillMaxSize()) {
     Box(Modifier.fillMaxSize().onGloballyPositioned {
         overlayOrigin = it.positionInRoot()
@@ -320,7 +346,7 @@ internal fun DaiyuChatScreen(
         Modifier.fillMaxSize().background(MiuixTheme.colorScheme.background)
             .windowInsetsPadding(stableStatusBars),
     ) {
-        ChatTopBar(state.title, actions, modifier = dismissInputOnTap, assistantLabel = state.composer.assistantLabel, modelLabel = state.composer.modelLabel,
+        ChatTopBar(state.title, actions, modifier = dismissInputOnTap.onGloballyPositioned { headerGeometry.title = it }, assistantLabel = state.composer.assistantLabel, modelLabel = state.composer.modelLabel,
             interactiveModeEnabled = state.interactiveModeEnabled,
             interactiveModeChangeEnabled = state.interactiveModeChangeEnabled,
             automaticCompression = state.automaticCompression, automaticCompressionPending = state.automaticCompressionPending,
@@ -328,7 +354,8 @@ internal fun DaiyuChatScreen(
         state.statusText?.let { status ->
             // 错误、恢复和准备进度使用独立状态行，与金额展示分开。
             top.yukonga.miuix.kmp.basic.Text(status,
-                modifier = dismissInputOnTap.testTag("chat-status").fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp)
+                modifier = dismissInputOnTap.testTag("chat-status").fillMaxWidth()
+                    .onGloballyPositioned { headerGeometry.status = it }.padding(horizontal = 16.dp, vertical = 4.dp)
                     .semantics { liveRegion = LiveRegionMode.Polite },
                 color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
                 style = MiuixTheme.textStyles.footnote1)
@@ -336,7 +363,9 @@ internal fun DaiyuChatScreen(
         ChatConversationLayers(Modifier.weight(1f)
             .windowInsetsPadding(conversationInsets), messages = { bottomInset ->
             androidx.compose.runtime.key(state.conversationKey) {
-                ChatMessageList(displayedTurns, actions, Modifier.fillMaxSize().then(dismissInputOnTap),
+                ChatMessageList(displayedTurns, actions, Modifier.fillMaxSize().then(dismissInputOnTap)
+                    .onGloballyPositioned { headerGeometry.messages = it }
+                    .drawWithContent { headerGeometry.trace(state.statusText != null); drawContent() },
                     state.scrollRequest, turnExtras, imageLoader, dedicatedTool, toolContent, bottomInset, state.timeline, state.compressionActivity,
                     speechMessageId = speechMessageId, speechPreparingMessageId = speechPreparingMessageId, compressionActivities = state.compressionActivities,
                     onPresentationReady = onPresentationReady, historyReady = state.historyReady,

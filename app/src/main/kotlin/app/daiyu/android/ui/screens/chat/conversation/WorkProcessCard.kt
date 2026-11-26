@@ -80,7 +80,7 @@ internal fun WorkProcessCard(work: WorkProcessUi, ownerKey: String, modifier: Mo
     visibility.targetState = detailExtent.keepsContent(expanded)
     val disclosure = rememberWorkflowDisclosureMotion(ownerKey, visibility, collapseUp = true,
         targetExpanded = expanded, animationIdle = detailExtent.idle(expanded),
-        pendingOpeningHeight = remember(detailExtent) { detailExtent::pendingOpeningHeight })
+        pendingCardHeight = remember(detailExtent) { detailExtent::pendingHeight })
     LaunchedEffect(expanded, if (expanded) detailExtent.fullHeight else 0) {
         detailExtent.animate(expanded, disclosure.closingDetailHeight, disclosure.upwards)
     }

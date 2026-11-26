@@ -1,7 +1,11 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.semantics.SemanticsProperties
+import java.util.concurrent.atomic.AtomicInteger
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.*
@@ -115,6 +119,39 @@ class ReconnectBoundaryPlacementTest : WiredActivityTestCase() {
         ui.onAllNodesWithContentDescription("复制回答").assertCountEquals(1)
         ui.onNodeWithContentDescription("复制回答").performClick()
         assertEquals(anchor.listKey, copied)
+    }
+
+    fun testLiveReconnectDoesNotReplayAcceptedReasoning() {
+        val prefix = "Accepted thought before reconnect."
+        val old = MessageContentUi.Reasoning(ReportedReasoning("old", prefix, activeSinceNanos = 1L))
+        val fresh = MessageContentUi.Reasoning(ReportedReasoning("fresh", "New thought after reconnect.", activeSinceNanos = 1L))
+        var entries by mutableStateOf(emptyList<ChatTimelineEntry.Reconnect>())
+        var content by mutableStateOf<List<MessageContentUi>>(listOf(old))
+        val advances = AtomicInteger()
+        val collapsed = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已折叠")
+        mainThread { activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            val turn = ChatTurnUi.Assistant("a", status = RunStatus.RUNNING, isStreaming = true, content = content,
+                reconnectSource = ReconnectSourceUi(anchor, 0, content))
+            val scope = remember { WorkflowVisualScope(baseline = false) }
+            CompositionLocalProvider(LocalWorkflowVisualScope provides scope) {
+                ReconnectedAssistantTurn(turn, reconnectParts(turn, entries), ChatScreenActions(),
+                    onVisibleAdvance = { advances.incrementAndGet() })
+            }
+        } } }
+        ui.onNodeWithTag("work-reasoning:old", useUnmergedTree = true).assertExists()
+        mainThread { entries = listOf(event(prefix.length.toLong())) }
+        ui.onNodeWithTag("timeline:one").assertIsDisplayed()
+        ui.onNodeWithTag("work-process-header").assert(collapsed)
+        ui.onNodeWithText(prefix).assertDoesNotExist()
+        val before = advances.get()
+        ui.onNodeWithTag("work-process-header").performClick()
+        ui.onNodeWithContentDescription("展开模型已报告的思考 / 摘要").performClick()
+        ui.waitUntil(5_000) { ui.onAllNodesWithText(prefix).fetchSemanticsNodes().size == 1 }
+        ui.onNodeWithText(prefix).assertIsDisplayed()
+        assertEquals("Manually reading accepted reasoning must be silent", before, advances.get())
+        mainThread { entries = entries.map { it.copy(status = "succeeded") }; content = listOf(old, fresh) }
+        ui.onNodeWithTag("reasoning-step-state:fresh", useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "思考中"))
     }
 
     fun testThoughtContinuationUsesTwoIndependentWorkflowCardsAroundTheDivider() {

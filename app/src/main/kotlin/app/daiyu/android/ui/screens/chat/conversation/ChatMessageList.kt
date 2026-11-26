@@ -19,6 +19,7 @@ import androidx.compose.foundation.MutatePriority
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onPlaced
 import androidx.compose.ui.layout.onSizeChanged
@@ -1489,7 +1490,21 @@ internal fun ChatMessageList(
                     clearanceLayout.coordinates = coordinates
                     if (coordinates.isAttached) scheduleFollowClearance()
                 }
-                .drawWithContent { if (!initialPositionPending) drawContent() }
+                .drawWithContent {
+                    if (app.daiyu.android.diagnostics.ChatGeometryTrace.active) {
+                        val coords = clearanceLayout.coordinates?.takeIf { it.isAttached }
+                        val layout = listState.layoutInfo
+                        val first = layout.visibleItemsInfo.firstOrNull { it.size > 0 && it.offset + it.size > layout.viewportStartOffset }
+                        app.daiyu.android.diagnostics.ChatGeometryTrace.record("chat_list_draw",
+                            "drawing" to !initialPositionPending, "retaining_rows" to currentRetainingRows,
+                            "list_top_px" to coords?.positionInWindow()?.y, "list_visible_top_px" to coords?.boundsInWindow()?.top,
+                            "viewport_start_px" to layout.viewportStartOffset, "top_padding_px" to layout.beforeContentPadding,
+                            "first_index" to first?.index, "first_offset_px" to first?.offset, "first_size_px" to first?.size,
+                            "tail_bounded" to currentNestedTail.bounded, "tail_viewport_offset_px" to currentNestedTail.viewportOffset,
+                            "tail_inner_scroll_px" to currentNestedTail.scrollOffset)
+                    }
+                    if (!initialPositionPending) drawContent()
+                }
                 .then(if (initialPositionPending) Modifier.clearAndSetSemantics {} else Modifier)
                 .then(if (exposeSemantics) Modifier else Modifier.clearAndSetSemantics {})
                 .pointerInput(Unit) {

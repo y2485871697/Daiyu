@@ -30,7 +30,7 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
 
     def test_downward_opening_detaches_follow_and_ignores_composer_overflow(self):
         source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
-        toggle = source.split('fun toggle(opening: Boolean)', 1)[1].split('fun observeExpanded(', 1)[0]
+        toggle = source.split('fun toggle(opening: Boolean,', 1)[1].split('fun observeExpanded(', 1)[0]
         self.assertLess(toggle.index('cycleChosen = chooseDirection()'), toggle.index('val openingDownwards = opening && !upwards'))
         self.assertIn('if (openingDownwards) viewport.detachFollow()\n            else if (following) viewport.resumeFollow()', toggle)
         self.assertIn('if (detachedOpening) return null', source)
@@ -129,20 +129,20 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertNotIn('viewport.scrollOffset =', anchor)
         self.assertIn('disclosureViewport.active == null', source)
 
-    def test_moving_bottom_anchor_drains_pending_geometry_even_when_the_old_edge_is_aligned(self):
+    def test_moving_anchor_drains_pending_geometry_even_when_the_old_edge_is_aligned(self):
         motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         pre_draw = motion.split('fun correctBeforeDraw() {', 2)[2].split('val headerModifier', 1)[0]
         self.assertIn('val requester = anchorRequester ?: this', pre_draw)
-        self.assertIn('if (anchorAtTop) null else', pre_draw)
+        self.assertIn('if (!anchorAtTop || requester.collapseUp && !requester.expanded)', pre_draw)
         self.assertIn('requester.animatedExtent?.pendingHeight()', pre_draw)
-        self.assertIn('if (requester.expanded) requester.pendingOpeningHeight?.invoke() else null', pre_draw)
+        self.assertIn('requester.pendingCardHeight?.invoke(', pre_draw)
         self.assertIn('val refreshGeometry = pendingHeight != null && pendingHeight != lastRefreshedHeight', pre_draw)
         extent = (CHAT / 'WorkflowCardExtent.kt').read_text()
-        self.assertIn('fun pendingOpeningHeight()', extent)
+        self.assertIn('fun pendingHeight(expanded: Boolean, closingLimit: Int?)', extent)
         self.assertIn('.takeIf { it != measuredHeight }', extent)
         self.assertIn('val pixels = layoutHeight(expanded, settledExpanded)', extent)
         work = (CHAT / 'WorkProcessCard.kt').read_text()
-        self.assertIn('detailExtent::pendingOpeningHeight', work)
+        self.assertIn('detailExtent::pendingHeight', work)
         self.assertIn('if (!anchorCorrectionPosted && !refreshGeometry) return', pre_draw)
         self.assertIn('correctAnchor(refreshGeometry = refreshGeometry)', pre_draw)
         anchor = motion.split('private fun correctAnchor(', 1)[1].split('private fun chooseDirection()', 1)[0]

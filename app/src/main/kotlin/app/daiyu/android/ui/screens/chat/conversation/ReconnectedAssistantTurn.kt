@@ -3,6 +3,7 @@ package app.daiyu.android.ui.screens.chat.conversation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateMapOf
@@ -41,9 +42,12 @@ internal fun ReconnectedAssistantTurn(
     }
     val actionsReady = turn.status == app.daiyu.android.domain.RunStatus.STOPPED || LocalReplyPlayback.current?.control?.stopped == true || parts.parts.all { ready[it.turn.listKey] == it && settled[it.turn.listKey] == it }
     val identityIndex = parts.parts.indexOfFirst { it.turn.hasVisibleResponse() }.coerceAtLeast(0)
+    val liveScope = LocalWorkflowVisualScope.current
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         parts.parts.forEachIndexed { index, part -> key(part.turn.listKey) {
-            androidx.compose.runtime.CompositionLocalProvider(LocalReasoningSourceWindows provides
+            // A reconnect changes the display key, not the presentation age of accepted content.
+            val partScope = if (part.after.isNotEmpty()) remember { WorkflowVisualScope(baseline = true) } else liveScope
+            CompositionLocalProvider(LocalWorkflowVisualScope provides partScope, LocalReasoningSourceWindows provides
                 part.turn.content.filterIsInstance<MessageContentUi.Reasoning>().mapNotNull { item ->
                     item.markdownWindow?.let { item.reported.itemId to it }
                 }.toMap()) {

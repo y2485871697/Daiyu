@@ -110,7 +110,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         }
         val disclosure = rememberWorkflowDisclosureMotion("late-height-fixture", visibility, collapseUp = !nested,
             targetExpanded = expanded, animationIdle = !expanded,
-            pendingOpeningHeight = if (nested) null else remember(pendingHeight) { pendingHeight::pending })
+            pendingCardHeight = if (nested) null else remember(pendingHeight) { { _, _ -> pendingHeight.pending() } })
         val extent = remember(height) { WorkflowNestedExtent({ height() / 100f }, { true }, { null }) }
         if (nested) DisposableEffect(disclosure, extent) {
             disclosure.animatedExtent = extent
@@ -1154,6 +1154,16 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         animateNested("work-process-header", opening = false)
         assertDirection(true)
         assertEquals(originalIdentity, ui.onNodeWithTag("reply-identity:tail").fetchSemanticsNode().boundsInRoot.top, 2f)
+    }
+
+    fun testClosingWorkflowReportsAClampedPendingHeightBeforeLayout() {
+        val extent = WorkflowCardExtent(initiallyExpanded = true)
+        extent.fullHeight = 800
+        assertEquals(800, extent.measure(expanded = true, closingLimit = null))
+        assertNull(extent.pendingHeight(expanded = true, closingLimit = null))
+        assertEquals(241, extent.pendingHeight(expanded = false, closingLimit = 241))
+        assertEquals(241, extent.measure(expanded = false, closingLimit = 241))
+        assertNull(extent.pendingHeight(expanded = false, closingLimit = 241))
     }
 
     fun testLongWorkflowManualAndAutomaticCollapseHasNoHiddenHeightPlateau() {

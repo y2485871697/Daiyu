@@ -110,7 +110,7 @@ internal class WorkflowDisclosureMotion(
     private val context: WorkflowDisclosureContext?,
     private val collapseUp: Boolean = false,
     private val parent: WorkflowDisclosureMotion? = null,
-    private val pendingOpeningHeight: (() -> Int?)? = null,
+    private val pendingCardHeight: ((Boolean, Int?) -> Int?)? = null,
 ) {
     var upwards by mutableStateOf(context?.let { it.outputActive() && it.viewport.follows() } == true)
         private set
@@ -157,11 +157,19 @@ internal class WorkflowDisclosureMotion(
         if (!tracing) return
         val actual = coordinates?.takeIf { it.isAttached } ?: container?.takeIf { it.isAttached }
         val top = actual?.positionInWindow()?.y
+        val viewport = context?.viewport
+        val ownsAnchor = viewport?.active === this
+        val safe = viewport?.bounds?.invoke()
         trace("disclosure_draw", "top_px" to top, "layout_height_px" to layoutHeight,
             "available_px" to available, "painted_height_px" to if (paint) paintedHeight else 0f,
             "painted_bottom_px" to if (paint) top?.plus(paintedHeight) else null,
             "header_height_px" to headerHeight, "previously_admitted" to admitted,
-            "paint" to paint, "owns_anchor" to (context?.viewport?.active === this))
+            "paint" to paint, "owns_anchor" to ownsAnchor,
+            "expanded" to expanded, "header_top_px" to header?.takeIf { it.isAttached }?.positionInWindow()?.y,
+            "safe_top_px" to safe?.top, "safe_bottom_px" to safe?.bottom,
+            "anchor_edge" to when { !ownsAnchor -> null; anchorAtTop -> "top"; else -> "bottom" },
+            "anchor_target_px" to if (ownsAnchor) (if (anchorAtTop) anchorTop else anchorBottom) else null,
+            "requested_scroll_px" to lastRequested.takeIf { ownsAnchor }, "consumed_scroll_px" to lastConsumed.takeIf { ownsAnchor })
     }
 
     internal fun traceFrame(phase: String) {
@@ -206,9 +214,10 @@ internal class WorkflowDisclosureMotion(
         val requester = anchorRequester ?: this
         // dispatchDraw can consume a spring tick after this listener. Only flush a new
         // pixel height: forcing a measure on every traversal can schedule another traversal.
-        val pendingHeight = if (anchorAtTop) null else
-            requester.animatedExtent?.pendingHeight() ?:
-                (if (requester.expanded) requester.pendingOpeningHeight?.invoke() else null)
+        val pendingHeight = if (!anchorAtTop || requester.collapseUp && !requester.expanded) {
+            requester.animatedExtent?.pendingHeight() ?: requester.pendingCardHeight?.invoke(
+                requester.expanded, requester.closingDetailHeight)
+        } else null
         val refreshGeometry = pendingHeight != null && pendingHeight != lastRefreshedHeight
         lastRefreshedHeight = pendingHeight
         if (!anchorCorrectionPosted && !refreshGeometry) return
@@ -328,9 +337,9 @@ internal class WorkflowDisclosureMotion(
 
     fun retainAnchor(gesture: Long) { anchorGesture = gesture }
 
-    fun toggle(opening: Boolean) {
+    fun toggle(opening: Boolean, automatic: Boolean = false) {
         if (tracing) trace("disclosure_toggle", "phase" to "begin", "opening" to opening,
-            "expanded_before" to expanded, "up_before" to upwards,
+            "expanded_before" to expanded, "up_before" to upwards, "automatic" to automatic,
             "header_center_px" to header?.takeIf { it.isAttached }?.let { it.positionInWindow().y + it.size.height / 2f },
             "container_top_px" to container?.takeIf { it.isAttached }?.positionInWindow()?.y,
             "container_height_px" to container?.takeIf { it.isAttached }?.size?.height,
@@ -376,7 +385,7 @@ internal class WorkflowDisclosureMotion(
     }
 
     fun observeExpanded(value: Boolean) {
-        if (!value && expanded && !manualChange && collapseUp) toggle(opening = false)
+        if (!value && expanded && !manualChange && collapseUp) toggle(opening = false, automatic = true)
         if (value && !expanded && !manualChange && !cycleChosen) {
             cycleChosen = chooseDirection()
         }
@@ -478,12 +487,12 @@ internal fun rememberWorkflowDisclosureMotion(
     collapseUp: Boolean = false,
     targetExpanded: Boolean = visibility.targetState,
     animationIdle: Boolean = true,
-    pendingOpeningHeight: (() -> Int?)? = null,
+    pendingCardHeight: ((Boolean, Int?) -> Int?)? = null,
 ): WorkflowDisclosureMotion {
     val context = LocalWorkflowDisclosureContext.current
     val parent = LocalWorkflowDisclosureParent.current
-    val motion = remember(key, context, collapseUp, parent, pendingOpeningHeight) {
-        WorkflowDisclosureMotion(context, collapseUp, parent, pendingOpeningHeight)
+    val motion = remember(key, context, collapseUp, parent, pendingCardHeight) {
+        WorkflowDisclosureMotion(context, collapseUp, parent, pendingCardHeight)
     }
     motion.observeExpanded(targetExpanded)
     val idle = visibility.isIdle && animationIdle

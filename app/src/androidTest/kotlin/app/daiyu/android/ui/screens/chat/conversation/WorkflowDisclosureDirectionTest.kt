@@ -109,7 +109,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             .testTag("work-process-surface")) {
             Box(Modifier.fillMaxWidth().height(44.dp).testTag("work-process-header").then(disclosure.headerModifier)
                 .conversationClickable { disclosure.toggle(opening = true); expanded = true })
-            if (expanded) Box(Modifier.fillMaxWidth().layout { measurable, constraints ->
+            if (expanded) Box(Modifier.fillMaxWidth().testTag("late-opening-body").layout { measurable, constraints ->
                 val child = measurable.measure(constraints)
                 val pixels = pendingHeight.read()
                 pendingHeight.measured = pixels
@@ -262,6 +262,14 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                 lateOpeningHeight = { lateGrowth.intValue })
             assertHalf(lower = true)
             touchHeader()
+            // Wait for the open body to enter layout before changing a measured dependency.
+            ui.onNodeWithTag("late-opening-body", useUnmergedTree = true).assertExists()
+            val armedHeight = bottom() - top()
+            mainThread {
+                assertEquals(0, lateGrowth.intValue)
+                collect(JSONObject().put("kind", "fixture_marker").put("phase", "late_layout_armed")
+                    .put("height_px", armedHeight.toDouble()).put("at_ns", System.nanoTime()))
+            }
             for (pixels in listOf(17, 37, 74)) {
                 mainThread { injectGrowth = pixels; window.decorView.invalidate() }
             }
@@ -286,6 +294,9 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                         val late = rows.filter { it.optString("phase") == "late_layout" }
                         assertEquals(listOf(17, 37, 74), late.map { it.getInt("growth_px") })
                         val initial = opening.getDouble("container_height_px")
+                        val armed = rows.single { it.optString("phase") == "late_layout_armed" }
+                        assertEquals(initial, armed.getDouble("height_px"), 1.0)
+                        assertTrue(armed.getLong("at_ns") < late.first().getLong("at_ns"))
                         for (tick in late) {
                             val draw = samples.first { it.getLong("at_ns") >= tick.getLong("at_ns") }
                             assertEquals("The first draw after a late tick must use its corrected height: $draw",

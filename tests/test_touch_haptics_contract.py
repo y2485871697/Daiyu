@@ -107,7 +107,7 @@ class TouchHapticsContractTest(unittest.TestCase):
         overflow = menus.split("internal fun ChatOverflowMenu(", 1)[1].split("private fun ChatMenuItem(", 1)[0]
         self.assertIn("outsideClickFeedback = false", overflow)
         item = menus.split("private fun ChatMenuItem(", 1)[1].split("internal fun ChatAttachmentSheet(", 1)[0]
-        self.assertIn(".conversationClickable(enabled = enabled)", item)
+        self.assertIn(".conversationClickable(enabled = enabled, onClick = onClick)", item)
         self.assertNotIn("clickFeedback = false", item)
         self.assertEqual(1, menus.count("outsideClickFeedback = false"))
 

@@ -63,7 +63,7 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
         activity = (APP / 'MainActivity.kt').read_text()
         call = activity.split('DaiyuChatScreen(pageState, pageActions,', 1)[1].split('readAutomaticCompression = {', 1)[0]
         self.assertIn('derivedStateOf(structuralEqualityPolicy()) { retainedPageState == "chat" }', activity)
-        self.assertIn('menuAvailable = chatRouteSelected && !sidebarVisible', call)
+        self.assertIn('menuAvailable = chatRouteSelected && retainedPage == "chat" && !sidebarVisible', call)
         self.assertNotIn('menuAvailable = routeActive', call)
         screen = (CHAT / 'ChatScreen.kt').read_text()
         self.assertIn('menuAvailable: Boolean = true', screen)

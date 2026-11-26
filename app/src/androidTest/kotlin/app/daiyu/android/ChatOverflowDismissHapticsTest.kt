@@ -43,6 +43,7 @@ class ChatOverflowDismissHapticsTest : WiredActivityTestCase() {
         var dismisses = 0
         var underlyingClicks = 0
         val actions = mutableListOf<ChatMenuAction>()
+        val dismissCountsAtAction = mutableListOf<Int>()
     }
     private fun withMenu(overflow: Boolean, block: (Port, Events) -> Unit) {
         val context = instrumentation.targetContext
@@ -50,6 +51,8 @@ class ChatOverflowDismissHapticsTest : WiredActivityTestCase() {
         val port = Port()
         val events = Events()
         var expanded by mutableStateOf(false)
+        var interactive by mutableStateOf(false)
+        var automatic by mutableStateOf(false)
         var runtime: HapticsRuntime? = null
         var unregister: () -> Unit = {}
         try {
@@ -61,7 +64,15 @@ class ChatOverflowDismissHapticsTest : WiredActivityTestCase() {
                             Box(Modifier.align(Alignment.TopEnd).size(40.dp).testTag("feedback-open")
                                 .conversationClickable { expanded = true }) {
                                 val dismiss = { events.dismisses++; expanded = false }
-                                if (overflow) ChatOverflowMenu(expanded, dismiss, { events.actions += it })
+                                if (overflow) ChatOverflowMenu(expanded, dismiss, { action ->
+                                    events.actions += action
+                                    events.dismissCountsAtAction += events.dismisses
+                                    when (action) {
+                                        ChatMenuAction.INTERACTIVE_MODE -> interactive = !interactive
+                                        ChatMenuAction.AUTO_COMPRESS -> automatic = !automatic
+                                        else -> Unit
+                                    }
+                                }, interactiveModeEnabled = interactive, automaticCompression = automatic)
                                 else ChatAnchoredMenu(expanded, dismiss) {
                                     Box(Modifier.size(100.dp).testTag("feedback-default-menu"))
                                 }
@@ -125,6 +136,42 @@ class ChatOverflowDismissHapticsTest : WiredActivityTestCase() {
         assertEquals(3, events.dismisses)
         assertEquals(0, events.underlyingClicks)
     }
+    fun testOnlySwitchesKeepOverflowOpenAndAllActionsDismissBeforeDispatch() = withMenu(true) { _, events ->
+        val menu = ui.onNodeWithTag("chat-overflow-menu", useUnmergedTree = true)
+        val switches = listOf(ChatMenuAction.INTERACTIVE_MODE, ChatMenuAction.AUTO_COMPRESS)
+        openMenu("chat-overflow-menu")
+        switches.forEach { action ->
+            val switch = ui.onNodeWithTag("chat-menu-switch:${action.name}", useUnmergedTree = true)
+            ui.onNodeWithTag("chat-menu:${action.name}").scrollToVisible()
+            switch.assertIsOff().performTouchInput { click() }
+            ui.waitForIdle()
+            switch.assertIsOn()
+            menu.assertIsDisplayed()
+            assertEquals(0, events.dismisses)
+        }
+        val commands = listOf(ChatMenuAction.NEW_CHAT, ChatMenuAction.SEARCH, ChatMenuAction.OPEN_TERMINAL,
+            ChatMenuAction.OPEN_BROWSER, ChatMenuAction.OPEN_WORKSPACE, ChatMenuAction.SUB_AGENT,
+            ChatMenuAction.CONTEXT_STATS, ChatMenuAction.COMPRESS_CONTEXT)
+        commands.forEachIndexed { index, action ->
+            if (index > 0) openMenu("chat-overflow-menu")
+            val row = ui.onNodeWithTag("chat-menu:${action.name}").scrollToVisible()
+            ui.mainClock.autoAdvance = false
+            try {
+                row.performTouchInput { click() }
+                // Assert in the unmerged tree before an ordinary retained exit could finish.
+                repeat(2) { ui.mainClock.advanceTimeByFrame() }
+                ui.waitForIdle()
+                menu.assertDoesNotExist()
+            } finally {
+                ui.mainClock.autoAdvance = true
+            }
+            assertEquals(index + 1, events.dismisses)
+        }
+        assertEquals(switches + commands, events.actions)
+        assertEquals(listOf(0, 0) + (1..commands.size).toList(), events.dismissCountsAtAction)
+        assertEquals(0, events.underlyingClicks)
+    }
+
     fun testOtherAnchoredMenusKeepTheirDefaultOutsideFeedback() = withMenu(false) { port, events ->
         openMenu("feedback-default-menu")
         assertEquals(1, port.requests.size)

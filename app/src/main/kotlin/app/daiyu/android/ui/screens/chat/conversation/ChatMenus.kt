@@ -114,11 +114,13 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
                                 ChatMenuAction.AUTO_COMPRESS -> compression.enabled != null && !compression.pending
                                 else -> true
                             }
-                            val dismiss = if (entry.action == ChatMenuAction.COMPRESS_CONTEXT) ({
-                                removeMenu()
-                                onDismiss()
-                            }) else onDismiss
-                            ChatMenuItem(entry, dismiss, onAction, checked = checked, enabled = enabled, previewStyle = true)
+                            ChatMenuItem(entry, onClick = {
+                                if (!entry.action.isOverflowSwitch) {
+                                    removeMenu()
+                                    onDismiss()
+                                }
+                                onAction(entry.action)
+                            }, checked = checked, enabled = enabled, previewStyle = true)
                         }
                     }
                 }
@@ -127,18 +129,18 @@ internal fun ChatOverflowMenu(expanded: Boolean, onDismiss: () -> Unit, onAction
     }
 }
 
+private val ChatMenuAction.isOverflowSwitch: Boolean
+    get() = this == ChatMenuAction.INTERACTIVE_MODE || this == ChatMenuAction.AUTO_COMPRESS
+
 @Composable
-private fun ChatMenuItem(entry: MenuEntry, onDismiss: () -> Unit, onAction: (ChatMenuAction) -> Unit,
+private fun ChatMenuItem(entry: MenuEntry, onClick: () -> Unit,
     modifier: Modifier = Modifier, checked: Boolean? = null, enabled: Boolean = true, previewStyle: Boolean = false) {
     val colors = chatChromeColors()
     val scheme = MiuixTheme.colorScheme
     val dark = scheme.background.luminance() < .3f
     Row(modifier.testTag("chat-menu:${entry.action.name}").fillMaxWidth().heightIn(min = 38.dp)
         .clip(RoundedCornerShape(11.dp))
-        .conversationClickable(enabled = enabled) {
-            if (entry.action != ChatMenuAction.INTERACTIVE_MODE && entry.action != ChatMenuAction.AUTO_COMPRESS) onDismiss()
-            onAction(entry.action)
-        }
+        .conversationClickable(enabled = enabled, onClick = onClick)
         .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(9.dp)) {
         Icon(entry.icon, null, Modifier.size(17.dp), tint = (if (previewStyle)
@@ -147,7 +149,7 @@ private fun ChatMenuItem(entry: MenuEntry, onDismiss: () -> Unit, onAction: (Cha
         Text(entry.title, Modifier.weight(1f), maxLines = 1,
             style = MiuixTheme.textStyles.body1.copy(fontSize = 12.sp, lineHeight = 18.sp),
             color = (if (previewStyle) colors.text else scheme.onSurface).copy(alpha = if (enabled) 1f else .38f))
-        if (entry.action == ChatMenuAction.INTERACTIVE_MODE || entry.action == ChatMenuAction.AUTO_COMPRESS) {
+        if (entry.action.isOverflowSwitch) {
             val isChecked = checked == true
             Box(Modifier.testTag("chat-menu-switch:${entry.action.name}").size(25.dp, 15.dp).background(
                 if (isChecked) colors.accent else Color(0x2E9B8CB9), CircleShape)

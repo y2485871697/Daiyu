@@ -30,8 +30,9 @@ class ChatOverflowIconColorsContract(unittest.TestCase):
     def test_labels_switches_and_dismiss_behavior_do_not_follow_feature_colors(self):
         self.assertIn("if (isChecked) colors.accent else Color(0x2E9B8CB9)", self.item)
         self.assertIn("if (previewStyle) colors.text else scheme.onSurface", self.item)
-        self.assertIn("if (entry.action != ChatMenuAction.INTERACTIVE_MODE && entry.action != ChatMenuAction.AUTO_COMPRESS) onDismiss()", self.item)
-        self.assertIn("onAction(entry.action)", self.item)
+        self.assertIn("get() = this == ChatMenuAction.INTERACTIVE_MODE || this == ChatMenuAction.AUTO_COMPRESS", self.overflow)
+        self.assertIn("if (entry.action.isOverflowSwitch)", self.item)
+        self.assertRegex(self.overflow, r"if \(!entry\.action\.isOverflowSwitch\)\s*\{\s*removeMenu\(\)\s*onDismiss\(\)\s*\}\s*onAction\(entry\.action\)")
         self.assertIn(".size(17.dp)", self.item)
         self.assertIn(".heightIn(min = 38.dp)", self.item)
 

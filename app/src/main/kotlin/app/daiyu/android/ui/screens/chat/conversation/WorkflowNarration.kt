@@ -23,6 +23,8 @@ internal class WorkflowVisualAdmissions(initialOwners: Set<String>, sentReplyKey
 internal val LocalReasoningPaused = staticCompositionLocalOf { false }
 
 internal class WorkflowVisualScope(private val baseline: Boolean) {
+    private val replyEntrances = mutableSetOf<ReplyEntrancePart>()
+    fun claimReplyEntrance(part: ReplyEntrancePart) = !baseline && replyEntrances.add(part)
     private var replyControl: ReplyPresentationControl? = null
     fun retainReplyControl(control: ReplyPresentationControl) { replyControl = control }
     fun replyPlayback(current: ReplyPlayback?): ReplyPlayback? =

@@ -7,12 +7,14 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.*
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import kotlinx.coroutines.runBlocking
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.sp
@@ -347,6 +349,72 @@ class ReportedReasoningCardTest : WiredActivityTestCase() {
         }
     }
 
+
+    fun testNewReplyIdentityAndFirstWorkflowEnterOnceWithoutChangingLayout() {
+        prepareSummaries("text before workflow")
+        val work = WorkProcessUi(listOf(WorkSegmentUi(steps = listOf(
+            WorkStepUi("entrance-tool", "fixture tool", "done", WorkStepState.OK)))), "进行中", running = true)
+        var turn by mutableStateOf(ChatTurnUi.Assistant("entrance", status = RunStatus.RUNNING, isStreaming = true))
+        var mounted by mutableStateOf(true)
+        var scope by mutableStateOf(WorkflowVisualScope(baseline = false))
+        val identity = ui.onNodeWithTag("reply-identity:entrance", useUnmergedTree = true)
+        val workflow = ui.onNodeWithTag("work-process-surface", useUnmergedTree = true)
+        fun SemanticsNodeInteraction.progress(): Float? =
+            fetchSemanticsNode().config.getOrNull(ReplyEntranceProgress)?.invoke()
+
+        ui.mainClock.autoAdvance = false
+        try {
+            mainThread { activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    CompositionLocalProvider(LocalWorkflowVisualScope provides scope) {
+                        if (mounted) AssistantTurn(turn, ChatScreenActions())
+                    }
+                }
+            } }
+            ui.mainClock.advanceTimeBy(32)
+            identity.assertDoesNotExist()
+            workflow.assertDoesNotExist()
+            mainThread { turn = turn.copy(workProcess = work) }
+            ui.mainClock.advanceTimeBy(32)
+            val firstIdentity = checkNotNull(identity.progress())
+            val firstWorkflow = checkNotNull(workflow.progress())
+            assertTrue(firstIdentity < 1f && firstWorkflow < 1f)
+            val identityBounds = identity.getUnclippedBoundsInRoot()
+            val header = ui.onNodeWithTag("work-process-header", useUnmergedTree = true)
+            val headerBounds = header.getUnclippedBoundsInRoot()
+            ui.mainClock.advanceTimeBy(80)
+            assertTrue(checkNotNull(identity.progress()) > firstIdentity)
+            assertTrue(checkNotNull(workflow.progress()) > firstWorkflow)
+            assertEquals(identityBounds, identity.getUnclippedBoundsInRoot())
+            assertEquals(headerBounds, header.getUnclippedBoundsInRoot())
+            ui.mainClock.advanceTimeBy(240)
+            assertEquals(1f, checkNotNull(identity.progress()), 0f)
+            assertEquals(1f, checkNotNull(workflow.progress()), 0f)
+
+            mainThread { mounted = false }
+            ui.mainClock.advanceTimeBy(32)
+            identity.assertDoesNotExist()
+            mainThread { mounted = true }
+            ui.mainClock.advanceTimeBy(32)
+            assertNull(identity.progress())
+            assertNull(workflow.progress())
+
+            mainThread {
+                scope = WorkflowVisualScope(baseline = false).also { it.releaseLeading("entrance") }
+                turn = turn.copy(leadingContent = listOf(MessageContentUi.Text("lead", "text before workflow")))
+            }
+            ui.mainClock.advanceTimeBy(32)
+            assertTrue(checkNotNull(identity.progress()) < 1f)
+            assertNull(workflow.progress())
+
+            mainThread { scope = WorkflowVisualScope(baseline = true) }
+            ui.mainClock.advanceTimeBy(32)
+            assertNull(identity.progress())
+            assertNull(workflow.progress())
+        } finally {
+            ui.mainClock.autoAdvance = true
+        }
+    }
 
     fun testReplyIdentityAndReasoningWaitForRealContentWithoutAnExtraPlaceholder() {
         prepareSummaries("actual summary")

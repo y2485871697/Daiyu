@@ -71,7 +71,7 @@ class ChatMenuShadowContract(unittest.TestCase):
                       "0x55000000", "0x164C3A6B", "0x22000000", "0x05342048"]:
             self.assertIn(token, self.shadows)
         self.assertIn("delay(PopupExitRetentionMillis)", self.host)
-        self.assertIn("else Modifier.clearAndSetSemantics {}", self.host)
+        self.assertIn("else Modifier.clearAndSetSemantics { testTag = \"chat-menu-exiting\" }", self.host)
         self.assertIn("surface.place(x, y)", self.host)
 
     def test_body_does_not_subscribe_to_animation_in_composition(self):

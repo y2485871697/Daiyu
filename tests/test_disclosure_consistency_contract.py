@@ -17,19 +17,18 @@ class DisclosureConsistencyContractTest(unittest.TestCase):
 
     def test_readonly_child_details_remain_inside_shared_disclosure(self):
         source = (CHAT / 'ChildTaskToolContent.kt').read_text()
-        self.assertIn('WorkflowExpandableContent(visibility, disclosure) {', source)
         child = source.split('internal fun ChildTaskDisclosure(', 1)[1]
         child_contract = child.split('\n}', 1)[0]
         self.assertNotIn('controls:', child_contract)
         self.assertNotIn('controls()', source)
-        self.assertIn('WorkflowExpandableContent(visibility, disclosure) {\n            details()\n        }', source)
+        self.assertIn('WorkflowExpandableContent(visibility, disclosure, leadingSpace = 5.dp) {\n            details()\n        }', source)
         self.assertIn('settingsDisclosureRotation(expanded, expandedDegrees = 180f)', source)
         self.assertIn('var expanded by rememberSaveable(row.owner)', source)
         self.assertNotIn('if (expanded) details()', source)
 
     def test_tool_groups_and_both_work_headers_rotate_without_swapping_icons(self):
         source = (CHAT / 'ToolCategoryContent.kt').read_text()
-        self.assertIn('WorkflowExpandableContent(visibility, disclosure) { body() }', source)
+        self.assertIn('WorkflowExpandableContent(visibility, disclosure, leadingSpace = 5.dp) { body() }', source)
         self.assertIn('settingsDisclosureRotation(expanded)', source)
         self.assertNotIn('Icon(if (expanded)', source)
         work = (CHAT / 'WorkProcessCard.kt').read_text()

@@ -229,16 +229,16 @@ class DialogMotionContractTest(unittest.TestCase):
         self.assertIn("LaunchedEffect(layer, menu, expanded)", layer)
         self.assertIn("layer.active?.takeIf { it !== menu }?.onDismiss?.invoke()", layer)
         self.assertIn("clipWhenFullyRevealed = false", layer)
-        self.assertIn("else Modifier.clearAndSetSemantics {}", layer)
+        self.assertIn("else Modifier.clearAndSetSemantics { testTag = \"chat-menu-exiting\" }", layer)
         self.assertIn("rememberPopupMotion(expanded)", self.text("ui/components/DaiyuDropdownMenu.kt"))
 
     def test_more_button_is_transparent_but_keeps_selection_semantics(self):
         text = self.text("ui/screens/chat/conversation/ChatTopBar.kt")
-        button = text[text.index('val moreShape'):text.index('ChatOverflowMenu(expanded')]
+        button = text[text.index('val moreShape'):text.index('ChatOverflowMenu(menuExpanded')]
         self.assertNotIn(".background(", button)
         self.assertNotIn(".border(", button)
         self.assertIn("indication = null", button)
-        self.assertIn("selected = expanded", button)
+        self.assertIn("selected = menuExpanded", button)
         self.assertIn("actions.onMore(); expanded = true", button)
 
 

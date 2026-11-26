@@ -47,7 +47,9 @@ class McpLiveToolsContractTest(unittest.TestCase):
         source = text(DOMAIN / 'ChatRunner.kt')
         self.assertIn('if (attempt == 0 && tool is CatalogTool) {\n                                    active.updateToolDefinitions(requestDefinitions)', source)
         self.assertIn('fun meterHistory(message: Message = current): List<Message> = effectiveHistory(message)', source)
-        self.assertIn('val local = runtime.localTokens(meterHistory(), requestDefinitions)', source)
+        estimate = source.split('is ModelEvent.InputEstimate -> {', 1)[1].split('is ModelEvent.Usage -> {', 1)[0]
+        self.assertIn('val surface = checkNotNull(contextRuntime).localTokens(meterHistory(), requestDefinitions)', estimate)
+        self.assertIn('event.tokens, historyTokens = surface)', estimate)
         self.assertIn('active.updateToolDefinitions(requestDefinitions)', source)
         self.assertIn('val sideEffect = requestDefinitions.firstOrNull', source)
         for name in ['ResponsesModel', 'MessagesModel', 'NativeCompletionModel']:

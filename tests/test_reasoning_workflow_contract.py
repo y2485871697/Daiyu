@@ -237,8 +237,8 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('segment.steps.count { it.state == WorkStepState.UNKNOWN && !(running && it.activity.inFlight) }', model)
         self.assertNotIn('步失败', model)
         self.assertNotIn('步待确认', model)
-        self.assertIn('if (running || status != "已完成") add(status)', model)
-        self.assertIn('val status = controlActivity?.label ?: summary', model)
+        self.assertIn('if (status != null && (running || status != "已完成")) add(status)', model)
+        self.assertIn('val status = controlActivity?.label?.takeIf { it.isNotBlank() }', model)
         mapper = (CHAT / 'ChatTurnMapper.kt').read_text()
         self.assertIn('message.status == RunStatus.FAILED -> "流程失败"', mapper)
         terminal = mapper.split('val summary = when {', 1)[1].split('return ChatTurnUi.Assistant(', 1)[0]
@@ -253,7 +253,8 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         for name in ('screenshotShapeAddsSettledUnknownToClosedReasoningSteps',
                      'failedAndUnknownReceiptsRemainVisibleDuringAllControlStates',
                      'failedRunWithoutFailedToolIsNotInventedAsToolFailure',
-                     'resultCountsAccumulateAcrossSegmentsRatherThanBecomingFlags'):
+                     'resultCountsAccumulateAcrossSegmentsRatherThanBecomingFlags',
+                     'pendingReceiptAndEmptySummaryKeepAnExplicitStatus'):
             self.assertIn('fun ' + name, regression)
 
     def test_handoff_waits_for_reveal_and_exit_before_releasing_successors(self):

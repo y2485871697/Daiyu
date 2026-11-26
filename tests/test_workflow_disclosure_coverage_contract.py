@@ -109,9 +109,10 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         for name in ('QuestionCard.kt', 'ToolCategoryContent.kt', 'ChildTaskToolContent.kt', 'ChildTaskCardContent.kt'):
             with self.subTest(name=name):
                 source = (CHAT / name).read_text()
+                spacing = '' if name == 'QuestionCard.kt' else ', leadingSpace = 5.dp'
                 for token in ('rememberWorkflowDisclosureMotion(', '.then(disclosure.containerModifier)',
                               '.then(disclosure.headerModifier)', 'disclosure.toggle(opening =',
-                              'WorkflowExpandableContent(visibility, disclosure)'):
+                              f'WorkflowExpandableContent(visibility, disclosure{spacing})'):
                     self.assertIn(token, source)
                 self.assertNotIn('SettingsExpandableContent(', source)
 

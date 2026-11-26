@@ -157,7 +157,7 @@ class ProviderUsageTest {
         assertEquals(listOf(ModelEvent.Usage(0, null)), events.filterIsInstance<ModelEvent.Usage>())
         assertNull(ProviderUsage.messages(null, null, null, null))
     }
-    @Test fun messagesUsageSeparatesPromptPressureFromHeaderBoundCompactionAfterTools() {
+    @Test fun messagesUsageTriggersAfterToolsOnlyFromConfirmedPromptInput() {
         for (automatic in listOf(false, true)) for (highInput in listOf(false, true))
             for (outputTokens in listOf(1, 250_000)) for (identified in listOf(false, true)) {
             val inputTokens = if (highInput) 240_000L else 20_000L
@@ -208,13 +208,12 @@ class ProviderUsageTest {
             assertEquals(RunStatus.COMPLETED, result.status)
             assertEquals(1, tools)
             assertEquals(2, nexts)
-            // The signed internal meter includes completed output. The pressure displayed to the
-            // user and the billed-input calibration remain prompt-only. Unknown headers cannot
-            // borrow a previous request's measurement.
+            // Both variants observe their own request's receipt; output never raises input pressure.
             val threshold = requireNotNull(runtime.pressureThresholdTokens)
-            assertEquals(if (automatic && identified && inputTokens + outputTokens >= threshold) 1 else 0, compactions)
+            assertEquals(if (automatic && inputTokens >= threshold) 1 else 0, compactions)
             assertEquals(inputTokens, store.saved.last().usage.single().snapshot.inputTokens)
-            assertTrue(store.saved.any { it.context?.meter?.pressureTokens == inputTokens })
+            assertEquals(inputTokens, store.saved.last().context?.meter?.cloudInputTokens)
+            assertEquals(inputTokens >= threshold, store.saved.any { it.context?.meter?.pressureTokens == inputTokens })
         }
     }
 

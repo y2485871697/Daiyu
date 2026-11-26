@@ -160,7 +160,7 @@ class RunCatalogShizukuTest {
                 val receipts = if (useStart) (tools.start(message, listOf(call())) { false } as ReceiptBatchStart.Completed).receipts
                     else tools.execute(message, listOf(call())) { false }
                 assertEquals(DispatchOutcome.Unknown("receipt_persistence_failed"), receipts.single().outcome)
-                assertEquals(ExecutionReceipt.Unknown("receipt_persistence_failed"), session.state.receipt)
+                assertEquals(ExecutionReceipt.Unknown("dispatcher_outcome_unknown"), session.state.receipt)
                 assertTrue(session.allowedWrites.isEmpty())
                 assertEquals(LedgerState.UNKNOWN, memory.transaction { it.single().state })
                 assertEquals(DispatchOutcome.Unknown("unknown_effect_protected"),
@@ -422,6 +422,6 @@ class RunCatalogShizukuTest {
         worker.join(5000)
         assertFalse(worker.isAlive); failure.get()?.let { throw it }
         assertEquals(RunCatalogCloseResult.Drained, closed.get())
-        assertEquals(ExecutionReceipt.Unknown("receipt_persistence_failed"), receiptAtClose.get())
+        assertEquals(ExecutionReceipt.Unknown("dispatcher_outcome_unknown"), receiptAtClose.get())
     }
 }

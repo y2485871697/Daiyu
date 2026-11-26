@@ -280,10 +280,18 @@ class WorkflowNarrationCompositionTest {
                         expanded = expanded.value, stopped = false, revealResetEpoch = 0L,
                         reasoningReady = { true }, onVisibleAdvance = { advances++ }, admission = admission) { value ->
                         narration = value
+                        // The node-free fixture observes reveal state as a text leaf would,
+                        // then acknowledges installation and draw only for admitted text.
+                        val readySources = steps.value.mapIndexedNotNull { index, item ->
+                            (item as? MessageContentUi.Text)?.takeIf {
+                                value.entryVisible(it.workflowKey(index)) &&
+                                    value.reveal.ready(it.itemId, it.text, it.markdownWindow)
+                            }
+                        }
                         androidx.compose.runtime.SideEffect {
-                            sources.forEach { source ->
-                                value.reveal.presented(source.id)
-                                value.reveal.drawn(source.id)
+                            readySources.forEach { source ->
+                                value.reveal.presented(source.itemId)
+                                value.reveal.drawn(source.itemId)
                             }
                         }
                     }

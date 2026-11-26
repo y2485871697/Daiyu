@@ -376,6 +376,7 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         lateinit var runner: ChatRunner
         runner = ChatRunner(model, object : ConversationStore { override fun save(message: Message) = Unit },
             BatteryTool { error("fixture uses receipt batches") }, RunnerOptions(runtimeStore = object : AtomicRuntimeStore {
+                override fun reconcileCheckpoint(checkpoint: RunCheckpoint): RunCheckpoint = error("no recovery expected")
                 override fun commitCheckpoint(checkpoint: RunCheckpoint) {
                     if (checkpoint.message.blocks.filterIsInstance<MessageBlock.Tool>().any { it.result != null } &&
                         committed?.tools?.any { it.result != null } != true) {

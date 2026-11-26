@@ -1605,7 +1605,7 @@ internal fun ChatMessageList(
                     }
                     compressionAfter[turn.listKey].orEmpty().forEach { activity ->
                         key(activity.id) { CompressionProgressNotice(activity.agentLabel,
-                            label = "${activity.agentLabel} • ${if (activity.waiting) "等待压缩，当前调用结束后执行" else "正在压缩上下文"}") }
+                            label = "${activity.agentLabel} • ${if (activity.waiting) "等待压缩" else "正在压缩上下文"}") }
                     }
                 }
                 Column(Modifier.testTag("chat-turn:${turn.id}").then(if (turn.listKey == currentTailKey) Modifier.onGloballyPositioned { coordinates ->
@@ -1643,7 +1643,7 @@ internal fun ChatMessageList(
                         fadeInSpec = androidx.compose.animation.core.tween(180), placementSpec = null, fadeOutSpec = null).onGloballyPositioned { coordinates ->
                         if (coordinates.isAttached && currentTailKey == "chat-context-compressing:${activity.id}") scheduleFollowClearance()
                     },
-                        label = "${activity.agentLabel} • ${if (activity.waiting) "等待压缩，当前调用结束后执行" else "正在压缩上下文"}")
+                        label = "${activity.agentLabel} • ${if (activity.waiting) "等待压缩" else "正在压缩上下文"}")
                 }
             }
         }

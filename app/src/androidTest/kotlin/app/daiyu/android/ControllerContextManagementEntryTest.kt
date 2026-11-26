@@ -306,7 +306,11 @@ class ControllerContextManagementEntryTest : InstrumentationTestCase() {
             adapter.requestCompression()
             assertTrue(adapter.state.value.confirmingCompression)
             assertEquals(0, probe.get().compressions.get())
+            assertNull(f.controller.active)
             adapter.confirmCompression()
+            val activity = f.controller.compressionActivities.single()
+            assertTrue(activity.running)
+            assertFalse("idle manual compression must never wait for a model call", activity.waiting)
         }
         await(entered)
         controlMain {

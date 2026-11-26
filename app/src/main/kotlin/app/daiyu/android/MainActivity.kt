@@ -7935,6 +7935,9 @@ class MainActivity : ComponentActivity() {
             val reconnects = visibleTimeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
             val oldReconnects = chatState.timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
             val currentReceipts = currentToolReceiptKey()
+            val committedReceipts = app.daiyu.android.ui.RetainedToolOutcomes.committedReader(
+                controller.active?.takeIf { it.conversationId == selected?.id }?.let(controller::committedToolReceipts),
+                currentReceipts.sources)
             val retainedReceipts = toolReceiptKey?.let { loaded ->
                 toolReceiptSnapshot?.displayReader(loaded, currentReceipts, controller::runState, controller::runStopping)
             }
@@ -7942,7 +7945,8 @@ class MainActivity : ComponentActivity() {
                 it.conversationId.value == owner.conversationId && it.runId.value == owner.runId && it.id.value == owner.messageId
             }
             val visibleToolReceipts = { message: Message, block: MessageBlock.Tool ->
-                retainedReceipts?.invoke(message, block) ?: if (receiptsReady && block.result != null) null else {
+                committedReceipts(WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value), block)
+                    ?: retainedReceipts?.invoke(message, block) ?: if (receiptsReady && block.result != null) null else {
                     val live = displayLiveOwner(WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value))
                     app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(message, block,
                         liveState = live?.let(controller::runState), stopping = live?.let(controller::runStopping) == true)
@@ -7957,7 +7961,7 @@ class MainActivity : ComponentActivity() {
                 WorkStepOwnerUi(it.conversation, it.run, it.message)
             }
             val visibleDisplayReceipts = { owner: WorkStepOwnerUi, block: MessageBlock.Tool ->
-                retainedDisplayReceipts?.invoke(owner, block) ?: if (receiptsReady && block.result != null) null else {
+                committedReceipts(owner, block) ?: retainedDisplayReceipts?.invoke(owner, block) ?: if (receiptsReady && block.result != null) null else {
                     val live = displayLiveOwner(owner)
                     displayReceiptSources[owner]?.let { source ->
                         app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(source.status, block,

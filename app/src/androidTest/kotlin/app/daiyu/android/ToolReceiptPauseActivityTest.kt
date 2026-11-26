@@ -359,6 +359,58 @@ class ToolReceiptPauseActivityTest : WiredActivityTestCase() {
         }
         awaitReceipts()
     }
+    fun testFirstPublishedResultUsesCommittedRunnerReceiptWithoutDatabaseRead() {
+        val initial = historical.copy(id = MessageId("current-message"), runId = RunId("current-run"),
+            blocks = emptyList(), status = RunStatus.RUNNING)
+        val invocations = (0..2).map { ToolInvocation(ToolCallId("live-$it"), "read_fixture", "{}") }
+        var rounds = 0
+        val model = ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                if (rounds++ == 0) invocations.forEach { sink(ModelEvent.ToolReady(it)) }
+                else sink(ModelEvent.TextFinal("answer", "finished"))
+            }
+            override fun cancel() = Unit
+        } }
+        var committed: RunCheckpoint? = null
+        var verified = false
+        lateinit var runner: ChatRunner
+        runner = ChatRunner(model, object : ConversationStore { override fun save(message: Message) = Unit },
+            BatteryTool { error("fixture uses receipt batches") }, RunnerOptions(runtimeStore = object : AtomicRuntimeStore {
+                override fun commitCheckpoint(checkpoint: RunCheckpoint) {
+                    if (checkpoint.message.blocks.filterIsInstance<MessageBlock.Tool>().any { it.result != null } &&
+                        committed?.tools?.any { it.result != null } != true) {
+                        assertTrue(runner.committedToolReceipts()?.tools.orEmpty().none { it.result != null })
+                    }
+                    committed = checkpoint
+                }
+            }, receiptBatchExecutor = ReceiptBatchToolExecutor { _, calls, _ ->
+                calls.mapIndexed { index, call ->
+                    val outcome = when (index) {
+                        0 -> app.daiyu.android.domain.tools.DispatchOutcome.Confirmed("normal", isError = false)
+                        1 -> app.daiyu.android.domain.tools.DispatchOutcome.Confirmed("failed", isError = true)
+                        else -> app.daiyu.android.domain.tools.DispatchOutcome.Unknown("unconfirmed")
+                    }
+                    app.daiyu.android.domain.tools.ToolDispatchResult(call.id, outcome)
+                }
+            })) { message ->
+                val tools = message.blocks.filterIsInstance<MessageBlock.Tool>()
+                if (!verified && message.status == RunStatus.RUNNING && tools.size == 3 && tools.all { it.result != null }) {
+                    val receipt = checkNotNull(runner.committedToolReceipts())
+                    assertEquals(committed?.tools, receipt.tools)
+                    val owner = WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value)
+                    val source = RetainedToolOutcomes.sources(listOf(message)).single()
+                    val reader = RetainedToolOutcomes.committedReader(receipt, listOf(source))
+                    assertEquals(listOf(ToolActivityUi.SUCCESS, ToolActivityUi.FAILED, null), tools.map { reader(owner, it)?.activity })
+                    assertNull(reader(owner.copy(runId = "different"), tools.first()))
+                    val mismatched = source.copy(tools = source.tools.reversed())
+                    assertNull(RetainedToolOutcomes.committedReader(receipt, listOf(mismatched))(owner, tools.first()))
+                    verified = true
+                }
+            }
+        runner.run(initial, emptyList())
+        assertTrue("first published tool results were checked without receipt I/O", verified)
+    }
+
     fun testReturnedToolsStayUnconfirmedThenShowTheirExactFinalStatus() {
         mainThread { activity.select(fixture.database.conversations().single()) }
         awaitReceipts()

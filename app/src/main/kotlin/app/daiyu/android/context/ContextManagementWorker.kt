@@ -104,9 +104,7 @@ internal class ContextManagementWorker(
             lease.cancellation.check()
             val id = lease.owner.conversationId
             require(service.isUsageOwner(id.value)) { "会话不存在" }
-            val originals = freezeContextMessages(service.displayHistory(id))
-            // No summarizer / policy: this is a strictly read-only projection, even above budget.
-            val effective = service.prepareSend(id).let { it.copy(messages = freezeContextMessages(it.messages)) }
+            val (originals, effective) = service.managementHistory(id)
             ContextManagementSnapshot(id, ContextRevision.digest(originals), originals, effective, configuration, target)
         }
     }
@@ -226,10 +224,9 @@ internal class ContextManagementWorker(
         lease.cancellation.check()
         val id = lease.owner.conversationId
         require(id == expected.conversationId && service.isUsageOwner(id.value)) { "会话已变化或已删除" }
-        require(ContextRevision.digest(service.displayHistory(id)) == expected.historyRevision) {
-            "完整历史已变化；请刷新"
-        }
-        require(service.prepareSend(id).archiveId == expected.effective.archiveId) { "活动档案已变化；请刷新" }
+        val (originals, effective) = service.managementHistory(id)
+        require(ContextRevision.digest(originals) == expected.historyRevision) { "完整历史已变化；请刷新" }
+        require(effective.archiveId == expected.effective.archiveId) { "活动档案已变化；请刷新" }
     }
 
     private fun checkLease(lease: ContextManagementLease) {

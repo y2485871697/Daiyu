@@ -108,6 +108,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
     private fun queuedSupplementMessages(): List<Message> = supplements + pendingSupplements.map { it.message } +
         listOfNotNull(admittingSupplement)
     @Volatile private var execution = ExecutionState()
+    @Volatile private var committedToolReceipts: CommittedToolReceipts? = null
     @Volatile private var targetOwner: RunExecutionOwner? = null
     @Volatile private var session: ModelSession? = null
     @Volatile private var reconnectBudget: TransportReconnectBudget? = null
@@ -187,6 +188,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             override fun resumeWith(result: Result<Message>) { sliceCompletion = result }
         })
         return collectSlice()
+    }
+
+    fun committedToolReceipts(): CommittedToolReceipts? = committedToolReceipts
+
+    private fun cacheToolReceipts(checkpoint: RunCheckpoint) {
+        committedToolReceipts = checkpoint.tools.takeIf { it.isNotEmpty() }
+            ?.let { CommittedToolReceipts(checkpoint.message, it) }
     }
 
     fun state(): ExecutionState = execution.copy(terminalTargets = targetOwner?.terminalTargets.orEmpty())
@@ -391,7 +399,10 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             if (stagingTransportBatch) return
             val runtime = options.runtimeStore ?: return
             try {
-                if (runtime is AtomicRuntimeStore) runtime.commitCheckpoint(next) else runtime.save(next)
+                if (runtime is AtomicRuntimeStore) {
+                    runtime.commitCheckpoint(next)
+                    if (runtime.durable) cacheToolReceipts(next)
+                } else runtime.save(next)
                 revision = next.revision
             } catch (failure: Exception) { throw PersistenceException(failure) }
             if (next.phase == ExecutionPhase.PAUSED) {
@@ -435,6 +446,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (runtime is AtomicRuntimeStore) {
                     val nextCheckpoint = snapshot(next)
                     runtime.commitCheckpoint(nextCheckpoint)
+                    if (runtime.durable) cacheToolReceipts(nextCheckpoint)
                     revision = nextCheckpoint.revision
                 } else store.save(next.frozenReasoning(reasoningInterruptedAtNanos ?: System.nanoTime()))
             } catch (failure: Exception) { throw PersistenceException(failure) }

@@ -162,10 +162,21 @@ class ContextService(private val store: ConversationDatabase, private val blobs:
         return ArchiveFit(physicalCount, logical.drop(cut))
     }
 
-    private fun effective(db: SQLiteDatabase, id: ConversationId, supplied: List<Message>? = null): PreparedContext {
+    internal fun managementHistory(id: ConversationId): Pair<List<Message>, PreparedContext> =
+        RuntimeDiagnostics.measure(Stage.CONTEXT_READ) {
+            transactions.run { db ->
+                val originals = freezeContextMessages(read(db, id))
+                val prepared = effective(db, id, originals, activeOnly = true)
+                originals to if (prepared.messages === originals) prepared
+                else prepared.copy(messages = freezeContextMessages(prepared.messages))
+            }
+        }
+
+    private fun effective(db: SQLiteDatabase, id: ConversationId, supplied: List<Message>? = null,
+        activeOnly: Boolean = supplied == null): PreparedContext {
         val original = supplied ?: read(db, id)
         db.rawQuery("SELECT id,prefix_count,revision,summary,blob_hash FROM context_archives WHERE conversation_id=?" +
-            (if (supplied == null) " AND active=1" else "") + " ORDER BY created DESC,id DESC", arrayOf(id.value)).use { c ->
+            (if (activeOnly) " AND active=1" else "") + " ORDER BY created DESC,id DESC", arrayOf(id.value)).use { c ->
             while (c.moveToNext()) {
                 val document = ArchiveCodec.decodeDocument(blobs.forConversation(id.value).read(c.getString(4)))
                 val fit = fitArchive(id, original, c.getInt(1), c.getString(2), document) ?: continue

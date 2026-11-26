@@ -176,6 +176,8 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
                 ui.mainClock.autoAdvance = false
                 try {
                     node("chat-menu:COMPRESS_CONTEXT").performTouchInput { click() }
+                    ui.mainClock.advanceTimeByFrame()
+                    node("chat-overflow-menu").assertDoesNotExist()
                     assertStationaryFrames()
                 } finally { ui.mainClock.autoAdvance = true }
                 lateinit var openedAdapter: ContextManagementControllerAdapter
@@ -184,6 +186,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
                     openedAdapter.state.value.operation == null && openedAdapter.state.value.snapshot != null
                 }
                 awaitUniqueTag("context-management")
+                node("chat-overflow-menu").assertDoesNotExist()
                 ui.waitForIdle()
                 ui.mainClock.autoAdvance = false
                 try {

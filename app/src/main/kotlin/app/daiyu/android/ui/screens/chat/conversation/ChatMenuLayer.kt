@@ -94,6 +94,13 @@ private class MenuOverlay(
 private typealias MenuLayerState = ChatMenuLayerState<MenuOverlay>
 
 private val LocalMenuLayer = staticCompositionLocalOf<MenuLayerState?> { null }
+// Opening a modal must not retain the old menu or its backdrop during the handoff.
+@Composable
+internal fun rememberImmediateChatMenuDismiss(): () -> Unit {
+    val layer = LocalMenuLayer.current
+    return remember(layer) { { layer?.active = null } }
+}
+
 internal val LocalChatMenuPlacementDiagnostic = staticCompositionLocalOf<((() -> String) -> Unit)?> { null }
 
 private class MenuPlacementDiagnostic {

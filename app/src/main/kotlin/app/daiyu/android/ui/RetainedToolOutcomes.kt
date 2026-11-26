@@ -17,6 +17,8 @@ import app.daiyu.android.ui.screens.chat.conversation.WorkStepOwnerUi
 import app.daiyu.android.ui.screens.chat.conversation.ToolActivityUi
 import app.daiyu.android.ui.screens.chat.conversation.ToolReceiptUi
 import app.daiyu.android.ui.screens.chat.conversation.toolReceiptPresentation
+import app.daiyu.android.domain.runtime.CommittedToolReceipts
+import app.daiyu.android.domain.runtime.ToolRecord
 import app.daiyu.android.domain.runtime.ExecutionState
 import java.util.IdentityHashMap
 
@@ -69,6 +71,53 @@ internal object RetainedToolOutcomes {
                 source.tools.forEachIndexed { index, block -> put(block, index) }
             }
         }
+
+    private fun outcomes(message: Message, tools: List<ToolRecord>): Map<Result, ToolDisposition> {
+        val projected = sourceBlocks(message)
+        val visibleUnreturned = projected.filterIsInstance<MessageBlock.Tool>()
+            .filter { it.result == null }.toSet()
+        val physical = message.blocks.filter {
+            it !is MessageBlock.Tool || it.result != null || it in visibleUnreturned
+        }
+        val tailStart = projected.size - physical.size
+        if (tailStart < 0 || projected.subList(tailStart, projected.size) != physical) return emptyMap()
+        val projectedTools = projected.filterIsInstance<MessageBlock.Tool>()
+        val physicalOffset = projected.take(tailStart).count { it is MessageBlock.Tool }
+        val ledger = tools.associateBy { it.invocation.id }
+        val occurrences = projectedTools.groupingBy { it.invocation.id }.eachCount()
+        return projectedTools.mapIndexedNotNull { position, block ->
+            val record = ledger[block.invocation.id]?.takeIf {
+                it.invocation == block.invocation && it.result == block.result &&
+                    (position >= physicalOffset || (block.result != null && occurrences[block.invocation.id] == 1 &&
+                        it.disposition in setOf(ToolDisposition.SUCCEEDED, ToolDisposition.FAILED, ToolDisposition.NOT_EXECUTED)))
+            } ?: return@mapIndexedNotNull null
+            Result(block.invocation, block.result, position) to record.disposition
+        }.toMap()
+    }
+
+    fun committedReader(receipts: CommittedToolReceipts?, sources: List<Source>):
+        (WorkStepOwnerUi, MessageBlock.Tool) -> ToolReceiptUi? {
+        receipts ?: return { _, _ -> null }
+        val message = receipts.message
+        val source = sources.firstOrNull {
+            it.conversation == message.conversationId.value && it.run == message.runId.value && it.message == message.id.value
+        } ?: return { _, _ -> null }
+        val owner = WorkStepOwnerUi(source.conversation, source.run, source.message)
+        val positions = IdentityHashMap<MessageBlock.Tool, Int>().apply {
+            source.tools.forEachIndexed { index, block -> put(block, index) }
+        }
+        val committed = outcomes(message, receipts.tools)
+        return reader@ { identity, block ->
+            if (identity != owner || block.result == null) return@reader null
+            val index = positions[block] ?: return@reader null
+            val disposition = committed[Result(block.invocation, block.result, index)] ?: return@reader null
+            when (disposition) {
+                ToolDisposition.SUCCEEDED, ToolDisposition.FAILED, ToolDisposition.NOT_EXECUTED ->
+                    toolReceiptPresentation(disposition, liveOwner = false, phase = ExecutionPhase.IDLE, runStatus = source.status)
+                else -> null
+            }
+        }
+    }
 
     internal class Snapshot private constructor(private val records: Map<Owner, Map<Result, ToolDisposition>>,
         private val questions: Map<Owner, QuestionCheckpointEvidence>,
@@ -178,30 +227,7 @@ internal object RetainedToolOutcomes {
                         if (snapshot.tools.any { it.invocation.name == app.daiyu.android.domain.question.ASK_USER_TOOL_NAME }) {
                             questions[owner] = QuestionCheckpointEvidence.from(snapshot, recoveryOwner)
                         }
-                        val projected = sourceBlocks(snapshot.message)
-                        val visibleUnreturned = projected.filterIsInstance<MessageBlock.Tool>()
-                            .filter { it.result == null }.toSet()
-                        val physical = snapshot.message.blocks.filter {
-                            it !is MessageBlock.Tool || it.result != null || it in visibleUnreturned
-                        }
-                        val tailStart = projected.size - physical.size
-                        val outcomes: Map<Result, ToolDisposition> =
-                            if (tailStart < 0 || projected.subList(tailStart, projected.size) != physical) emptyMap()
-                            else {
-                                val projectedTools = projected.filterIsInstance<MessageBlock.Tool>()
-                                val physicalOffset = projected.take(tailStart).count { it is MessageBlock.Tool }
-                                val ledger = snapshot.tools.associateBy { it.invocation.id }
-                                val occurrences = projectedTools.groupingBy { it.invocation.id }.eachCount()
-                                projectedTools.mapIndexedNotNull { position, block ->
-                                    val record = ledger[block.invocation.id]?.takeIf {
-                                        it.invocation == block.invocation && it.result == block.result &&
-                                            (position >= physicalOffset || (block.result != null && occurrences[block.invocation.id] == 1 &&
-                                                it.disposition in setOf(ToolDisposition.SUCCEEDED, ToolDisposition.FAILED, ToolDisposition.NOT_EXECUTED)))
-                                    } ?: return@mapIndexedNotNull null
-                                    Result(block.invocation, block.result, position) to record.disposition
-                                }.toMap()
-                            }
-                        put(owner, outcomes)
+                        put(owner, outcomes(snapshot.message, snapshot.tools))
                     }
                 }
                 return Snapshot(records, questions.toMap(), blockPositions, childAgentNames.toMap())

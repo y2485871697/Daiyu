@@ -6166,6 +6166,7 @@ class ChatController internal constructor(private val application:Application,
             owner.role==Message.ASSISTANT_ROLE) runner else null
     }
     @Synchronized internal fun runState(owner:Message):ExecutionState? = ownedRunner(owner)?.state()
+    @Synchronized internal fun committedToolReceipts(owner: Message) = ownedRunner(owner)?.committedToolReceipts()
     @Synchronized internal fun runStopping(owner: Message): Boolean = resources?.let {
         it.fenced && it.initial.id == owner.id && it.initial.runId == owner.runId &&
             it.initial.conversationId == owner.conversationId && owner.role == Message.ASSISTANT_ROLE

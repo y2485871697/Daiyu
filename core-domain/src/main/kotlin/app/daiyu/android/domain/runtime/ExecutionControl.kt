@@ -8,6 +8,7 @@ import app.daiyu.android.domain.tools.ReceiptBatchStart
 enum class ExecutionPhase { IDLE, STREAMING, BOUNDARY, PAUSED, TOOL_EXECUTING, WAITING_USER, RECONNECTING, TERMINAL }
 enum class ToolDisposition { READY, IN_FLIGHT, SUCCEEDED, FAILED, NOT_EXECUTED, UNKNOWN }
 data class ToolRecord(val invocation: ToolInvocation, val disposition: ToolDisposition, val result: String? = null)
+data class CommittedToolReceipts(val message: Message, val tools: List<ToolRecord>)
 
 data class PendingToolCheckpoint(val callId: ToolCallId)
 

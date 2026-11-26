@@ -178,7 +178,10 @@ internal fun ReportedReasoningCard(
         Row(Modifier.fillMaxWidth().heightIn(min = if (embedded) 44.dp else 35.dp).testTag("reported-reasoning-header:$ownerKey").workflowInkClearance().workflowToolAppearance(appearance).then(disclosure.headerModifier)
             .then(if (hasSummary) Modifier.conversationClickable(
                 onClickLabel = if (expanded) "收起思考摘要" else "展开思考摘要"
-            ) { disclosure.toggle(opening = !disclosureExpanded); overridePhase = isThinking; overrideStopped = stopped; expandedOverride = !disclosureExpanded }.semantics {
+            ) {
+                disclosure.toggle(opening = !disclosureExpanded, protectEnclosingSurface = embedded)
+                overridePhase = isThinking; overrideStopped = stopped; expandedOverride = !disclosureExpanded
+            }.semantics {
                 stateDescription = if (expanded) "已展开" else "已折叠"
             } else Modifier.semantics(mergeDescendants = true) {})
             .padding(horizontal = if (embedded) 0.dp else 11.dp, vertical = if (embedded) 5.dp else 9.dp),

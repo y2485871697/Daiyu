@@ -20,12 +20,27 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         clearance = source.split('private fun anchorClearance()', 1)[1].split('private fun correctAnchor(', 1)[0]
         self.assertIn('if (!anchorAtTop) return turnClearance', clearance)
-        self.assertIn('placed.positionInWindow().y + placed.size.height, safe.bottom', clearance)
+        self.assertIn('bottomInWindow()?.let { workflowDisclosureTopClearance(clearance, it, safe.bottom) }', clearance)
         self.assertIn('minOf(turnClearance, disclosureBottom - safeBottom)', source)
         correction = source.split('private fun correctAnchor(', 1)[1].split('private fun chooseDirection()', 1)[0]
         self.assertEqual(3, correction.count('anchorClearance()'))
         self.assertNotIn('viewport.anchorClearance(context.itemKey)', correction)
         self.assertIn('val delta = maxOf(anchor, anchorClearance() ?: anchor)', correction)
+
+    def test_embedded_reasoning_protects_only_a_tail_surface_that_started_above_the_composer(self):
+        source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
+        self.assertIn('opening && anchorAtTop && protectEnclosingSurface && viewport.active === this', source)
+        self.assertIn('bottom in safe.top..(safe.bottom + 1f)', source)
+        self.assertIn('protectedSurface?.takeIf { context.viewport.hasTailComposer(context.itemKey) }', source)
+        self.assertIn('else maxOf(surfaceOverflow, disclosureClearance ?: 0f)', source)
+        self.assertIn('protectedSurface = null', source.split('private fun releaseAnchor(', 1)[1])
+        chat = (CHAT / 'ChatMessageList.kt').read_text()
+        self.assertIn('itemKey == currentTailKey && itemKey == assistantOwnerKey && currentOcclusionPx > 0', chat)
+        reasoning = (CHAT / 'ReportedReasoningCard.kt').read_text()
+        self.assertIn('protectEnclosingSurface = embedded', reasoning)
+        device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowDisclosureDirectionTest.kt').read_text()
+        self.assertIn('testCompletedTailReasoningExpansionKeepsTheEnclosingBorderAboveComposer', device)
+        self.assertIn('bottom() <= safeBottom + 1f', device)
 
     def test_bottom_reading_anchor_keeps_the_existing_physical_edge(self):
         motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()

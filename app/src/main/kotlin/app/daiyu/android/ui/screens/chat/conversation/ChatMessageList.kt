@@ -689,6 +689,7 @@ internal fun ChatMessageList(
                 }
             },
             outputPending = { itemKey -> nestedStates[itemKey]?.textClearance?.typingPending == true },
+            hasTailComposer = { itemKey -> itemKey == currentTailKey && itemKey == assistantOwnerKey && currentOcclusionPx > 0 },
             correctAnchor = { itemKey, remaining ->
                 var consumed = 0f
                 if (clearanceLayout.active && !clearanceLayout.correcting && nestedStates[itemKey]?.migrating != true) {

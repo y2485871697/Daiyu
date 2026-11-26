@@ -286,6 +286,50 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
 
 
 
+    fun testCompletedTailReasoningExpansionKeepsTheEnclosingBorderAboveComposer() {
+        val summary = "Finished reasoning summary. " + "The saved explanation does not change. ".repeat(8)
+        kotlinx.coroutines.runBlocking { projectMarkdown(listOf(summary)) }
+        mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+            density = LocalDensity.current.density
+            BoxWithConstraints(Modifier.size(320.dp, 420.dp)) {
+                ChatConversationLayers(Modifier.size(maxWidth, maxHeight), messages = { inset ->
+                    ChatMessageList(List(8) { ChatTurnUi.User("u$it", "history $it") } +
+                        ChatTurnUi.Assistant("tail", status = RunStatus.COMPLETED),
+                        ChatScreenActions(), composerBottomInset = inset, scrollRequest = ChatScrollRequest(1),
+                        turnExtras = { turn -> if (turn.id == "tail") {
+                            WorkProcessCard(work.copy(running = true), "reasoning-tail", content = {
+                                ReportedReasoningCard("tail-summary", listOf(app.daiyu.android.domain.ReportedReasoning("summary", summary)),
+                                    embedded = true)
+                                Box(Modifier.height(170.dp))
+                            })
+                        } })
+                }, composer = { Box(Modifier.fillMaxWidth().height(96.dp).testTag("reasoning-tail-composer")) })
+            }
+        } } }
+        ui.waitForIdle()
+        val header = "reported-reasoning-header:tail-summary"
+        val safeBottom = ui.onNodeWithTag("reasoning-tail-composer").fetchSemanticsNode().boundsInRoot.top -
+            ChatTailClearance.value * density
+        val listTop = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot.top
+        assertTrue(ui.onNodeWithTag(header).fetchSemanticsNode().boundsInRoot.center.y < (listTop + safeBottom) / 2f)
+        val initialTop = top()
+        val initialHeight = bottom() - initialTop
+        assertEquals("Tail card starts at the safe bottom", safeBottom, bottom(), 2f)
+        ui.mainClock.autoAdvance = false
+        try {
+            ui.onNodeWithTag(header).performTouchInput { click() }
+            repeat(28) {
+                ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                assertDirection(false, header)
+                assertTrue("Frame $it: outer border ${bottom()} crosses the safe edge $safeBottom: ${geometry(header)}",
+                    bottom() <= safeBottom + 1f)
+            }
+            assertTrue("Must make real space by scrolling the whole tail card", top() < initialTop - 35f * density)
+            assertTrue("Must grow the outer card rather than clamp its measured content", bottom() - top() > initialHeight + 35f * density)
+            ui.onNodeWithTag("reported-reasoning-content:tail-summary").assertExists()
+        } finally { ui.mainClock.autoAdvance = true }
+    }
+
     fun testWorkflowManualAndAutomaticCollapseBothKeepTheHeaderAndLiftTheBottom() {
         for (closing in listOf("manual", "complete", "stop")) {
             var running by mutableStateOf(true)

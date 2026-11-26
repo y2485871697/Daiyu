@@ -210,6 +210,8 @@ internal object ResponsesStream {
             else -> a == b
         }
         fun sameCall(a: ToolInvocation, b: ToolInvocation): Boolean = a.id == b.id && a.name == b.name && sameJson(MessagesRequest.jsonObject(a.arguments), MessagesRequest.jsonObject(b.arguments))
+        fun outputIndex(event: JSONObject): Int? =
+            if (!event.has("output_index") || event.isNull("output_index")) null else index(event, "output_index")
         fun fullText(item: JSONObject): String {
             val content = item.getJSONArray("content")
             return (0 until content.length()).joinToString("") { j ->
@@ -286,8 +288,6 @@ internal object ResponsesStream {
             reasoningAliases[rawId] = id
             return id
         }
-        fun outputIndex(event: JSONObject): Int? =
-            if (!event.has("output_index") || event.isNull("output_index")) null else index(event, "output_index")
         fun summary(event:JSONObject, value:String, final:Boolean) {
             val id=reasoningId(event.getString("item_id"), outputIndex(event))
             val index=index(event, "summary_index", index(event, "content_index"))

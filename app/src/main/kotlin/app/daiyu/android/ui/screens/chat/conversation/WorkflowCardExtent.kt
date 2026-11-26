@@ -28,13 +28,18 @@ internal class WorkflowCardExtent(private val initiallyExpanded: Boolean) {
     fun idle(expanded: Boolean): Boolean = finished == expanded && !geometry.isRunning &&
         placedGeometry == if (expanded) Offset(fullHeight.toFloat(), 0f) else Offset.Zero
 
+    private fun layoutHeight(expanded: Boolean, settledExpanded: Boolean): Int = when {
+        settledExpanded && expanded || !initialized && initiallyExpanded -> fullHeight
+        settledExpanded -> placedGeometry?.x?.roundToInt() ?: measuredHeight
+        else -> geometry.value.x.roundToInt().coerceAtLeast(0)
+    }
+
+    fun pendingOpeningHeight(): Int? = layoutHeight(expanded = true, settledExpanded = finished == true && !geometry.isRunning)
+        .takeIf { it != measuredHeight }
+
     fun measure(expanded: Boolean, closingLimit: Int?): Int {
         val settledExpanded = finished == true && !geometry.isRunning
-        val pixels = when {
-            settledExpanded && expanded || !initialized && initiallyExpanded -> fullHeight
-            settledExpanded -> placedGeometry?.x?.roundToInt() ?: measuredHeight
-            else -> geometry.value.x.roundToInt().coerceAtLeast(0)
-        }
+        val pixels = layoutHeight(expanded, settledExpanded)
         measuredHeight = if (expanded) pixels else minOf(pixels, closingLimit ?: pixels)
         contentOffset = if (settledExpanded || !initialized) 0 else geometry.value.y.roundToInt()
         return measuredHeight

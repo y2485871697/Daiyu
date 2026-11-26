@@ -107,6 +107,7 @@ internal class WorkflowDisclosureMotion(
     private val context: WorkflowDisclosureContext?,
     private val collapseUp: Boolean = false,
     private val parent: WorkflowDisclosureMotion? = null,
+    private val pendingOpeningHeight: (() -> Int?)? = null,
 ) {
     var upwards by mutableStateOf(context?.let { it.outputActive() && it.viewport.follows() } == true)
         private set
@@ -133,6 +134,7 @@ internal class WorkflowDisclosureMotion(
     private var detachedOpening = false
     private var finishPending = false
     private var anchorCorrectionPosted = false
+    private var lastRefreshedHeight: Int? = null
     private var anchoredOutput: Any? = null
     var animationIdle = true
 
@@ -198,9 +200,11 @@ internal class WorkflowDisclosureMotion(
         val viewport = context?.viewport ?: return
         if (viewport.active !== this || anchorGesture != viewport.gesture || correctingAnchor) return
         val requester = anchorRequester ?: this
-        // AndroidComposeView can measure a spring tick in dispatchDraw, after this listener.
-        // For a moving lower edge, drain the pending measure even if the previous edge is aligned.
-        val refreshGeometry = !anchorAtTop && !requester.animationIdle
+        // dispatchDraw can consume a spring tick after this listener. Only flush a new
+        // pixel height: forcing a measure on every traversal can schedule another traversal.
+        val pendingHeight = if (!anchorAtTop && requester.expanded) requester.pendingOpeningHeight?.invoke() else null
+        val refreshGeometry = pendingHeight != null && pendingHeight != lastRefreshedHeight
+        lastRefreshedHeight = pendingHeight
         if (!anchorCorrectionPosted && !refreshGeometry) return
         anchorCorrectionPosted = false
         correctAnchor(refreshGeometry = refreshGeometry)
@@ -384,6 +388,7 @@ internal class WorkflowDisclosureMotion(
     private fun captureAnchor(requester: WorkflowDisclosureMotion, top: Boolean, detached: Boolean) {
         val viewport = context?.viewport ?: return
         anchorRequester = requester.takeIf { it !== this }
+        lastRefreshedHeight = null
         anchorAtTop = top
         detachedOpening = detached
         anchorGesture = viewport.gesture
@@ -467,10 +472,13 @@ internal fun rememberWorkflowDisclosureMotion(
     collapseUp: Boolean = false,
     targetExpanded: Boolean = visibility.targetState,
     animationIdle: Boolean = true,
+    pendingOpeningHeight: (() -> Int?)? = null,
 ): WorkflowDisclosureMotion {
     val context = LocalWorkflowDisclosureContext.current
     val parent = LocalWorkflowDisclosureParent.current
-    val motion = remember(key, context, collapseUp, parent) { WorkflowDisclosureMotion(context, collapseUp, parent) }
+    val motion = remember(key, context, collapseUp, parent, pendingOpeningHeight) {
+        WorkflowDisclosureMotion(context, collapseUp, parent, pendingOpeningHeight)
+    }
     motion.observeExpanded(targetExpanded)
     val idle = visibility.isIdle && animationIdle
     motion.animationIdle = idle

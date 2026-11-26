@@ -133,7 +133,14 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         pre_draw = motion.split('fun correctBeforeDraw() {', 2)[2].split('val headerModifier', 1)[0]
         self.assertIn('val requester = anchorRequester ?: this', pre_draw)
-        self.assertIn('val refreshGeometry = !anchorAtTop && !requester.animationIdle', pre_draw)
+        self.assertIn('if (!anchorAtTop && requester.expanded) requester.pendingOpeningHeight?.invoke()', pre_draw)
+        self.assertIn('val refreshGeometry = pendingHeight != null && pendingHeight != lastRefreshedHeight', pre_draw)
+        extent = (CHAT / 'WorkflowCardExtent.kt').read_text()
+        self.assertIn('fun pendingOpeningHeight()', extent)
+        self.assertIn('.takeIf { it != measuredHeight }', extent)
+        self.assertIn('val pixels = layoutHeight(expanded, settledExpanded)', extent)
+        work = (CHAT / 'WorkProcessCard.kt').read_text()
+        self.assertIn('detailExtent::pendingOpeningHeight', work)
         self.assertIn('if (!anchorCorrectionPosted && !refreshGeometry) return', pre_draw)
         self.assertIn('correctAnchor(refreshGeometry = refreshGeometry)', pre_draw)
         anchor = motion.split('private fun correctAnchor(', 1)[1].split('private fun chooseDirection()', 1)[0]

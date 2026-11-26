@@ -185,7 +185,7 @@ class ChildTaskCardPresentationTest {
         val actual = childTaskNamedPresentation(original, "conversation", "inspect_child_tasks", "{}", payload,
             mapOf(frozenOwner to "历史执行", second to "历史审查"))
         assertTrue(actual.details.rich.entries.isEmpty())
-        assertEquals("2个子代理•状态未确认", actual.details.rich.prose!!.text)
+        assertEquals("1个子代理•状态未确认\n1个子代理•成功", actual.details.rich.prose!!.text)
         val recorded = JSONObject().put("agent_name", "原名").put("status", "COMPLETED").put("text", "body").toString()
         val explicit = ToolCardPresentations.present("get_child_task", identity().toString(), recorded)
         assertSame(explicit, childTaskNamedPresentation(explicit, "conversation", "get_child_task", identity().toString(), recorded,

@@ -10,7 +10,7 @@ object CodexContextPolicy {
 
     /** The meter and automatic gate share the same normalized cloud input (cache is a subset). */
     fun acceptedInput(usage: ModelEvent.Usage, window: Long?): Long? {
-        val input = usage.inputTokens?.takeIf { it > 0 } ?: return null
+        val input = usage.inputTokens?.takeIf { it >= 0 } ?: return null
         if (window != null && window > 0 && input.toDouble() > window.toDouble() * 1.3) return null
         val cached = usage.cachedTokens
         if (cached != null && (cached > input || (window != null && window > 0 && cached > window))) return null

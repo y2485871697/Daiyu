@@ -890,6 +890,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                             val window = contextRuntime?.windowTokens
                             if (window != null) {
                                 val acceptedInput = app.daiyu.android.domain.context.CodexContextPolicy.acceptedInput(event, window)
+                                val calibrationInput = acceptedInput?.takeIf { it > 0 }
                                 val state = checkNotNull(contextState)
                                 val meter = state.meter ?: ContextMeterCheckpoint()
                                 val header = preparedContextHeader
@@ -899,8 +900,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                                 }
                                 val latched = listOfNotNull(meter.pressureTokens, pressure).maxOrNull()
                                 contextState = state.copy(
-                                    calibration = if (acceptedInput != null && local?.request == request)
-                                        local?.copy(billedTokens = acceptedInput) else state.calibration,
+                                    calibration = if (calibrationInput != null && local?.request == request)
+                                        local?.copy(billedTokens = calibrationInput) else state.calibration,
                                     pressure = null,
                                     meter = meter.copy(pressureTokens = latched,
                                         cloudInputTokens = acceptedInput ?: meter.cloudInputTokens))

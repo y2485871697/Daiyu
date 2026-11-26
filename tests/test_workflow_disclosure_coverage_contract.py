@@ -11,7 +11,7 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         work = (CHAT / 'WorkProcessCard.kt').read_text()
         self.assertIn('LocalWorkflowDisclosureParent provides disclosure', work)
-        self.assertIn('boundary.captureAnchor(this, anchorAtTop)', motion)
+        self.assertIn('boundary.captureAnchor(this, anchorAtTop, openingDownwards)', motion)
         self.assertIn('boundary.anchorRequester === this', motion)
         self.assertIn('force || boundary.animationIdle', motion)
         self.assertIn('onDispose { motion.dispose() }', motion)
@@ -20,27 +20,29 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         clearance = source.split('private fun anchorClearance()', 1)[1].split('private fun correctAnchor(', 1)[0]
         self.assertIn('if (!anchorAtTop) return turnClearance', clearance)
-        self.assertIn('bottomInWindow()?.let { workflowDisclosureTopClearance(clearance, it, safe.bottom) }', clearance)
+        self.assertIn('placed.positionInWindow().y + placed.size.height, safe.bottom', clearance)
         self.assertIn('minOf(turnClearance, disclosureBottom - safeBottom)', source)
         correction = source.split('private fun correctAnchor(', 1)[1].split('private fun chooseDirection()', 1)[0]
         self.assertEqual(3, correction.count('anchorClearance()'))
         self.assertNotIn('viewport.anchorClearance(context.itemKey)', correction)
         self.assertIn('val delta = maxOf(anchor, anchorClearance() ?: anchor)', correction)
 
-    def test_embedded_reasoning_protects_only_a_tail_surface_that_started_above_the_composer(self):
+    def test_downward_opening_detaches_follow_and_ignores_composer_overflow(self):
         source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
-        self.assertIn('opening && anchorAtTop && protectEnclosingSurface && viewport.active === this', source)
-        self.assertIn('bottom in safe.top..(safe.bottom + 1f)', source)
-        self.assertIn('protectedSurface?.takeIf { context.viewport.hasTailComposer(context.itemKey) }', source)
-        self.assertIn('else maxOf(surfaceOverflow, disclosureClearance ?: 0f)', source)
-        self.assertIn('protectedSurface = null', source.split('private fun releaseAnchor(', 1)[1])
+        toggle = source.split('fun toggle(opening: Boolean)', 1)[1].split('fun observeExpanded(', 1)[0]
+        self.assertLess(toggle.index('cycleChosen = chooseDirection()'), toggle.index('val openingDownwards = opening && !upwards'))
+        self.assertIn('if (openingDownwards) viewport.detachFollow()\n            else if (following) viewport.resumeFollow()', toggle)
+        self.assertIn('if (detachedOpening) return null', source)
+        self.assertIn('detachedOpening = detached', source)
+        self.assertIn('if (!detachedOpening && expanded && anchorAtTop', source)
         chat = (CHAT / 'ChatMessageList.kt').read_text()
-        self.assertIn('itemKey == currentTailKey && itemKey == assistantOwnerKey && currentOcclusionPx > 0', chat)
-        reasoning = (CHAT / 'ReportedReasoningCard.kt').read_text()
-        self.assertIn('protectEnclosingSurface = embedded', reasoning)
+        self.assertIn('detachFollow = { followBottom = false; wasDragged = false }', chat)
+        self.assertNotIn('protectEnclosingSurface', (CHAT / 'ReportedReasoningCard.kt').read_text())
         device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowDisclosureDirectionTest.kt').read_text()
-        self.assertIn('testCompletedTailReasoningExpansionKeepsTheEnclosingBorderAboveComposer', device)
-        self.assertIn('bottom() <= safeBottom + 1f', device)
+        self.assertIn('testFollowingUpperHeaderExpandsDownBehindComposerWithoutMovingItsTop', device)
+        self.assertIn('testCompletedTailReasoningExpandsBehindComposerWithoutMovingTheEnclosingCard', device)
+        self.assertIn('bottom() > safeBottom + ChatTailClearance.value * density + 1f', device)
+        self.assertIn('following && expected, supplementalFollowing', device)
 
     def test_bottom_reading_anchor_keeps_the_existing_physical_edge(self):
         motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()

@@ -689,7 +689,7 @@ internal fun ChatMessageList(
                 }
             },
             outputPending = { itemKey -> nestedStates[itemKey]?.textClearance?.typingPending == true },
-            hasTailComposer = { itemKey -> itemKey == currentTailKey && itemKey == assistantOwnerKey && currentOcclusionPx > 0 },
+            detachFollow = { followBottom = false; wasDragged = false },
             correctAnchor = { itemKey, remaining ->
                 var consumed = 0f
                 if (clearanceLayout.active && !clearanceLayout.correcting && nestedStates[itemKey]?.migrating != true) {
@@ -1396,7 +1396,7 @@ internal fun ChatMessageList(
                     } while (event.changes.any { it.pressed })
                     return@awaitEachGesture
                 }
-                // A disclosure may restore this press's follow intent; other child actions still cancel it.
+                // A downward disclosure stays detached; an upward one may restore this press's follow intent.
                 disclosureViewport.pointerDown(followBottom)
                 // A down over a child action also cancels follow and an in-flight user-message jump.
                 followBottom = false; wasDragged = false

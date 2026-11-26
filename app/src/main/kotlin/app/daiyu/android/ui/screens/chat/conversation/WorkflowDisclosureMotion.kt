@@ -53,7 +53,7 @@ internal class WorkflowDisclosureViewport(
     val anchorClearance: (String) -> Float? = { null },
     val output: (String) -> Any? = { null },
     val outputPending: (String) -> Boolean = { false },
-    val hasTailComposer: (String) -> Boolean = { false },
+    val detachFollow: () -> Unit = {},
 ) {
     var followingOnPress = false
     var diagnostics: () -> String = { "" }
@@ -116,7 +116,7 @@ internal class WorkflowDisclosureMotion(
     private var pressGesture = -1L
     private var anchorRequester: WorkflowDisclosureMotion? = null
     private var borrowedBoundary: WorkflowDisclosureMotion? = null
-    private var protectedSurface: WorkflowDisclosureMotion? = null
+    private var detachedOpening = false
     private var finishPending = false
     private var anchoredOutput: Any? = null
     var animationIdle = true
@@ -159,22 +159,16 @@ internal class WorkflowDisclosureMotion(
             else placed.positionInWindow().y + placed.size.height - anchorBottom
     }
 
-    private fun bottomInWindow(): Float? = container?.takeIf { it.isAttached }?.let {
-        it.positionInWindow().y + it.size.height
-    }
-
     private fun anchorClearance(): Float? {
+        // The composer overlays detached content; a downward opening only anchors its title.
+        if (detachedOpening) return null
         val context = context ?: return null
-        val turnClearance = context.viewport.anchorClearance(context.itemKey)
+        val turnClearance = context.viewport.anchorClearance(context.itemKey) ?: return null
         if (!anchorAtTop) return turnClearance
+        val placed = container?.takeIf { it.isAttached } ?: return null
         val safe = context.viewport.bounds() ?: return null
-        val disclosureClearance = turnClearance?.let { clearance ->
-            bottomInWindow()?.let { workflowDisclosureTopClearance(clearance, it, safe.bottom) }
-        }
-        val surfaceOverflow = protectedSurface?.takeIf { context.viewport.hasTailComposer(context.itemKey) }
-            ?.bottomInWindow()?.minus(safe.bottom)?.takeIf { it > .5f }
-        return if (surfaceOverflow == null) disclosureClearance
-            else maxOf(surfaceOverflow, disclosureClearance ?: 0f)
+        return workflowDisclosureTopClearance(turnClearance,
+            placed.positionInWindow().y + placed.size.height, safe.bottom)
     }
 
     private fun correctAnchor(settling: Boolean = false): Boolean {
@@ -216,7 +210,7 @@ internal class WorkflowDisclosureMotion(
 
     fun retainAnchor(gesture: Long) { anchorGesture = gesture }
 
-    fun toggle(opening: Boolean, protectEnclosingSurface: Boolean = false) {
+    fun toggle(opening: Boolean) {
         context?.viewport?.claimGesture()
         closingDetailHeight = if (!opening) {
             val placedContainer = container?.takeIf { it.isAttached }
@@ -239,23 +233,14 @@ internal class WorkflowDisclosureMotion(
         // Freeze direction through reversals and the matching collapse; a new closed cycle may choose again.
         if ((opening || expanded) && !cycleChosen) cycleChosen = chooseDirection()
         manualChange = true
-        if (viewport != null && context != null) {
+        if (viewport != null) {
             viewport.followingOnPress = false
-            if (following) viewport.resumeFollow()
+            val openingDownwards = opening && !upwards
+            if (openingDownwards) viewport.detachFollow()
+            else if (following) viewport.resumeFollow()
             anchorAtTop = !upwards || collapseUp && !opening
             val boundary = if (anchorAtTop) this else enclosingBoundary()
-            boundary.captureAnchor(this, anchorAtTop)
-            // A nested disclosure can push its enclosing border below the composer before its own
-            // content reaches it. Only move a tail surface whose bottom was visible at the click.
-            if (opening && anchorAtTop && protectEnclosingSurface && viewport.active === this &&
-                viewport.hasTailComposer(context.itemKey)) {
-                val safe = viewport.bounds()
-                val surface = enclosingBoundary()
-                val bottom = surface.bottomInWindow()
-                if (surface !== this && safe != null && bottom != null && bottom in safe.top..(safe.bottom + 1f)) {
-                    protectedSurface = surface
-                }
-            }
+            boundary.captureAnchor(this, anchorAtTop, openingDownwards)
             borrowedBoundary = boundary.takeIf { it !== this && viewport.active === it }
         }
     }
@@ -276,10 +261,11 @@ internal class WorkflowDisclosureMotion(
         return enclosing?.enclosingBoundary() ?: this
     }
 
-    private fun captureAnchor(requester: WorkflowDisclosureMotion, top: Boolean) {
+    private fun captureAnchor(requester: WorkflowDisclosureMotion, top: Boolean, detached: Boolean) {
         val viewport = context?.viewport ?: return
         anchorRequester = requester.takeIf { it !== this }
         anchorAtTop = top
+        detachedOpening = detached
         anchorGesture = viewport.gesture
         anchoredOutput = viewport.output(context.itemKey)
         container?.takeIf { it.isAttached }?.let {
@@ -298,7 +284,6 @@ internal class WorkflowDisclosureMotion(
             }
         }
         borrowedBoundary = null
-        protectedSurface = null
         if ((force || anchorRequester == null) && viewport?.active === this) viewport.active = null
         if (force) anchorRequester = null
     }
@@ -320,7 +305,7 @@ internal class WorkflowDisclosureMotion(
         val boundary = borrowedBoundary ?: this
         if (!boundary.correctAnchor(settling = true)) return
         finishPending = false
-        if (expanded && anchorAtTop && borrowedBoundary == null && !outputChanged()) return
+        if (!detachedOpening && expanded && anchorAtTop && borrowedBoundary == null && !outputChanged()) return
         releaseAnchor(force = false)
     }
 

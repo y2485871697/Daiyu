@@ -33,6 +33,18 @@ class WorkflowDisclosureMotionTest {
         assertFalse(resumed)
     }
 
+    @Test fun downwardOpeningCancelsFollowWithoutRequiringAPress() {
+        var following = false
+        var resumed = false
+        val viewportState = WorkflowDisclosureViewport({ following }, { viewport }, { resumed = true }, { true }, { _, _ -> 0f },
+            detachFollow = { following = false })
+        val motion = WorkflowDisclosureMotion(WorkflowDisclosureContext(viewportState, "active") { true })
+        following = true
+        motion.toggle(opening = true)
+        assertFalse(following)
+        assertFalse(resumed)
+    }
+
     @Test fun detachedReaderUsesTheSafeViewportMidpoint() {
         assertFalse(workflowDisclosureExpandsUp(299f, viewport))
         assertTrue(workflowDisclosureExpandsUp(300f, viewport))
@@ -283,13 +295,13 @@ class WorkflowDisclosureMotionTest {
         assertEquals("A negative anchor delta can restore the original top", -4f, maxOf(-4f, clearance), 0f)
     }
 
-    @Test fun downwardDisclosureMovesOnlyItsOwnOverflowWhenTheComposerRises() {
+    @Test fun topAnchorWithClearanceMovesOnlyItsOwnOverflowWhenTheComposerRises() {
         assertEquals(4f, workflowDisclosureTopClearance(184f, 309f, 305f), 0f)
         assertEquals(2f, workflowDisclosureTopClearance(2f, 309f, 305f), 0f)
         assertEquals(0f, workflowDisclosureTopClearance(180f, 305f, 305f), 0f)
     }
 
-    @Test fun downwardDisclosureCanReturnTowardItsAnchorWithoutCrossingTheSafeBottom() {
+    @Test fun topAnchorWithClearanceCanReturnWithoutCrossingTheSafeBottom() {
         val clearance = workflowDisclosureTopClearance(180f, 302f, 305f)
         assertEquals(-3f, maxOf(-10f, clearance), 0f)
         assertEquals(-10f, maxOf(-10f, workflowDisclosureTopClearance(-12f, 280f, 305f)), 0f)

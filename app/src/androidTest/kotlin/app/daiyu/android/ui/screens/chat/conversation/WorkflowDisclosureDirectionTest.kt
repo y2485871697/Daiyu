@@ -39,6 +39,7 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.WiredActivityTestCase
 import app.daiyu.android.data.model.AppearanceSettings
@@ -50,7 +51,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
     private val work = WorkProcessUi(emptyList(), "已完成")
 
     private fun mountList(following: Boolean, lower: Boolean = false, tool: Boolean = false,
-        status: RunStatus = RunStatus.RUNNING, streaming: Boolean = true) {
+        status: RunStatus = RunStatus.RUNNING, streaming: Boolean = true, detailHeight: Dp = 80.dp) {
         mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             BoxWithConstraints(Modifier.size(320.dp, 420.dp)) {
@@ -61,9 +62,9 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                         turnExtras = { turn -> if (turn.id == "tail") {
                             if (lower) Box(Modifier.height(140.dp))
                             if (tool) WorkStepRow(WorkStepUi("tool", "fixture", "", WorkStepState.OK), toolContent = {
-                                Box(Modifier.fillMaxWidth().height(80.dp).testTag("direction-body"))
+                                Box(Modifier.fillMaxWidth().height(detailHeight).testTag("direction-body"))
                             }) else WorkProcessCard(work, "direction-fixture", content = {
-                                Box(Modifier.fillMaxWidth().height(80.dp).testTag("direction-body"))
+                                Box(Modifier.fillMaxWidth().height(detailHeight).testTag("direction-body"))
                             })
                             if (!lower) Box(Modifier.height(180.dp))
                         } })
@@ -91,26 +92,29 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
 
     private fun touchHeader() { ui.onNodeWithTag("work-process-header").performTouchInput { click() } }
 
-    fun testFollowingUpperHeaderExpandsDownAndNeverGrowsBehindComposer() {
-        mountList(following = true)
+    fun testFollowingUpperHeaderExpandsDownBehindComposerWithoutMovingItsTop() {
+        mountList(following = true, detailHeight = 330.dp)
         val header = ui.onNodeWithTag("work-process-header").fetchSemanticsNode().boundsInRoot
         val listTop = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot.top
         val safeBottom = ui.onNodeWithTag("direction-composer").fetchSemanticsNode().boundsInRoot.top - ChatTailClearance.value * density
         assertTrue("Fixture header must lie in the safe upper half", header.center.y < (listTop + safeBottom) / 2f)
+        assertTrue(geometry().contains("follow=true"))
         val anchor = top()
+        val initialHeight = bottom() - anchor
         ui.mainClock.autoAdvance = false
         try {
             touchHeader()
             repeat(60) {
                 ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
                 assertDirection(false)
-                assertTrue("No disclosure frame may reach behind the composer", bottom() <= safeBottom + 1f)
+                assertTrue("Downward opening must cancel follow: ${geometry()}", geometry().contains("follow=false"))
                 assertEquals("Downward disclosure holds its upper edge: ${geometry()}", anchor, top(), 2f)
             }
         } finally { ui.mainClock.autoAdvance = true }
         ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(
             androidx.compose.ui.semantics.SemanticsProperties.StateDescription, "已展开"))
-        assertTrue("The detail must really finish expanding", ui.onNodeWithTag("direction-body").fetchSemanticsNode().boundsInRoot.height >= 79f * density)
+        assertTrue("Card must expand behind the composer", bottom() > safeBottom + ChatTailClearance.value * density + 1f)
+        assertTrue("The detail must really finish expanding", bottom() - top() - initialHeight >= 329f * density)
         assertEquals(0, fixture.opens.get())
     }
 
@@ -286,7 +290,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
 
 
 
-    fun testCompletedTailReasoningExpansionKeepsTheEnclosingBorderAboveComposer() {
+    fun testCompletedTailReasoningExpandsBehindComposerWithoutMovingTheEnclosingCard() {
         val summary = "Finished reasoning summary. " + "The saved explanation does not change. ".repeat(8)
         kotlinx.coroutines.runBlocking { projectMarkdown(listOf(summary)) }
         mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -314,17 +318,19 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         assertTrue(ui.onNodeWithTag(header).fetchSemanticsNode().boundsInRoot.center.y < (listTop + safeBottom) / 2f)
         val initialTop = top()
         val initialHeight = bottom() - initialTop
-        assertEquals("Tail card starts at the safe bottom", safeBottom, bottom(), 2f)
+        assertTrue("Tail card starts above the composer", bottom() <= safeBottom + 2f)
         ui.mainClock.autoAdvance = false
         try {
             ui.onNodeWithTag(header).performTouchInput { click() }
             repeat(28) {
                 ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
                 assertDirection(false, header)
-                assertTrue("Frame $it: outer border ${bottom()} crosses the safe edge $safeBottom: ${geometry(header)}",
-                    bottom() <= safeBottom + 1f)
+                assertEquals("Frame $it: no scroll-away to protect the enclosing border: ${geometry(header)}",
+                    initialTop, top(), 2f)
+                assertTrue(geometry(header).contains("follow=false"))
             }
-            assertTrue("Must make real space by scrolling the whole tail card", top() < initialTop - 35f * density)
+            assertTrue("Outer border must be allowed behind the composer",
+                bottom() > safeBottom + ChatTailClearance.value * density + 1f)
             assertTrue("Must grow the outer card rather than clamp its measured content", bottom() - top() > initialHeight + 35f * density)
             ui.onNodeWithTag("reported-reasoning-content:tail-summary").assertExists()
         } finally { ui.mainClock.autoAdvance = true }
@@ -405,7 +411,10 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             androidx.compose.runtime.key(kind) {
             var safe by remember { mutableStateOf<Rect?>(null) }
-            val viewport = remember { WorkflowDisclosureViewport({ supplementalFollowing }, { safe }, {}, { false }, { _, _ -> 0f }) }
+            val viewport = remember {
+                WorkflowDisclosureViewport({ supplementalFollowing }, { safe }, {}, { false }, { _, _ -> 0f },
+                    detachFollow = { supplementalFollowing = false })
+            }
             Box(Modifier.size(320.dp, 420.dp).testTag("supplemental-viewport").onGloballyPositioned { safe = it.boundsInWindow() }) {
                 CompositionLocalProvider(LocalWorkflowDisclosureContext provides remember {
                     WorkflowDisclosureContext(viewport, "supplemental") { supplementalOutputActive }
@@ -453,6 +462,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             assertSupplementalHalf(header, lower)
             ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
             assertDirection(expected, header)
+            assertEquals("$kind must detach only when opening downwards", following && expected, supplementalFollowing)
             ui.onNodeWithTag(header).performTouchInput { click() }; ui.waitForIdle()
             assertDirection(expected, header)
         }

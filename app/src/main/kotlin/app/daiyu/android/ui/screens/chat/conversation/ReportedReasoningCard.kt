@@ -179,7 +179,7 @@ internal fun ReportedReasoningCard(
             .then(if (hasSummary) Modifier.conversationClickable(
                 onClickLabel = if (expanded) "收起思考摘要" else "展开思考摘要"
             ) {
-                disclosure.toggle(opening = !disclosureExpanded, protectEnclosingSurface = embedded)
+                disclosure.toggle(opening = !disclosureExpanded)
                 overridePhase = isThinking; overrideStopped = stopped; expandedOverride = !disclosureExpanded
             }.semantics {
                 stateDescription = if (expanded) "已展开" else "已折叠"

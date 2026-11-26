@@ -12,6 +12,7 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.DisposableEffect
@@ -31,6 +32,8 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import kotlin.math.roundToInt
 
 private const val WorkflowDisclosureDurationMillis = 220
@@ -40,6 +43,7 @@ internal fun WorkflowExpandableContent(
     visibility: MutableTransitionState<Boolean>,
     motion: WorkflowDisclosureMotion,
     modifier: Modifier = Modifier,
+    leadingSpace: Dp = 0.dp,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val expanded = visibility.targetState
@@ -50,7 +54,7 @@ internal fun WorkflowExpandableContent(
     }
     WorkflowAnimatedDetail(visibility, motion, modifier) {
         // Exiting fields remain drawn, but no longer receive input or accessibility actions.
-        Column(Modifier.fillMaxWidth().onFocusChanged { hasFocus = it.hasFocus }
+        Column(Modifier.fillMaxWidth().padding(top = leadingSpace).onFocusChanged { hasFocus = it.hasFocus }
             .focusProperties { onEnter = { if (!expanded) cancelFocusChange() } }.focusGroup()
             .then(if (expanded) Modifier else Modifier.clearAndSetSemantics {}.pointerInput(Unit) {
                 awaitPointerEventScope {

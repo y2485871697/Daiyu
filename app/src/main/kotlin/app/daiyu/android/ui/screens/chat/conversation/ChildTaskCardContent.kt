@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -35,11 +36,11 @@ import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.theme.MiuixTheme
 
 @Composable
-internal fun ChildTaskFrame(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+internal fun ChildTaskFrame(modifier: Modifier = Modifier, spacing: Dp = 5.dp, content: @Composable ColumnScope.() -> Unit) {
     val colors = conversationColors()
     val shape = RoundedCornerShape(8.dp)
     Column(modifier.fillMaxWidth().clip(shape).background(colors.soft).border(1.dp, colors.line, shape)
-        .padding(horizontal = 9.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(5.dp), content = content)
+        .padding(horizontal = 9.dp, vertical = 6.dp), verticalArrangement = Arrangement.spacedBy(spacing), content = content)
 }
 
 @Composable
@@ -82,7 +83,7 @@ internal fun ChildTaskReceiptContent(details: ToolCategoryDetailsUi) {
             val visibility = remember(index, entry.title) { MutableTransitionState(expanded) }
             visibility.targetState = expanded
             val disclosure = rememberWorkflowDisclosureMotion("receipt:$index:${entry.title}", visibility)
-            ChildTaskFrame(Modifier.testTag("tool-child-receipt:$index").then(disclosure.containerModifier)) {
+            ChildTaskFrame(Modifier.testTag("tool-child-receipt:$index").then(disclosure.containerModifier), spacing = 0.dp) {
                 val status = entry.fields.firstOrNull { it.label == "状态" }?.value ?: "状态未确认"
                 Row(Modifier.fillMaxWidth().heightIn(min = 28.dp).testTag("tool-child-receipt-header:$index").then(disclosure.headerModifier)
                     .conversationClickable(onClickLabel = if (expanded) "收起子任务" else "展开子任务") {
@@ -98,7 +99,7 @@ internal fun ChildTaskReceiptContent(details: ToolCategoryDetailsUi) {
                         .settingsDisclosureRotation(expanded, expandedDegrees = 180f).testTag("tool-child-receipt-arrow:$index"),
                         tint = conversationColors().muted)
                 }
-                WorkflowExpandableContent(visibility, disclosure) {
+                WorkflowExpandableContent(visibility, disclosure, leadingSpace = 5.dp) {
                     ChildTaskProgressContent(entry.documents.firstOrNull()?.text, status, "receipt-$index", entry.title)
                 }
             }

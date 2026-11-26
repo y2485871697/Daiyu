@@ -55,7 +55,7 @@ internal fun ToolCategoryContent(category: String, details: ToolCategoryDetailsU
         if (category == "generation") Fields(body.fields)
         if (category == "device_read") body.prose?.let { Document(it) }
         if (rich.entries.isEmpty()) details.items.forEachIndexed { index, item ->
-            Disclosure(item.title, "tool-task:$index") { Fields(item.fields) }
+            ToolCategoryDisclosure(item.title, "tool-task:$index") { Fields(item.fields) }
         }
         EntryList(rich.entries, "返回条目", private = category in setOf("memory", "personal_search", "gui"))
         body.documents.forEach { Document(it, showTitle = !body.plainDocuments || category == "workspace" && it.code) }
@@ -118,10 +118,10 @@ private fun EntryList(entries: List<ToolRichEntryUi>, title: String, private: Bo
                 }
             }
         }
-        if (private) Disclosure("$groupTitle · ${grouped.size}项", "tool-entries") { content(grouped) }
+        if (private) ToolCategoryDisclosure("$groupTitle · ${grouped.size}项", "tool-entries") { content(grouped) }
         else {
             content(grouped.take(3))
-            if (grouped.size > 3) Disclosure("查看其余 ${grouped.size - 3} 项", "tool-entries") { content(grouped.drop(3)) }
+            if (grouped.size > 3) ToolCategoryDisclosure("查看其余 ${grouped.size - 3} 项", "tool-entries") { content(grouped.drop(3)) }
         }
     }
 }
@@ -171,16 +171,16 @@ private fun Document(document: ToolDisclosureUi, showTitle: Boolean = true) {
 }
 
 @Composable
-private fun Disclosure(title: String, tag: String, body: @Composable () -> Unit) {
+internal fun ToolCategoryDisclosure(title: String, tag: String, body: @Composable () -> Unit) {
     var open by remember(title) { mutableStateOf(false) }
     val visibility = remember(title) { MutableTransitionState(open) }
     visibility.targetState = open
     val disclosure = rememberWorkflowDisclosureMotion("$tag:$title", visibility)
-    Column(Modifier.fillMaxWidth().then(disclosure.containerModifier), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+    Column(Modifier.fillMaxWidth().then(disclosure.containerModifier)) {
         ToolDisclosureHeader(title, open, Modifier.testTag(tag).then(disclosure.headerModifier)) {
             disclosure.toggle(opening = !open); open = !open
         }
-        WorkflowExpandableContent(visibility, disclosure) { body() }
+        WorkflowExpandableContent(visibility, disclosure, leadingSpace = 5.dp) { body() }
     }
 }
 

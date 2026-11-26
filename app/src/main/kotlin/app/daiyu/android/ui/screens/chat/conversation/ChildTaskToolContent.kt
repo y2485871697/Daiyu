@@ -119,7 +119,7 @@ internal fun ChildTaskDisclosure(
     val visibility = remember(row.owner) { MutableTransitionState(expanded) }
     visibility.targetState = expanded
     val disclosure = rememberWorkflowDisclosureMotion(subAgentStatusItemKey(row.owner), visibility)
-    ChildTaskFrame(Modifier.testTag("tool-child-frame:${row.owner.childRunId}").then(disclosure.containerModifier)) {
+    ChildTaskFrame(Modifier.testTag("tool-child-frame:${row.owner.childRunId}").then(disclosure.containerModifier), spacing = 0.dp) {
         Row(Modifier.fillMaxWidth().testTag("tool-child-summary:${row.owner.childRunId}")
             .then(disclosure.headerModifier).heightIn(min = 28.dp)
             .conversationClickable(onClickLabel = if (expanded) "收起子任务" else "展开子任务") {
@@ -140,7 +140,7 @@ internal fun ChildTaskDisclosure(
                 .settingsDisclosureRotation(expanded, expandedDegrees = 180f).testTag("tool-child-arrow:${row.owner.childRunId}"),
                 tint = colors.onSurfaceVariantSummary)
         }
-        WorkflowExpandableContent(visibility, disclosure) {
+        WorkflowExpandableContent(visibility, disclosure, leadingSpace = 5.dp) {
             details()
         }
     }

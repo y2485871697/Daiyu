@@ -137,9 +137,9 @@ internal class ProductionRunContext(
             progress(activity)
             val prefixTokens = TokenTailCompression.codexHistoryTokens(prefix, includeLatestScreen = false)
             val text = HarnessContextSummarizer(model, cancellation, definitions, systemPrompt,
-                checkpointTargetTokens = compactionCheckpointTarget(prefixTokens),
                 nextModel = model.rebind?.let { rebind -> { rebind(usage()) } }).summarize(
-                CompressionInput(logical.take(cut), ContextRevision.digest(prefix))).trim()
+                CompressionInput(logical.take(cut), ContextRevision.digest(prefix),
+                    checkpointTargetTokens = compactionCheckpointTarget(prefixTokens))).trim()
             if (cancelled()) return null
             require(text.isNotEmpty()) { "摘要为空；保留原文" }
             val id = "summary-${activity.id}"

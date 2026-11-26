@@ -9,11 +9,15 @@ class HarnessContextSummarizerTest {
     private val input = CompressionInput(listOf(Message(MessageId("u"), ConversationId("c"), RunId("r"),
         "user", listOf(MessageBlock.Text("source", "evidence")), RunStatus.COMPLETED)), "revision")
 
-    @Test fun liveCheckpointTargetScalesWithPrefixAndLeavesTheStandardDirectiveIntact() {
-        assertNull(compactionCheckpointTarget(511))
-        assertEquals(256L, compactionCheckpointTarget(512)!!)
-        assertEquals(1500L, compactionCheckpointTarget(3000)!!)
-        assertEquals(4000L, compactionCheckpointTarget(100000)!!)
+    @Test fun checkpointTargetScalesWithPrefixAndOmitsFixedSectionsForShortInputs() {
+        assertEquals(255L, compactionCheckpointTarget(511))
+        val short = HarnessCompactionPrompt.forCheckpointTarget(compactionCheckpointTarget(511))
+        assertTrue(short.contains("under about 255 tokens"))
+        assertTrue(short.contains("no headings"))
+        assertFalse(short.contains("## Primary Request"))
+        assertEquals(256L, compactionCheckpointTarget(512))
+        assertEquals(1500L, compactionCheckpointTarget(3000))
+        assertEquals(4000L, compactionCheckpointTarget(100000))
         assertEquals(HarnessCompactionPrompt.instruction, HarnessCompactionPrompt.forCheckpointTarget(null))
         val directive = HarnessCompactionPrompt.forCheckpointTarget(compactionCheckpointTarget(3000))
         assertTrue(directive.startsWith(HarnessCompactionPrompt.instruction))

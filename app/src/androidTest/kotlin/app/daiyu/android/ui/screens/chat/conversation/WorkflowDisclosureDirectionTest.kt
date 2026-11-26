@@ -750,7 +750,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         }
     }
 
-    private fun assertLowerReadingBoundaryIsStationary(status: RunStatus, streaming: Boolean) {
+    private fun assertLowerReadingBoundaryIsStationary(status: RunStatus, streaming: Boolean, category: Boolean = false) {
         val step = WorkStepUi("reading-tool", "fixture", "", WorkStepState.OK)
         mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
@@ -764,7 +764,9 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                             WorkProcessCard(work, "reading-fixture", content = {
                                 Column {
                                     Box(Modifier.height(88.dp))
-                                    WorkStepRow(step, toolContent = {
+                                    if (category) ToolCategoryDisclosure("fixture", "reading-category") {
+                                        Box(Modifier.fillMaxWidth().height(80.dp).testTag("reading-detail"))
+                                    } else WorkStepRow(step, toolContent = {
                                         Box(Modifier.fillMaxWidth().height(80.dp).testTag("reading-detail"))
                                     })
                                     Box(Modifier.fillMaxWidth().height(12.dp).background(Color.Magenta)
@@ -787,7 +789,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             parentHeader.center.y < (parentListTop + parentSafeBottom) / 2f)
         touchHeader(); ui.waitForIdle()
         assertDirection(false)
-        val headerTag = "tool-step-header:reading-tool"
+        val headerTag = if (category) "reading-category" else "tool-step-header:reading-tool"
         val header = ui.onNodeWithTag(headerTag).fetchSemanticsNode().boundsInRoot
         val listTop = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot.top
         val safeBottom = ui.onNodeWithTag("reading-composer").fetchSemanticsNode().boundsInRoot.top -
@@ -848,6 +850,9 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
 
     fun testUpwardToolAndDownwardCollapseKeepTheLowerReadingBoundaryStill() =
         assertLowerReadingBoundaryIsStationary(RunStatus.COMPLETED, streaming = false)
+
+    fun testNestedCategoryGapAnimatesWithoutMovingTheLowerReadingBoundary() =
+        assertLowerReadingBoundaryIsStationary(RunStatus.COMPLETED, streaming = false, category = true)
 
     fun testBoundedUpwardToolAndDownwardCollapseKeepTheLowerReadingBoundaryStill() =
         assertLowerReadingBoundaryIsStationary(RunStatus.RUNNING, streaming = true)

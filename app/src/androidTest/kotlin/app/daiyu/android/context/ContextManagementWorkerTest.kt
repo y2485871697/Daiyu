@@ -25,6 +25,7 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
     private var requests = 0
     private var cancellations = 0
     private var onRequest: () -> Unit = {}
+    private var modelReply: (String) -> String = { "已核实事实，保留不确定性与未完成行动" }
     private var resolve: () -> BoundSummaryModel? = { bound() }
     private var target: SummaryProfileDescriptor? = SummaryProfileDescriptor(binding, "revision-1",
         "https://summary.invalid/v1/responses", "actual-api-model")
@@ -79,15 +80,17 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         requests++
         assertTrue(history.size > 1)
         assertEquals("user", history.last().role)
-        assertEquals(HarnessCompactionPrompt.instruction,
-            (history.last().blocks.single() as MessageBlock.Text).text)
+        val directive = (history.last().blocks.single() as MessageBlock.Text).text
+        val prefix = history.dropLast(1).dropWhile { it.role == "system" }
+        val prefixTokens = TokenTailCompression.codexHistoryTokens(prefix, includeLatestScreen = false)
+        assertEquals(HarnessCompactionPrompt.forCheckpointTarget(compactionCheckpointTarget(prefixTokens)), directive)
         assertTrue(history.dropLast(1).none { it.id.value.startsWith("summary-directive-") })
         object : ModelSession {
             override fun cancel() { cancellations++ }
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                 assertTrue(outputs.isEmpty())
                 onRequest()
-                sink(ModelEvent.TextFinal("summary", "已核实事实，保留不确定性与未完成行动"))
+                sink(ModelEvent.TextFinal("summary", modelReply(directive)))
             }
         }
     }, 2_000_000, 1_900_000, { SummaryRequestDeadline(60_000) })
@@ -230,6 +233,28 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         assertEquals(logical.drop(cut), service.prepareSend(id).messages.drop(1))
         assertEquals(expected.originals.take(cut), service.archivePage(receipt.archiveId!!, expectedOwner = id).messages)
         assertTrue(cancellations > 0)
+    }
+
+    fun testManualCompressionSizesThePromptAndNeverPublishesAnOversizedCheckpoint() {
+        val lease = seed(2); val id = lease.owner.conversationId
+        val before = service.prepareSend(id)
+        val originalTokens = TokenTailCompression.codexHistoryTokens(before.messages)
+        modelReply = { directive ->
+            if (directive.contains("no headings or empty sections")) "保留事实0及已确认结果"
+            else "未按短前缀预算生成的摘要".repeat(500)
+        }
+        val receipt = worker.compress(lease, worker.snapshot(lease))
+        val compressed = service.prepareSend(id)
+        assertNotNull(receipt.archiveId)
+        assertEquals(receipt.archiveId, compressed.archiveId)
+        assertTrue(TokenTailCompression.codexHistoryTokens(compressed.messages) < originalTokens)
+        assertEquals(1, requests)
+        modelReply = { "模型无视预算，返回没有真正缩小的摘要".repeat(500) }
+        val rejected = failure { worker.compress(lease, worker.snapshot(lease)) }
+        assertEquals("压缩未缩小；保留原文", rejected.message)
+        assertEquals(compressed, service.prepareSend(id))
+        assertEquals(before.messages, service.displayHistory(id))
+        assertEquals(2, requests)
     }
 
     fun testArchivePagesAreScopedAndLosslessAndNeverResolveModels() {

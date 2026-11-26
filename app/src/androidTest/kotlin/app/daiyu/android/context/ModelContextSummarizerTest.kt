@@ -2,7 +2,6 @@ package app.daiyu.android.context
 
 import android.test.InstrumentationTestCase
 import app.daiyu.android.domain.*
-import app.daiyu.android.domain.context.estimateTokens
 import java.util.concurrent.CancellationException
 
 @Suppress("DEPRECATION")
@@ -61,10 +60,18 @@ class ModelContextSummarizerTest : InstrumentationTestCase() {
     }
 
     fun testBudgetCountsInstructionAndEncodedEvidenceNotJustOriginalText() {
-        val rawBudget = estimateTokens(source().originals)
+        val input = source()
+        val rawText = input.originals.flatMap { it.blocks }.joinToString("\n") { block ->
+            when (block) {
+                is MessageBlock.Text -> block.text
+                is MessageBlock.Tool -> block.result.orEmpty()
+                is MessageBlock.Image -> error("unexpected fixture image")
+            }
+        }
+        val rawBudget = TokenTailCompression.textTokens(rawText) + 16
         var opened = false
         try {
-            adapter(budget = rawBudget) { opened = true; error("must not open") }.summarize(source())
+            adapter(budget = rawBudget) { opened = true; error("must not open") }.summarize(input)
             fail()
         } catch (_: IllegalArgumentException) { }
         assertFalse(opened)

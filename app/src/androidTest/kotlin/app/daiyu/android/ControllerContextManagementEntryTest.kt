@@ -307,10 +307,14 @@ class ControllerContextManagementEntryTest : InstrumentationTestCase() {
             assertTrue(adapter.state.value.confirmingCompression)
             assertEquals(0, probe.get().compressions.get())
             assertNull(f.controller.active)
-            adapter.confirmCompression()
-            val activity = f.controller.compressionActivities.single()
-            assertTrue(activity.running)
-            assertFalse("idle manual compression must never wait for a model call", activity.waiting)
+            adapter.dismissCompression()
+            // Hold the controller monitor so the worker cannot clear the submitted activity first.
+            synchronized(f.controller) {
+                assertTrue(adapter.submitCompression(null))
+                val activity = f.controller.compressionActivities.single()
+                assertTrue(activity.running)
+                assertFalse("idle manual compression must never wait for a model call", activity.waiting)
+            }
         }
         await(entered)
         controlMain {

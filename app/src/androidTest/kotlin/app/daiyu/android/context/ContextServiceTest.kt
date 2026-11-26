@@ -119,7 +119,7 @@ class ContextServiceTest : InstrumentationTestCase() {
         val original = service.displayHistory(owner)
         val policy = CompressionPolicy(contextTokens = 10000, reserveTokens = 0, tokenTail = true)
         val expanded = MessageHistory.expand(original)
-        val cut = TokenTailCompression.selectStart(expanded, policy.contextTokens)
+        val cut = DaiyuCompaction.cut(expanded, policy.contextTokens)
         assertTrue(cut > 0)
         var supplied: List<Message>? = null
         val archive = service.compress(owner, policy, ContextSummarizer {
@@ -277,7 +277,7 @@ class ContextServiceTest : InstrumentationTestCase() {
         assertTrue(compressionRows(owner).isEmpty())
     }
 
-    fun testProductionRunnerOwnsConfirmedOverflowAndOversizePendingIsNotLocallyRejected() {
+    fun testOverflowWithoutConfirmedCloudInputDoesNotCompactOrRetry() {
         for (automatic in listOf(false, true)) for (atOpen in listOf(false, true)) {
             val owner = seed(6)
             val original = service.displayHistory(owner)
@@ -298,14 +298,14 @@ class ContextServiceTest : InstrumentationTestCase() {
             var opens = 0; var summaries = 0
             val model = ModelPort { history ->
                 opens++
-                if (opens == 2) assertEquals("retained facts", SummaryCheckpoint.unframe(
-                    (history.first().blocks.single() as MessageBlock.Text).text))
-                if (opens == 1 && atOpen) throw ModelRequestException(ModelFailure.CONTEXT_LIMIT)
+                assertEquals(1, opens)
+                assertEquals(user.id, history.last().id)
+                assertEquals(user.blocks, history.last().blocks)
+                if (atOpen) throw ModelRequestException(ModelFailure.CONTEXT_LIMIT)
                 object : ModelSession {
                     override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                         assertTrue(outputs.isEmpty())
-                        if (opens == 1) throw ModelRequestException(ModelFailure.CONTEXT_LIMIT)
-                        sink(ModelEvent.TextFinal("answer", "finished"))
+                        throw ModelRequestException(ModelFailure.CONTEXT_LIMIT)
                     }
                     override fun cancel() {}
                 }
@@ -329,19 +329,16 @@ class ContextServiceTest : InstrumentationTestCase() {
                 val result = ChatRunner(model, db, BatteryTool { error("overflow recovery cannot execute tools") },
                     app.daiyu.android.domain.runtime.RunnerOptions(runtimeStore = runtime, contextRuntime = liveContext)) {}
                     .run(assistant, original + user)
-                assertEquals(result.error, if (automatic) RunStatus.COMPLETED else RunStatus.FAILED, result.status)
-                assertEquals(if (automatic) 2 else 1, opens)
-                assertEquals(if (automatic) 1 else 0, summaries)
+                assertEquals(result.error, RunStatus.FAILED, result.status)
+                assertEquals(1, opens)
+                assertEquals(0, summaries)
             } finally { runtime.close() }
             assertEquals(original, service.displayHistory(owner).take(original.size))
             db.close(); db = ConversationDatabase(context); service = ContextService(context, db)
             assertEquals(original, service.displayHistory(owner).take(original.size))
             val reopened = service.prepareSend(owner)
-            if (automatic) {
-                assertNotNull(reopened.archiveId)
-                assertEquals(SummaryCheckpoint.frame(SummaryCheckpoint.forReplay("retained facts", reopened.archiveId)),
-                    (reopened.messages.first().blocks.single() as MessageBlock.Text).text)
-            } else assertNull(reopened.archiveId)
+            assertNull(reopened.archiveId)
+            assertTrue(compressionRows(owner).isEmpty())
         }
     }
 

@@ -118,7 +118,7 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         val before = fixture.database.exportBackup()
         menu(ChatMenuAction.SEARCH)
         awaitUniqueTag("search-history-dialog")
-        node("chat-messages").assertExists()
+        ui.onNodeWithTag("chat-messages", useUnmergedTree = true).assertExists()
         node("page:${activity.getString(R.string.search_messages_title)}").assertDoesNotExist()
         node("search:query").assertIsDisplayed()
         assertEquals(before, fixture.database.exportBackup())

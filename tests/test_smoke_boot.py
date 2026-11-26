@@ -100,12 +100,12 @@ class SourceTests(unittest.TestCase):
     def test_smoke_nested_and_outer_budgets_cover_all_stages(self):
         script = (ROOT / 'scripts/smoke_boot.sh').read_text()
         workflow = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:', 1)[1]
-        wrapper = int(re.search(r'export ADB_COMMAND_TIMEOUT=(\d+)', script).group(1))
+        budgets = [int(seconds) for seconds in re.findall(r'^ *instrumentation_budget=(\d+)$', script, re.M)]
+        self.assertEqual(budgets, [7200, 9600])
+        self.assertIn('export ADB_COMMAND_TIMEOUT=$((instrumentation_budget + 60))', script)
+        self.assertIn('adb_stage instrumentation "$instrumentation_budget" shell am instrument', script)
         stages = [(phase, int(seconds)) for phase, seconds in re.findall(r'adb_stage ([a-z-]+) (\d+) ', script)]
-        instrumentation = next(seconds for phase, seconds in stages if phase == 'instrumentation')
-        self.assertGreaterEqual(instrumentation, 7200)
-        self.assertLessEqual(instrumentation, 7200)
-        self.assertGreater(wrapper, instrumentation + 5)
+        stages.append(('instrumentation', max(budgets)))
         self.assertIn('adb_stage launch 30 shell am start -S -W -n app.daiyu.android/.MainActivity', script)
         step = int(re.search(r'        timeout-minutes: (\d+)', workflow).group(1)) * 60
         job = int(re.search(r'^    timeout-minutes: (\d+)', workflow, re.M).group(1)) * 60
@@ -777,6 +777,12 @@ exit 0
         args = (self.root / 'smoke/instrumentation-args.txt').read_text().splitlines()
         self.assertEqual(args[3:8], ['-w', '-r', '-e', 'class', 'app.daiyu.android.FirstTest'])
         self.assertEqual(args[8], 'app.daiyu.android.test/androidx.test.runner.AndroidJUnitRunner')
+
+    def test_release_instrumentation_uses_longer_budget_with_same_strict_report(self):
+        result = self.smoke(mode='release')
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertIn('phase=instrumentation budget=9600s', (self.root / 'smoke/stages.txt').read_text())
+        self.assertTrue(json.loads((self.root / 'smoke/instrumentation-result.json').read_text())['valid'])
 
     def test_webview_ready_and_renderer_observed_without_framework_restart(self):
         for api in (26, 37):

@@ -67,6 +67,13 @@ class DaiyuSummaryRequestTest {
         assertNull(DaiyuContextEstimate.summaryRetryLimit(8_000, 32_000, 1_000, providerRoom = 12_000))
     }
 
+    @Test fun idleCompactionLeavesOrphanUserHistoryAndCanArchiveFinishedExchange() {
+        val reply = row.copy(id = MessageId("reply"), role = Message.ASSISTANT_ROLE)
+        assertEquals(0, DaiyuCompaction.cut(listOf(row), 32_000, idle = true))
+        assertEquals(0, DaiyuCompaction.cut(listOf(row, reply.copy(status = RunStatus.RUNNING)), 32_000, idle = true))
+        assertEquals(2, DaiyuCompaction.cut(listOf(row, reply), 32_000, idle = true))
+    }
+
     @Test fun opaqueReplayCutKeepsNewestBatchAndOnlyResponsesCountsReduction() {
         fun assistant(name: String) = row.copy(id = MessageId(name), role = "assistant", blocks = emptyList(),
             protocolItems = listOf("""{"type":"reasoning","encrypted_content":"not-a-token-price"}"""))

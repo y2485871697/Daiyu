@@ -78,7 +78,13 @@ internal object DaiyuCompaction {
         val system = history.takeWhile { it.role == "system" }.size
         if (history.size <= system || window == null || window <= 0) return 0
         val available = TokenTailCompression.availableCuts(history)
-        val cuts = available.filter { it > system && (idle || it < history.size) }
+        // An orphan user row is not a finished exchange to archive by itself.
+        val firstFinishedReply = if (idle) history.indexOfFirst {
+            it.role == Message.ASSISTANT_ROLE && it.status != RunStatus.RUNNING
+        } else -1
+        if (idle && firstFinishedReply < system) return 0
+        val cuts = available.filter { it > system &&
+            (if (idle) it > firstFinishedReply else it < history.size) }
         if (cuts.isEmpty()) return 0
         val protectedStart = opaqueTailCut(history, available, protocol)
         if (protectedStart != null) return protectedStart.takeIf { it in cuts } ?: 0

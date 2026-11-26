@@ -40,14 +40,17 @@ class CatalogSummaryExecutionPolicyTest {
             responsesPath = "/responses", apiKey = "", oauth = auth, requestOptions = ProviderRequestOptions(
                 customBody = """{"reasoning":{"effort":"high"},"max_output_tokens":9000}""", openAiWebSearchEnabled = true))
         val snapshot = settings.requestSnapshot()
-        for (result in listOf(CatalogSummaryExecutionPolicy.chatConfiguration(snapshot, 32000),
-            CatalogSummaryExecutionPolicy.configuration(binding, CatalogSummaryExecutionPolicy.summarySettings(settings)))) {
+        val candidates = listOf(
+            CatalogSummaryExecutionPolicy.chatConfiguration(snapshot, 32000) to 8000,
+            CatalogSummaryExecutionPolicy.configuration(binding, CatalogSummaryExecutionPolicy.summarySettings(settings)) to 8192,
+        )
+        for ((result, expectedOutput) in candidates) {
             assertEquals(auth, result.provider.oauth); assertEquals("", result.provider.apiKey)
             assertEquals(snapshot.endpoint, result.provider.endpoint)
             assertFalse(result.provider.requestOptions.openAiWebSearchEnabled)
             assertFalse(result.provider.requestOptions.customBody.contains("reasoning"))
             assertTrue(snapshot.requestOptions.customBody.contains("reasoning"))
-            assertEquals(8000, result.maxOutputTokens)
+            assertEquals(expectedOutput, result.maxOutputTokens)
         }
     }
 

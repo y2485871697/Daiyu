@@ -93,8 +93,8 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
 
     def test_text_leaf_pairs_each_accepted_source_with_its_own_ast(self):
         chat = (BASE / 'ChatMessageList.kt').read_text()
-        for token in ('rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete, streamAnswer = true)',
-                      'rememberAssistantTextBody(plainNarration, textSources, narration.projection, narration.reveal, generationComplete)',
+        for token in ('rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete,',
+                      'rememberAssistantTextBody(plainNarration, textSources, narration.projection, narration.reveal, generationComplete, reportNarrationDraw = true)',
                       'currentSources.value.indexOfFirst { it.id == text.itemId }',
                       'accepted?.sources?.getOrNull(index)?.takeIf { text.text.startsWith(it) }',
                       'RevealedMessageMarkdown(displayed, accepted?.blocksAt(index)',

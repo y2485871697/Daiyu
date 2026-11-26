@@ -33,6 +33,9 @@ internal class WorkflowVisualScope(private val baseline: Boolean) {
     fun handoff(owner: String, initial: List<ReportedReasoning>) = handoffs.getOrPut(owner) {
         ReasoningHandoff(if (baseline) initial else emptyList())
     }
+    private val releasedLeading = mutableSetOf<String>()
+    fun leadingAlreadyReleased(key: String) = baseline || key in releasedLeading
+    fun releaseLeading(key: String) { releasedLeading.add(key) }
     private val detachedAnswers = mutableStateMapOf<String, Boolean>()
     fun rememberReleasedBody(key: String) { detachedAnswers[key] = true }
     fun bodyWasReleased(key: String) = detachedAnswers[key] == true
@@ -65,8 +68,8 @@ internal class WorkflowVisualAdmission(initial: List<String>, private var animat
     fun blockedText(steps: List<MessageContentUi>): Set<String> = buildSet {
         var blocked = false
         steps.forEachIndexed { index, item ->
-            if (item is MessageContentUi.Tool && !this@WorkflowVisualAdmission.contains(item.workflowKey(index))) blocked = true
             if (blocked && item is MessageContentUi.Text && !this@WorkflowVisualAdmission.contains(item.workflowKey(index))) add(item.itemId)
+            if (!this@WorkflowVisualAdmission.contains(item.workflowKey(index))) blocked = true
         }
     }
 }
@@ -115,8 +118,17 @@ internal fun WorkflowNarrationContent(
                 initialBaseline = baseline, presentationLane = admission.takeUnless { baselineOnly }, awaitPaintAdmission = true)
         }
         val keys = remember(steps) { steps.mapIndexed { index, item -> item.workflowKey(index) } }
+        // Admit through the first outstanding narration, including that text so it can draw.
+        // Existing keys are never withdrawn when a newer snapshot appends to the text.
+        val waitFor = if (admission == null || baselineOnly || displayPaused || admission.settled(steps)) -1 else
+            steps.indexOfFirst { it is MessageContentUi.Text && it.text.isNotBlank() &&
+                !reveal.wasDrawn(it.itemId, it.text, it.markdownWindow) }
         SideEffect {
-            if (!paused && playback?.paused != true) admission?.admit(keys)
+            if (!paused && playback?.paused != true) admission?.admit(if (waitFor < 0) keys else keys.take(waitFor + 1))
+        }
+        if (waitFor >= 0 && waitFor < steps.lastIndex) {
+            val text = steps[waitFor] as MessageContentUi.Text
+            RecordReplyUiWait(admission, text.itemId, reveal.waitStage(text))
         }
         val entryVisible = remember(admission, baselineOnly) {
             { key: String -> baselineOnly || admission?.contains(key) != false }

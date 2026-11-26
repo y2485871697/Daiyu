@@ -211,7 +211,7 @@ class StreamingFollowContract(unittest.TestCase):
         self.assertIn("clearanceLayout.viewportLoss.correction(0f)", zero_inset)
         positioned = self.source.split('.onPlaced { clearanceLayout.coordinates = it }', 1)[1].split('.drawWithContent', 1)[0]
         self.assertIn('.onGloballyPositioned', positioned)
-        self.assertIn('if (coordinates.isAttached) correctFollowClearance()', positioned)
+        self.assertIn('if (coordinates.isAttached) scheduleFollowClearance()', positioned)
 
 if __name__ == "__main__":
     unittest.main()
@@ -237,11 +237,11 @@ class ReasoningCardSameFrameGrowthTest(unittest.TestCase):
     def test_reasoning_card_growth_is_cleared_in_the_same_frame_without_a_reserve(self):
         source = (Path(__file__).resolve().parents[1] / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatMessageList.kt').read_text()
         self.assertIn('val reasoningDocumentOwner = documentFollowOwner?.takeIf { it != liveDocumentOwner }', source)
-        self.assertIn('reserveNextLine = turn.listKey != reasoningDocumentOwner,', source)
+        self.assertIn('reserveNextLine = turn.listKey != reasoningDocumentOwner && turn.listKey != workflowTailOwner,', source)
         self.assertIn('val reserve = if (!reserveNextLine) 0 else state.textClearance.reservedHeight(', source)
         correction = source.split('fun correctFollowClearance() {', 1)[1].split('// A non-following viewport', 1)[0]
         self.assertIn('if (sameFrameReasoning && nestedTail.followCatchup) return', correction)
-        self.assertIn('!viewportCorrection && !sameFrameReasoning &&\n                !liveDocumentOverflow) return', correction)
+        self.assertIn('!viewportCorrection && !sameFrameReasoning &&\n                !liveDocumentOverflow && !workflowTextGrowth) return', correction)
         self.assertIn('|| viewportCorrection || sameFrameReasoning', correction)
         self.assertLess(correction.index('val sameFrameReasoning'), correction.index('pacedFollowing && !viewportCorrection'))
 

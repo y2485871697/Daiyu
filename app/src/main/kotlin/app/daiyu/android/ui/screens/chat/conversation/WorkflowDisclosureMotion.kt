@@ -118,6 +118,16 @@ internal class WorkflowDisclosureMotion(
     private var borrowedBoundary: WorkflowDisclosureMotion? = null
     private var detachedOpening = false
     private var finishPending = false
+    private var anchorCorrectionPosted = false
+    private val postHandler = lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
+    private val placedCorrection = Runnable {
+        anchorCorrectionPosted = false
+        val viewport = context?.viewport
+        if (viewport != null && viewport.active === this && anchorGesture == viewport.gesture && !correctingAnchor) {
+            correctAnchor()
+            (anchorRequester ?: this).finishIfSettled()
+        }
+    }
     private var anchoredOutput: Any? = null
     var animationIdle = true
 
@@ -147,9 +157,8 @@ internal class WorkflowDisclosureMotion(
     }.onGloballyPositioned { coordinates ->
         container = coordinates
         val viewport = context?.viewport
-        if (viewport != null && viewport.active === this && anchorGesture == viewport.gesture && !correctingAnchor) {
-            correctAnchor()
-            (anchorRequester ?: this).finishIfSettled()
+        if (viewport != null && viewport.active === this && anchorGesture == viewport.gesture && !correctingAnchor && !anchorCorrectionPosted) {
+            anchorCorrectionPosted = postHandler.value.post(placedCorrection)
         }
     }
 
@@ -321,7 +330,11 @@ internal class WorkflowDisclosureMotion(
         }
     }
 
-    fun dispose() { releaseAnchor(force = true) }
+    fun dispose() {
+        if (postHandler.isInitialized()) postHandler.value.removeCallbacks(placedCorrection)
+        anchorCorrectionPosted = false
+        releaseAnchor(force = true)
+    }
 }
 
 @Composable

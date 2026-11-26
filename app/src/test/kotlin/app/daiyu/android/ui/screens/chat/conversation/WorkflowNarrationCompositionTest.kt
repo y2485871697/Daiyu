@@ -278,7 +278,15 @@ class WorkflowNarrationCompositionTest {
                     val sources = steps.value.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text) }
                     WorkflowNarrationContent(steps.value, plainText, sources, running = true, paused = paused.value,
                         expanded = expanded.value, stopped = false, revealResetEpoch = 0L,
-                        reasoningReady = { true }, onVisibleAdvance = { advances++ }, admission = admission) { narration = it }
+                        reasoningReady = { true }, onVisibleAdvance = { advances++ }, admission = admission) { value ->
+                        narration = value
+                        androidx.compose.runtime.SideEffect {
+                            sources.forEach { source ->
+                                value.reveal.presented(source.id)
+                                value.reveal.drawn(source.id)
+                            }
+                        }
+                    }
                 }
             }
             until { narration != null }
@@ -326,7 +334,7 @@ class WorkflowNarrationCompositionTest {
         } finally { composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
     }
 
-    @Test fun receivedToolsDoNotWaitForNarrationFramesOrParserCompletion() = runBlocking {
+    @Test fun receivedToolsWaitForActualNarrationDrawAfterProjection() = runBlocking {
         val clock = BroadcastFrameClock()
         val recomposer = Recomposer(coroutineContext + clock)
         val runner = launch(clock, start = CoroutineStart.UNDISPATCHED) { recomposer.runRecomposeAndApplyChanges() }
@@ -343,7 +351,15 @@ class WorkflowNarrationCompositionTest {
             check(release.await(10, TimeUnit.SECONDS))
             listOf(MarkdownBlock.Paragraph(listOf(MarkdownInline.Text(source))))
         }
-        suspend fun flush() { Snapshot.sendApplyNotifications(); repeat(24) { yield() } }
+        var now = 1_000_000_000L
+        suspend fun frame() {
+            Snapshot.sendApplyNotifications(); repeat(24) { yield() }
+            now += 16_000_000L
+            if (clock.hasAwaiters) clock.sendFrame(now)
+            repeat(24) { yield() }
+        }
+        suspend fun until(ready: () -> Boolean) = withTimeout(10_000) { while (!ready()) frame() }
+        fun toolVisible() = admission.contains(tools.first().workflowKey(1))
         try {
             composition.setContent {
                 CompositionLocalProvider(LocalMarkdownParser provides parser) {
@@ -352,13 +368,18 @@ class WorkflowNarrationCompositionTest {
                         reasoningReady = { true }, onVisibleAdvance = {}, admission = admission) { narration = it }
                 }
             }
-            withTimeout(10_000) {
-                while (!parsing.get() || narration == null || tools.withIndex().any { (index, tool) ->
-                    !narration!!.entryVisible(tool.workflowKey(index + 1))
-                }) flush()
-            }
-            assertEquals("Tools must not be held behind parser or synthetic two-frame waits", 0,
-                narration!!.reveal.limit(before.itemId))
+            until { parsing.get() && narration != null }
+            assertFalse(toolVisible())
+            release.countDown()
+            until { narration!!.reveal.ready(before.itemId, before.text) }
+            narration!!.reveal.drawn(before.itemId)
+            repeat(3) { frame() }
+            assertFalse("A draw before source installation cannot admit a tool", toolVisible())
+            narration!!.reveal.presented(before.itemId)
+            repeat(3) { frame() }
+            assertFalse("Composition without drawing cannot admit a tool", toolVisible())
+            narration!!.reveal.drawn(before.itemId)
+            until { toolVisible() }
             tools.forEachIndexed { index, tool -> assertTrue(narration!!.entryVisible(tool.workflowKey(index + 1))) }
         } finally { release.countDown(); composition.dispose(); recomposer.close(); runner.cancelAndJoin() }
     }
@@ -371,12 +392,12 @@ class WorkflowNarrationCompositionTest {
         val steps = listOf(before, first, after, last)
         val gate = WorkflowVisualAdmission(emptyList(), animateFirstNarration = true)
         assertEquals(setOf(after.itemId), gate.blockedText(steps))
-        gate.admit(listOf(first.workflowKey(1)))
+        gate.admit(listOf(before.workflowKey(0), first.workflowKey(1)))
         assertTrue("An admitted tool must not remain a text barrier", gate.blockedText(steps).isEmpty())
         assertFalse(gate.contains(last.workflowKey(3)))
         val textAfterLast = MessageContentUi.Text("tail", "last barrier")
         assertEquals(setOf(textAfterLast.itemId), gate.blockedText(steps + textAfterLast))
-        gate.admit(listOf(last.workflowKey(3)))
+        gate.admit(listOf(after.workflowKey(2), last.workflowKey(3)))
         assertTrue(gate.blockedText(steps + textAfterLast).isEmpty())
     }
 

@@ -92,6 +92,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.domain.RunStatus
 import app.daiyu.android.domain.BottomFollowMotion
@@ -109,6 +110,7 @@ private val ChatTurnSpacing = 26.dp
 private class FollowClearanceLayout : RemeasurementModifier {
     var remeasurement: Remeasurement? = null
     var correcting = false
+    var correctionPosted = false
     var active = false
     var coordinates: LayoutCoordinates? = null
     var followViewport: Triple<androidx.compose.ui.unit.IntSize, Int, Int>? = null
@@ -607,6 +609,8 @@ internal fun ChatMessageList(
         (scrollRequest?.messageId != null || scrollRequest?.listKey != null) && touchEpoch == requestTouchEpoch)
     val currentScrollSerial by rememberUpdatedState(scrollRequest?.serial)
     val tailAssistant = turns.lastOrNull() as? ChatTurnUi.Assistant
+    val workflowTailOwner = remember(tailAssistant) { tailAssistant?.takeIf { it.workflowContent().work != null }?.listKey }
+    val currentWorkflowTailOwner by rememberUpdatedState(workflowTailOwner)
     val nestedStates = remember { mutableMapOf<String, StreamingTailViewport>() }
     val initialQuestionContent = initialPositionPending || resumeFollowPending || !pageActive || !scrollResumed ||
         !presentationActive || retainingRows
@@ -775,8 +779,10 @@ internal fun ChatMessageList(
             val liveDocumentOverflow = activeTail != null && currentTailKey == activeTail.listKey &&
                 (activeTail.status == RunStatus.RUNNING || revealedTurns[activeTail.listKey] != activeTail) &&
                 nestedTail.contentHeight >= layout.viewportSize.height - currentOcclusionPx
+            val workflowTextGrowth = currentWorkflowTailOwner != null && currentWorkflowTailOwner == currentTailKey &&
+                nestedTail.textClearance.pacedFollowing
             if (nestedTail.textClearance.pacedFollowing && !viewportCorrection && !sameFrameReasoning &&
-                !liveDocumentOverflow) return
+                !liveDocumentOverflow && !workflowTextGrowth) return
             val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey &&
                 nestedTail.contentHeight > 0 && nestedTail.contentHeight <= layout.viewportSize.height -
                 currentOcclusionPx - with(density) { 11.dp.roundToPx() + currentFollowClearancePx }
@@ -785,7 +791,7 @@ internal fun ChatMessageList(
                 readyTurns[activeTail.listKey] == activeTail &&
                 revealedTurns[activeTail.listKey] != activeTail
             val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal || viewportCorrection || sameFrameReasoning ||
-                liveDocumentOverflow
+                liveDocumentOverflow || workflowTextGrowth
             if (nestedTail.followCatchup && !protectMeasuredTail) return
             if (!protectMeasuredTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return
             var last = layout.visibleItemsInfo.lastOrNull {
@@ -841,6 +847,24 @@ internal fun ChatMessageList(
             } finally {
                 clearanceLayout.correcting = false
             }
+        }
+    }
+    val chatView = LocalView.current
+    val latestCorrection by rememberUpdatedState { correctFollowClearance() }
+    val followCorrection = remember(clearanceLayout, chatView) { Runnable {
+        clearanceLayout.correctionPosted = false
+        if (clearanceLayout.active && chatView.isAttachedToWindow) latestCorrection()
+    } }
+    DisposableEffect(chatView, followCorrection) {
+        onDispose {
+            chatView.removeCallbacks(followCorrection)
+            clearanceLayout.correctionPosted = false
+        }
+    }
+    fun scheduleFollowClearance() {
+        // Force remeasure and scroll only after Compose's positioned hierarchy traversal has returned.
+        if (clearanceLayout.active && !clearanceLayout.correcting && !clearanceLayout.correctionPosted) {
+            clearanceLayout.correctionPosted = chatView.post(followCorrection)
         }
     }
     // A non-following viewport keeps its reader anchor while visible. Once off-screen,
@@ -1379,7 +1403,7 @@ internal fun ChatMessageList(
                 .onPlaced { clearanceLayout.coordinates = it }
                 .onGloballyPositioned { coordinates ->
                     clearanceLayout.coordinates = coordinates
-                    if (coordinates.isAttached) correctFollowClearance()
+                    if (coordinates.isAttached) scheduleFollowClearance()
                 }
                 .drawWithContent { if (!initialPositionPending) drawContent() }
                 .then(if (initialPositionPending) Modifier.clearAndSetSemantics {} else Modifier)
@@ -1466,7 +1490,7 @@ internal fun ChatMessageList(
                     }
                 }
                 Column(Modifier.testTag("chat-turn:${turn.id}").then(if (turn.listKey == currentTailKey) Modifier.onGloballyPositioned { coordinates ->
-                    if (coordinates.isAttached) correctFollowClearance()
+                    if (coordinates.isAttached) scheduleFollowClearance()
                 } else Modifier)) {
                     val viewportState = nestedStates[turn.listKey]
                     if (turn is ChatTurnUi.Assistant && viewportState != null) {
@@ -1483,13 +1507,13 @@ internal fun ChatMessageList(
                             preserveTextClearance = turn.listKey == currentTailKey &&
                                 (turn.status == RunStatus.RUNNING || revealedTurns[turn.listKey] != turn),
                             documentFollow = turn.listKey == documentFollowOwner,
-                            reserveNextLine = turn.listKey != reasoningDocumentOwner,
+                            reserveNextLine = turn.listKey != reasoningDocumentOwner && turn.listKey != workflowTailOwner,
                             trackViewport = viewportState.bounded || viewportState.migrating ||
                                 turn.listKey == currentTailKey || turn.listKey == assistantOwnerKey,
                             listViewportHeight = { viewportHeightPx.intValue },
                             initialContent = initialQuestionContent,
                             followIntent = { turn.listKey == assistantOwnerKey && followBottom },
-                            onContentPositioned = { if (turn.listKey == currentTailKey) correctFollowClearance() },
+                            onContentPositioned = { if (turn.listKey == currentTailKey) scheduleFollowClearance() },
                             content = turnContent)
                     } else turnContent()
                 }
@@ -1498,7 +1522,7 @@ internal fun ChatMessageList(
                 item(key = "chat-context-compressing:${activity.id}", contentType = "compression") {
                     CompressionProgressNotice(activity.agentLabel, Modifier.animateItem(
                         fadeInSpec = androidx.compose.animation.core.tween(180), placementSpec = null, fadeOutSpec = null).onGloballyPositioned { coordinates ->
-                        if (coordinates.isAttached && currentTailKey == "chat-context-compressing:${activity.id}") correctFollowClearance()
+                        if (coordinates.isAttached && currentTailKey == "chat-context-compressing:${activity.id}") scheduleFollowClearance()
                     },
                         label = "${activity.agentLabel} • ${if (activity.waiting) "等待压缩，当前调用结束后执行" else "正在压缩上下文"}")
                 }
@@ -1716,15 +1740,26 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, ordered: AssistantW
         WorkflowEntrances(if (reasoningReady) ordered.body.mapIndexed { index, item -> item.workflowKey(index) } else emptyList())
     }
     val observedLive = remember(turn.listKey) { turn.status == RunStatus.RUNNING }
-    val textBody = rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete, streamAnswer = true)
+    val leadingText = remember(ordered.leading) { ordered.leading.filterIsInstance<MessageContentUi.Text>() }
+    val textBody = rememberAssistantTextBody(emptySet(), bodySources, projection, reveal, generationComplete,
+        streamAnswer = true, reportNarrationDraw = leadingText.isNotEmpty())
+    val scope = LocalWorkflowVisualScope.current
+    val workflowVisible = scope == null || scope.leadingAlreadyReleased(turn.listKey) || turn.reasoningStopped ||
+        LocalReplyPlayback.current?.control?.finished == true ||
+        leadingText.all { it.text.isBlank() || reveal.wasDrawn(it.itemId, it.text, it.markdownWindow) }
+    SideEffect { if (workflowVisible && work != null) scope?.releaseLeading(turn.listKey) }
+    if (work != null && !workflowVisible && LocalReplyPlayback.current?.paused != true) {
+        leadingText.firstOrNull { it.text.isNotBlank() && !reveal.wasDrawn(it.itemId, it.text, it.markdownWindow) }
+            ?.let { RecordReplyUiWait(scope, it.itemId, reveal.waitStage(it)) }
+    }
     val answerPending = ordered.body.isNotEmpty()
     val currentVisibleAdvance = rememberUpdatedState(onVisibleAdvance)
     val notifyVisibleAdvance = remember { { currentVisibleAdvance.value() } }
     if (ordered.leading.isNotEmpty()) {
         MessageContent(ordered.leading, actions, imageLoader, markdown = true, textBody = textBody)
     }
-    work?.let { AssistantWorkflow(it, ordered.steps, turn.listKey, actions, imageLoader,
-        live = turn.isStreaming && turn.status == RunStatus.RUNNING,
+    work?.takeIf { workflowVisible }?.let { AssistantWorkflow(it, ordered.steps, turn.listKey, actions, imageLoader,
+        live = turn.isStreaming && turn.status == RunStatus.RUNNING, observedLive = observedLive,
         generationComplete = turn.status != RunStatus.RUNNING, stopped = turn.reasoningStopped,
         revealResetEpoch = revealResetEpoch, onVisibleAdvance = notifyVisibleAdvance, handoff = handoff,
         entrances = entrances, answerPending = answerPending,
@@ -1732,7 +1767,6 @@ private fun AssistantTextContent(turn: ChatTurnUi.Assistant, ordered: AssistantW
         dedicatedTool = dedicatedTool, toolContent = toolContent, plainNarration = ordered.plainNarration, plainText = turn.content.isEmpty(),
         imageOffset = ordered.leading.count { it is MessageContentUi.Image }) }
     if (ordered.body.isNotEmpty() && bodyVisible) {
-        val scope = LocalWorkflowVisualScope.current
         SideEffect { scope?.rememberReleasedBody(turn.listKey) }
         MessageContent(ordered.body, actions, imageLoader, markdown = true,
             imageOffset = (ordered.leading + ordered.steps).count { it is MessageContentUi.Image },
@@ -1765,25 +1799,32 @@ private fun UserMessageBody(text: String, modifier: Modifier = Modifier) {
 /** Projection and reveal updates are consumed only by text leaves, not the workflow host. */
 @Composable
 internal fun rememberAssistantTextBody(plainNarration: Set<String>, sources: List<MarkdownTypingSource>, projection: MarkdownProjection?,
-    reveal: MarkdownReveal, generationComplete: Boolean, streamAnswer: Boolean = false): @Composable (MessageContentUi.Text, Modifier) -> Unit {
+    reveal: MarkdownReveal, generationComplete: Boolean, streamAnswer: Boolean = false,
+    reportNarrationDraw: Boolean = false): @Composable (MessageContentUi.Text, Modifier) -> Unit {
     val currentSources = rememberUpdatedState(sources)
     val currentProjection = rememberUpdatedState(projection)
     val currentReveal = rememberUpdatedState(reveal)
     val currentComplete = rememberUpdatedState(generationComplete)
-    return remember(plainNarration, streamAnswer) { { text, modifier ->
+    return remember(plainNarration, streamAnswer, reportNarrationDraw) { { text, modifier ->
         val index = currentSources.value.indexOfFirst { it.id == text.itemId }
         val accepted = currentProjection.value
         val displayed = accepted?.sources?.getOrNull(index)?.takeIf { text.text.startsWith(it) } ?: text.text
+        val drawReceipt = if (!reportNarrationDraw) modifier else modifier.drawWithContent {
+            drawContent()
+            val current = currentReveal.value
+            if (!current.wasDrawn(text.itemId, text.text, text.markdownWindow) &&
+                current.ready(text.itemId, text.text, text.markdownWindow)) current.drawn(text.itemId)
+        }
         if (text.itemId in plainNarration) {
             val visibility = currentReveal.value.visibility(text.itemId)
             val boundaries = remember(displayed) { MarkdownTextBoundaries(displayed) }
             val end by remember(visibility, boundaries) { androidx.compose.runtime.derivedStateOf { boundaries.end(visibility.value) } }
             val sourceReady = currentReveal.value.ready(text.itemId, displayed, text.markdownWindow)
             SideEffect { if (sourceReady) currentReveal.value.presented(text.itemId) }
-            Text(displayed.take(end), modifier.fillMaxWidth(), color = conversationColors().muted,
+            Text(displayed.take(end), drawReceipt.fillMaxWidth(), color = conversationColors().muted,
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
         } else RevealedMessageMarkdown(displayed, accepted?.blocksAt(index),
-            currentReveal.value, text.itemId, if (streamAnswer && text.markdownWindow == null) modifier.padding(horizontal = 4.dp) else modifier,
+            currentReveal.value, text.itemId, if (streamAnswer && text.markdownWindow == null) drawReceipt.padding(horizontal = 4.dp) else drawReceipt,
             generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true,
             sourceWindow = accepted?.windows?.getOrNull(index) ?: text.markdownWindow, bodyPaintFeedback = streamAnswer)
     } }
@@ -1791,19 +1832,19 @@ internal fun rememberAssistantTextBody(plainNarration: Set<String>, sources: Lis
 
 @Composable
 private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>, ownerKey: String,
-    actions: ChatScreenActions, imageLoader: MessageImageLoader?, live: Boolean, generationComplete: Boolean,
+    actions: ChatScreenActions, imageLoader: MessageImageLoader?, live: Boolean, observedLive: Boolean, generationComplete: Boolean,
     stopped: Boolean, revealResetEpoch: Long, onVisibleAdvance: () -> Unit, handoff: ReasoningHandoff,
     entrances: WorkflowEntrances, answerPending: Boolean, onAnswerReleased: () -> Unit,
     dedicatedTool: @Composable (WorkStepUi) -> Boolean, toolContent: @Composable (WorkStepUi) -> Unit,
     plainNarration: Set<String>, plainText: Boolean, imageOffset: Int) {
     val textSources = remember(steps) { steps.filterIsInstance<MessageContentUi.Text>().map { MarkdownTypingSource(it.itemId, it.text, it.markdownWindow) } }
     val visualScope = LocalWorkflowVisualScope.current
-    val visualAdmission = remember(ownerKey, visualScope) { visualScope?.owner(ownerKey, steps, work.running) }
+    val visualAdmission = remember(ownerKey, visualScope) { visualScope?.owner(ownerKey, steps, work.running || observedLive) }
     val nodeMotions = remember(ownerKey, visualScope) { visualScope?.motions(ownerKey, steps, work.running) ?: WorkflowNodeMotions(steps) }
     val textPhase = textSources to work.running
     val entriesSettled = visualAdmission?.settled(steps) != false
     var settledPhase by remember(ownerKey) { mutableStateOf<Pair<List<MarkdownTypingSource>, Boolean>?>(null) }
-    var disclosureExpanded by remember(ownerKey) { mutableStateOf(work.running && !stopped) }
+    var disclosureExpanded by remember(ownerKey) { mutableStateOf((work.running || observedLive) && !stopped) }
     WorkProcessCard(work, ownerKey, nodeMotions = nodeMotions, motionItems = steps,
         allowLiveTiming = live, generationComplete = generationComplete, stopped = stopped,
         revealResetEpoch = revealResetEpoch, onVisibleAdvance = onVisibleAdvance, handoff = handoff,
@@ -1823,7 +1864,7 @@ private fun AssistantWorkflow(work: WorkProcessUi, steps: List<MessageContentUi>
                 admission = visualAdmission) { narration ->
                 val narrationSettled = narration.reveal.settled
                 SideEffect { if (narrationSettled) settledPhase = textPhase }
-                val textBody = rememberAssistantTextBody(plainNarration, textSources, narration.projection, narration.reveal, generationComplete)
+                val textBody = rememberAssistantTextBody(plainNarration, textSources, narration.projection, narration.reveal, generationComplete, reportNarrationDraw = true)
                 MessageContent(steps, actions, imageLoader, markdown = true, dedicatedTool = dedicatedTool,
                     workflowTimeline = true, entryVisible = narration.entryVisible, imageOffset = imageOffset,
                     toolContent = toolContent, flowRunning = work.running,

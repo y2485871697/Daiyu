@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
+import app.daiyu.android.MarkdownSourceWindow
 import app.daiyu.android.domain.RunStatus
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +59,16 @@ internal class MarkdownReveal(
             publication.presented(id, it.source)
         }
     }
+    fun wasDrawn(id: String, text: String, window: MarkdownSourceWindow?): Boolean =
+        ready(id, text, window) && (displayText(id).isEmpty() || publication.wasDrawn(id, text, window))
+
+    fun drawn(id: String) {
+        target?.parts?.firstOrNull { it.source.id == id }?.takeIf { limit(id) >= it.length }?.let {
+            val inkComplete = !inkEnabled || publication.inks[id]?.covers(it.source, it.length) == true
+            if (inkComplete && it.length > 0) publication.drawn(it.source)
+        }
+    }
+
     private fun visible(): Int = frame.value.let { if (it.target === target) it.visible else target?.start ?: 0 }
     private val limits = target?.let { current -> current.parts.associate { part ->
         part.source.id to budgets.visibility(part.source.id)
@@ -67,7 +78,9 @@ internal class MarkdownReveal(
     private val readiness = target?.parts?.associate { part ->
         part.source.id to (part.source to derivedStateOf { limit(part.source.id) >= part.length })
     }.orEmpty()
-    fun ready(id: String, text: String, window: app.daiyu.android.MarkdownSourceWindow? = null): Boolean =
+    fun hasSource(id: String, text: String, window: MarkdownSourceWindow?): Boolean =
+        readiness[id]?.first?.let { it.text == text && it.window == window } == true
+    fun ready(id: String, text: String, window: MarkdownSourceWindow? = null): Boolean =
         readiness[id]?.let { (source, state) -> source.text == text && source.window == window && state.value } == true
 }
 
@@ -97,6 +110,12 @@ internal class MarkdownPaintPublication(val inks: MutableMap<String, MarkdownInk
     var active by mutableStateOf(false)
     private val pending = mutableStateMapOf<Any, Unit>()
     private val published = mutableStateMapOf<String, MarkdownTypingSource>()
+    private val drawn = mutableStateMapOf<String, MarkdownTypingSource>()
+    fun drawn(source: MarkdownTypingSource) {
+        if (ready && published[source.id] == source && drawn[source.id] != source) drawn[source.id] = source
+    }
+    fun wasDrawn(id: String, text: String, window: MarkdownSourceWindow?) =
+        drawn[id]?.let { it.text == text && it.window == window } == true
     private var installingTarget: MarkdownTypingTarget? = null
     private val installing = mutableStateMapOf<String, Int>()
     private val readyState = MutableStateFlow(true)

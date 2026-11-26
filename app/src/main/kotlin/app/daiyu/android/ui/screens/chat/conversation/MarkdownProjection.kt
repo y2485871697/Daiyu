@@ -1,5 +1,7 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
+import app.daiyu.android.diagnostics.RuntimeDiagnostics
+import app.daiyu.android.diagnostics.RuntimeDiagnostics.Stage
 import app.daiyu.android.MarkdownBlock
 import app.daiyu.android.MarkdownParser
 import app.daiyu.android.MarkdownSourceWindow
@@ -80,7 +82,10 @@ internal suspend fun projectMarkdown(
     if (predecessor == null) cached?.let { return it }
     val dispatcher = if (sources.sumOf { it.length.toLong() } <= INTERACTIVE_MARKDOWN_CHARS)
         interactiveMarkdownDispatcher else markdownDispatcher
+    val queuedAt = if (RuntimeDiagnostics.enabled) System.nanoTime() else 0L
     val projection = withContext(dispatcher) {
+        val startedAt = if (queuedAt != 0L) System.nanoTime() else 0L
+        if (queuedAt != 0L) RuntimeDiagnostics.slow(Stage.REPLY_PARSE_QUEUE, queuedAt, 100)
         val context = currentCoroutineContext()
         val blocks = linkedMapOf<String, List<MarkdownBlock>>()
         val windowBlocks = linkedMapOf<MarkdownSourceWindow, List<MarkdownBlock>>()
@@ -103,7 +108,10 @@ internal suspend fun projectMarkdown(
         val display = blocks.mapValues { (source, ast) ->
             cached?.displayText?.get(source) ?: predecessor?.displayText?.get(source) ?: markdownBlocksDisplayText(ast)
         }
-        MarkdownProjection(sources.toList(), blocks, parser, display, windows = if (windowed) windows.toList() else emptyList(), windowBlocks = windowBlocks)
+        MarkdownProjection(sources.toList(), blocks, parser, display,
+            windows = if (windowed) windows.toList() else emptyList(), windowBlocks = windowBlocks).also {
+            if (startedAt != 0L) RuntimeDiagnostics.slow(Stage.REPLY_PARSE, startedAt, 100)
+        }
     }
     currentCoroutineContext().ensureActive()
     cache.put(projection)

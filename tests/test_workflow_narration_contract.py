@@ -59,7 +59,7 @@ class WorkflowNarrationContract(unittest.TestCase):
         self.assertIn('val playback = LocalReplyPlayback.current', narration)
         self.assertIn('val displayPaused = paused || playback?.paused == true', narration)
         self.assertIn('rememberMarkdownReveal(sources, projection, streaming = running && !displayPaused,', narration)
-        self.assertIn('if (!paused && playback?.paused != true) admission?.admit(keys)', narration)
+        self.assertIn('if (!paused && playback?.paused != true) admission?.admit(if (waitFor < 0) keys else keys.take(waitFor + 1))', narration)
         self.assertIn('!this@WorkflowVisualAdmission.contains(item.workflowKey(index))', narration)
         self.assertIn('val entriesSettled = visualAdmission?.settled(steps) != false', chat)
         self.assertIn('(initialBaseline ?: sources).toList()', typing)
@@ -70,16 +70,18 @@ class WorkflowNarrationContract(unittest.TestCase):
                        'admittedToolsReleaseFollowingTextWithoutWaitingForLaterTools'):
             self.assertIn(method, tests)
 
-    def test_tools_do_not_wait_for_synthetic_text_or_parser_frames(self):
+    def test_new_tools_wait_for_a_draw_receipt_not_a_fixed_delay(self):
         narration = (BASE / 'WorkflowNarration.kt').read_text()
         self.assertIn('SideEffect {', narration)
         self.assertIn('steps.mapIndexed { index, item -> item.workflowKey(index) }', narration)
-        self.assertIn('if (!paused && playback?.paused != true) admission?.admit(keys)', narration)
+        self.assertIn('if (!paused && playback?.paused != true) admission?.admit(if (waitFor < 0) keys else keys.take(waitFor + 1))', narration)
         self.assertNotIn('withFrameNanos', narration)
-        self.assertNotIn('presentedText', narration)
-        self.assertNotIn('currentReveal.ready', narration)
+        self.assertIn('!reveal.wasDrawn(it.itemId, it.text, it.markdownWindow)', narration)
+        chat = (BASE / 'ChatMessageList.kt').read_text()
+        self.assertIn('work?.takeIf { workflowVisible }', chat)
+        self.assertIn('current.drawn(text.itemId)', chat)
         tests = (ROOT / 'app/src/test/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNarrationCompositionTest.kt').read_text()
-        for token in ('receivedToolsDoNotWaitForNarrationFramesOrParserCompletion',
+        for token in ('receivedToolsWaitForActualNarrationDrawAfterProjection',
                       'A newly received tool must wait for resume',
                       'Already admitted cards remain visible while paused'):
             self.assertIn(token, tests)

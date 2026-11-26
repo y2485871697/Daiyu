@@ -5,7 +5,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
@@ -189,7 +188,7 @@ internal fun WorkflowTimelineColumn(timeline: Boolean, content: @Composable () -
 
 private class WorkflowPaintFrame {
     var coordinates: LayoutCoordinates? = null
-    var availableHeight by mutableStateOf(0f)
+    var admitted = false
 }
 
 private class WorkflowSurfaceOutline {
@@ -216,7 +215,6 @@ internal fun Modifier.streamingWorkflowSurface(background: Color, border: Color,
     val outline = remember { WorkflowSurfaceOutline() }
     fun positioned(coordinates: LayoutCoordinates) {
         frame.coordinates = coordinates
-        frame.availableHeight = clearance?.availableHeight(coordinates) ?: Float.POSITIVE_INFINITY
     }
     val tracked = if (clearance == null) this else onPlaced(::positioned).onGloballyPositioned(::positioned)
     return tracked.drawWithContent {
@@ -225,7 +223,8 @@ internal fun Modifier.streamingWorkflowSurface(background: Color, border: Color,
         val available = if (clearance == null) Float.POSITIVE_INFINITY else clearance.availableHeight(frame.coordinates)
         val height = minOf(size.height, available)
         val header = headerHeight?.invoke()
-        if (height > 0f && (header == null || header > 0 && height + .01f >= header)) {
+        if (height > 0f && (frame.admitted || header == null || header > 0 && height + .01f >= header)) {
+            frame.admitted = true
             val surfaceSize = Size(size.width, height)
             val corner = minOf(radius.toPx(), surfaceSize.width / 2f, surfaceSize.height / 2f)
             val path = outline.pathFor(surfaceSize, corner)
@@ -249,17 +248,21 @@ internal fun Modifier.workflowInkClearance(): Modifier {
     val item = LocalWorkflowItemLayout.current
     if (clearance == null && item == null) return this
     val frame = remember(clearance, item) { WorkflowPaintFrame() }
-    fun positioned(coordinates: LayoutCoordinates) {
-        frame.coordinates = coordinates
-        frame.availableHeight = clearance?.availableHeight(coordinates) ?: Float.POSITIVE_INFINITY
-    }
-    return onPlaced(::positioned).onGloballyPositioned(::positioned).drawWithContent {
+    return onPlaced { frame.coordinates = it }.onGloballyPositioned { frame.coordinates = it }.drawWithContent {
         val coordinates = frame.coordinates?.takeIf { it.isAttached } ?: return@drawWithContent
         val parent = item?.coordinates
-        val height = coordinates.size.height
-        val allocated = if (item != null && parent?.isAttached == true)
-            parent.localPositionOf(coordinates, Offset.Zero).y + height <= item.allocatedHeight + .01f
-        else item == null
-        if (allocated && height <= frame.availableHeight + .01f && clearance?.fits(coordinates, height) != false) drawContent()
+        val allocated = when {
+            item == null -> size.height
+            parent?.isAttached == true -> item.allocatedHeight - parent.localPositionOf(coordinates, Offset.Zero).y
+            else -> return@drawWithContent
+        }
+        val available = minOf(allocated, clearance?.availableHeight(coordinates) ?: Float.POSITIVE_INFINITY)
+        if (available + .01f >= size.height) {
+            frame.admitted = true
+            drawContent()
+        } else if (frame.admitted && available > 0f) {
+            // After the initial intact appearance, clip an animated edge instead of blinking the whole header.
+            clipRect(bottom = available) { this@drawWithContent.drawContent() }
+        }
     }
 }

@@ -579,7 +579,7 @@ class StreamingOcclusionContract(unittest.TestCase):
             self.assertIn(token, correction)
         tail = " ".join(source.split('Modifier.testTag("chat-turn:${turn.id}")', 1)[1].split('val viewportState', 1)[0].split())
         self.assertIn(".then(if (turn.listKey == currentTailKey) Modifier.onGloballyPositioned { coordinates -> "
-                      "if (coordinates.isAttached) correctFollowClearance() } else Modifier)", tail)
+                      "if (coordinates.isAttached) scheduleFollowClearance() } else Modifier)", tail)
         self.assertIn("status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running", (DEVICE.parent / "ChatMessageSpacingTest.kt").read_text())
         device = ' '.join(DEVICE.read_text().split())
         self.assertIn("status = if (running) RunStatus.RUNNING else RunStatus.COMPLETED, isStreaming = running && !waiting", device)

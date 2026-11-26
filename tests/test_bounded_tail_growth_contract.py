@@ -5,13 +5,26 @@ SRC = pathlib.Path(__file__).resolve().parents[1] / 'app/src/main/kotlin/app/dai
 
 
 class BoundedTailGrowthContractTest(unittest.TestCase):
-    def test_capped_viewport_content_growth_runs_same_frame_correction(self):
+    def test_capped_viewport_content_growth_schedules_correction_outside_position_dispatch(self):
         ui = SRC.read_text()
         container = ui.split('internal fun StreamingTailContainer(', 1)[1].split('internal fun ChatMessageList(', 1)[0]
         self.assertIn('onContentPositioned: (() -> Unit)? = null', container)
-        # Content growth inside a fixed-height viewport must report itself before draw.
+        # The callback reports growth, but cannot synchronously remeasure Compose.
         self.assertIn('if (it.isAttached) onContentPositioned()', container)
-        self.assertIn('onContentPositioned = { if (turn.listKey == currentTailKey) correctFollowClearance() }', ui)
+        self.assertIn('onContentPositioned = { if (turn.listKey == currentTailKey) scheduleFollowClearance() }', ui)
+        self.assertIn('chatView.post(followCorrection)', ui)
+        self.assertIn('chatView.removeCallbacks(followCorrection)', ui)
+        disclosure = (SRC.parent / 'WorkflowDisclosureMotion.kt').read_text()
+        placed = disclosure.split('}.onGloballyPositioned { coordinates ->', 1)[1].split('private fun anchorDelta', 1)[0]
+        self.assertIn('postHandler.value.post(placedCorrection)', placed)
+        self.assertNotIn('correctAnchor()', placed)
+
+    def test_displayed_workflow_header_clips_instead_of_flashing_blank(self):
+        workflow = (SRC.parent / 'WorkflowTimelineLayout.kt').read_text()
+        ink = workflow.split('internal fun Modifier.workflowInkClearance()', 1)[1]
+        self.assertIn('val available = minOf(allocated, clearance?.availableHeight(coordinates)', ink)
+        self.assertIn('else if (frame.admitted && available > 0f)', ink)
+        self.assertIn('clipRect(bottom = available)', ink)
 
     def test_document_follow_pins_content_end_inside_capped_viewport(self):
         ui = SRC.read_text()

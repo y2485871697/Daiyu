@@ -72,7 +72,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertNotIn('workflowToolAppearance', content)
         self.assertIn('val timelineIndices = visibleIndices.filter', content)
         narration = (CHAT / 'WorkflowNarration.kt').read_text()
-        self.assertIn('if (!paused && playback?.paused != true) admission?.admit(keys)', narration)
+        self.assertIn('if (!paused && playback?.paused != true) admission?.admit(if (waitFor < 0) keys else keys.take(waitFor + 1))', narration)
         self.assertNotIn('entry.precedingText.all { currentReveal.ready(it.id, it.text, it.window) }', narration)
         regression = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowNodeMotionTest.kt').read_text()
         for name in ('testNewPendingToolAndFastCompletionShareActualArrival',
@@ -300,7 +300,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
             self.assertIn(token, entry)
         host = (CHAT / 'ChatMessageList.kt').read_text()
         self.assertIn('val entrances = remember(turn.listKey) { WorkflowEntrances(visibleWorkflowKeys(ordered.steps, handoff)) }', host)
-        self.assertLess(host.index('val entrances = remember(turn.listKey)'), host.index('work?.let { AssistantWorkflow'))
+        self.assertLess(host.index('val entrances = remember(turn.listKey)'), host.index('work?.takeIf { workflowVisible }?.let { AssistantWorkflow'))
         self.assertIn('entrances.suppress(steps.mapIndexed { index, item -> item.workflowKey(index) })', host)
         self.assertIn('WorkflowEntry(key, entrances, animate = false,', host)
         self.assertIn('entryBody = { key, body -> WorkflowEntry(key, bodyEntrances, observedLive,', host)

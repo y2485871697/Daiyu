@@ -4,6 +4,7 @@ import android.os.Handler
 import android.os.Looper
 import android.view.FrameMetrics
 import android.view.Window
+import android.view.ViewTreeObserver
 import app.daiyu.android.diagnostics.ChatGeometryTrace
 import java.io.File
 import org.json.JSONObject
@@ -12,6 +13,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.layout
 import app.daiyu.android.domain.question.QuestionIdentity
 import app.daiyu.android.domain.question.QuestionOption
 import app.daiyu.android.domain.question.QuestionRecord
@@ -32,6 +34,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -59,7 +62,8 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
     private val work = WorkProcessUi(emptyList(), "已完成")
 
     private fun mountList(following: Boolean, lower: Boolean = false, tool: Boolean = false,
-        status: RunStatus = RunStatus.RUNNING, streaming: Boolean = true, detailHeight: Dp = 80.dp) {
+        status: RunStatus = RunStatus.RUNNING, streaming: Boolean = true, detailHeight: Dp = 80.dp,
+        leadingGrowthPx: () -> Int = { 0 }) {
         mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             BoxWithConstraints(Modifier.size(320.dp, 420.dp)) {
@@ -68,7 +72,11 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                         ChatScreenActions(), composerBottomInset = inset,
                         scrollRequest = if (following) ChatScrollRequest(1) else ChatScrollRequest(1, messageId = "tail", followBottom = false),
                         turnExtras = { turn -> if (turn.id == "tail") {
-                            if (lower) Box(Modifier.height(140.dp))
+                            if (lower) Box(Modifier.layout { measurable, constraints ->
+                                val spacer = measurable.measure(constraints)
+                                // Read growth during measure, not recomposition: a pre-draw update is real pending layout.
+                                layout(spacer.width, spacer.height + leadingGrowthPx()) { spacer.placeRelative(0, 0) }
+                            }.height(140.dp))
                             if (tool) WorkStepRow(WorkStepUi("tool", "fixture", "", WorkStepState.OK), toolContent = {
                                 Box(Modifier.fillMaxWidth().height(detailHeight).testTag("direction-body"))
                             }) else WorkProcessCard(work, "direction-fixture", content = {
@@ -180,17 +188,32 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                 .put("callback_drops", drops))
         }
         val window = activity.window
+        val lateGrowth = mutableIntStateOf(0)
+        var injectGrowth = false
+        var viewTree: ViewTreeObserver? = null
+        val publishLateGrowth = ViewTreeObserver.OnPreDrawListener {
+            if (injectGrowth) {
+                injectGrowth = false
+                lateGrowth.intValue = 37
+                androidx.compose.runtime.snapshots.Snapshot.sendApplyNotifications()
+                collect(JSONObject().put("kind", "fixture_marker").put("phase", "late_layout")
+                    .put("growth_px", lateGrowth.intValue).put("at_ns", System.nanoTime()))
+            }
+            true
+        }
         var lease: AutoCloseable? = null
         try {
             mainThread {
                 rateDroppedBefore = ChatGeometryTrace.droppedRows()
                 lease = ChatGeometryTrace.observe(::collect)
                 window.addOnFrameMetricsAvailableListener(listener, Handler(Looper.getMainLooper()))
+                // Install before the list's listener. Android's ordinary layout has already run at this point.
+                viewTree = window.decorView.viewTreeObserver.also { it.addOnPreDrawListener(publishLateGrowth) }
             }
             // Short enough to close again by tapping the visible header, then exceed the viewport.
             for (height in listOf(140.dp, 500.dp)) {
                 mountList(following = true, lower = true, status = RunStatus.COMPLETED, streaming = false,
-                    detailHeight = height)
+                    detailHeight = height, leadingGrowthPx = { lateGrowth.intValue })
                 assertHalf(lower = true)
                 val initialHeight = bottom() - top()
                 mainThread { collect(JSONObject().put("kind", "fixture_marker").put("phase", "open")
@@ -198,7 +221,13 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                 ui.mainClock.autoAdvance = false
                 try {
                     touchHeader()
-                    repeat(42) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+                    repeat(42) { frame ->
+                        if (height == 500.dp && frame == 8) mainThread {
+                            injectGrowth = true
+                            window.decorView.invalidate()
+                        }
+                        ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                    }
                     assertTrue("The fixture must grow beyond its collapsed height", bottom() - top() > initialHeight)
                     if (height == 140.dp) {
                         mainThread { collect(JSONObject().put("kind", "fixture_marker").put("phase", "close")
@@ -212,13 +241,36 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             mainThread {
                 val phases = rows.filter { it.optString("event") == "disclosure_frame" }.map { it.optString("phase") }.toSet()
                 assertTrue("Expected both correction samples", phases.containsAll(listOf("pre_draw", "post_correction")))
-                assertTrue("Expected a real card draw", rows.any { it.optString("event") == "disclosure_draw" && it.optBoolean("owns_anchor") })
+                assertEquals("The late layout must actually be delivered", 37, lateGrowth.intValue)
+                val openings = rows.filter { it.optString("event") == "disclosure_toggle" &&
+                    it.optString("phase") == "anchor_captured" && it.optBoolean("opening") }
+                assertEquals(2, openings.size)
+                for (opening in openings) {
+                    assertTrue("Fixture must use an owned bottom anchor: $opening", opening.optBoolean("up") &&
+                        !opening.optBoolean("top_anchor") && opening.optBoolean("active_owner"))
+                    val samples = rows.filter { it.optString("event") == "disclosure_draw" &&
+                        it.optLong("seq") > opening.optLong("seq") && it.optLong("gesture") == opening.optLong("gesture") &&
+                        it.optLong("owner") == opening.optLong("owner") && it.optBoolean("owns_anchor") && it.optBoolean("paint") }
+                    assertTrue("Expected several distinct heights during real drawing: $opening",
+                        samples.map { it.getDouble("layout_height_px") }.distinct().size >= 3)
+                    for (draw in samples) assertEquals("Draw drifted during upward opening: $draw",
+                        opening.getDouble("anchor_bottom_px"), draw.getDouble("painted_bottom_px"), 1.0)
+                    if (opening == openings.last()) {
+                        val late = rows.single { it.optString("phase") == "late_layout" }
+                        assertTrue("Must draw during the same open animation after the late layout",
+                            samples.any { it.getLong("at_ns") > late.getLong("at_ns") })
+                    }
+                }
+                assertEquals("No geometry events dropped during validation", rateDroppedBefore, ChatGeometryTrace.droppedRows())
+                assertEquals("No probe overflow", 0, overflow)
                 assertTrue("Expected window metrics", rows.any { it.optString("kind") == "window_frame_metrics" })
             }
             success = true
         } finally {
             mainThread {
                 lease?.close()
+                (viewTree?.takeIf { it.isAlive } ?: window.decorView.viewTreeObserver)
+                    .removeOnPreDrawListener(publishLateGrowth)
                 window.removeOnFrameMetricsAvailableListener(listener)
                 rateDropped = ChatGeometryTrace.droppedRows() - rateDroppedBefore
             }

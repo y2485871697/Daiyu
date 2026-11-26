@@ -788,7 +788,7 @@ internal fun ChatMessageList(
         )
     }
     DisposableEffect(chatView, disclosureViewport) {
-        // Positioned callbacks only mark work. Use the latest geometry before presenting this frame.
+        // Run outside positioned callbacks; correction may synchronously remeasure the list.
         val observer = chatView.viewTreeObserver
         val listener = android.view.ViewTreeObserver.OnPreDrawListener {
             disclosureViewport.correctBeforeDraw()

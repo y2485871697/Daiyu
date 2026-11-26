@@ -129,6 +129,17 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertNotIn('viewport.scrollOffset =', anchor)
         self.assertIn('disclosureViewport.active == null', source)
 
+    def test_moving_bottom_anchor_drains_pending_geometry_even_when_the_old_edge_is_aligned(self):
+        motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
+        pre_draw = motion.split('fun correctBeforeDraw() {', 2)[2].split('val headerModifier', 1)[0]
+        self.assertIn('val requester = anchorRequester ?: this', pre_draw)
+        self.assertIn('val refreshGeometry = !anchorAtTop && !requester.animationIdle', pre_draw)
+        self.assertIn('if (!anchorCorrectionPosted && !refreshGeometry) return', pre_draw)
+        self.assertIn('correctAnchor(refreshGeometry = refreshGeometry)', pre_draw)
+        anchor = motion.split('private fun correctAnchor(', 1)[1].split('private fun chooseDirection()', 1)[0]
+        self.assertIn('if (refreshGeometry || settling || abs(anchorDelta()) > .5f', anchor)
+        self.assertLess(anchor.index('Snapshot.sendApplyNotifications()'), anchor.index('viewport.correctAnchor('))
+
     def test_full_extent_is_a_parent_measure_dependency_even_when_the_viewport_is_fixed(self):
         source = (CHAT / 'ChatMessageList.kt').read_text()
         self.assertIn('var contentHeight by androidx.compose.runtime.mutableIntStateOf(0)', source)
@@ -179,7 +190,7 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertIn('expanded && anchorAtTop && borrowedBoundary == null && outputChanged()', output_handoff)
         self.assertIn('releaseAnchor(force = false)', output_handoff)
         self.assertLess(settled.index('boundary.correctAnchor(settling = true)'), settled.index('releaseAnchor(force = false)'))
-        self.assertIn('(anchorRequester ?: this).finishIfSettled()', source)
+        self.assertIn('requester.finishIfSettled()', source)
         self.assertIn('return abs(anchorDelta()) <= .5f', source)
         self.assertIn('if (anchorRequester != null) return', source)
         device = (ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ui/screens/chat/conversation/WorkflowDisclosureDirectionTest.kt').read_text()
@@ -192,7 +203,7 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertLess(effect.index('withFrameNanos { }'), effect.index('motion.finish(closed)'))
         self.assertNotIn('SideEffect', source)
         self.assertIn('onDispose { motion.dispose() }', source)
-        self.assertIn('(anchorRequester ?: this).finishIfSettled()', source)
+        self.assertIn('requester.finishIfSettled()', source)
 
     def test_tool_spring_reversal_reuses_the_placed_extent_guard(self):
         source = (CHAT / 'WorkProcessCard.kt').read_text().split('internal fun WorkStepRow(', 1)[1]

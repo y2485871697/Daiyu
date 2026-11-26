@@ -13,6 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -194,13 +195,16 @@ internal class WorkflowDisclosureMotion(
     }
 
     fun correctBeforeDraw() {
-        if (!anchorCorrectionPosted) return
-        anchorCorrectionPosted = false
         val viewport = context?.viewport ?: return
-        if (viewport.active === this && anchorGesture == viewport.gesture && !correctingAnchor) {
-            correctAnchor()
-            (anchorRequester ?: this).finishIfSettled()
-        }
+        if (viewport.active !== this || anchorGesture != viewport.gesture || correctingAnchor) return
+        val requester = anchorRequester ?: this
+        // AndroidComposeView can measure a spring tick in dispatchDraw, after this listener.
+        // For a moving lower edge, drain the pending measure even if the previous edge is aligned.
+        val refreshGeometry = !anchorAtTop && !requester.animationIdle
+        if (!anchorCorrectionPosted && !refreshGeometry) return
+        anchorCorrectionPosted = false
+        correctAnchor(refreshGeometry = refreshGeometry)
+        requester.finishIfSettled()
     }
 
     val headerModifier: Modifier get() = Modifier.onGloballyPositioned {
@@ -260,7 +264,7 @@ internal class WorkflowDisclosureMotion(
             placed.positionInWindow().y + placed.size.height, safe.bottom)
     }
 
-    private fun correctAnchor(settling: Boolean = false): Boolean {
+    private fun correctAnchor(settling: Boolean = false, refreshGeometry: Boolean = false): Boolean {
         val context = context ?: return true
         val viewport = context.viewport
         if (viewport.active !== this || anchorGesture != viewport.gesture) return true
@@ -271,11 +275,14 @@ internal class WorkflowDisclosureMotion(
             viewport.active = null
             return true
         }
-        if (settling || abs(anchorDelta()) > .5f || (anchorClearance() ?: 0f) > .5f) {
+        if (refreshGeometry || settling || abs(anchorDelta()) > .5f || (anchorClearance() ?: 0f) > .5f) {
             if (tracing) trace("disclosure_anchor", "phase" to "evaluate", "settling" to settling,
-                "anchor_error_px" to anchorDelta(), "animation_idle" to animationIdle)
+                "anchor_error_px" to anchorDelta(), "animation_idle" to animationIdle,
+                "refresh_geometry" to refreshGeometry)
             correctingAnchor = true
             try {
+                // Deliver this tick's layout invalidation before the list's forceRemeasure.
+                if (refreshGeometry) Snapshot.sendApplyNotifications()
                 lastConsumed = viewport.correctAnchor(context.itemKey) {
                     val anchor = anchorDelta()
                     val clearance = anchorClearance()

@@ -6,10 +6,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExitTransition
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.IntrinsicSize
@@ -225,7 +222,6 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
     val visibility = remember(step.renderKey) { MutableTransitionState(expanded) }
     visibility.targetState = expanded
     val disclosure = rememberWorkflowDisclosureMotion(step.renderKey, visibility)
-    val detailExtent = remember(step.renderKey) { WorkflowCollapseExtent() }
     val activity = step.displayActivity
     val running = activity in setOf(ToolActivityUi.RUNNING, ToolActivityUi.PREPARING, ToolActivityUi.PAUSING, ToolActivityUi.PAUSED)
     val tint = when {
@@ -288,12 +284,7 @@ internal fun WorkStepRow(step: WorkStepUi, showConnector: Boolean = false, flowR
                         if (expanded) "收起操作详情" else "展开操作详情", Modifier.size(14.dp).settingsDisclosureRotation(expanded), tint = colors.muted)
                 }
             }
-            AnimatedVisibility(visibility, modifier = Modifier.layout { measurable, constraints ->
-                val detail = measurable.measure(constraints)
-                val height = detailExtent.measure(detail.height, expanded, disclosure.closingDetailHeight)
-                layout(detail.width, height) { detail.placeRelative(0, 0) }
-            }, enter = fadeIn() + expandVertically(expandFrom = disclosure.alignment),
-                exit = fadeOut() + shrinkVertically(shrinkTowards = disclosure.alignment)) {
+            WorkflowAnimatedDetail(visibility, disclosure, springMotion = true) {
                 CompositionLocalProvider(LocalToolOutputContext provides ToolOutputContext(step.name, stateLabel)) {
                     Column(Modifier.padding(bottom = 4.dp).then(
                         if (step.categoryDetails != null) Modifier.testTag("tool-category:${step.category}") else Modifier

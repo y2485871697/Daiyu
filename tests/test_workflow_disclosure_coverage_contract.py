@@ -133,7 +133,9 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         pre_draw = motion.split('fun correctBeforeDraw() {', 2)[2].split('val headerModifier', 1)[0]
         self.assertIn('val requester = anchorRequester ?: this', pre_draw)
-        self.assertIn('if (!anchorAtTop && requester.expanded) requester.pendingOpeningHeight?.invoke()', pre_draw)
+        self.assertIn('if (anchorAtTop) null else', pre_draw)
+        self.assertIn('requester.animatedExtent?.pendingHeight()', pre_draw)
+        self.assertIn('if (requester.expanded) requester.pendingOpeningHeight?.invoke() else null', pre_draw)
         self.assertIn('val refreshGeometry = pendingHeight != null && pendingHeight != lastRefreshedHeight', pre_draw)
         extent = (CHAT / 'WorkflowCardExtent.kt').read_text()
         self.assertIn('fun pendingOpeningHeight()', extent)
@@ -214,13 +216,17 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
 
     def test_tool_spring_reversal_reuses_the_placed_extent_guard(self):
         source = (CHAT / 'WorkProcessCard.kt').read_text().split('internal fun WorkStepRow(', 1)[1]
-        self.assertIn('val detailExtent = remember(step.renderKey) { WorkflowCollapseExtent() }', source)
-        self.assertIn('detailExtent.measure(detail.height, expanded, disclosure.closingDetailHeight)', source)
-        self.assertIn('shrinkTowards = disclosure.alignment', source)
+        self.assertIn('WorkflowAnimatedDetail(visibility, disclosure, springMotion = true)', source)
+        detail = (CHAT / 'WorkflowExpandableContent.kt').read_text()
+        self.assertIn('val collapse = WorkflowCollapseExtent()', detail)
+        self.assertIn('collapse.limit(animatedHeight(), expanded(), closingLimit())', detail)
+        self.assertIn('collapse.measure(animatedHeight(), expanded(), closingLimit())', detail)
+        self.assertIn('motion.animatedExtent = extent', detail)
+        self.assertIn('if (alignment == Alignment.Bottom) height - detail.height else 0', detail)
 
     def test_chat_helper_preserves_exit_input_and_focus_guards(self):
         source = (CHAT / 'WorkflowExpandableContent.kt').read_text()
-        for token in ('visibleState = visibility', 'expandFrom = motion.alignment', 'shrinkTowards = motion.alignment',
+        for token in ('rememberTransition(visibility', 'if (visibility.targetState) motion.alignment else motion.collapseAlignment',
                       'focusManager.clearFocus(force = true)', 'clearAndSetSemantics {}',
                       'if (!expanded) cancelFocusChange()', 'it.consume()'):
             self.assertIn(token, source)
@@ -229,7 +235,6 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         source = (CHAT / 'WorkProcessCard.kt').read_text()
         self.assertEqual(1, source.count('collapseUp = true'))
         self.assertIn('detailExtent.contentOffset', source)
-        self.assertIn('shrinkTowards = disclosure.alignment', source)
         motion = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         self.assertIn('if (collapseUp) Alignment.Top else alignment', motion)
         self.assertIn('!value && expanded && !manualChange && collapseUp', motion)

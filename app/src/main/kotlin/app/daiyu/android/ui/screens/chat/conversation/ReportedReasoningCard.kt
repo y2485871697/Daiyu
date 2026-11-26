@@ -1,15 +1,9 @@
 package app.daiyu.android.ui.screens.chat.conversation
 
 import androidx.compose.animation.core.MutableTransitionState
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -196,18 +190,7 @@ internal fun ReportedReasoningCard(
                     Modifier.size(if (embedded) 14.dp else 10.dp).graphicsLayer { rotationZ = chevronRotation.value }, tint = colors.muted)
             }
         }
-        AnimatedVisibility(
-            visibleState = visibility,
-            modifier = Modifier.fillMaxWidth(),
-            enter = if (manualExpansion) expandVertically(
-                animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
-                expandFrom = disclosure.alignment
-            ) + fadeIn(tween(ReasoningDisclosureDurationMillis)) else EnterTransition.None,
-            exit = shrinkVertically(
-                animationSpec = tween(ReasoningDisclosureDurationMillis, easing = FastOutSlowInEasing),
-                shrinkTowards = disclosure.alignment
-            ) + fadeOut(tween(ReasoningDisclosureDurationMillis))
-        ) {
+        WorkflowAnimatedDetail(visibility, disclosure, animateOpening = manualExpansion) {
             Column(Modifier.fillMaxWidth()) {
                 if (!embedded) HorizontalDivider(thickness = 1.dp, color = colors.line)
                 Column(Modifier.testTag("reported-reasoning-content:$ownerKey")

@@ -88,7 +88,7 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
         self.assertIn('rememberWorkflowToolAppearance(' + identity + ')', row)
         self.assertIn('.workflowCompletion(' + identity + ', complete, appearance = appearance)', row)
         self.assertIn('onHandoffReady = onHandoffReady, appearance = appearance', row)
-        header = card[card.index('Row(Modifier.fillMaxWidth().heightIn'):card.index('AnimatedVisibility(')]
+        header = card[card.index('Row(Modifier.fillMaxWidth().heightIn'):card.index('WorkflowAnimatedDetail(')]
         self.assertIn('.workflowToolAppearance(appearance)', header)
         self.assertIn('val arrived = appearance?.arrived != false', card)
         self.assertIn('val revealEnabled = arrived && revealGate && !staticExpansion && hasReportedReasoningText(text)', card)
@@ -100,9 +100,10 @@ class ReasoningWorkflowContractTest(unittest.TestCase):
                       'initialBaseline = if (firstPresentation || queuedEmptyBaseline) emptyList() else null,',
                       'onHandoffReady(appearance?.settled != false && handoffReady)'):
             self.assertIn(token, card)
-        body = card[card.index('AnimatedVisibility('):card.index('internal fun rememberReasoningElapsed(')]
-        self.assertIn('enter = if (manualExpansion)', body)
-        self.assertIn('else EnterTransition.None', body)
+        body = card[card.index('WorkflowAnimatedDetail('):card.index('internal fun rememberReasoningElapsed(')]
+        self.assertIn('animateOpening = manualExpansion', body)
+        self.assertIn('false isTransitioningTo true && !animateOpening -> snap()',
+                      (CHAT / 'WorkflowExpandableContent.kt').read_text())
         self.assertNotIn('workflowToolAppearance', body)
         appearance = motion[motion.index('internal fun rememberWorkflowToolAppearance'):motion.index('internal fun Modifier.workflowToolAppearance')]
         wait = 'snapshotFlow { incoming.value?.fraction() ?: 1f }.first { it >= 1f }'

@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -65,7 +66,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
 
     private fun mountList(following: Boolean, lower: Boolean = false, tool: Boolean = false,
         status: RunStatus = RunStatus.RUNNING, streaming: Boolean = true, detailHeight: Dp = 80.dp,
-        lateOpeningHeight: (() -> Int)? = null) {
+        lateOpeningHeight: (() -> Int)? = null, nested: Boolean = false) {
         mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             BoxWithConstraints(Modifier.size(320.dp, 420.dp)) {
@@ -75,7 +76,13 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                         scrollRequest = if (following) ChatScrollRequest(1) else ChatScrollRequest(1, messageId = "tail", followBottom = false),
                         turnExtras = { turn -> if (turn.id == "tail") {
                             if (lower) Box(Modifier.height(140.dp))
-                            if (lateOpeningHeight != null) LateHeightDisclosure(lateOpeningHeight)
+                            if (nested) WorkProcessCard(work.copy(running = true), "nested-draw-fixture", content = {
+                                if (lateOpeningHeight != null) LateHeightDisclosure(lateOpeningHeight, nested = true)
+                                else WorkStepRow(WorkStepUi("nested-draw", "fixture", "", WorkStepState.OK), toolContent = {
+                                    Box(Modifier.fillMaxWidth().height(detailHeight).testTag("nested-draw-body"))
+                                })
+                            })
+                            else if (lateOpeningHeight != null) LateHeightDisclosure(lateOpeningHeight)
                             else if (tool) WorkStepRow(WorkStepUi("tool", "fixture", "", WorkStepState.OK), toolContent = {
                                 Box(Modifier.fillMaxWidth().height(detailHeight).testTag("direction-body"))
                             }) else WorkProcessCard(work, "direction-fixture", content = {
@@ -91,7 +98,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
     }
 
     @Composable
-    private fun LateHeightDisclosure(height: () -> Int) {
+    private fun LateHeightDisclosure(height: () -> Int, nested: Boolean = false) {
         var expanded by remember { mutableStateOf(false) }
         val visibility = remember { MutableTransitionState(false) }
         val pendingHeight = remember(height) {
@@ -101,17 +108,22 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                 fun pending(): Int? = read().takeIf { it != measured }
             }
         }
-        val disclosure = rememberWorkflowDisclosureMotion("late-height-fixture", visibility, collapseUp = true,
+        val disclosure = rememberWorkflowDisclosureMotion("late-height-fixture", visibility, collapseUp = !nested,
             targetExpanded = expanded, animationIdle = !expanded,
-            pendingOpeningHeight = remember(pendingHeight) { pendingHeight::pending })
+            pendingOpeningHeight = if (nested) null else remember(pendingHeight) { pendingHeight::pending })
+        val extent = remember(height) { WorkflowNestedExtent({ height() / 100f }, { true }, { null }) }
+        if (nested) DisposableEffect(disclosure, extent) {
+            disclosure.animatedExtent = extent
+            onDispose { disclosure.animatedExtent = null }
+        }
         Column(Modifier.fillMaxWidth().then(disclosure.containerModifier)
             .streamingWorkflowSurface(Color.White, Color.Black, 12.dp, diagnosticMotion = disclosure)
             .testTag("work-process-surface")) {
-            Box(Modifier.fillMaxWidth().height(44.dp).testTag("work-process-header").then(disclosure.headerModifier)
+            Box(Modifier.fillMaxWidth().height(44.dp).testTag(if (nested) "nested-late-header" else "work-process-header").then(disclosure.headerModifier)
                 .conversationClickable { disclosure.toggle(opening = true); expanded = true })
             if (expanded) Box(Modifier.fillMaxWidth().testTag("late-opening-body").layout { measurable, constraints ->
                 val child = measurable.measure(constraints)
-                val pixels = pendingHeight.read()
+                val pixels = if (nested) extent.measure(100, 0) else pendingHeight.read()
                 pendingHeight.measured = pixels
                 layout(child.width, pixels) { child.placeRelative(0, 0) }
             })
@@ -273,30 +285,76 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
             for (pixels in listOf(17, 37, 74)) {
                 mainThread { injectGrowth = pixels; window.decorView.invalidate() }
             }
+            // A real tool row and the same late-tick fixture both borrow the workflow's lower edge.
+            mountList(following = true, lower = true, status = RunStatus.COMPLETED, streaming = false,
+                detailHeight = 68.dp, nested = true)
+            val toolHeader = "tool-step-header:nested-draw"
+            assertHalf(lower = true, tag = toolHeader)
+            ui.mainClock.autoAdvance = false
+            try {
+                ui.onNodeWithTag(toolHeader).performTouchInput { click() }
+                repeat(32) { ui.mainClock.advanceTimeByFrame(); ui.waitForIdle() }
+                ui.onNodeWithTag("nested-draw-body", useUnmergedTree = true).assertExists()
+            } finally { ui.mainClock.autoAdvance = true }
+
+            val nestedGrowth = mutableIntStateOf(0)
+            var injectNested = 0
+            val lateNested = ViewTreeObserver.OnPreDrawListener {
+                if (injectNested != 0) {
+                    nestedGrowth.intValue = injectNested
+                    injectNested = 0
+                    collect(JSONObject().put("kind", "fixture_marker").put("phase", "nested_late_layout")
+                        .put("growth_px", nestedGrowth.intValue).put("at_ns", System.nanoTime()))
+                }
+                true
+            }
+            mainThread { checkNotNull(viewTree).addOnPreDrawListener(lateNested) }
+            try {
+                mountList(following = true, lower = true, status = RunStatus.COMPLETED, streaming = false,
+                    lateOpeningHeight = { nestedGrowth.intValue }, nested = true)
+                assertHalf(lower = true, tag = "nested-late-header")
+                ui.onNodeWithTag("nested-late-header").performTouchInput { click() }
+                ui.onNodeWithTag("late-opening-body", useUnmergedTree = true).assertExists()
+                for (pixels in listOf(17, 37, 74)) {
+                    mainThread { injectNested = pixels; window.decorView.invalidate() }
+                }
+            } finally { mainThread { viewTree?.takeIf { it.isAlive }?.removeOnPreDrawListener(lateNested) } }
             mainThread {
                 val phases = rows.filter { it.optString("event") == "disclosure_frame" }.map { it.optString("phase") }.toSet()
                 assertTrue("Expected both correction samples", phases.containsAll(listOf("pre_draw", "post_correction")))
                 assertEquals("The late layout must actually be delivered", 74, lateGrowth.intValue)
                 val openings = rows.filter { it.optString("event") == "disclosure_toggle" &&
                     it.optString("phase") == "anchor_captured" && it.optBoolean("opening") }
-                assertEquals(3, openings.size)
-                for (opening in openings) {
-                    assertTrue("Fixture must use an owned bottom anchor: $opening", opening.optBoolean("up") &&
-                        !opening.optBoolean("top_anchor") && opening.optBoolean("active_owner"))
+                assertEquals(5, openings.size)
+                for ((index, opening) in openings.withIndex()) {
+                    val borrowed = index >= 3
+                    assertTrue("Wrong anchor owner for upward opening: $opening", opening.optBoolean("up") &&
+                        !opening.optBoolean("top_anchor") && opening.optBoolean("active_owner") != borrowed &&
+                        opening.optBoolean("borrowed_boundary") == borrowed)
+                    // The requester logs the gesture; only the captured outer owner has the anchor bottom.
+                    val capture = rows.last { it.optString("event") == "disclosure_anchor" &&
+                        it.optString("phase") == "captured" && it.optLong("seq") < opening.optLong("seq") &&
+                        it.optLong("gesture") == opening.optLong("gesture") }
+                    assertEquals(borrowed, capture.optBoolean("requester_matches_boundary"))
+                    val nextOpening = openings.getOrNull(index + 1)?.optLong("seq") ?: Long.MAX_VALUE
                     val samples = rows.filter { it.optString("event") == "disclosure_draw" &&
-                        it.optLong("seq") > opening.optLong("seq") && it.optLong("gesture") == opening.optLong("gesture") &&
-                        it.optLong("owner") == opening.optLong("owner") && it.optBoolean("owns_anchor") && it.optBoolean("paint") }
+                        it.optLong("seq") > opening.optLong("seq") && it.optLong("seq") < nextOpening &&
+                        it.optLong("gesture") == opening.optLong("gesture") &&
+                        it.optLong("owner") == capture.optLong("owner") && it.optBoolean("owns_anchor") && it.optBoolean("paint") }
                     assertTrue("Expected several distinct heights during real drawing: $opening",
                         samples.map { it.getDouble("layout_height_px") }.distinct().size >= 3)
                     for (draw in samples) assertEquals("Draw drifted during upward opening: $draw",
-                        opening.getDouble("anchor_bottom_px"), draw.getDouble("painted_bottom_px"), 1.0)
-                    if (opening == openings.last()) {
-                        val late = rows.filter { it.optString("phase") == "late_layout" }
+                        capture.getDouble("container_bottom_px"), draw.getDouble("painted_bottom_px"), 1.0)
+                    if (index == 2 || index == 4) {
+                        val phase = if (borrowed) "nested_late_layout" else "late_layout"
+                        val late = rows.filter { it.optString("phase") == phase }
                         assertEquals(listOf(17, 37, 74), late.map { it.getInt("growth_px") })
-                        val initial = opening.getDouble("container_height_px")
-                        val armed = rows.single { it.optString("phase") == "late_layout_armed" }
-                        assertEquals(initial, armed.getDouble("height_px"), 1.0)
-                        assertTrue(armed.getLong("at_ns") < late.first().getLong("at_ns"))
+                        val initial = capture.getDouble("container_height_px")
+                        if (!borrowed) {
+                            val armed = rows.single { it.optString("phase") == "late_layout_armed" }
+                            assertEquals(initial, armed.getDouble("height_px"), 1.0)
+                            assertTrue(armed.getLong("at_ns") < late.first().getLong("at_ns"))
+                        }
                         for (tick in late) {
                             val draw = samples.first { it.getLong("at_ns") >= tick.getLong("at_ns") }
                             assertEquals("The first draw after a late tick must use its corrected height: $draw",
@@ -304,7 +362,7 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
                         }
                         assertEquals("Do not remeasure unchanged animation ticks", late.size, rows.count {
                             it.optString("event") == "disclosure_anchor" && it.optString("phase") == "evaluate" &&
-                                it.optLong("owner") == opening.optLong("owner") && it.optBoolean("refresh_geometry")
+                                it.optLong("owner") == capture.optLong("owner") && it.optBoolean("refresh_geometry")
                         })
                     }
                 }

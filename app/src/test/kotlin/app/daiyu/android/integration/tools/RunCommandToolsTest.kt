@@ -52,6 +52,7 @@ class RunCommandToolsTest {
         var execution = "executed"
         var exitCode: Int? = 0
         var pendingReads = 0
+        var onRead: () -> Unit = {}
         var journalCommitUnknown = false
         var reads = 0
         var ownerCurrent = true
@@ -101,6 +102,7 @@ class RunCommandToolsTest {
                     }
                     override fun read(id: String, offset: Long, limit: Int): JSONObject {
                         reads++
+                        onRead()
                         if (pendingReads > 0) pendingReads--
                         return JSONObject().put("ok", true).put("execution", if (pendingReads > 0) "unknown" else "executed")
                             .put("wait_pending", pendingReads > 0).put("exit_code", exitCode ?: JSONObject.NULL)
@@ -123,6 +125,9 @@ class RunCommandToolsTest {
             dispatchOwner: RunExecutionOwner = owner) = dispatcher.dispatchOwned(task,
                 listOf(ToolInvocation(ToolCallId(id), "read_image", JSONObject().put("path", path).toString())),
                 dispatchOwner) { cancelled }.single().outcome
+        fun readJob() = dispatcher.dispatchOwned(task,
+            listOf(ToolInvocation(ToolCallId("read-job"), "terminal_read",
+                """{"job_id":"00000000-0000-0000-0000-000000000001"}""")), owner) { cancelled }.single().outcome
         fun hasImageTool() = leaf.tools().any { it.definition.name == "read_image" }
         fun dispatch(id: String = "call", environment: String = "android", timeout: Long = 30000,
             command: String = "echo exact", dispatchOwner: RunExecutionOwner = owner) = dispatcher.dispatchOwned(task,
@@ -167,6 +172,36 @@ class RunCommandToolsTest {
             assertEquals(1, fixture.executions)
             assertEquals(2, fixture.reads)
             assertFalse((fixture.dispatch() as DispatchOutcome.Confirmed).isError)
+            assertEquals(1, fixture.executions)
+        } finally { fixture.leaf.close() }
+    }
+
+    @Test(timeout = 5000) fun pendingJobDoesNotBlockReceiptIndefinitely() {
+        val fixture = Fixture().apply { pendingReads = Int.MAX_VALUE }
+        try {
+            val unknown = fixture.dispatch(timeout = 1) as DispatchOutcome.Unknown
+            assertEquals("terminal_outcome_unknown_no_resend:job_id=00000000-0000-0000-0000-000000000001", unknown.code)
+            assertEquals(1, fixture.executions)
+            val readsAtDeadline = fixture.reads
+            fixture.pendingReads = 1
+            val verified = fixture.readJob() as DispatchOutcome.Confirmed
+            assertEquals("executed", JSONObject(verified.payload).getString("execution"))
+            assertEquals(readsAtDeadline + 1, fixture.reads)
+            fixture.dispatch(id = "later-command", command = "echo not-a-retry")
+            assertEquals(1, fixture.executions)
+            assertEquals(readsAtDeadline + 1, fixture.reads)
+        } finally { fixture.leaf.close() }
+    }
+
+    @Test fun lostPendingLookupRetainsOriginalJobId() {
+        val fixture = Fixture().apply {
+            pendingReads = 2
+            onRead = { throw java.io.IOException("receipt lookup failed") }
+        }
+        try {
+            val unknown = fixture.dispatch() as DispatchOutcome.Unknown
+            assertEquals("terminal_outcome_unknown_no_resend:job_id=00000000-0000-0000-0000-000000000001", unknown.code)
+            assertEquals(1, fixture.reads)
             assertEquals(1, fixture.executions)
         } finally { fixture.leaf.close() }
     }

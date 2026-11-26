@@ -7,6 +7,7 @@ import app.daiyu.android.domain.tools.*
 import app.daiyu.android.terminal.*
 import org.json.JSONObject
 import java.security.MessageDigest
+import java.util.concurrent.TimeUnit
 
 internal interface CommandTransport : AutoCloseable {
     fun execute(name: String, arguments: JSONObject): JSONObject
@@ -55,6 +56,8 @@ internal class RunCommandTools(
 ) : AutoCloseable {
     companion object {
         const val CAPABILITY = "terminal.command.consent"
+        private const val POLL_MILLIS = 250L
+        private const val RECEIPT_GRACE_MILLIS = 1000L
         internal fun androidConfiguration(context: Context, workingDirectory: java.io.File,
             mode: app.daiyu.android.runningmode.RunningMode = app.daiyu.android.runningmode.AndroidRunningModeStore.get(context).mode.value): TerminalConfiguration =
             androidConfiguration(mode,
@@ -165,7 +168,7 @@ internal class RunCommandTools(
     }
     fun tools(): List<RegisteredTool> = listOf(object : RegisteredTool {
         override val definition = app.daiyu.android.domain.tools.ToolDefinition("terminal_exec", 1,
-            "在已选择的 Android ${if (android.backend == "shizuku") "Shizuku（仅真实授权服务，不回退应用 UID）" else if (android.root) "Root" else "应用 UID"} 身份或绑定 Linux 中执行命令。当前会话 Android 工作目录：${android.workingDirectory?.path}；$linuxDescription。已绑定时两者直通同一会话目录；Android 系统命令请选择 android，不在 Linux 内猜测执行。应用内默认许可按本次精确命令和环境放行，无需逐次确认；仍核验真实身份与系统权限，不自动提权、不自动安装、不切换环境。同步等待真实退出和完整输出；timeout_ms是首段等待时长，仍运行时继续等待同一job并响应取消，不会重新执行。UNKNOWN不得重发，凭job_id用terminal_read读取。",
+            "在已选择的 Android ${if (android.backend == "shizuku") "Shizuku（仅真实授权服务，不回退应用 UID）" else if (android.root) "Root" else "应用 UID"} 身份或绑定 Linux 中执行命令。当前会话 Android 工作目录：${android.workingDirectory?.path}；$linuxDescription。已绑定时两者直通同一会话目录；Android 系统命令请选择 android，不在 Linux 内猜测执行。应用内默认许可按本次精确命令和环境放行，无需逐次确认；仍核验真实身份与系统权限，不自动提权、不自动安装、不切换环境。同步等待真实退出和完整输出；timeout_ms 是等待预算，另有最多约 1 秒的收尾查询。超出预算还没确认就返回 UNKNOWN，不代表命令没有执行；不得重发，凭 job_id 用 terminal_read 只读核实并继续不依赖该结果的工作。",
             CAPABILITY, ToolEffect.WRITE, ToolSchema(listOf(
                 ArgumentField("command", ArgumentType.Text(maxLength = 32768, minimumLength = 1)),
                 ArgumentField("environment", ArgumentType.Text(choices = setOf("android", "linux"))),
@@ -312,14 +315,36 @@ internal class RunCommandTools(
         if (call.cancelled() || synchronized(lock) { closed })
             return ExecutionReceipt.NotExecuted("terminal_cancelled_before_command")
         TerminalTargetMetadata.publish(call, opened)
+        val waitStarted = System.nanoTime()
         var raw = registry.execute("terminal_exec", JSONObject().put("request_id", "exec-$request")
             .put("session_id", opened.getString("session_id")).put("command", command)
             .put("mode", "sync").put("timeout_ms", timeout))
-        while (raw.optBoolean("ok") && !raw.has("error") && raw.optBoolean("wait_pending") &&
+        val waitNanos = TimeUnit.MILLISECONDS.toNanos(timeout + RECEIPT_GRACE_MILLIS)
+        val jobId = raw.optString("job_id").takeIf { it.matches(Regex("[a-f0-9-]{36}")) }
+        fun unconfirmed(): ExecutionReceipt.Unknown {
+            synchronized(lock) { unknown = true }
+            val code = "terminal_outcome_unknown_no_resend"
+            return ExecutionReceipt.Unknown(if (jobId == null) code else "$code:job_id=$jobId")
+        }
+        while (jobId != null && raw.optBoolean("ok") && !raw.has("error") && raw.optBoolean("wait_pending") &&
             raw.optString("execution") == "unknown") {
             if (call.cancelled() || synchronized(lock) { closed }) break
-            Thread.sleep(250)
-            raw = registry.read(raw.getString("job_id"), 0, 16384)
+            val remaining = waitNanos - (System.nanoTime() - waitStarted)
+            if (remaining <= 0) break
+            val next = try {
+                TimeUnit.NANOSECONDS.sleep(minOf(remaining, TimeUnit.MILLISECONDS.toNanos(POLL_MILLIS)))
+                if (call.cancelled() || synchronized(lock) { closed }) break
+                registry.read(jobId, 0, 16384)
+            } catch (interrupted: InterruptedException) {
+                Thread.currentThread().interrupt()
+                return unconfirmed()
+            } catch (_: Exception) {
+                return unconfirmed()
+            }
+            // A failed or mismatched lookup cannot establish that the already dispatched job did not execute.
+            if (!next.optBoolean("ok") || next.has("error") || next.optString("job_id") != jobId ||
+                next.optString("execution") !in setOf("executed", "unknown")) return unconfirmed()
+            raw = next
         }
         return when (raw.optString("execution")) {
             "executed" -> {
@@ -330,10 +355,7 @@ internal class RunCommandTools(
                 } else ExecutionReceipt.Confirmed(raw.toString(), isError = !raw.optBoolean("ok") || exit.toInt() != 0)
             }
             "not_executed" -> ExecutionReceipt.NotExecuted(raw.optString("error", "terminal_not_executed"))
-            else -> {
-                synchronized(lock) { unknown = true }
-                ExecutionReceipt.Unknown("terminal_outcome_unknown_no_resend:job_id=${raw.optString("job_id", "unavailable")}")
-            }
+            else -> unconfirmed()
         }
     }
     fun markUnknown() = synchronized(lock) { unknown = true }

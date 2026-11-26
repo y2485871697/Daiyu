@@ -40,8 +40,11 @@ internal val WorkflowDisclosureGeometry = SemanticsPropertyKey<() -> String>("Wo
 internal class WorkflowCollapseExtent {
     private var height = 0
 
+    fun limit(measuredHeight: Int, expanded: Boolean, closingLimit: Int?): Int =
+        if (expanded) measuredHeight else minOf(height, measuredHeight, closingLimit ?: height)
+
     fun measure(measuredHeight: Int, expanded: Boolean, closingLimit: Int? = null): Int {
-        height = if (expanded) measuredHeight else minOf(height, measuredHeight, closingLimit ?: height)
+        height = limit(measuredHeight, expanded, closingLimit)
         return height
     }
 }
@@ -135,6 +138,7 @@ internal class WorkflowDisclosureMotion(
     private var finishPending = false
     private var anchorCorrectionPosted = false
     private var lastRefreshedHeight: Int? = null
+    internal var animatedExtent: WorkflowNestedExtent? = null
     private var anchoredOutput: Any? = null
     var animationIdle = true
 
@@ -202,7 +206,9 @@ internal class WorkflowDisclosureMotion(
         val requester = anchorRequester ?: this
         // dispatchDraw can consume a spring tick after this listener. Only flush a new
         // pixel height: forcing a measure on every traversal can schedule another traversal.
-        val pendingHeight = if (!anchorAtTop && requester.expanded) requester.pendingOpeningHeight?.invoke() else null
+        val pendingHeight = if (anchorAtTop) null else
+            requester.animatedExtent?.pendingHeight() ?:
+                (if (requester.expanded) requester.pendingOpeningHeight?.invoke() else null)
         val refreshGeometry = pendingHeight != null && pendingHeight != lastRefreshedHeight
         lastRefreshedHeight = pendingHeight
         if (!anchorCorrectionPosted && !refreshGeometry) return

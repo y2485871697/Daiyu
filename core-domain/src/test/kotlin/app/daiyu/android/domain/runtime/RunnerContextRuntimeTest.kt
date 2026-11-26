@@ -162,7 +162,7 @@ class RunnerContextRuntimeTest {
                 val anchor = store.snapshots.last().context!!.calibration!!
                 assertEquals(900L, anchor.billedTokens)
                 assertEquals(20L, anchor.localTokens)
-                assertEquals(900 + localTokens - anchor.localTokens, billedTokens)
+                assertEquals(900L, billedTokens)
                 admit()
                 assertEquals(request, store.snapshots.last().context!!.summaries.single())
                 observe(ModelEvent.Usage(40, 5))
@@ -242,7 +242,7 @@ class RunnerContextRuntimeTest {
     }
 
     @Test fun belowThresholdAndImplausibleCloudReceiptsNeverCreatePressure() {
-        for (receipt in listOf(ModelEvent.Usage(799, 10), ModelEvent.Usage(1301, 10),
+        for (receipt in listOf(ModelEvent.Usage(799, 1000), ModelEvent.Usage(1301, 10),
                 ModelEvent.Usage(inputTokens = 1200, outputTokens = 10, cachedTokens = 1100))) {
             val store = Store(); var summaries = 0
             val runtime = object : RunContextRuntime {
@@ -592,7 +592,7 @@ class RunnerContextRuntimeTest {
         assertTrue(store.snapshots.all { it.context?.meter?.overflowRetries == 0 })
     }
 
-    @Test fun firstRequestUsesLocalPressureAndBoundsBestEffortCompactionAttempts() {
+    @Test fun firstRequestDoesNotCompactFromLocalEstimateAndMissingCloudUsage() {
         for (noRangeAfterFirst in listOf(false, true)) {
             val store = Store(); var summaries = 0; var opens = 0
             val runtime = object : RunContextRuntime {
@@ -613,12 +613,12 @@ class RunnerContextRuntimeTest {
             } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("no tools") },
                 RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}.run(initial, listOf(user("u", "source")))
             assertEquals(RunStatus.COMPLETED, result.status)
-            assertEquals(2, summaries); assertEquals(1, opens)
+            assertEquals(0, summaries); assertEquals(1, opens)
             assertTrue(store.snapshots.all { it.context?.capacity == null })
         }
     }
 
-    @Test fun confirmedOverflowRetriesOnceOnlyWhenAutomaticCompactionIsEnabled() {
+    @Test fun cloudRejectionWithoutANumericReceiptNeverAuthorizesAutomaticCompaction() {
         for (automatic in listOf(false, true)) for (atOpen in listOf(false, true)) {
             val store = Store(); var opens = 0; var nexts = 0; var summaries = 0
             val runtime = object : RunContextRuntime {
@@ -646,10 +646,10 @@ class RunnerContextRuntimeTest {
                 BatteryTool { error("no tools") }, RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}.run(initial,
                     listOf(user("u1", "source"), user("u2", "tail")))
             assertEquals(RunStatus.FAILED, result.status)
-            assertEquals(if (automatic) 1 else 0, summaries)
-            assertEquals(if (automatic) 2 else 1, opens)
+            assertEquals(0, summaries)
+            assertEquals(1, opens)
             assertEquals(if (atOpen) 0 else opens, nexts)
-            assertEquals(if (automatic) 1 else 0, store.snapshots.last().context!!.meter!!.overflowRetries)
+            assertEquals(0, store.snapshots.last().context!!.meter!!.overflowRetries)
         }
     }
 
@@ -659,7 +659,7 @@ class RunnerContextRuntimeTest {
             override val windowTokens = 1000L
             override val pressureThresholdTokens = 800L
             override val initialMeter = ContextMeterCheckpoint(anchorHeader = "old", anchorEstimate = 100,
-                anchorSurface = 100, anchorUsageTotal = 900)
+                anchorSurface = 100, anchorUsageTotal = 900, cloudInputTokens = 900)
             override fun headerIdentity(tools: List<ToolDefinition>) = "new"
             override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L
             override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
@@ -674,13 +674,13 @@ class RunnerContextRuntimeTest {
         assertEquals(RunStatus.COMPLETED, result.status); assertEquals(0, summaries)
     }
 
-    @Test fun successfulCompactionPreservesTheSignedCloudMeasurementAnchor() {
+    @Test fun successfulCompactionConsumesCloudPressureWithoutReusingAnyOldEstimate() {
         val store = Store(); var summaries = 0; var opens = 0
         val runtime = object : RunContextRuntime {
             override val windowTokens = 1000L
             override val pressureThresholdTokens = 800L
             override val initialMeter = ContextMeterCheckpoint(anchorHeader = "same", anchorEstimate = 100,
-                anchorSurface = 100, anchorUsageTotal = 1000)
+                anchorSurface = 100, anchorUsageTotal = 1000, cloudInputTokens = 800)
             override fun headerIdentity(tools: List<ToolDefinition>) = "same"
             override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L - summaries * 10
             override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
@@ -690,7 +690,7 @@ class RunnerContextRuntimeTest {
             }
         }
         val model = ModelPort {
-            opens++; assertEquals(2, summaries)
+            opens++; assertEquals(1, summaries)
             object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                     sink(ModelEvent.TextFinal("t", "ok"))
@@ -702,8 +702,39 @@ class RunnerContextRuntimeTest {
             BatteryTool { error("no tools") }, RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}.run(initial,
                 listOf(user("old", "original"), user("tail", "latest")))
         assertEquals(RunStatus.COMPLETED, result.status)
-        assertEquals(2, summaries); assertEquals(1, opens)
-        assertTrue(store.snapshots.any { it.context?.compactions == 1 && it.context?.meter?.anchorUsageTotal == 1000L })
+        assertEquals(1, summaries); assertEquals(1, opens)
+        assertTrue(store.snapshots.any { it.context?.compactions == 1 && it.context?.meter?.cloudInputTokens == null })
+        assertTrue(store.snapshots.last().context!!.meter!!.cloudCompactionAttempted)
+    }
+
+    @Test fun consecutiveHighCloudReceiptsDoNotRepeatUntilProviderReportsBelowTheThreshold() {
+        var requests = 0; var tools = 0; var summaries = 0
+        val runtime = object : RunContextRuntime {
+            override val windowTokens = 1000L
+            override val pressureThresholdTokens = 800L
+            override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 9999L
+            override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
+                request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
+                admit: () -> Unit, cancelled: () -> Boolean): List<Message>? {
+                summaries++
+                return null // No safe range: do not loop on the same episode.
+            }
+        }
+        val model = ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                requests++
+                assertEquals(listOf(0, 1, 1, 1, 2)[requests - 1], summaries)
+                if (requests < 5) {
+                    sink(ModelEvent.Usage(listOf(800L, 920L, 799L, 801L)[requests - 1], 2000))
+                    sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("read-$requests"), "read", "{}")))
+                } else sink(ModelEvent.TextFinal("answer", "done"))
+            }
+            override fun cancel() {}
+        } }
+        val runner = ChatRunner(model, object : ConversationStore { override fun save(message: Message) {} },
+            BatteryTool { tools++; "done" }, RunnerOptions(runtimeStore = Store(), contextRuntime = runtime)) {}
+        assertEquals(RunStatus.COMPLETED, runner.run(initial, listOf(user("source", "text"))).status)
+        assertEquals(4, tools); assertEquals(2, summaries)
     }
 
 }

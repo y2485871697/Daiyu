@@ -91,7 +91,7 @@ class ToolReceiptSourceTest {
             }
         }
     }
-    @Test fun onlyExactActiveCallCanSupplyLiveActivityWithoutDurableEvidence() {
+    @Test fun returnedResultsAreUnknownWithoutDurableEvidenceEvenIfTheCallStillLooksActive() {
         val returned = (message.blocks.single() as MessageBlock.Tool).copy(result = "done")
         val source = message.copy(blocks = listOf(returned))
         val live = ExecutionState(phase = ExecutionPhase.TOOL_EXECUTING, activeToolCalls = setOf(call.id))
@@ -100,10 +100,10 @@ class ToolReceiptSourceTest {
         assertEquals(ToolActivityUi.UNKNOWN, activity(null))
         assertEquals(ToolActivityUi.UNKNOWN, activity(live.copy(activeToolCalls = emptySet())))
         assertEquals(ToolActivityUi.UNKNOWN, activity(live.copy(activeToolCalls = setOf(ToolCallId("other")))))
-        assertEquals(ToolActivityUi.RUNNING, activity(live))
-        assertEquals(ToolActivityUi.WAITING, activity(live.copy(phase = ExecutionPhase.WAITING_USER)))
-        assertEquals(ToolActivityUi.PAUSING, activity(live.copy(pauseRequested = true)))
-        assertEquals(ToolActivityUi.STOPPING, activity(live, stopping = true))
+        assertEquals(ToolActivityUi.UNKNOWN, activity(live))
+        assertEquals(ToolActivityUi.UNKNOWN, activity(live.copy(phase = ExecutionPhase.WAITING_USER)))
+        assertEquals(ToolActivityUi.UNKNOWN, activity(live.copy(pauseRequested = true)))
+        assertEquals(ToolActivityUi.UNKNOWN, activity(live, stopping = true))
         assertEquals(ToolActivityUi.UNKNOWN, activity(live.copy(phase = ExecutionPhase.IDLE)))
         for (status in RunStatus.values().filter { it != RunStatus.RUNNING }) {
             assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN),
@@ -174,24 +174,14 @@ class ToolReceiptSourceTest {
         assertTrue(source(onlyUser).isEmpty())
     }
 
-    @Test fun pendingReceiptReadOnlyKeepsTheExactLiveRunExecuting() {
-        assertFalse(ToolActivityUi.entries.any { it.label == "确认中" || it.label == "读取结果" })
-        for (status in listOf(RunStatus.RUNNING, RunStatus.COMPLETED, RunStatus.FAILED)) {
-            for (result in listOf("{\"ok\":true}", "{\"ok\":false}", "not a receipt", "")) {
-                val returned = (message.blocks.single() as MessageBlock.Tool).copy(result = result)
-                val source = message.copy(status = status, blocks = listOf(returned))
-                for (live in listOf(null, ExecutionState(ExecutionPhase.BOUNDARY),
-                    ExecutionState(ExecutionPhase.STREAMING), ExecutionState(ExecutionPhase.TERMINAL))) {
-                    val pending = RetainedToolOutcomes.pendingProjection(source, returned, live, receiptPending = true)
-                    val executing = status == RunStatus.RUNNING && live != null &&
-                        live.phase != ExecutionPhase.TERMINAL
-                    assertEquals(if (executing) ToolReceiptUi(WorkStepState.PENDING, ToolActivityUi.RUNNING)
-                        else ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN), pending)
-                    assertEquals(pending, RetainedToolOutcomes.pendingProjection(status, returned, live, receiptPending = true))
-                    assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN),
-                        RetainedToolOutcomes.pendingProjection(source, returned, live, receiptPending = false))
-                }
-            }
+    @Test fun anotherToolOrLaterModelRequestCannotRestartAReturnedCard() {
+        val returned = (message.blocks.single() as MessageBlock.Tool).copy(result = "done")
+        val source = message.copy(blocks = listOf(returned))
+        for (phase in ExecutionPhase.values()) {
+            val live = ExecutionState(phase, activeToolCalls = setOf(ToolCallId("different-tool")))
+            val expected = ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN)
+            assertEquals(expected, RetainedToolOutcomes.pendingProjection(source, returned, live))
+            assertEquals(expected, RetainedToolOutcomes.pendingProjection(RunStatus.RUNNING, returned, live))
         }
     }
 
@@ -199,20 +189,16 @@ class ToolReceiptSourceTest {
         val returned = (message.blocks.single() as MessageBlock.Tool).copy(result = "done")
         for (status in listOf(RunStatus.STOPPED, RunStatus.INTERRUPTED)) {
             assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN),
-                RetainedToolOutcomes.pendingProjection(status, returned, receiptPending = true))
+                RetainedToolOutcomes.pendingProjection(status, returned))
         }
         assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN),
             RetainedToolOutcomes.pendingProjection(RunStatus.RUNNING, returned,
-                ExecutionState(ExecutionPhase.RECONNECTING), receiptPending = true))
+                ExecutionState(ExecutionPhase.RECONNECTING)))
         assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN),
-            RetainedToolOutcomes.pendingProjection(RunStatus.RUNNING, returned, stopping = true, receiptPending = true))
-        assertNull(RetainedToolOutcomes.pendingProjection(message, returned.copy(result = null), receiptPending = true))
-        assertNull(RetainedToolOutcomes.pendingProjection(message.copy(role = Message.USER_ROLE), returned, receiptPending = true))
-        for ((live, activity) in listOf(ExecutionState(ExecutionPhase.PAUSED) to ToolActivityUi.PAUSED,
-            ExecutionState(ExecutionPhase.BOUNDARY, pauseRequested = true) to ToolActivityUi.PAUSING)) {
-            assertEquals(ToolReceiptUi(WorkStepState.PENDING, activity),
-                RetainedToolOutcomes.pendingProjection(message, returned, live, receiptPending = true))
-        }
+            RetainedToolOutcomes.pendingProjection(RunStatus.RUNNING, returned, stopping = true))
+        assertNull(RetainedToolOutcomes.pendingProjection(message, returned.copy(result = null)))
+        assertNull(RetainedToolOutcomes.pendingProjection(message.copy(role = Message.USER_ROLE), returned))
+
     }
 
 }

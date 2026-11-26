@@ -24,8 +24,8 @@ internal class HarnessContextSummarizer(
             listOf(MessageBlock.Text("compaction-directive", HarnessCompactionPrompt.forCheckpointTarget(checkpointTargetTokens))),
             RunStatus.COMPLETED)
         val replay = originals + instruction
-        val inputTokens = app.daiyu.android.domain.context.HarnessTokenEstimate.system(systemPrompt) +
-            TokenTailCompression.historyTokens(replay, includeLatestScreen = false) + TokenTailCompression.toolTokens(tools)
+        val inputTokens = app.daiyu.android.domain.context.CodexTokenEstimate.text(systemPrompt) +
+            TokenTailCompression.codexHistoryTokens(replay, includeLatestScreen = false) + TokenTailCompression.toolTokens(tools, codex = true)
         require(inputTokens <= bound.inputBudgetTokens) { "摘要模型输入超过其配置预算；保留原文" }
         var model = bound
         var reasoningIndex = 0

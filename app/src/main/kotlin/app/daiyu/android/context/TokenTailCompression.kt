@@ -1,6 +1,7 @@
 package app.daiyu.android.context
 
 import app.daiyu.android.domain.*
+import app.daiyu.android.domain.context.CodexTokenEstimate
 import app.daiyu.android.media.NativeScreenImage
 import app.daiyu.android.model.TerminalToolResultProjection
 import org.json.JSONArray
@@ -27,18 +28,26 @@ internal object TokenTailCompression {
     fun historyTokens(history: List<Message>, includeLatestScreen: Boolean = true): Long =
         messageWeights(history, includeLatestScreen).sum()
 
-    private fun messageWeights(history: List<Message>, includeLatestScreen: Boolean = true): List<Long> {
+    fun codexHistoryTokens(history: List<Message>, includeLatestScreen: Boolean = true): Long =
+        messageWeights(history, includeLatestScreen, codex = true).sum()
+
+    private fun messageWeights(history: List<Message>, includeLatestScreen: Boolean = true,
+        codex: Boolean = false): List<Long> {
         // The wire projection attaches only the latest screen result. Even a newer node-only
         // result retires the older image, while every receipt remains in canonical history.
         val latestScreen = if (!includeLatestScreen) null else history.asReversed().firstNotNullOfOrNull { message ->
             message.blocks.lastOrNull { it is MessageBlock.Tool && it.invocation.name == "screen" && it.result != null }
         }
         return history.map { message ->
+            var messageBytes = 0L
             val payload = message.blocks.sumOf { block -> when (block) {
-                is MessageBlock.Text -> 4L + textTokens(block.text)
-                is MessageBlock.Image -> imageReferenceTokens(block.reference)
+                is MessageBlock.Text -> if (codex) { messageBytes += CodexTokenEstimate.bytes(block.text); 0L }
+                    else 4L + textTokens(block.text)
+                is MessageBlock.Image -> if (codex) { messageBytes += CodexTokenEstimate.RESIZED_IMAGE_BYTES; 0L } else imageReferenceTokens(block.reference)
                 is MessageBlock.Tool -> {
-                    block.result?.let { result ->
+                    val call = if (codex) CodexTokenEstimate.tokens(CodexTokenEstimate.bytes(block.invocation.name) +
+                        CodexTokenEstimate.bytes(block.invocation.arguments)) else 0L
+                    call + (block.result?.let { result ->
                         val metadata = if (result.contains("\"image_asset\""))
                             NativeScreenImage.metadata(block.invocation.name, block.invocation.arguments, result)
                         else NativeScreenImage.parse(block.invocation.name, block.invocation.arguments, result)?.metadata
@@ -47,13 +56,19 @@ internal object TokenTailCompression {
                         val output = if (image == null) TerminalToolResultProjection.output(block.invocation.name, result) else JSONObject(metadata).apply {
                             if (attached) put("image_attached", true) else put("image_omitted", "superseded_screen")
                         }.toString()
-                        val pixels = if (image != null && attached)
-                            imageTokens(image.getInt("width"), image.getInt("height")) + textTokens(
-                                "screen工具图像（call_id=${block.invocation.id.value}），坐标使用原始${image.getInt("width")}×${image.getInt("height")}像素。") else 0L
-                        8L + textTokens(output) + pixels
-                    } ?: 0L
+                        if (codex) {
+                            val resultBytes = CodexTokenEstimate.bytes(output) + CodexTokenEstimate.bytes(block.invocation.id.value)
+                            CodexTokenEstimate.tokens(resultBytes) + if (attached) CodexTokenEstimate.resizedImageTokens else 0L
+                        } else {
+                            val pixels = if (image != null && attached)
+                                imageTokens(image.getInt("width"), image.getInt("height")) + textTokens(
+                                    "screen工具图像（call_id=${block.invocation.id.value}），坐标使用原始${image.getInt("width")}×${image.getInt("height")}像素。") else 0L
+                            8L + textTokens(output) + pixels
+                        }
+                    } ?: 0L)
                 }
             } }
+            if (codex) return@map CodexTokenEstimate.tokens(messageBytes) + payload
             if (message.role == "system") {
                 val rendered = message.blocks.filterIsInstance<MessageBlock.Text>().joinToString("") { it.text }
                 app.daiyu.android.domain.context.HarnessTokenEstimate.system(rendered)
@@ -85,12 +100,12 @@ internal object TokenTailCompression {
         }
     }
 
-    fun toolTokens(tools: List<ToolDefinition>): Long {
+    fun toolTokens(tools: List<ToolDefinition>, codex: Boolean = false): Long {
         if (tools.isEmpty()) return 0
         val definitions = JSONArray()
         tools.forEach { tool -> definitions.put(JSONObject().put("name", tool.name).put("description", tool.description)
             .put("parameters", JSONObject(tool.parameters))) }
-        return 4L + textTokens(definitions.toString())
+        return if (codex) CodexTokenEstimate.text(definitions.toString()) else 4L + textTokens(definitions.toString())
     }
 
     @Suppress("UNUSED_PARAMETER")
@@ -110,11 +125,12 @@ internal object TokenTailCompression {
 
     @Suppress("UNUSED_PARAMETER")
     fun selectStart(history: List<Message>, window: Long?, billed: Long? = null,
-        local: Long? = null, overflow: Boolean = false, reservedCompletionTokens: Long = 0): Int {
+        local: Long? = null, overflow: Boolean = false, reservedCompletionTokens: Long = 0, codex: Boolean = false): Int {
         if (history.size < 2 || (!overflow && (window == null || window <= reservedCompletionTokens))) return 0
         val first = history.takeWhile { it.role == "system" }.size
-        val retain = if (overflow) 0L else (checkNotNull(window) - reservedCompletionTokens) * 16 / 100
-        val weights = messageWeights(history)
+        val retain = if (overflow) 0L else ((checkNotNull(window) - reservedCompletionTokens) * 16 / 100)
+            .let { if (codex) minOf(it, CodexTokenEstimate.RECENT_HISTORY_TOKENS) else it }
+        val weights = messageWeights(history, codex = codex)
         var accumulated = 0L
         var keepFrom = history.size
         for (index in history.indices.reversed()) {

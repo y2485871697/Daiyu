@@ -49,8 +49,10 @@ class RunnerCompressionRefreshTest {
     private var toolFinished = false
     private fun toolModel() = ModelPort { object : ModelSession {
         override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
-            if (!toolFinished) sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("read"), "read", "{}")))
-            else sink(ModelEvent.TextFinal("answer", "done"))
+            if (!toolFinished) {
+                sink(ModelEvent.ToolReady(ToolInvocation(ToolCallId("read"), "read", "{}")))
+                sink(ModelEvent.Usage(800, 5))
+            } else sink(ModelEvent.TextFinal("answer", "done"))
         }
         override fun cancel() {}
     } }
@@ -76,7 +78,7 @@ class RunnerCompressionRefreshTest {
 
     @Test fun pressureDecisionAndCompactionKeepTheSameConfigurationSnapshot() {
         var saved = Choice(false, "old")
-        val runtime = Runtime(saved, { saved }) { saved = Choice(false, "later") }
+        val runtime = Runtime(saved, { saved }) { if (saved.automatic) saved = Choice(false, "later") }
         val result = runner(toolModel(), runtime) {
             toolFinished = true; saved = Choice(true, "selected"); "once"
         }.run(initial, listOf(user("source")))
@@ -85,36 +87,8 @@ class RunnerCompressionRefreshTest {
         assertEquals(Choice(false, "later"), saved)
     }
 
-    @Test fun overflowRecoveryReloadsTheAutomaticSwitchAndModel() {
-        for (atOpen in listOf(true, false)) for (enable in listOf(true, false)) {
-            var saved = Choice(!enable, "old")
-            val runtime = Runtime(saved, { saved })
-            var opens = 0
-            val model = ModelPort {
-                if (++opens == 1 && atOpen) {
-                    saved = Choice(enable, "new")
-                    throw ModelRequestException(ModelFailure.CONTEXT_LIMIT)
-                }
-                object : ModelSession {
-                    override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
-                        if (opens == 1 && !atOpen) {
-                            saved = Choice(enable, "new")
-                            throw ModelRequestException(ModelFailure.CONTEXT_LIMIT)
-                        }
-                        sink(ModelEvent.TextFinal("answer", "done"))
-                    }
-                    override fun cancel() {}
-                }
-            }
-            val result = runner(model, runtime) { error("no tool replay") }.run(initial, listOf(user("source")))
-            assertEquals(if (enable) RunStatus.COMPLETED else RunStatus.FAILED, result.status)
-            assertEquals(if (enable) 2 else 1, opens)
-            assertEquals(if (enable) listOf(Choice(true, "new")) else emptyList<Choice>(), runtime.summaries)
-        }
-    }
-
-    @Test fun initialOverflowDoesNotRetainAnEmptyAssistantInTheCompactedHistory() {
-        for (atOpen in listOf(false, true)) {
+    @Test fun initialCloudReceiptDoesNotRetainAnEmptyAssistantInCompactedHistory() {
+        run {
             val store = Store()
             val tail = user("tail")
             var opens = 0
@@ -123,6 +97,7 @@ class RunnerCompressionRefreshTest {
                 override val automatic = true
                 override val windowTokens = 1000L
                 override val pressureThresholdTokens = 800L
+                override val initialMeter = ContextMeterCheckpoint(cloudInputTokens = 800)
                 override fun localTokens(history: List<Message>, tools: List<ToolDefinition>) = 100L
                 override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
                     request: RequestCheckpoint, observe: (ModelEvent.Usage) -> Unit,
@@ -135,12 +110,10 @@ class RunnerCompressionRefreshTest {
             }
             val model = ModelPort {
                 opens++
-                if (opens == 1 && atOpen) throw ModelRequestException(ModelFailure.CONTEXT_LIMIT)
-                if (opens == 2) assertEquals(listOf(user("summary"), tail), it)
+                assertEquals(listOf(user("summary"), tail), it)
                 object : ModelSession {
                     override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
                         assertTrue(outputs.isEmpty())
-                        if (opens == 1) throw ModelRequestException(ModelFailure.CONTEXT_LIMIT)
                         sink(ModelEvent.TextFinal("answer", "done"))
                     }
                     override fun cancel() {}
@@ -151,7 +124,7 @@ class RunnerCompressionRefreshTest {
                 RunnerOptions(runtimeStore = store, contextRuntime = runtime)) {}
                 .run(initial, listOf(user("source"), tail))
             assertEquals(result.error, RunStatus.COMPLETED, result.status)
-            assertEquals(2, opens)
+            assertEquals(1, opens)
             assertEquals(1, summaries)
             val terminal = store.checkpoints.last()
             assertEquals(ExecutionPhase.TERMINAL, terminal.phase)

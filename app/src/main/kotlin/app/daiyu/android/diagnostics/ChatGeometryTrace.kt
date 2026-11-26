@@ -16,6 +16,9 @@ internal object ChatGeometryTrace {
     private val droppedTotal = AtomicLong()
     private val idSource = AtomicLong()
     private val last = HashMap<String, String>()
+    private val lastProductionDraw = object : LinkedHashMap<Any, List<Pair<String, Any?>>>(64, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Any, List<Pair<String, Any?>>>?) = size > 128
+    }
     private val observers = CopyOnWriteArrayList<(JSONObject) -> Unit>()
 
     val active: Boolean get() = sink != null || observers.isNotEmpty()
@@ -33,8 +36,16 @@ internal object ChatGeometryTrace {
     fun sample(event: String, vararg values: Pair<String, Any?>) = publish(event, false, values)
 
     private fun publish(event: String, deduplicate: Boolean, values: Array<out Pair<String, Any?>>) {
-        val target = sink
+        var target = sink
         val listeners = observers.iterator()
+        if (target != null && event == "disclosure_draw") {
+            // A stationary tall card must not evict the gesture that reproduced a jump.
+            val owner = values.firstOrNull { it.first == "owner" }?.second
+            if (owner != null) {
+                val geometry = values.filterNot { it.first == "traversal" || it.first == "gesture" }
+                if (lastProductionDraw.put(owner, geometry) == geometry) target = null
+            }
+        }
         if (target == null && !listeners.hasNext()) return
         if (deduplicate) {
             val signature = values.joinToString(",") { "${it.first}=${it.second}" }

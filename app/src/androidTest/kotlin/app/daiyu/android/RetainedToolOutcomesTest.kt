@@ -243,25 +243,14 @@ class RetainedToolOutcomesTest : android.test.AndroidTestCase() {
         }
     }
 
-    fun testPendingReadRequiresAnActiveLiveOwnerAndKeepsPausePresentation() {
+    fun testPendingReadNeverResurrectsAReturnedTool() {
         val returned = MessageBlock.Tool(ToolInvocation(ToolCallId("pending-read"), "read", "{}"), "done")
         for (status in listOf(RunStatus.RUNNING, RunStatus.COMPLETED)) {
-            for (phase in listOf(ExecutionPhase.IDLE, ExecutionPhase.BOUNDARY,
-                ExecutionPhase.STREAMING, ExecutionPhase.TERMINAL)) {
-                val live = ExecutionState(phase)
-                val executing = status == RunStatus.RUNNING &&
-                    phase != ExecutionPhase.IDLE && phase != ExecutionPhase.TERMINAL
-                assertEquals(ToolReceiptUi(if (executing) WorkStepState.PENDING else WorkStepState.UNKNOWN,
-                    if (executing) ToolActivityUi.RUNNING else ToolActivityUi.UNKNOWN),
-                    RetainedToolOutcomes.pendingProjection(status, returned, live, receiptPending = true))
+            for (phase in ExecutionPhase.values()) {
+                val live = ExecutionState(phase, activeToolCalls = setOf(returned.invocation.id))
+                assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN),
+                    RetainedToolOutcomes.pendingProjection(status, returned, live))
             }
-            assertEquals(ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN),
-                RetainedToolOutcomes.pendingProjection(status, returned, receiptPending = true))
-        }
-        for ((live, activity) in listOf(ExecutionState(ExecutionPhase.PAUSED) to ToolActivityUi.PAUSED,
-            ExecutionState(ExecutionPhase.BOUNDARY, pauseRequested = true) to ToolActivityUi.PAUSING)) {
-            assertEquals(ToolReceiptUi(WorkStepState.PENDING, activity),
-                RetainedToolOutcomes.pendingProjection(RunStatus.RUNNING, returned, live, receiptPending = true))
         }
     }
 

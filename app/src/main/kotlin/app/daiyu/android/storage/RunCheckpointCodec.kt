@@ -282,13 +282,19 @@ internal object RunCheckpointCodec {
         .put("sampled_surface", value.sampledSurfaceTokens ?: JSONObject.NULL)
         .put("surface", value.surfaceTokens)
         .put("input_fixed_surface", value.inputFixedSurfaceTokens ?: JSONObject.NULL).put("overflow_retries", value.overflowRetries)
+        .put("cloud_input", value.cloudInputTokens ?: JSONObject.NULL)
+        .put("cloud_compaction_attempted", value.cloudCompactionAttempted)
     internal fun decodeMeter(value: JSONObject): ContextMeterCheckpoint {
-        fields(value, "anchor_header", "anchor_estimate", "anchor_surface", "anchor_usage", "pressure",
+        val legacy = arrayOf("anchor_header", "anchor_estimate", "anchor_surface", "anchor_usage", "pressure",
             "sampled_surface", "surface", "input_fixed_surface", "overflow_retries")
+        val hasCloud = value.has("cloud_input") || value.has("cloud_compaction_attempted")
+        fields(value, *(if (hasCloud) legacy + arrayOf("cloud_input", "cloud_compaction_attempted") else legacy))
         return ContextMeterCheckpoint(if (value.isNull("anchor_header")) null else string(value, "anchor_header"),
             nullableInteger(value, "anchor_estimate"), nullableInteger(value, "anchor_surface"),
             nullableInteger(value, "anchor_usage"), nullableInteger(value, "pressure"),
-            nullableInteger(value, "sampled_surface"), integer(value, "surface"), nullableInteger(value, "input_fixed_surface"), integer(value, "overflow_retries").also { require(it in 0..Int.MAX_VALUE.toLong()) }.toInt())
+            nullableInteger(value, "sampled_surface"), integer(value, "surface"), nullableInteger(value, "input_fixed_surface"), integer(value, "overflow_retries").also { require(it in 0..Int.MAX_VALUE.toLong()) }.toInt(),
+            nullableInteger(value, "cloud_input"),
+            if (hasCloud) value.get("cloud_compaction_attempted") as Boolean else false)
     }
     private fun encodeInput(value: RequestInputCheckpoint) = JSONObject()
         .put("request", encodeRequest(value.request)).put("local", value.localTokens)

@@ -2368,7 +2368,11 @@ class MainActivity : ComponentActivity() {
     private fun activityUsable() = activityCallbacksAllowed && !isFinishing && !isDestroyed
     private fun requireActivityUsable() { check(activityUsable()) { "页面已关闭" } }
 
+    private val lifecycleTraceId = System.nanoTime()
+
     override fun onCreate(state: Bundle?) {
+        RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.ACTIVITY_CREATE, RuntimeDiagnostics.Code.BEGIN,
+            count = lifecycleTraceId, size = if (state == null) 0 else 1)
         super.onCreate(state)
         lifecycleScope.launch {
             androidx.compose.runtime.snapshotFlow { shownVoiceCall() }.collect { refreshFloatingCall() }
@@ -2428,6 +2432,17 @@ class MainActivity : ComponentActivity() {
         if (retainedPage == "child-tasks" || state?.containsKey("task-records-conversation") == true) retainedPage = "chat"
         if (intent?.action == ChatApplication.OPEN_PET_SETTINGS) retainedPage = "pet-settings"
         app.daiyu.android.diagnostics.WindowFramePerformance.install(this, controller.diagnostics)
+        val decor = window.decorView
+        decor.viewTreeObserver.addOnDrawListener(object : android.view.ViewTreeObserver.OnDrawListener {
+            private var first = true
+            override fun onDraw() {
+                if (!first) return
+                first = false
+                RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.ACTIVITY_FIRST_DRAW, RuntimeDiagnostics.Code.END,
+                    count = lifecycleTraceId, size = if (selectionReady) 1 else 0)
+                decor.post { if (decor.viewTreeObserver.isAlive) decor.viewTreeObserver.removeOnDrawListener(this) }
+            }
+        })
         setContent {
             app.daiyu.android.ui.screens.settings.ApplicationPetMount(pets, this@MainActivity, Modifier.fillMaxSize()) {
             AgentAppTheme(appearance, applyInterfaceScale = true, onResolvedDarkModeChange = ::updateSystemBars) {
@@ -2567,7 +2582,7 @@ class MainActivity : ComponentActivity() {
                             }
                             val contextUsage = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsage(
                                 controller, selected?.id, contextReceiptRevision, controller.dataRevision,
-                                contextModelRevision, chatState.composer.phase, ready = controller.ready, active = routeActive && !sidebarVisible && displayWindow == null)
+                                contextModelRevision, ready = controller.ready && selectionReady, active = routeActive && !sidebarVisible)
                             val usageConfiguration = androidx.compose.ui.platform.LocalConfiguration.current
                             val usageLocale = remember(usageConfiguration) { java.util.Locale.getDefault() }
                             val contextUsageLabels = app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsageLabels(contextUsage, usageLocale)
@@ -6295,6 +6310,8 @@ class MainActivity : ComponentActivity() {
         consumeOpenedAttachments()
     }
     override fun onResume() {
+        RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.ACTIVITY_RESUME, RuntimeDiagnostics.Code.BEGIN,
+            count = lifecycleTraceId, size = if (selectionReady) 1 else 0)
         super.onResume(); chatReturnRefresh = null; suspendMessageActionEditor(); voiceForeground = true; speechHost.setForeground(true)
         if (continuingVoiceCall() && !microphoneGranted()) invalidateConfiguredVoice()
         val pendingCall = pendingFloatingCallAction
@@ -6336,6 +6353,8 @@ class MainActivity : ComponentActivity() {
         pets.refreshOverlayPermission()
         refreshRateWindowResumed = true; applyPreferredRefreshRate()
         window.decorView.post(refreshRateRequest)
+        RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.ACTIVITY_RESUME, RuntimeDiagnostics.Code.END,
+            count = lifecycleTraceId, size = if (selectionReady) 1 else 0)
     }
     private fun applyPreferredRefreshRate() {
         if (!refreshRateWindowResumed || refreshRateRequestRelinquished || isFinishing || isDestroyed) return
@@ -6479,6 +6498,7 @@ class MainActivity : ComponentActivity() {
         super.onPause()
     }
     override fun onStop() {
+        RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.ACTIVITY_STOP, RuntimeDiagnostics.Code.BEGIN, count = lifecycleTraceId)
         closeBrowserVisualVisit(clearTarget = false)
         if (chatReferencePick?.pickerAway != true) revokeChatReferencePick(preserveShortcut = true)
         revokePlatformActionVisit()
@@ -6498,6 +6518,8 @@ class MainActivity : ComponentActivity() {
         super.onStop()
     }
     override fun onDestroy() {
+        RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.ACTIVITY_DESTROY, RuntimeDiagnostics.Code.BEGIN,
+            count = lifecycleTraceId, size = if (isChangingConfigurations) 1 else 0)
         floatingCallClosed = true
         pendingFloatingCallAction = null
         chatReturnRefresh = null
@@ -6884,6 +6906,8 @@ class MainActivity : ComponentActivity() {
         val owner = selected?.id
         val editor = editorGeneration
         val initial = !selectionReady
+        if (initial) RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.CHAT_RESTORE, RuntimeDiagnostics.Code.BEGIN,
+            count = lifecycleTraceId)
         val read = paneConversationReader
         val prepare = panePresentationPreparer
         paneSelectionRequest = request
@@ -6907,6 +6931,8 @@ class MainActivity : ComponentActivity() {
                     titleRevision = revision.title
                     select(snapshot.conversation, snapshot)
                     published = true
+                    if (initial) RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.CHAT_RESTORE, RuntimeDiagnostics.Code.END,
+                        count = lifecycleTraceId, size = snapshot.display?.rows?.size?.toLong() ?: snapshot.messages.size.toLong())
                     val firstWindow = snapshot.display
                     if (firstWindow != null && firstWindow.deferredRows > 0) {
                         val generation = editorGeneration
@@ -7731,7 +7757,6 @@ class MainActivity : ComponentActivity() {
     private var toolReceiptKey: ToolReceiptKey? = null
     private var toolReceiptSnapshot: app.daiyu.android.ui.RetainedToolOutcomes.Snapshot? = null
     private var toolReceiptRead: kotlinx.coroutines.Job? = null
-    private var toolReceiptReadFailed = false
     private var toolReceiptRequested: ToolReceiptKey? = null
     private var toolReceiptRequest: Any? = null
     private fun currentToolReceiptKey() = ToolReceiptKey(selected?.id, controller.dataRevision, editorGeneration,
@@ -7768,7 +7793,6 @@ class MainActivity : ComponentActivity() {
         val rows = shown.map { it.second }
         val display = displayWindow
         val read = toolReceiptReader
-        toolReceiptReadFailed = false
         toolReceiptRead = lifecycleScope.launch {
             try {
                 val snapshot = withContext(Dispatchers.IO) {
@@ -7778,7 +7802,8 @@ class MainActivity : ComponentActivity() {
             } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
             catch (_: Exception) {
                 if (activityUsable() && toolReceiptRequest === request && key.canDisplayFor(currentToolReceiptKey())) {
-                    toolReceiptReadFailed = true
+                    RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.TOOL_RECEIPT_PROJECTION, RuntimeDiagnostics.Code.FAILURE,
+                        count = key.sources.size.toLong())
                     publishChat()
                 }
             } finally {
@@ -7910,8 +7935,6 @@ class MainActivity : ComponentActivity() {
             val reconnects = visibleTimeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
             val oldReconnects = chatState.timeline.filterIsInstance<app.daiyu.android.timeline.ChatTimelineEntry.Reconnect>()
             val currentReceipts = currentToolReceiptKey()
-            val receiptPending = !toolReceiptReadFailed && toolReceiptRead?.isActive == true &&
-                toolReceiptRequested?.canDisplayFor(currentReceipts) == true
             val retainedReceipts = toolReceiptKey?.let { loaded ->
                 toolReceiptSnapshot?.displayReader(loaded, currentReceipts, controller::runState, controller::runStopping)
             }
@@ -7922,8 +7945,7 @@ class MainActivity : ComponentActivity() {
                 retainedReceipts?.invoke(message, block) ?: if (receiptsReady && block.result != null) null else {
                     val live = displayLiveOwner(WorkStepOwnerUi(message.conversationId.value, message.runId.value, message.id.value))
                     app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(message, block,
-                        liveState = live?.let(controller::runState), stopping = live?.let(controller::runStopping) == true,
-                        receiptPending = receiptPending)
+                        liveState = live?.let(controller::runState), stopping = live?.let(controller::runStopping) == true)
                 }
             }
             val retainedDisplayReceipts = toolReceiptKey?.let { loaded ->
@@ -7939,8 +7961,7 @@ class MainActivity : ComponentActivity() {
                     val live = displayLiveOwner(owner)
                     displayReceiptSources[owner]?.let { source ->
                         app.daiyu.android.ui.RetainedToolOutcomes.pendingProjection(source.status, block,
-                            liveState = live?.let(controller::runState), stopping = live?.let(controller::runStopping) == true,
-                            receiptPending = receiptPending)
+                            liveState = live?.let(controller::runState), stopping = live?.let(controller::runStopping) == true)
                     }
                 }
             }

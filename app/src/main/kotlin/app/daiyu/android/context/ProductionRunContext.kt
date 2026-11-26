@@ -3,7 +3,8 @@ package app.daiyu.android.context
 import app.daiyu.android.diagnostics.RuntimeDiagnostics
 import app.daiyu.android.domain.*
 import app.daiyu.android.domain.context.ContextRevision
-import app.daiyu.android.domain.context.estimateTokens
+import app.daiyu.android.domain.context.CodexContextPolicy
+import app.daiyu.android.domain.context.CodexTokenEstimate
 import app.daiyu.android.domain.runtime.*
 import java.util.UUID
 
@@ -43,7 +44,12 @@ internal class ProductionRunContext(
     }
     override val windowTokens = checkNotNull(policy.contextTokens)
     override val sendBudgetTokens = checkNotNull(policy.sendBudgetTokens).coerceAtLeast(0)
-    override val pressureThresholdTokens get() = policy.compactSpec?.thresholdTokens
+    override val pressureThresholdTokens get() = CodexContextPolicy.autoCompactLimit(windowTokens, policy.triggerPercent)
+    override fun automaticCompactionDecision(input: Long, threshold: Long, attempted: Boolean) {
+        RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.CONTEXT_PRESSURE,
+            if (attempted) RuntimeDiagnostics.Code.BEGIN else RuntimeDiagnostics.Code.THROTTLED,
+            size = threshold, count = input)
+    }
     private var definitions = emptyList<ToolDefinition>()
     override fun headerIdentity(tools: List<ToolDefinition>): String {
         definitions = tools.toList()
@@ -52,8 +58,8 @@ internal class ProductionRunContext(
             .joinToString("") { "%02x".format(it.toInt() and 255) }
     }
     override fun fixedSurfaceTokens(history: List<Message>): Long =
-        app.daiyu.android.domain.context.HarnessTokenEstimate.system(systemPrompt) +
-            TokenTailCompression.historyTokens(MessageHistory.expand(history))
+        CodexTokenEstimate.text(systemPrompt) +
+            TokenTailCompression.codexHistoryTokens(MessageHistory.expand(history))
     @Volatile private var cancellation: ContextPreparationCancellation? = null
     @Volatile private var lastActivity: app.daiyu.android.timeline.CompressionActivity? = null
     private var boundary: app.daiyu.android.timeline.TimelineAnchor? = null
@@ -71,7 +77,7 @@ internal class ProductionRunContext(
     override fun cancel() { cancellation?.cancel() }
     override fun localTokens(history: List<Message>, tools: List<ToolDefinition>): Long {
         definitions = tools.toList()
-        return fixedSurfaceTokens(history) + TokenTailCompression.toolTokens(tools)
+        return fixedSurfaceTokens(history) + TokenTailCompression.toolTokens(tools, codex = true)
     }
 
     override fun compact(history: List<Message>, billedTokens: Long?, localTokens: Long,
@@ -109,7 +115,7 @@ internal class ProductionRunContext(
         requests: RunSummaryRequests, cancelled: () -> Boolean, overflow: Boolean): List<Message>? {
         val logical = MessageHistory.expand(history)
         val cut = TokenTailCompression.selectStart(logical, windowTokens, billedTokens, localTokens,
-            overflow = overflow || manualRetention, reservedCompletionTokens = policy.outputReservationTokens)
+            overflow = overflow || manualRetention, reservedCompletionTokens = policy.outputReservationTokens, codex = true)
         if (cut <= 0 || cancelled()) return null
         fun usage(): BoundSummaryUsagePort {
             val request = requests.create()
@@ -129,7 +135,7 @@ internal class ProductionRunContext(
                 anchor = boundary ?: app.daiyu.android.timeline.TimelineAnchor.at(logical, logical.lastIndex))
             lastActivity = activity
             progress(activity)
-            val prefixTokens = TokenTailCompression.historyTokens(prefix, includeLatestScreen = false)
+            val prefixTokens = TokenTailCompression.codexHistoryTokens(prefix, includeLatestScreen = false)
             val text = HarnessContextSummarizer(model, cancellation, definitions, systemPrompt,
                 checkpointTargetTokens = compactionCheckpointTarget(prefixTokens),
                 nextModel = model.rebind?.let { rebind -> { rebind(usage()) } }).summarize(
@@ -142,7 +148,9 @@ internal class ProductionRunContext(
             val result = logical.take(systemCount) + summary + logical.drop(cut)
             val candidateTokens = this.localTokens(result, emptyList())
             val originalTokens = this.localTokens(history, emptyList())
-            val reduced = candidateTokens < originalTokens
+            // A negligible shrink does not create a successful checkpoint or invalidate cloud usage.
+            val requiredSaving = maxOf(1L, prefixTokens / 10)
+            val reduced = originalTokens - candidateTokens >= requiredSaving
             RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.SUMMARY_REDUCTION,
                 if (reduced) RuntimeDiagnostics.Code.SUMMARY_REDUCED else RuntimeDiagnostics.Code.SUMMARY_NOT_REDUCED,
                 count = originalTokens, size = candidateTokens)

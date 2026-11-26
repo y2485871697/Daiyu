@@ -5,7 +5,6 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.test.*
 import app.daiyu.android.domain.ModelEvent
-import app.daiyu.android.ui.screens.chat.conversation.ComposerPhase
 import app.daiyu.android.ui.screens.chat.conversation.rememberChatContextUsage
 import java.util.concurrent.TimeUnit
 
@@ -25,7 +24,7 @@ class ChatContextUsageRestoreTest : WiredActivityTestCase() {
         val ready = mutableStateOf(false)
         fun mount() = mainThread { activity.setContent {
             val usage = rememberChatContextUsage(fixture.controller, conversation.id, 0, 0, 0,
-                ComposerPhase.IDLE, ready = ready.value)
+                ready = ready.value)
             BasicText(usage.tokensLabel())
         } }
         mount()

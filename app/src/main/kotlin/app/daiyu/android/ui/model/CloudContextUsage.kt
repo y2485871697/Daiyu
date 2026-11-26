@@ -54,10 +54,5 @@ internal data class CloudContextUsageUi(val inputTokens: Long? = null, val windo
 }
 
 /** Input is already normalized by the transport and includes both cache subsets. */
-internal fun acceptedContextInput(usage: ModelEvent.Usage, window: Long?): Long? {
-    val input = usage.inputTokens?.takeIf { it >= 0 } ?: return null
-    if (window != null && window > 0 && input.toDouble() > window.toDouble() * 1.3) return null
-    val cached = usage.cachedTokens
-    if (cached != null && (cached > input || (window != null && window > 0 && cached > window))) return null
-    return input
-}
+internal fun acceptedContextInput(usage: ModelEvent.Usage, window: Long?): Long? =
+    app.daiyu.android.domain.context.CodexContextPolicy.acceptedInput(usage, window)

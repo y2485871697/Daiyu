@@ -26,11 +26,13 @@ data class ContextMeterCheckpoint(
     val surfaceTokens: Long = 0,
     val inputFixedSurfaceTokens: Long? = null,
     val overflowRetries: Int = 0,
+    val cloudInputTokens: Long? = null,
+    val cloudCompactionAttempted: Boolean = false,
 ) {
     init {
         require(surfaceTokens >= 0 && overflowRetries >= 0)
         require(listOf(anchorEstimate, anchorSurface, anchorUsageTotal, pressureTokens,
-            sampledSurfaceTokens, inputFixedSurfaceTokens).all { it == null || it >= 0 })
+            sampledSurfaceTokens, inputFixedSurfaceTokens, cloudInputTokens).all { it == null || it >= 0 })
     }
 }
 
@@ -60,9 +62,8 @@ interface RunContextRuntime {
     val windowTokens: Long
     val sendBudgetTokens: Long get() = windowTokens
     val initialMeter: ContextMeterCheckpoint? get() = null
-    val pressureThresholdTokens: Long? get() = runCatching {
-        app.daiyu.android.domain.context.HarnessContextPolicy.resolve(windowTokens, windowTokens - sendBudgetTokens).thresholdTokens
-    }.getOrNull()
+    val pressureThresholdTokens: Long? get() =
+        app.daiyu.android.domain.context.CodexContextPolicy.autoCompactLimit(windowTokens)
     fun headerIdentity(tools: List<ToolDefinition>): String? = null
     fun fixedSurfaceTokens(history: List<Message>): Long = localTokens(history, emptyList())
     fun localTokens(history: List<Message>, tools: List<ToolDefinition>): Long
@@ -78,6 +79,7 @@ interface RunContextRuntime {
     fun compactOverflowRequests(history: List<Message>, billedTokens: Long?, localTokens: Long,
         requests: RunSummaryRequests, cancelled: () -> Boolean): List<Message>? =
         compactRequests(history, billedTokens, localTokens, requests, cancelled)
+    fun automaticCompactionDecision(input: Long, threshold: Long, attempted: Boolean) {}
     fun beginCompaction(boundary: Message) {}
     fun compactionApplied() {}
     fun finishedCompaction() {}

@@ -188,13 +188,17 @@ internal object RetainedToolOutcomes {
                         val outcomes: Map<Result, ToolDisposition> =
                             if (tailStart < 0 || projected.subList(tailStart, projected.size) != physical) emptyMap()
                             else {
-                                val offset = projected.take(tailStart).count { it is MessageBlock.Tool }
+                                val projectedTools = projected.filterIsInstance<MessageBlock.Tool>()
+                                val physicalOffset = projected.take(tailStart).count { it is MessageBlock.Tool }
                                 val ledger = snapshot.tools.associateBy { it.invocation.id }
-                                physical.filterIsInstance<MessageBlock.Tool>().mapIndexedNotNull { position, block ->
+                                val occurrences = projectedTools.groupingBy { it.invocation.id }.eachCount()
+                                projectedTools.mapIndexedNotNull { position, block ->
                                     val record = ledger[block.invocation.id]?.takeIf {
-                                        it.invocation == block.invocation && it.result == block.result
+                                        it.invocation == block.invocation && it.result == block.result &&
+                                            (position >= physicalOffset || (block.result != null && occurrences[block.invocation.id] == 1 &&
+                                                it.disposition in setOf(ToolDisposition.SUCCEEDED, ToolDisposition.FAILED, ToolDisposition.NOT_EXECUTED)))
                                     } ?: return@mapIndexedNotNull null
-                                    Result(block.invocation, block.result, offset + position) to record.disposition
+                                    Result(block.invocation, block.result, position) to record.disposition
                                 }.toMap()
                             }
                         put(owner, outcomes)
@@ -207,34 +211,21 @@ internal object RetainedToolOutcomes {
 
     /** Receipt IO is presentation-only; only exact durable evidence can confirm an outcome. */
     fun pendingProjection(message: Message, block: MessageBlock.Tool,
-        liveState: ExecutionState? = null, stopping: Boolean = false, receiptPending: Boolean = false): ToolReceiptUi? =
+        liveState: ExecutionState? = null, stopping: Boolean = false): ToolReceiptUi? =
         if (message.role != Message.ASSISTANT_ROLE) null else
-            pendingProjection(message.status, block, liveState, stopping, receiptPending)
+            pendingProjection(message.status, block, liveState, stopping)
 
     // The caller must match conversation/run/message before supplying liveState.
     fun pendingProjection(status: RunStatus, block: MessageBlock.Tool,
-        liveState: ExecutionState? = null, stopping: Boolean = false, receiptPending: Boolean = false): ToolReceiptUi? {
+        liveState: ExecutionState? = null, stopping: Boolean = false): ToolReceiptUi? {
         if (block.result == null) {
             if (status != RunStatus.RUNNING || liveState == null || block.invocation.id !in liveState.activeToolCalls ||
                 liveState.phase !in setOf(ExecutionPhase.TOOL_EXECUTING, ExecutionPhase.WAITING_USER)) return null
             return toolReceiptPresentation(ToolDisposition.READY, true, liveState.phase,
                 liveState.pauseRequested, stopping, status, activeCall = true)
         }
-        val projected = if (status != RunStatus.RUNNING || liveState == null || block.invocation.id !in liveState.activeToolCalls)
-            ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN)
-        else toolReceiptPresentation(ToolDisposition.UNKNOWN, liveOwner = true, phase = liveState.phase,
-            pauseRequested = liveState.pauseRequested, stopRequested = stopping, runStatus = status, activeCall = true)
-        if (!receiptPending || status != RunStatus.RUNNING || liveState == null ||
-            liveState.phase == ExecutionPhase.IDLE || liveState.phase == ExecutionPhase.TERMINAL ||
-            projected.activity != ToolActivityUi.UNKNOWN || stopping ||
-            status == RunStatus.STOPPED || status == RunStatus.INTERRUPTED || liveState?.phase == ExecutionPhase.RECONNECTING)
-            return projected
-        val activity = when {
-            liveState?.phase == ExecutionPhase.PAUSED -> ToolActivityUi.PAUSED
-            liveState?.pauseRequested == true -> ToolActivityUi.PAUSING
-            else -> ToolActivityUi.RUNNING
-        }
-        return ToolReceiptUi(WorkStepState.PENDING, activity)
+        // The tool has returned. Pending receipt IO and run-level activity cannot make it execute again.
+        return ToolReceiptUi(WorkStepState.UNKNOWN, ToolActivityUi.UNKNOWN)
     }
 
     fun projectionReader(database: ConversationDatabase, messages: List<Message>,

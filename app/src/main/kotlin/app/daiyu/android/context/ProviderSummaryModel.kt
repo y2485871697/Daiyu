@@ -162,8 +162,8 @@ internal class ProviderSummaryModelPort(
         }
         val system = listOf(systemPrompt, leadingSystem.flatMap { it.blocks }.filterIsInstance<MessageBlock.Text>()
             .joinToString("") { it.text }).filter { it.isNotEmpty() }.joinToString("\n\n")
-        val inputTokens = app.daiyu.android.domain.context.HarnessTokenEstimate.system(system) +
-            TokenTailCompression.historyTokens(messages, includeLatestScreen = false) + TokenTailCompression.toolTokens(tools)
+        val inputTokens = app.daiyu.android.domain.context.CodexTokenEstimate.text(system) +
+            TokenTailCompression.codexHistoryTokens(messages, includeLatestScreen = false) + TokenTailCompression.toolTokens(tools, codex = true)
         require(inputTokens <= configuration.inputBudgetTokens) { "摘要模型输入超过其配置预算；保留原文" }
         usagePort?.let { port ->
             require(frozen.all { it.conversationId.value == port.conversationId })

@@ -524,14 +524,13 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             checkpoint()
             return acceptedUsers != null
         }
-        fun compactAtBoundary(pressureTrigger: Boolean = false, overflow: Boolean = false,
+        fun compactAtBoundary(cloudPressure: Long? = null,
             boundaryRuntime: RunContextRuntime? = null): Boolean {
             val base = boundaryRuntime ?: contextRuntime?.compressionSnapshot() ?: return false
             if (!base.canCompact) return false
-            val pressure = contextState?.pressure
             val selected = synchronized(terminalLock) {
                 if (stopped.get() || terminalReserved || pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) return false
-                if (pendingCompact == null && !pressureTrigger && !overflow && (!base.automatic || pressure == null)) return false
+                if (pendingCompact == null && cloudPressure == null) return false
                 (pendingCompact to pauseEpoch).also { pendingCompact = null; compacting = true }
             }
             val manual = selected.first
@@ -540,7 +539,6 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             var applied = false
             var error: String? = null
             var runtime: RunContextRuntime? = null
-            var admissionAttempted = false
             var persistenceFailure: PersistenceException? = null
             val compactionBoundary = segmentHistory.project(current)
             val admittedRequests = hashSetOf<String>()
@@ -553,19 +551,23 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 runtime = selectedRuntime
                 compactingRuntime = selectedRuntime
                 if (cancelled()) return false
+                if (cloudPressure != null) {
+                    val state = checkNotNull(contextState)
+                    contextState = state.copy(meter = checkNotNull(state.meter).copy(cloudCompactionAttempted = true))
+                    persistSummary() // Consume the receipt even if there is no useful range or the summary fails.
+                }
                 selectedRuntime.beginCompaction(compactionBoundary)
                 val before = meterHistory()
                 val historyLocal = selectedRuntime.localTokens(before, (tool as? CatalogTool)?.definitions.orEmpty())
                 val anchor = contextState?.calibration ?: contextState?.input
                 val local = anchor?.let { (it.localTokens + historyLocal - it.historyTokens).coerceAtLeast(0) } ?: historyLocal
-                val billed = anchor?.billedTokens?.let { (it + local - anchor.localTokens).coerceAtLeast(0) }
+                val billed = cloudPressure ?: anchor?.billedTokens
                 if (cancelled()) return false
                 val summaryRequests = object : RunSummaryRequests {
                     override fun create() = RequestCheckpoint(UUID.randomUUID().toString(), UUID.randomUUID().toString(), owner, RequestOperation.NEXT)
                     override fun admit(request: RequestCheckpoint) {
                         persistenceFailure?.let { throw it }
                         check(!cancelled() && admittedRequests.add(request.requestId))
-                        admissionAttempted = true
                         contextState = checkNotNull(contextState).copy(pressure = null,
                             summaries = checkNotNull(contextState).summaries + request)
                         persistSummary()
@@ -578,8 +580,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         persistSummary(snapshot(usageSnapshot = next)); usage = next
                     }
                 }
-                val candidate = if (overflow) selectedRuntime.compactOverflowRequests(before, billed, local, summaryRequests, cancelled)
-                    else selectedRuntime.compactRequests(before, billed, local, summaryRequests, cancelled)
+                val candidate = selectedRuntime.compactRequests(before, billed, local, summaryRequests, cancelled)
                 persistenceFailure?.let { throw it }
                 if (candidate == null || cancelled()) return false
                 require(candidate.all { it.conversationId == initial.conversationId })
@@ -591,7 +592,8 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 outputs = emptyList()
                 transportCheckpoint = null
                 contextState = checkNotNull(contextState).let { state -> state.copy(input = null, calibration = null, pressure = null,
-                    meter = (state.meter ?: ContextMeterCheckpoint()).copy(inputFixedSurfaceTokens = null),
+                    meter = (state.meter ?: ContextMeterCheckpoint()).copy(inputFixedSurfaceTokens = null,
+                        cloudInputTokens = null, cloudCompactionAttempted = true),
                     compactions = state.compactions + 1) }
                 val expected = snapshot()
                 val store = options.runtimeStore
@@ -631,23 +633,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 try { (runtime ?: base).finishedCompaction() } catch (_: Exception) { }
                 compactingRuntime = null
                 try { manual?.completed?.invoke(applied, error) } catch (_: Exception) { }
-                if (!admissionAttempted && persistenceFailure == null && pressure != null && !cancelled() && contextState?.pressure == pressure) {
-                    contextState = checkNotNull(contextState).copy(pressure = null)
-                    checkpoint()
-                }
             }
-        }
-        fun contextSize(boundaryRuntime: RunContextRuntime? = contextRuntime): Long {
-            val runtime = boundaryRuntime ?: return 0
-            val local = runtime.localTokens(meterHistory(), requestDefinitions)
-            val header = runtime.headerIdentity(requestDefinitions)
-            val meter = contextState?.meter
-            if (meter?.anchorHeader != null && meter.anchorHeader == header &&
-                meter.anchorEstimate != null && meter.anchorSurface != null) {
-                val baseline = maxOf(meter.anchorEstimate, meter.anchorUsageTotal ?: meter.anchorEstimate)
-                return (baseline + local - meter.anchorSurface).coerceAtLeast(0)
-            }
-            return local
         }
         var preparedContextHeader: String? = null
         var contextHeaderPrepared = false
@@ -674,29 +660,16 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
             if (synchronized(terminalLock) { pendingCompact != null }) compactAtBoundary(boundaryRuntime = runtime)
             if (pressureChecked || !runtime.automatic || !runtime.canCompact) return
             pressureChecked = true
+            val meter = contextState?.meter ?: return
+            val input = meter.cloudInputTokens ?: return
+            if (meter.anchorHeader != preparedContextHeader) return
             val threshold = runtime.pressureThresholdTokens ?: return
-            repeat(app.daiyu.android.domain.context.HarnessContextPolicy.COMPACTION_RETRIES + 1) {
-                if (contextSize(runtime) < threshold) return
-                if (!compactAtBoundary(pressureTrigger = true, boundaryRuntime = runtime)) return
+            if (input < threshold || meter.cloudCompactionAttempted) {
+                runtime.automaticCompactionDecision(input, threshold, attempted = false)
+                return
             }
-            // Harness pre-step pressure compression is best-effort; provider rejection owns overflow recovery.
-        }
-        fun recoverContextOverflow(failure: Exception): Boolean {
-            val rejected = failure as? ModelRequestException ?: return false
-            if (rejected.failure != ModelFailure.CONTEXT_LIMIT && rejected.diagnostic?.rejection != RequestRejection.CONTEXT_LIMIT) return false
-            val runtime = contextRuntime?.compressionSnapshot() ?: return false
-            val state = contextState ?: return false
-            val attempts = state.meter?.overflowRetries ?: 0
-            if (!runtime.automatic || !runtime.canCompact || attempts >= app.daiyu.android.domain.context.HarnessContextPolicy.MAX_OVERFLOW_RETRIES ||
-                stopped.get() || pauseRequested || terminalReserved || breakStream) return false
-            contextState = state.copy(meter = (state.meter ?: ContextMeterCheckpoint()).copy(overflowRetries = attempts + 1))
-            requestUnconfirmed = false
-            checkpoint()
-            if (!compactAtBoundary(overflow = true, boundaryRuntime = runtime)) return false
-            if (stopped.get() || pauseRequested || terminalReserved || breakStream) return false
-            pressureChecked = true
-            checkpoint()
-            return true
+            runtime.automaticCompactionDecision(input, threshold, attempted = true)
+            compactAtBoundary(cloudPressure = input, boundaryRuntime = runtime)
         }
         fun open(): ModelSession {
             while (true) {
@@ -736,7 +709,6 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         }
                         if (invalidated) continue
                         if (failure is ModelPreparationChangedException) { pressureChecked = false; continue }
-                        if (recoverContextOverflow(failure)) continue
                         if (pauseRequested || breakStream || supplements.isNotEmpty() || pendingSupplements.isNotEmpty()) {
                             boundary(); pressureChecked = false; continue
                         }
@@ -1355,11 +1327,6 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     active = open()
                     continue
                 }
-                if (requestFailure != null && pending.isEmpty() && !effectiveOutput && recoverContextOverflow(requestFailure)) {
-                    cancelSession(active)
-                    active = open()
-                    continue
-                }
                 if (requestFailure != null && (pauseRequested || breakStream)) {
                     cancelSession(active); boundary(); pressureChecked = false; active = open(); continue
                 }
@@ -1370,10 +1337,20 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     val surface = runtime.localTokens(meterHistory(), requestDefinitions)
                     val estimate = surface
                     val receipt = usage.lastOrNull { it.source == UsageRequestSource.MAIN && it.request == request }?.snapshot
-                    val reportedTotal = receipt?.inputTokens?.let { prompt -> receipt.outputTokens?.let { Math.addExact(prompt, it) } }
-                    contextState = state.copy(meter = (state.meter ?: ContextMeterCheckpoint()).copy(
-                        anchorHeader = runtime.headerIdentity(requestDefinitions), anchorEstimate = estimate,
-                        anchorSurface = surface, anchorUsageTotal = reportedTotal, overflowRetries = 0))
+                    val reportedTotal = receipt?.inputTokens?.let { prompt ->
+                        receipt.outputTokens?.takeIf { it >= 0 && prompt in 0..Long.MAX_VALUE - it }?.let { prompt + it }
+                    }
+                    val cloudInput = receipt?.let {
+                        app.daiyu.android.domain.context.CodexContextPolicy.acceptedInput(it, runtime.windowTokens)
+                    }
+                    val meter = state.meter ?: ContextMeterCheckpoint()
+                    val header = runtime.headerIdentity(requestDefinitions)
+                    val threshold = runtime.pressureThresholdTokens
+                    val rearm = cloudInput != null && threshold != null && cloudInput < threshold
+                    contextState = state.copy(meter = meter.copy(anchorHeader = header, anchorEstimate = estimate,
+                        anchorSurface = surface, anchorUsageTotal = reportedTotal, overflowRetries = 0,
+                        cloudInputTokens = cloudInput,
+                        cloudCompactionAttempted = meter.anchorHeader == header && meter.cloudCompactionAttempted && !rearm))
                 }
                 pressureChecked = false
                 round++

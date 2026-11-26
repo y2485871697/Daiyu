@@ -95,4 +95,12 @@ class TokenTailEstimateTest {
         assertEquals(9L, TokenTailCompression.messageTokens(reasoning))
     }
 
+    @Test fun codexPricesModelVisibleUtf8OncePerItemAndIgnoresTransportMetadata() {
+        val row = Message(MessageId("a"), ConversationId("c"), RunId("r"), "user",
+            listOf(MessageBlock.Text("part-1", "中"), MessageBlock.Text("part-2", "文😀")), RunStatus.COMPLETED)
+        assertEquals(3L, TokenTailCompression.codexHistoryTokens(listOf(row)))
+        assertEquals(3L, TokenTailCompression.codexHistoryTokens(listOf(row.copy(protocolItems = listOf(
+            """{"type":"reasoning","summary":[{"type":"summary_text","text":"not replayed"}]}""")))) )
+    }
+
 }

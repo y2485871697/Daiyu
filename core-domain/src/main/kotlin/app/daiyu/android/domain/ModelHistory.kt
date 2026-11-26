@@ -1,9 +1,32 @@
 package app.daiyu.android.domain
 
+import app.daiyu.android.domain.tools.toolFailureDiagnostic
+
 /** A reported unknown outcome is not a successful execution receipt. ToolRecord/ledger stay
  * UNKNOWN; this payload only closes the model protocol and explicitly forbids replay. */
 object ModelHistory {
-    const val UNKNOWN_TOOL_RESULT = "{\"ok\":false,\"outcome\":\"UNKNOWN\",\"replay_allowed\":false,\"message\":\"工具结果未知；禁止重放，请仅使用只读方式核实\"}"
+    private const val LEGACY_UNKNOWN_TOOL_RESULT = "{\"ok\":false,\"outcome\":\"UNKNOWN\",\"replay_allowed\":false,\"message\":\"工具结果未知；禁止重放，请仅使用只读方式核实\"}"
+    const val UNKNOWN_TOOL_RESULT = "{\"ok\":false,\"outcome\":\"UNKNOWN\",\"replay_allowed\":false,\"message\":\"仅这项操作的结果未知。不要重放或用其它工具执行等价操作；可只读核实这项结果，并继续不依赖它的其余任务。\"}"
+
+    private val terminalJob = Regex("terminal_outcome_unknown_no_resend:job_id=([a-f0-9-]{36})")
+    private val reasonPrefix = UNKNOWN_TOOL_RESULT.dropLast(1) + ",\"reason\":\""
+    private val jobPrefix = UNKNOWN_TOOL_RESULT.dropLast(1) + ",\"job_id\":\""
+
+    fun unknownToolResult(code: String): String = when {
+        toolFailureDiagnostic(code) != null -> reasonPrefix + code + "\"}"
+        else -> terminalJob.matchEntire(code)?.let { jobPrefix + it.groupValues[1] + "\"}" } ?: UNKNOWN_TOOL_RESULT
+    }
+
+    fun isUnknownToolResult(result: String?): Boolean {
+        if (result == UNKNOWN_TOOL_RESULT || result == LEGACY_UNKNOWN_TOOL_RESULT) return true
+        if (result == null || !result.endsWith("\"}")) return false
+        return when {
+            result.startsWith(reasonPrefix) -> toolFailureDiagnostic(result.substring(reasonPrefix.length, result.length - 2)) != null
+            result.startsWith(jobPrefix) -> terminalJob.matches("terminal_outcome_unknown_no_resend:job_id=" +
+                result.substring(jobPrefix.length, result.length - 2))
+            else -> false
+        }
+    }
 
     /** 旧终态的 null 结果按未知处理，活动调用保持待定。
      * 保留物理所有者和分段供授权及 CAS 使用，仅丢弃受影响分段的协议快照，再从块重建单一结果。
@@ -14,11 +37,11 @@ object ModelHistory {
         return history.map { row ->
             if (row.role != Message.ASSISTANT_ROLE || row.status == RunStatus.RUNNING) return@map row
             fun unknown(block: MessageBlock) = block is MessageBlock.Tool &&
-                (block.result == null || block.result == UNKNOWN_TOOL_RESULT)
+                (block.result == null || isUnknownToolResult(block.result))
             val affected = row.blocks.any(::unknown) || row.historySegments.any { it.blocks.any(::unknown) }
             if (!affected) return@map row
             fun close(blocks: List<MessageBlock>) = blocks.map { block ->
-                if (block is MessageBlock.Tool && block.result == null) block.copy(result = UNKNOWN_TOOL_RESULT) else block
+                if (block is MessageBlock.Tool && (block.result == null || block.result == LEGACY_UNKNOWN_TOOL_RESULT)) block.copy(result = UNKNOWN_TOOL_RESULT) else block
             }
             row.copy(
                 blocks = close(row.blocks),

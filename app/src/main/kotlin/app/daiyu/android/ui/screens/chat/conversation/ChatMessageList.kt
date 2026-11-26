@@ -658,6 +658,7 @@ internal fun ChatMessageList(
             clearanceLayout.remeasurement = null
         }
     }
+    val chatView = LocalView.current
     val disclosureViewport = remember(listState) {
         WorkflowDisclosureViewport(
             follows = { followBottom && !currentDragging },
@@ -714,6 +715,19 @@ internal fun ChatMessageList(
                 consumed
             },
         )
+    }
+    DisposableEffect(chatView, disclosureViewport) {
+        // Positioned callbacks only mark work. Use the latest geometry before presenting this frame.
+        val observer = chatView.viewTreeObserver
+        val listener = android.view.ViewTreeObserver.OnPreDrawListener {
+            disclosureViewport.correctBeforeDraw()
+            true
+        }
+        observer.addOnPreDrawListener(listener)
+        onDispose {
+            if (observer.isAlive) observer.removeOnPreDrawListener(listener)
+            else chatView.viewTreeObserver.removeOnPreDrawListener(listener)
+        }
     }
     LaunchedEffect(disclosureViewport) {
         snapshotFlow { disclosureViewport.active?.let { it to it.outputChanged() } }
@@ -849,7 +863,6 @@ internal fun ChatMessageList(
             }
         }
     }
-    val chatView = LocalView.current
     val latestCorrection by rememberUpdatedState { correctFollowClearance() }
     val followCorrection = remember(clearanceLayout, chatView) { Runnable {
         clearanceLayout.correctionPosted = false

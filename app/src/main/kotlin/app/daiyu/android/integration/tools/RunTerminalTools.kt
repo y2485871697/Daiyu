@@ -66,8 +66,10 @@ internal class RunTerminalTools(
 
     /** Include ledger reservation/persistence UNKNOWN, not just the transport's result. */
     fun observeOutcomes(results: List<ToolDispatchResult>) {
-        if (results.any { it.outcome is DispatchOutcome.Unknown }) binding.markOutcomeUnknown()
+        if (results.any { it.outcome is DispatchOutcome.Unknown }) markUnknown()
     }
+
+    fun markUnknown() = binding.markOutcomeUnknown()
 
     private fun stepTool(): RegisteredTool {
         val byId = binding.plan.steps.associateBy { it.id }

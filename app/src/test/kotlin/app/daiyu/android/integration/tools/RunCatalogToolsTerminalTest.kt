@@ -209,7 +209,7 @@ class RunCatalogToolsTerminalTest {
         }
     }
 
-    @Test fun reservationUnknownInNonterminalBatchMemberPoisonsTerminalWithoutExecutingIt() {
+    @Test fun reservationUnknownInNonterminalBatchMemberDoesNotPoisonAnIndependentTerminalRead() {
         for (start in listOf(false, true)) Fixture().use { f ->
             f.tools.definitions
             f.dispatch(f.step("open"), f.audit())
@@ -224,7 +224,7 @@ class RunCatalogToolsTerminalTest {
             assertEquals(DispatchOutcome.Unknown("unknown_effect_protected"), batch[1].outcome)
             assertEquals(before, f.store.transaction { it.toList() })
             assertEquals(1, f.auditContexts.size); assertTrue(f.connection.callers.isEmpty())
-            assertEquals(DispatchOutcome.Unknown("terminal_outcome_unknown_no_resend"), f.dispatch(f.step("input")).single().outcome)
+            assertTrue(f.dispatch(f.read()).single().outcome is DispatchOutcome.Confirmed)
             assertEquals(0, f.connection.writes.get())
         }
     }

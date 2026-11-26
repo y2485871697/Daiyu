@@ -5,6 +5,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.locks.LockSupport
 import app.daiyu.android.domain.runtime.*
 import app.daiyu.android.domain.tools.DispatchOutcome
+import app.daiyu.android.domain.tools.ToolDispatchResult
 import app.daiyu.android.domain.tools.jsonQuote
 import app.daiyu.android.domain.tools.BarrierOffer
 import app.daiyu.android.domain.tools.ToolFailureStage
@@ -1422,7 +1423,12 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                     pending.forEach { records[it.id] = ToolRecord(it, ToolDisposition.IN_FLIGHT) }
                     checkpoint()
                     if (stopped.get() || terminalReserved) throw InterruptedException()
-                    val receipts = try {
+                    val repeatsUnknown = pending.any { (it.name to it.arguments) in unknownOperations }
+                    val receipts = if (repeatsUnknown) pending.map { call ->
+                        ToolDispatchResult(call.id, DispatchOutcome.NotExecuted(
+                            if ((call.name to call.arguments) in unknownOperations) "unknown_effect_no_replay"
+                            else "batch_contains_unknown_replay"))
+                    } else try {
                         val start = if (allowBarrier) {
                             diagnostic(RunDiagnosticStage.TOOL_EXECUTION) { receiptBatch.start(current, pending.toList(), stopped::get) }
                         } else {
@@ -1455,43 +1461,44 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                         if (failure is PersistenceException || failure is InterruptedException) throw failure
                         pendingCheckpoint = null
                         execution = execution.copy(activeToolCalls = emptySet())
-                        pending.forEach {
-                            records[it.id] = ToolRecord(it, ToolDisposition.UNKNOWN)
-                            unknownOperations.add(it.name to it.arguments)
-                        }
-                        checkpoint()
-                        throw UnknownToolOutcomeException(listOf(toolFailureCode(ToolFailureStage.BATCH, failure)))
+                        val code = toolFailureCode(ToolFailureStage.BATCH, failure)
+                        pending.map { ToolDispatchResult(it.id, DispatchOutcome.Unknown(code)) }
                     }
-                    val known = linkedMapOf<ToolCallId, String>()
-                    val uncertainCodes = linkedSetOf<String>()
+                    // An unresolved user-input barrier is not an ordinary tool result.
+                    val unknownAnswer = receipts.singleOrNull()?.outcome as? DispatchOutcome.Unknown
+                    if (pending.singleOrNull()?.name == "ask_user" && unknownAnswer != null) {
+                        val call = pending.single()
+                        records[call.id] = ToolRecord(call, ToolDisposition.UNKNOWN)
+                        throw UnknownToolOutcomeException(listOf(unknownAnswer.code))
+                    }
+                    val reported = linkedMapOf<ToolCallId, String>()
                     pending.zip(receipts).forEach { (call, receipt) ->
                         when (val outcome = receipt.outcome) {
                             is DispatchOutcome.Confirmed -> {
                                 records[call.id] = ToolRecord(call,
                                     if (outcome.isError) ToolDisposition.FAILED else ToolDisposition.SUCCEEDED,
                                     outcome.payload)
-                                known[call.id] = outcome.payload
+                                reported[call.id] = outcome.payload
                             }
                             is DispatchOutcome.NotExecuted -> {
                                 val result = notExecutedToolResult(call.name, outcome.code)
                                 records[call.id] = ToolRecord(call, ToolDisposition.NOT_EXECUTED, result)
-                                known[call.id] = result
+                                reported[call.id] = result
                             }
                             is DispatchOutcome.Unknown -> {
-                                execution = execution.copy(activeToolCalls = execution.activeToolCalls - call.id)
                                 records[call.id] = ToolRecord(call, ToolDisposition.UNKNOWN)
                                 unknownOperations.add(call.name to call.arguments)
-                                uncertainCodes += outcome.code
+                                reported[call.id] = ModelHistory.unknownToolResult(outcome.code)
                             }
                         }
                     }
-                    results.putAll(known)
-                    outputs = known.map { ToolOutput(it.key, it.value) }
+                    execution = execution.copy(activeToolCalls = emptySet())
+                    outputs = reported.map { (id, result) -> ToolOutput(id, result) }
+                    // UNKNOWN closes the model protocol only; it never confirms the ledger or tool record.
                     apply(current.copy(blocks = current.blocks.map {
-                        if (it is MessageBlock.Tool && it.invocation.id in known)
-                            it.copy(result = known.getValue(it.invocation.id)) else it
+                        if (it is MessageBlock.Tool && it.invocation.id in reported)
+                            it.copy(result = reported.getValue(it.invocation.id)) else it
                     }))
-                    if (uncertainCodes.isNotEmpty()) throw UnknownToolOutcomeException(uncertainCodes.toList())
                 } else if (batch != null) {
                     pending.forEach { records[it.id] = ToolRecord(it, ToolDisposition.IN_FLIGHT) }
                     checkpoint()
@@ -1603,7 +1610,7 @@ class ChatRunner private constructor(private val model: ModelPort, private val s
                 if (failure is TransportReconnectDeadlineException) failure.detailedMessage else
                 if (failure is RepetitiveOutputException) "检测到模型${failure.surface}持续高度重复，已中止本次请求；已接收内容和工具结果已保留" else if (failure is ModelRequestException) failure.detailedMessage else "请求失败，请检查模型设置或网络"
             // Close only ended, uncertain executions. This is a reported UNKNOWN, not a
-            // result cache or a ledger confirmation; the current run still stops here.
+            // result cache or a ledger confirmation; terminal cleanup is not a replay.
             val unknownIds = records.values.filter { it.disposition == ToolDisposition.UNKNOWN }
                 .map { it.invocation.id }.toSet()
             val next = current.copy(status = status,
@@ -1673,6 +1680,8 @@ class PersistenceException(cause: Throwable) : RuntimeException("Conversation pe
 
 private fun notExecutedToolResult(toolName: String, code: String): String {
     val original = "{\"ok\":false,\"executed\":false,\"error\":" + jsonQuote(code) + "}"
+    if (code == "batch_contains_unknown_replay" || code == "unknown_effect_no_replay" || code == "unknown_effect_protected")
+        return original.dropLast(1) + ",\"message\":\"未执行本次调用。不要重放结果未知的操作；可将独立操作或只读核实另行提交。\"}"
     if (toolName !in setOf("screen", "screen_action", "launch_app")) return original
     val hint = when (code) {
         "APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED", "NO_ACTIVE_EXTERNAL_WINDOW" ->

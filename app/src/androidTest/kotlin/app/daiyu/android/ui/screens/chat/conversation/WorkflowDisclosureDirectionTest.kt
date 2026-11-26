@@ -139,9 +139,17 @@ class WorkflowDisclosureDirectionTest : WiredActivityTestCase() {
         mountList(following = true, lower = true, status = RunStatus.COMPLETED, streaming = false)
         assertHalf(lower = true)
         val anchor = bottom()
-        touchHeader(); ui.waitForIdle()
-        assertDirection(true)
-        assertEquals(anchor, bottom(), 2f)
+        val initialHeight = anchor - top()
+        ui.mainClock.autoAdvance = false
+        try {
+            touchHeader()
+            repeat(60) { frame ->
+                ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
+                assertDirection(true)
+                assertEquals("The lower edge must stay anchored on frame $frame: ${geometry()}", anchor, bottom(), 2f)
+            }
+        } finally { ui.mainClock.autoAdvance = true }
+        assertTrue("The card must actually expand", bottom() - top() > initialHeight)
     }
 
     fun testStoppedReplyAtBottomUsesTheUpperHalfFallback() {

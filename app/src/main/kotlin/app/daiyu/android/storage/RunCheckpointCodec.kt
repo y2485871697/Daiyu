@@ -258,8 +258,16 @@ internal object RunCheckpointCodec {
             require(value.tools.count { it.disposition == ToolDisposition.IN_FLIGHT } == 1)
         }
         require(value.outputs.map { it.callId }.distinct().size == value.outputs.size)
-        value.outputs.forEach { out -> require(value.tools.any { it.invocation.id == out.callId &&
-            hasResult(it.disposition) && it.result == out.output }) }
+        val records = value.tools.associateBy { it.invocation.id }
+        val reportedUnknown = m.blocks.filterIsInstance<MessageBlock.Tool>()
+            .filter { ModelHistory.isUnknownToolResult(it.result) }.associateBy { it.invocation.id }
+        value.outputs.forEach { out ->
+            val record = requireNotNull(records[out.callId])
+            require(if (record.disposition == ToolDisposition.UNKNOWN) {
+                val block = reportedUnknown[out.callId]
+                block != null && block.invocation == record.invocation && block.result == out.output
+            } else hasResult(record.disposition) && record.result == out.output)
+        }
     }
     private fun validateReportedReasoning(row: Message) = MessageHistory.validateSegment(
         MessageHistorySegment(row.id, row.role, row.blocks, row.protocolItems, row.createdAt, row.reportedReasoning))

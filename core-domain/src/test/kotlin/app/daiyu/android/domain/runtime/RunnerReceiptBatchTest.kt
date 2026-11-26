@@ -15,14 +15,19 @@ class RunnerReceiptBatchTest {
         var rounds = 0
         var executions = 0
         var outputs = emptyList<ToolOutput>()
+        val received = mutableListOf<List<ToolOutput>>()
         lateinit var runner: ChatRunner
     }
     private fun run(probe: Probe = Probe(), invocations: List<ToolInvocation> = calls,
+        followUp: List<List<ToolInvocation>> = emptyList(),
         execute: (Probe, List<ToolInvocation>, () -> Boolean) -> List<ToolDispatchResult>): Pair<Message, Probe> {
         val port = ModelPort { object : ModelSession {
             override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
-                if (probe.rounds++ == 0) invocations.forEach { sink(ModelEvent.ToolReady(it)) }
-                else { probe.outputs = outputs; sink(ModelEvent.TextFinal("answer", "done")) }
+                val round = probe.rounds++
+                if (round > 0) { probe.outputs = outputs; probe.received += outputs }
+                val batch = if (round == 0) invocations else followUp.getOrNull(round - 1)
+                if (batch != null) batch.forEach { sink(ModelEvent.ToolReady(it)) }
+                else sink(ModelEvent.TextFinal("answer", "done"))
             }
             override fun cancel() {}
         } }
@@ -101,9 +106,9 @@ class RunnerReceiptBatchTest {
         val (result, probe) = run(invocations = listOf(invocation)) { _, batch, _ ->
             listOf(ToolDispatchResult(batch.single().id, DispatchOutcome.Unknown("APPLICATION_WINDOW_NOT_ACTIVE_NOT_EXECUTED")))
         }
-        assertEquals(RunStatus.FAILED, result.status)
-        assertEquals(1, probe.rounds); assertEquals(1, probe.executions)
-        assertTrue(probe.outputs.isEmpty())
+        assertEquals(RunStatus.COMPLETED, result.status)
+        assertEquals(2, probe.rounds); assertEquals(1, probe.executions)
+        assertEquals(ModelHistory.UNKNOWN_TOOL_RESULT, probe.outputs.single().output)
         assertEquals(ToolDisposition.UNKNOWN, probe.checkpoints.last().tools.single().disposition)
         assertNull(probe.checkpoints.last().tools.single().result)
         assertEquals(ModelHistory.UNKNOWN_TOOL_RESULT, result.blocks.filterIsInstance<MessageBlock.Tool>().single().result)
@@ -123,13 +128,13 @@ class RunnerReceiptBatchTest {
             probe.outputs.map { it.output })
         assertEquals(probe.outputs.map { it.output }, result.blocks.filterIsInstance<MessageBlock.Tool>().map { it.result })
     }
-    @Test fun mixedUnknownStopsWithoutErasingConfirmedOrNotExecutedReceipts() {
+    @Test fun mixedUnknownContinuesWithoutErasingConfirmedOrNotExecutedReceipts() {
         val (result, probe) = run { _, batch, _ -> listOf(
             ToolDispatchResult(batch[0].id, DispatchOutcome.Confirmed("saved", false)),
             ToolDispatchResult(batch[1].id, DispatchOutcome.Unknown("lost_receipt")),
             ToolDispatchResult(batch[2].id, DispatchOutcome.NotExecuted("batch_stopped_before_execution"))) }
-        assertEquals(RunStatus.FAILED, result.status)
-        assertEquals(1, probe.rounds)
+        assertEquals(RunStatus.COMPLETED, result.status)
+        assertEquals(2, probe.rounds)
         val records = probe.checkpoints.last().tools
         assertEquals(listOf(ToolDisposition.SUCCEEDED, ToolDisposition.UNKNOWN, ToolDisposition.NOT_EXECUTED), records.map { it.disposition })
         assertEquals("saved", records[0].result)
@@ -140,9 +145,31 @@ class RunnerReceiptBatchTest {
         assertEquals(result.blocks, result.historySegments.flatMap { it.blocks })
         assertEquals(ModelHistory.UNKNOWN_TOOL_RESULT,
             probe.checkpoints.last().message.blocks.filterIsInstance<MessageBlock.Tool>()[1].result)
-        assertTrue(probe.outputs.isEmpty()) // Never feed UNKNOWN back into this run.
-        assertTrue(result.error!!.contains("禁止重放"))
+        assertEquals(result.blocks.filterIsInstance<MessageBlock.Tool>().map { it.result }, probe.outputs.map { it.output })
+        assertNull(result.error)
     }
+    @Test fun unknownBlocksRepeatButAdmitsAnIndependentVerification() {
+        val original = ToolInvocation(ToolCallId("write"), "write", "{}")
+        val repeat = original.copy(id = ToolCallId("repeat"))
+        val verify = ToolInvocation(ToolCallId("verify"), "inspect", "{}")
+        val (result, probe) = run(invocations = listOf(original), followUp = listOf(listOf(repeat), listOf(verify))) { p, batch, _ ->
+            if (p.executions == 1) {
+                assertEquals(listOf(original), batch)
+                listOf(ToolDispatchResult(original.id, DispatchOutcome.Unknown("lost_receipt")))
+            } else {
+                assertEquals(listOf(verify), batch)
+                listOf(ToolDispatchResult(verify.id, DispatchOutcome.Confirmed("verified", false)))
+            }
+        }
+        assertEquals(RunStatus.COMPLETED, result.status)
+        assertEquals(2, probe.executions)
+        assertEquals(ModelHistory.UNKNOWN_TOOL_RESULT, probe.received[0].single().output)
+        assertTrue(probe.received[1].single().output.contains("unknown_effect_no_replay"))
+        assertEquals("verified", probe.received[2].single().output)
+        assertEquals(listOf(ToolDisposition.UNKNOWN, ToolDisposition.NOT_EXECUTED, ToolDisposition.SUCCEEDED),
+            probe.checkpoints.last().tools.map { it.disposition })
+    }
+
     @Test fun stopSignalReachesDispatcherAndKeepsKnownReceipts() {
         val (result, probe) = run { p, batch, cancelled ->
             assertFalse(cancelled())
@@ -160,11 +187,11 @@ class RunnerReceiptBatchTest {
                 if (mode == 0) error("uncertain boundary")
                 batch.reversed().map { ToolDispatchResult(it.id, DispatchOutcome.Confirmed("wrong order", false)) }
             }
-            assertEquals(RunStatus.FAILED, result.status)
+            assertEquals(RunStatus.COMPLETED, result.status)
             assertEquals(1, probe.executions)
-            assertEquals(1, probe.rounds)
+            assertEquals(2, probe.rounds)
             assertTrue(probe.checkpoints.last().tools.all { it.disposition == ToolDisposition.UNKNOWN && it.result == null })
-            assertTrue(result.blocks.filterIsInstance<MessageBlock.Tool>().all { it.result == ModelHistory.UNKNOWN_TOOL_RESULT })
+            assertTrue(result.blocks.filterIsInstance<MessageBlock.Tool>().all { ModelHistory.isUnknownToolResult(it.result) })
             assertEquals(result.blocks, result.historySegments.flatMap { it.blocks })
         }
     }

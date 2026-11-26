@@ -16,7 +16,9 @@ class BoundedTailGrowthContractTest(unittest.TestCase):
         self.assertIn('chatView.removeCallbacks(followCorrection)', ui)
         disclosure = (SRC.parent / 'WorkflowDisclosureMotion.kt').read_text()
         placed = disclosure.split('}.onGloballyPositioned { coordinates ->', 1)[1].split('private fun anchorDelta', 1)[0]
-        self.assertIn('postHandler.value.post(placedCorrection)', placed)
+        self.assertIn('anchorCorrectionPosted = true', placed)
+        self.assertIn('OnPreDrawListener {\n            disclosureViewport.correctBeforeDraw()', ui)
+        self.assertIn('if (!(anchorRequester ?: this).animationIdle) return null', disclosure)
         self.assertNotIn('correctAnchor()', placed)
 
     def test_displayed_workflow_header_clips_instead_of_flashing_blank(self):

@@ -75,7 +75,7 @@ internal fun voiceResponseFailure(message: Message, status: VoiceBodyStatus): St
     if (status == VoiceBodyStatus.CANCELLED) return "回答已中止，可以继续说"
     if (status != VoiceBodyStatus.FAILED) return null
     val unknownTool = message.blocks.filterIsInstance<MessageBlock.Tool>().firstOrNull {
-        it.result == ModelHistory.UNKNOWN_TOOL_RESULT
+        ModelHistory.isUnknownToolResult(it.result)
     }
     if (unknownTool != null) return if (unknownTool.invocation.name in setOf("browser_read", "browser_write"))
         "浏览器执行结果未确认；本轮已停止，未自动重试" else "工具执行结果未确认；本轮已停止，未自动重试"

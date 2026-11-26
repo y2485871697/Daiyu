@@ -29,7 +29,7 @@ internal class TerminalCatalogLeaf(
 
     val registeredTools: List<RegisteredTool> get() = tools.registeredTools
     fun bindOwner(owner: RunExecutionOwner) = tools.bindOwner(owner)
-    fun observeOutcomes(results: List<ToolDispatchResult>) = tools.observeOutcomes(results)
+    fun markUnknown() = tools.markUnknown()
     override fun close() = tools.close()
 
     /**

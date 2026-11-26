@@ -206,7 +206,7 @@ internal class TerminalJobSession private constructor(
     fun observeOutcomes(results: List<ToolDispatchResult>) {
         if (results.any { it.outcome is DispatchOutcome.Unknown }) markUnknown()
     }
-    private fun markUnknown() = synchronized(lock) { unknown = true }
+    fun markUnknown() = synchronized(lock) { unknown = true }
 
     /** Original retained object only. These are UI diagnostics, not new model/run authorization. */
     fun inspectOnWorker(): JSONObject {

@@ -413,46 +413,51 @@ internal class RunCatalogTools(
         fun finish(results: List<ToolDispatchResult>) {
             check(!finalForwarded) { "catalog_batch_already_finished" }
             finalForwarded = true // Consume before external feedback, even if feedback throws.
-            try { observeOutcomes(results) }
+            try { observeOutcomes(invocations, results) }
             finally {
                 if (session != null) sessionTicket?.let { session.finishBatch(it, results) }
                 else ticket?.let { checkNotNull(leaf).finishBatch(it, results) }
             }
         }
         fun unconfirmed() {
-            ordinary.forEach { it.markUnknown() }
-            commands?.markUnknown()
-            gui?.onCentralUnknown() // missing final central feedback also fails closed, with no retry
-            mcp?.markUnknown()
-            liveMcp?.close()
-            platformAction?.markUnknown()
+            fenceUncertainTools(invocations.map { it.name }.toSet())
             if (leaf != null || session != null) synchronized(closeLock) { recordCloseFailure("virtual_display_batch_unconfirmed") }
             // Do not invent results or finish a ticket when no final central result exists.
         }
     }
-    private fun observeOutcomes(results: List<ToolDispatchResult>) {
-        results.forEach { result ->
+    private fun observeOutcomes(invocations: List<ToolInvocation>, results: List<ToolDispatchResult>) {
+        check(invocations.map { it.id } == results.map { it.callId }) { "catalog_receipt_identity_mismatch" }
+        val uncertain = mutableSetOf<String>()
+        invocations.zip(results).forEach { (call, result) ->
             RuntimeDiagnostics.event(RuntimeDiagnostics.Stage.TOOL_EXECUTION,
                 when (result.outcome) {
                     is DispatchOutcome.Confirmed -> RuntimeDiagnostics.Code.END
                     is DispatchOutcome.NotExecuted -> RuntimeDiagnostics.Code.REJECTED
-                    is DispatchOutcome.Unknown -> RuntimeDiagnostics.Code.UNKNOWN
+                    is DispatchOutcome.Unknown -> {
+                        uncertain += call.name
+                        RuntimeDiagnostics.Code.UNKNOWN
+                    }
                 })
         }
-        // Includes ledger reservation conflicts and persistence failure AFTER a confirmed adapter reply.
-        // Use the entire central result, never a second leaf dispatcher or adapter-only receipts.
-        val unknown = results.firstNotNullOfOrNull { it.outcome as? DispatchOutcome.Unknown }
-        if (unknown != null) ordinary.forEach { it.markUnknown() }
-        if (unknown != null) gui?.onCentralUnknown() // before any external feedback can throw
-        terminalLeaf?.observeOutcomes(results)
-        terminalJobs?.observeOutcomes(results)
-        commands?.observeOutcomes(results)
-        unknown?.let {
-            mcp?.markUnknown()
-            liveMcp?.close()
-            shizuku?.session?.markOutcomeUnknown(it.code.ifBlank { "dispatcher_outcome_unknown" })
-            platformAction?.markUnknown()
+        fenceUncertainTools(uncertain)
+    }
+
+    private fun fenceUncertainTools(names: Set<String>) {
+        if (names.isEmpty()) return
+        // Keep admission fences on affected stateful resources, not on unrelated tool families.
+        ordinary.filterNot { it is RunOrdinaryGenerationTools }.forEach { scope ->
+            if (scope.tools.any { it.definition.name in names }) scope.markUnknown()
         }
+        if (RunGenerationTools.IMAGE_TOOL in names || RunGenerationTools.VIDEO_TOOL in names)
+            ordinary.filterIsInstance<RunOrdinaryGenerationTools>().forEach { it.markUnknown() }
+        if (RunTerminalTools.STEP_TOOL in names) terminalLeaf?.markUnknown()
+        if (TerminalJobSession.START in names) terminalJobs?.markUnknown()
+        if ("terminal_exec" in names) commands?.markUnknown()
+        if ("screen" in names || "screen_action" in names) gui?.onCentralUnknown()
+        if (names.any { it.startsWith("mcp_") && !it.startsWith("mcp_live_") }) mcp?.markUnknown()
+        if (names.any { it.startsWith("mcp_live_") }) liveMcp?.close()
+        if (RunShizukuCommands.TOOL_NAME in names) shizuku?.session?.markOutcomeUnknown("dispatcher_outcome_unknown")
+        platformAction?.let { if (it.action.kind.toolName in names) it.markUnknown() }
     }
     private fun beginDispatch(): Boolean = synchronized(closeLock) {
         if (closed.get()) false else { activeDispatches++; true }

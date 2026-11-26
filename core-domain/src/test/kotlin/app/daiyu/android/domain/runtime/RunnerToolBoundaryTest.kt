@@ -19,12 +19,17 @@ class RunnerToolBoundaryTest {
         override fun save(message: Message) { writes += message }
     }
 
-    @Test fun unknownReceiptShowsOnlyWhitelistedCauseAndNeverContinuesModel() {
+    @Test fun unknownReceiptReportsOnlyWhitelistedCauseAndContinuesModel() {
         for (code in listOf("adapter_result_unconfirmed_io", "private-token-secret")) {
             var rounds = 0; var executions = 0
             val runner = ChatRunner(ModelPort { object : ModelSession {
                 override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
-                    rounds++; sink(ModelEvent.ToolReady(call))
+                    if (rounds++ == 0) sink(ModelEvent.ToolReady(call))
+                    else {
+                        assertFalse(outputs.single().output.contains("private-token-secret"))
+                        assertEquals(ModelHistory.unknownToolResult(code), outputs.single().output)
+                        sink(ModelEvent.TextFinal("answer", "done"))
+                    }
                 }
                 override fun cancel() {}
             } }, store(), BatteryTool { error("receipt executor required") }, RunnerOptions(
@@ -32,10 +37,11 @@ class RunnerToolBoundaryTest {
                     executions++; calls.map { ToolDispatchResult(it.id, DispatchOutcome.Unknown(code)) }
                 })) {}
             val result = runner.run(initial, emptyList())
-            assertEquals(RunStatus.FAILED, result.status); assertEquals(1, rounds); assertEquals(1, executions)
-            assertTrue(result.error!!.contains("禁止重放")); assertFalse(result.error!!.contains("private-token-secret"))
-            assertEquals(code == "adapter_result_unconfirmed_io", result.error!!.contains("adapter_result_unconfirmed_io"))
-            assertEquals(ModelHistory.UNKNOWN_TOOL_RESULT, result.blocks.filterIsInstance<MessageBlock.Tool>().single().result)
+            assertEquals(RunStatus.COMPLETED, result.status); assertEquals(2, rounds); assertEquals(1, executions)
+            val reported = result.blocks.filterIsInstance<MessageBlock.Tool>().single().result!!
+            assertTrue(ModelHistory.isUnknownToolResult(reported))
+            assertFalse(reported.contains("private-token-secret"))
+            assertEquals(code == "adapter_result_unconfirmed_io", reported.contains("adapter_result_unconfirmed_io"))
         }
     }
 

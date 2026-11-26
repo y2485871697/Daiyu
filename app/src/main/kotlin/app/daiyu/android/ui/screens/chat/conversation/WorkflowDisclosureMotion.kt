@@ -70,6 +70,8 @@ internal class WorkflowDisclosureViewport(
 
     fun claimGesture() { disclosureClaimed = true }
 
+    fun correctBeforeDraw() { active?.correctBeforeDraw() }
+
     fun pointerUp() {
         followingOnPress = false
         if (!disclosureClaimed) active = null
@@ -119,11 +121,11 @@ internal class WorkflowDisclosureMotion(
     private var detachedOpening = false
     private var finishPending = false
     private var anchorCorrectionPosted = false
-    private val postHandler = lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
-    private val placedCorrection = Runnable {
+    fun correctBeforeDraw() {
+        if (!anchorCorrectionPosted) return
         anchorCorrectionPosted = false
-        val viewport = context?.viewport
-        if (viewport != null && viewport.active === this && anchorGesture == viewport.gesture && !correctingAnchor) {
+        val viewport = context?.viewport ?: return
+        if (viewport.active === this && anchorGesture == viewport.gesture && !correctingAnchor) {
             correctAnchor()
             (anchorRequester ?: this).finishIfSettled()
         }
@@ -158,7 +160,7 @@ internal class WorkflowDisclosureMotion(
         container = coordinates
         val viewport = context?.viewport
         if (viewport != null && viewport.active === this && anchorGesture == viewport.gesture && !correctingAnchor && !anchorCorrectionPosted) {
-            anchorCorrectionPosted = postHandler.value.post(placedCorrection)
+            anchorCorrectionPosted = true
         }
     }
 
@@ -171,6 +173,9 @@ internal class WorkflowDisclosureMotion(
     private fun anchorClearance(): Float? {
         // The composer overlays detached content; a downward opening only anchors its title.
         if (detachedOpening) return null
+        // During disclosure only correct the captured edge. Its changing extent is not
+        // composer movement and must not permanently shift the anchor target.
+        if (!(anchorRequester ?: this).animationIdle) return null
         val context = context ?: return null
         val turnClearance = context.viewport.anchorClearance(context.itemKey) ?: return null
         if (!anchorAtTop) return turnClearance
@@ -331,7 +336,6 @@ internal class WorkflowDisclosureMotion(
     }
 
     fun dispose() {
-        if (postHandler.isInitialized()) postHandler.value.removeCallbacks(placedCorrection)
         anchorCorrectionPosted = false
         releaseAnchor(force = true)
     }

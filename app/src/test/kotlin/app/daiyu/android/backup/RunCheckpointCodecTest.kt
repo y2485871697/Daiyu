@@ -77,6 +77,16 @@ class RunCheckpointCodecTest {
         val unknown=checkpoint().copy(tools=listOf(ToolRecord(call,ToolDisposition.UNKNOWN)),outputs=emptyList())
         assertEquals(unknown,RunCheckpointCodec.decode(RunCheckpointCodec.encode(unknown)))
     }
+    @Test fun unknownReportClosesTheProtocolWithoutConfirmingExecution() {
+        val result = ModelHistory.unknownToolResult("adapter_result_unconfirmed_io")
+        val blocks = listOf(MessageBlock.Tool(call, result))
+        val message = assistant.copy(blocks = blocks, historySegments = assistant.historySegments.map { it.copy(blocks = blocks) })
+        val value = checkpoint().copy(message = message, tools = listOf(ToolRecord(call, ToolDisposition.UNKNOWN)),
+            outputs = listOf(ToolOutput(call.id, result)))
+        assertEquals(value, RunCheckpointCodec.decode(RunCheckpointCodec.encode(value)))
+        reject { RunCheckpointCodec.encode(value.copy(outputs = listOf(ToolOutput(call.id, "success")))) }
+    }
+
     @Test fun singleParseReturnsTheSameValidatedRecoveryEnvelope() {
         val ordinary = checkpoint()
         val wire = RunCheckpointCodec.encode(ordinary)

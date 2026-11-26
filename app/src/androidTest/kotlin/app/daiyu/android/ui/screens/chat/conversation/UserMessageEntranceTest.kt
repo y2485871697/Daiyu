@@ -302,19 +302,20 @@ class UserMessageEntranceTest private constructor(private val scale: UserEntranc
         assertEquals(1f, progress(), .001f)
     }
 
-    fun testPendingActionSlotCannotBeClickedOrExposedAsAccessibleActions() {
+    fun testPendingActionsWaitForEntranceAndOnlyCopyIsEnabled() {
         show()
         change { request = UserMessageEntrance("pending-actions"); turn = turn.copy(id = "pending-actions", listKey = "pending-actions", pending = true) }
+        ui.onNodeWithContentDescription("复制回答").assertDoesNotExist()
         finish()
-        val actions = ui.onNodeWithTag("message-user-actions:pending-actions")
-        assertTrue("pending action semantics must be cleared", actions.fetchSemanticsNode().children.isEmpty())
-        for (inset in listOf(12.5f, 42.5f, 72.5f, 102.5f)) actions.performTouchInput {
-            click(androidx.compose.ui.geometry.Offset(width - inset.dp.toPx(), height / 2f))
+        for (label in listOf("编辑", "分支", "删除")) {
+            ui.onNodeWithContentDescription(label).assertIsNotEnabled().performTouchInput { click() }
         }
-        assertEquals("invisible or pending actions must not reach the host", 0, actionCalls)
+        assertEquals("pending mutations must not reach the host", 0, actionCalls)
+        ui.onNodeWithContentDescription("复制回答").assertIsEnabled().performClick()
+        assertEquals(1, actionCalls)
         change { turn = turn.copy(pending = false) }
-        ui.onNodeWithContentDescription("复制回答").performClick()
-        assertEquals("the settled real action must remain connected", 1, actionCalls)
+        ui.onNodeWithContentDescription("分支").assertIsEnabled().performClick()
+        assertEquals("settled real actions must remain connected", 2, actionCalls)
     }
 
     @OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)

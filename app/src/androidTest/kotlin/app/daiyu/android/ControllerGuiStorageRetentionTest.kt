@@ -463,6 +463,7 @@ class ControllerGuiStorageRetentionTest : InstrumentationTestCase() {
                 assertEquals(6, it.getInt(1)) // four complete old turns, keep one
                 assertEquals(summaryText.substringAfter('\n'), it.getString(2))
                 assertEquals("summary-${it.getString(0)}", sentHistory.first().id.value)
+                assertTrue(wireTexts.first().contains("\ncontext-checkpoint:${it.getString(0)}\n"))
             }
             assertEquals(f.originalHistory.takeLast(2), sentHistory.drop(1).dropLast(1))
             val summaryBody = f.summary.body.toString("UTF-8")

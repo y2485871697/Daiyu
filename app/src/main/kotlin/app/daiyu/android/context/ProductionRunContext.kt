@@ -139,12 +139,13 @@ internal class ProductionRunContext(
             val text = HarnessContextSummarizer(model, cancellation, definitions, systemPrompt,
                 nextModel = model.rebind?.let { rebind -> { rebind(usage()) } }, archiveToolResult = archiveToolResult).summarize(
                 CompressionInput(logical.take(cut), ContextRevision.digest(prefix),
-                    checkpointTargetTokens = compactionCheckpointTarget(prefixTokens), archiveId = activity.id.takeIf { taskId == null })).trim()
+                    checkpointTargetTokens = compactionCheckpointTarget(prefixTokens))).trim()
             if (cancelled()) return null
             require(text.isNotEmpty()) { "摘要为空；保留原文" }
             val id = "summary-${activity.id}"
+            val replay = SummaryCheckpoint.forReplay(text, activity.id.takeIf { taskId == null })
             val summary = Message(MessageId(id), parent.conversationId, RunId(id), Message.USER_ROLE,
-                listOf(MessageBlock.Text("summary", SummaryCheckpoint.frame(text))), RunStatus.COMPLETED)
+                listOf(MessageBlock.Text("summary", SummaryCheckpoint.frame(replay))), RunStatus.COMPLETED)
             val result = logical.take(systemCount) + summary + logical.drop(cut)
             val candidateTokens = DaiyuCompaction.history(listOf(summary), includeScreen = false)
             val originalTokens = prefixTokens

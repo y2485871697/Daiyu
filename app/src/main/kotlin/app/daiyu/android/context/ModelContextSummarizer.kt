@@ -120,8 +120,7 @@ class ModelContextSummarizer(
         val evidenceSnapshot = if (bound.requireCheckpointFormat) sourceEvidence
             ?: DaiyuCheckpointEvidence.collect(originals, cancellation) else null
         val independentEvidence = evidenceSnapshot?.prompt().orEmpty()
-        fun finish(summary: String) = if (evidenceSnapshot == null) summary else
-            SummaryCheckpoint.withArchive(evidenceSnapshot.finish(summary), input.archiveId)
+        fun finish(summary: String) = evidenceSnapshot?.finish(summary) ?: summary
         val budget = minOf(bound.inputBudgetTokens, planningBudget ?: Long.MAX_VALUE)
         fun price(text: String) = if (planningBudget != null)
             app.daiyu.android.domain.context.DaiyuContextEstimate.text(text) else TokenTailCompression.textTokens(text)

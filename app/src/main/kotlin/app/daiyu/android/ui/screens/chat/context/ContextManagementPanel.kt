@@ -121,7 +121,7 @@ internal fun ContextManagementRoute(
             onRefresh = {
                 if (isCurrent()) {
                     presentation.reset()
-                    if (adapter == null) onResume() else { adapter.dismissCompression(); adapter.refresh() }
+                    if (adapter == null) onResume() else adapter.refresh()
                 }
             }, operation = state?.operation)
     }

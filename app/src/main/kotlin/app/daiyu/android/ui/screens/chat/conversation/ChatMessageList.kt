@@ -1665,8 +1665,8 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
         it.request.messageId == turn.id || it.request.messageId == turn.listKey ||
             it.request.key == turn.id || it.request.key == turn.listKey
     }
-    val actionsAvailable by remember(entering, turn.pending) {
-        derivedStateOf { !turn.pending && (entering == null || entering.progress.value > .25f) }
+    val actionsAvailable by remember(entering) {
+        derivedStateOf { entering == null || entering.progress.value > .25f }
     }
     Column(Modifier.fillMaxWidth().then(if (turn.pending) Modifier.testTag("chat-send-preview") else Modifier),
         horizontalAlignment = Alignment.End) {

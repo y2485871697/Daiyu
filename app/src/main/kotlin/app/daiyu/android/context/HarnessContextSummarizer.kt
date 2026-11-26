@@ -22,8 +22,7 @@ internal class HarnessContextSummarizer(
         val evidence = DaiyuSummaryEvidence.prepare(originals, cancellation, archiveToolResult)
         val sourceEvidence = if (bound.requireCheckpointFormat) DaiyuCheckpointEvidence.collect(originals, cancellation) else null
         val evidencePrompt = sourceEvidence?.prompt().orEmpty()
-        fun finish(summary: String) = if (sourceEvidence == null) summary else
-            SummaryCheckpoint.withArchive(sourceEvidence.finish(summary), input.archiveId)
+        fun finish(summary: String) = sourceEvidence?.finish(summary) ?: summary
         val directive = if (bound.requireCheckpointFormat) listOf(SummaryCheckpoint.instruction, evidencePrompt)
             .filter(String::isNotEmpty).joinToString("\n") else HarnessCompactionPrompt.forCheckpointTarget(input.checkpointTargetTokens)
         val id = UUID.randomUUID().toString()

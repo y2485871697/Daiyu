@@ -27,7 +27,10 @@ class DaiyuCheckpointEvidenceTest {
         val summary = evidence.finish("## Next Step\n- 下载 12345 的产物\n## Critical Context\n- facts")
         assertTrue(summary.contains("completed"))
         assertFalse(summary.contains("in_progress"))
-        val framed = SummaryCheckpoint.frame(SummaryCheckpoint.withArchive(summary, "source"))
+        val replay = SummaryCheckpoint.forReplay(summary, "source")
+        val framed = SummaryCheckpoint.frame(replay)
+        assertEquals(summary, SummaryCheckpoint.body(replay, "source"))
+        assertEquals(replay, SummaryCheckpoint.forReplay(replay, "source"))
         assertTrue(SummaryCheckpoint.unframe(framed).orEmpty().contains("context-checkpoint:source"))
         assertFalse(SummaryCheckpoint.display(framed).contains("context-checkpoint:"))
     }

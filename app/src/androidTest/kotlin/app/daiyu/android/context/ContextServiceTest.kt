@@ -184,8 +184,8 @@ class ContextServiceTest : InstrumentationTestCase() {
         fun assertRead() {
             val reopened = ContextService(context, db)
             val body = (reopened.prepareSend(owner).messages.first().blocks.single() as MessageBlock.Text).text
-            assertEquals(SummaryCheckpoint.frame(text), body)
-            assertEquals(text, SummaryCheckpoint.unframe(body))
+            assertEquals(SummaryCheckpoint.frame(SummaryCheckpoint.forReplay(text, archive)), body)
+            assertEquals(text, SummaryCheckpoint.unframe(body)?.let { SummaryCheckpoint.body(it, archive) })
             val timeline = reopened.timeline(owner).single() as app.daiyu.android.timeline.ChatTimelineEntry.Compression
             assertEquals(text, timeline.summary)
             assertEquals(original, reopened.displayHistory(owner))
@@ -339,7 +339,7 @@ class ContextServiceTest : InstrumentationTestCase() {
             val reopened = service.prepareSend(owner)
             if (automatic) {
                 assertNotNull(reopened.archiveId)
-                assertEquals(SummaryCheckpoint.frame("retained facts"),
+                assertEquals(SummaryCheckpoint.frame(SummaryCheckpoint.forReplay("retained facts", reopened.archiveId)),
                     (reopened.messages.first().blocks.single() as MessageBlock.Text).text)
             } else assertNull(reopened.archiveId)
         }

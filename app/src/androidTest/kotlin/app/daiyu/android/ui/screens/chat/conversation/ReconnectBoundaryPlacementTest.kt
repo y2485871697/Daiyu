@@ -123,8 +123,11 @@ class ReconnectBoundaryPlacementTest : WiredActivityTestCase() {
 
     fun testLiveReconnectDoesNotReplayAcceptedReasoning() {
         val prefix = "Accepted thought before reconnect."
-        val old = MessageContentUi.Reasoning(ReportedReasoning("old", prefix, activeSinceNanos = 1L))
-        val fresh = MessageContentUi.Reasoning(ReportedReasoning("fresh", "New thought after reconnect.", activeSinceNanos = 1L))
+        val startedAt = System.nanoTime()
+        val old = MessageContentUi.Reasoning(ReportedReasoning("old", prefix,
+            elapsedMillis = 0L, activeSinceNanos = startedAt))
+        val fresh = MessageContentUi.Reasoning(ReportedReasoning("fresh", "New thought after reconnect.",
+            elapsedMillis = 0L, activeSinceNanos = startedAt))
         var entries by mutableStateOf(emptyList<ChatTimelineEntry.Reconnect>())
         var content by mutableStateOf<List<MessageContentUi>>(listOf(old))
         val advances = AtomicInteger()

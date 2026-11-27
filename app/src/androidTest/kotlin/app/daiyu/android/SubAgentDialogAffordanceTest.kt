@@ -163,6 +163,10 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         repository.update(owner) { if (adding) it else it.copy(profiles = listOf(profile)) }
         lateinit var editor: ConversationSubAgentEditor
         var active by mutableStateOf<SubAgentProfileDraftSession?>(null)
+        fun awaitDraftClosed() {
+            ui.waitUntil(5_000) { active == null }
+            node("subagent-config-body").assertDoesNotExist()
+        }
         fun openDraft(newProfile: Boolean) {
             mainThread {
                 active = checkNotNull(SubAgentProfileDraftSession.open(editor,
@@ -245,7 +249,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         assertEquals(initialPreferences, preferences.all.toMap())
         closeThinking(initialTitle)
         if (adding) ui.onNodeWithText("取消").performClick() else back()
-        ui.runOnIdle { assertNull(active) }
+        awaitDraftClosed()
         assertEquals(initialPreferences, preferences.all.toMap())
 
         openDraft(newProfile = adding)
@@ -256,8 +260,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         assertEquals(initialPreferences, preferences.all.toMap())
         ui.onNodeWithText("确认").assertIsEnabled().performClick()
         awaitControl("confirmed child reasoning") { repository.snapshot(owner).profiles.singleOrNull()?.reasoning == ReasoningEffort.HIGH }
-        ui.waitForIdle()
-        ui.runOnIdle { assertNull(active) }
+        awaitDraftClosed()
         assertTrue(repository.snapshot(owner).profiles.single().toJson().getBoolean("enabled"))
         val savedHigh = preferences.all.toMap()
 
@@ -269,7 +272,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         assertEquals(savedHigh, preferences.all.toMap())
         closeThinking("子代理配置")
         back()
-        ui.runOnIdle { assertNull(active) }
+        awaitDraftClosed()
         assertEquals(savedHigh, preferences.all.toMap())
 
         openDraft(newProfile = false)
@@ -280,8 +283,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         assertEquals(savedHigh, preferences.all.toMap())
         ui.onNodeWithText("确认").assertIsEnabled().performClick()
         awaitControl("confirmed explicit off") { repository.snapshot(owner).profiles.singleOrNull()?.reasoning == ReasoningEffort.OFF }
-        ui.waitForIdle()
-        ui.runOnIdle { assertNull(active) }
+        awaitDraftClosed()
         openDraft(newProfile = false)
         openThinking("子代理配置")
         node("subagent-thinking-value").assertTextEquals("关闭")
@@ -290,6 +292,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         assertEquals(0f..6f, offRange.range)
         closeThinking("子代理配置")
         back()
+        awaitDraftClosed()
         assertEquals(ReasoningEffort.OFF, repository.snapshot(owner).profiles.single().reasoning)
         assertEquals(1, repository.snapshot(owner).profiles.size)
         assertEquals(0, fixture.opens.get())

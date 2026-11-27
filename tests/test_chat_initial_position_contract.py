@@ -179,8 +179,12 @@ class ChatInitialPositionContract(unittest.TestCase):
         self.assertLess(wait.index('throwCaptureFailure()'), wait.index('probe in capturedProbes'))
         self.assertIn('ui.onAllNodesWithTag("chat-turn:cold-tail").assertCountEquals(0)', device)
         self.assertIn('useUnmergedTree = true).assertCountEquals(1)', device)
-        self.assertIn('saved.isNotEmpty()', device)
-        self.assertIn('saved.maxOf { it.bottom } > bottom + 10f', device)
+        revisit = device.split('fun testRevisitDoesNotDrawTheSavedHistoryPositionBeforeTheNewBottomRequest()', 1)[1].split('    fun ', 1)[0]
+        self.assertLess(revisit.index('awaitProbe(probe)'), revisit.index('val saved = draws.filter'))
+        self.assertIn('it.frameOwner == "first" && it.probeEpoch == probe.second', revisit)
+        self.assertIn('saved.isNotEmpty()', revisit)
+        self.assertIn('saved.any { it.owner == "first" && it.tail && it.bottom >= viewportBottom - 2f }', revisit)
+        self.assertIn('assertOnlyAlignedDraws("first")', revisit)
 
 
 if __name__ == '__main__':

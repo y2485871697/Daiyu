@@ -1,10 +1,10 @@
 package app.daiyu.android
 
+import android.view.KeyEvent
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.ui.test.*
-import androidx.test.espresso.Espresso.pressBack
 import app.daiyu.android.context.CatalogSummaryBindings
 import app.daiyu.android.context.CompressionSettingsEditor
 import app.daiyu.android.context.ProductionCompressionSettings
@@ -75,12 +75,16 @@ class ModelSelectionSwitchStateActivityTest : WiredActivityTestCase() {
         awaitNodeWindowFocus(picker)
         dismissIme()
         awaitDialogImeFrame(picker, visible = false)
-        pressBack()
+        awaitNodeWindowFocus(picker)
+        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         ui.waitUntil(5_000) {
             ui.mainClock.advanceTimeByFrame()
-            ui.onAllNodesWithTag(tag).fetchSemanticsNodes().isEmpty()
+            ui.onAllNodesWithTag(tag, useUnmergedTree = true)
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
         }
-        node("page:$page").assertIsDisplayed()
+        val settingsPage = node("page:$page")
+        awaitNodeWindowFocus(settingsPage)
+        settingsPage.assertIsDisplayed()
     }
 
     fun testCompressionModelRowPreservesBothSwitchesAndManualEnableStillWorks() {

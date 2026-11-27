@@ -2,7 +2,9 @@ package app.daiyu.android
 
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.test.*
+import androidx.test.espresso.Espresso.pressBack
 import app.daiyu.android.context.CatalogSummaryBindings
 import app.daiyu.android.context.CompressionSettingsEditor
 import app.daiyu.android.context.ProductionCompressionSettings
@@ -28,32 +30,39 @@ class ModelSelectionSwitchStateActivityTest : WiredActivityTestCase() {
     }
 
     private fun show(content: @Composable () -> Unit) {
+        val visit = source
         mainThread {
-            activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) { content() } }
+            activity.setContent { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) { key(visit) { content() } } }
         }
         ui.waitForIdle()
     }
 
     private fun ready(tag: String) {
         ui.waitUntil(5000) {
-            ui.onAllNodes(hasTestTag(tag) and hasClickAction()).fetchSemanticsNodes().isNotEmpty()
+            ui.onAllNodes(hasTestTag(tag) and hasClickAction() and isEnabled()).fetchSemanticsNodes().size == 1
         }
     }
 
     private fun choose(feature: String) {
         awaitUniqueTag("settings-model-picker")
+        awaitDialogEnter(node("settings-model-picker"))
         node("chat-model-search").performTextReplacement(choice.selection.record.id)
-        val option = hasTestTag("chat-model-option:${choice.selection.record.id}") or
-            hasTestTag("chat-model-option:${choice.provider.slotId}:${choice.selection.record.id}")
-        ui.waitUntil(5000) { ui.onAllNodes(option).fetchSemanticsNodes().isNotEmpty() }
-        ui.onNode(option).performClick()
+        val option = (hasTestTag("chat-model-option:${choice.selection.record.id}") or
+            hasTestTag("chat-model-option:${choice.provider.slotId}:${choice.selection.record.id}")) and
+            hasClickAction() and isEnabled()
+        ui.waitUntil(5000) { ui.onAllNodes(option).fetchSemanticsNodes().size == 1 }
+        ui.onNode(option).assertIsDisplayed().performClick()
         awaitControl("selection persisted") { source.key(feature) == choice.key }
         ui.waitForIdle()
     }
 
     private fun closePicker(page: String) {
-        if (ui.onAllNodesWithTag("settings-model-picker").fetchSemanticsNodes().isNotEmpty())
-            backToPage(activity, "page:$page")
+        awaitUniqueTag("settings-model-picker")
+        awaitNodeWindowFocus(node("settings-model-picker"))
+        dismissIme()
+        pressBack()
+        ui.waitUntil(5000) { ui.onAllNodesWithTag("settings-model-picker").fetchSemanticsNodes().isEmpty() }
+        node("page:$page").assertIsDisplayed()
     }
 
     fun testCompressionModelRowPreservesBothSwitchesAndManualEnableStillWorks() {
@@ -70,6 +79,7 @@ class ModelSelectionSwitchStateActivityTest : WiredActivityTestCase() {
             ready("compression-summary-config")
             reveal("compression-summary-config", "上下文压缩").performClick()
             choose("compression")
+            ready("compression-summary-config")
             closePicker("上下文压缩")
             assertEquals(automatic, store.snapshot().automatic)
             assertEquals(binding.takeIf { enabled }, store.snapshot().summaryModel)
@@ -97,12 +107,15 @@ class ModelSelectionSwitchStateActivityTest : WiredActivityTestCase() {
             choose("title")
             assertEquals(enabled, store.snapshot().enabled)
             assertNotNull(store.snapshot().binding)
+            ready("title-model-enabled")
+            closePicker("标题模型")
             if (!enabled) {
-                ready("title-model-enabled")
                 node("title-model-enabled").assertIsOff().performClick()
                 choose("title")
                 awaitControl("manual title enable") { store.snapshot().enabled }
+                closePicker("标题模型")
             }
+            ready("title-model-enabled")
             node("title-model-enabled").assertIsOn()
             assertEquals(0, fixture.opens.get())
         }
@@ -121,11 +134,13 @@ class ModelSelectionSwitchStateActivityTest : WiredActivityTestCase() {
                 ready("independent-model-configure")
                 reveal("independent-model-configure", "辅助视觉模型").performClick()
                 choose("independent-vision")
+                ready("independent-model-configure")
                 closePicker("辅助视觉模型")
                 assertEquals(enabled, store.record(slot).enabled)
                 assertEquals(choice.selection.record.id, store.editing(slot).settings.model)
                 if (!enabled) {
                     val before = store.record(slot)
+                    ready("independent-model-enabled")
                     node("independent-model-enabled").assertIsOff().performClick()
                     closePicker("辅助视觉模型")
                     assertEquals(before, store.record(slot))
@@ -134,6 +149,7 @@ class ModelSelectionSwitchStateActivityTest : WiredActivityTestCase() {
                     awaitControl("manual vision enable") { store.record(slot).enabled }
                     closePicker("辅助视觉模型")
                 }
+                ready("independent-model-enabled")
                 node("independent-model-enabled").assertIsOn()
                 assertEquals(0, fixture.opens.get())
             }

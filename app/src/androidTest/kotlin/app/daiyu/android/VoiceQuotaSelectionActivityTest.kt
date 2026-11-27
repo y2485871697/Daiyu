@@ -375,7 +375,8 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         creationRemoteIds = emptyList()
         openPicker()
         node("voice-create-slot:S_available").assertDoesNotExist()
-        ui.onNodeWithText("云端暂无可用音色名额。").assertExists()
+        ui.onNode(hasText("云端暂无可用音色名额。") and
+            hasAnyAncestor(hasTestTag("voice-create-slot-picker"))).assertIsDisplayed()
         assertNoSideEffects(expectedRequests = 8)
     }
 

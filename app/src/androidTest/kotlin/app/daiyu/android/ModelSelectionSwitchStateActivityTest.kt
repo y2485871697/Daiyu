@@ -46,14 +46,25 @@ class ModelSelectionSwitchStateActivityTest : WiredActivityTestCase() {
     private fun choose(feature: String) {
         awaitUniqueTag("settings-model-picker")
         awaitDialogEnter(node("settings-model-picker"))
+        val picker = node("settings-model-picker")
+        awaitNodeWindowFocus(picker)
         node("chat-model-search").performTextReplacement(choice.selection.record.id)
+        dismissIme()
+        awaitDialogImeFrame(picker, visible = false)
         val option = (hasTestTag("chat-model-option:${choice.selection.record.id}") or
             hasTestTag("chat-model-option:${choice.provider.slotId}:${choice.selection.record.id}")) and
             hasClickAction() and isEnabled()
         ui.waitUntil(5000) { ui.onAllNodes(option).fetchSemanticsNodes().size == 1 }
-        ui.onNode(option).assertIsDisplayed().performClick()
-        awaitControl("selection persisted") { source.key(feature) == choice.key }
-        ui.waitForIdle()
+        val row = ui.onNode(option)
+        awaitNodeTouchReady(row)
+        row.performClick()
+        val saveFailure = ui.onAllNodesWithText("模型配置更新未完成，请重新选择。")
+        ui.waitUntil(30_000) {
+            source.key(feature) == choice.key ||
+                (feature == "independent-vision" && saveFailure.fetchSemanticsNodes().isNotEmpty())
+        }
+        assertEquals("selection persisted; save error visible=${saveFailure.fetchSemanticsNodes().isNotEmpty()}",
+            choice.key, source.key(feature))
     }
 
     private fun closePicker(page: String) {

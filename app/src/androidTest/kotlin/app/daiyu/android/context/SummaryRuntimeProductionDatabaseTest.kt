@@ -21,6 +21,7 @@ import javax.net.ssl.HttpsURLConnection
 class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
     private lateinit var context: Context
     private lateinit var database: ConversationDatabase
+    private lateinit var service: ContextService
     private lateinit var runtime: SQLiteRuntimeStore
     private val binding = SummaryModelBinding("summary-provider", "summary-model")
     private val deadlines = object : SummaryDeadlineScheduler {
@@ -33,6 +34,7 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
         val root = File(base.cacheDir, "summary-runtime-${UUID.randomUUID()}").apply { mkdirs() }
         context = object : ContextWrapper(base) { override fun getFilesDir() = root }
         database = ConversationDatabase(context)
+        service = ContextService(context, database)
         runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
     }
     override fun tearDown() {
@@ -69,13 +71,21 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
         val provider = ProviderSnapshot.capture(ModelSettings("https://example.invalid/v1", binding.modelId,
             "offline-fixture-only", false, protocol = ProviderProtocol.RESPONSES))
         val config = SummaryProviderConfiguration(binding, provider, binding.modelId, 128000, 127104, 256, 128, 512, 60000)
-        val coordinator = ContextPreparationCoordinator(ContextService(context, database),
+        val coordinator = ContextPreparationCoordinator(service,
             { ProductionCompressionSettings(true, 32000, 1000, summaryModel = binding,
                 summaryProtocol = ProviderProtocol.RESPONSES).coordinatorSettings() },
             ProductionCompressionPolicyResolver,
             ProviderSummaryModelResolver({ config }, { wire }, deadlines))
         return Submission(user, assistant, cancellation, usage, coordinator,
             coordinator.freeze(owner, listOf(user), cancellation, usage.usagePort, nextSummaryUsage = usage.nextUsagePort), wire)
+    }
+    private fun compressBeforeHandoff(s: Submission): PreparedSendContext {
+        // Exercise durable summary admission explicitly; send preparation no longer compresses from local pressure.
+        val archive = service.compress(s.frozen.conversationId, s.frozen.policy, checkNotNull(s.frozen.summarizer),
+            pendingMessages = s.frozen.pendingMessages, cancelled = { s.cancellation.isCancelled },
+            retainTail = false, replayProtocol = ProviderProtocol.RESPONSES)
+        assertNotNull("fixture must compress a completed history", archive)
+        return s.coordinator.prepare(s.frozen).also { assertEquals(archive, it.archiveId) }
     }
     private fun scalar(sql: String, vararg args: String): Long = database.readableDatabase.rawQuery(sql, args).use {
         it.moveToFirst(); it.getLong(0)
@@ -94,12 +104,24 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
     private fun restart() {
         runtime.close(); database.close()
         database = ConversationDatabase(context)
+        service = ContextService(context, database)
         runtime = SQLiteRuntimeStore.acquire(database).also { it.recoverPending() }
+    }
+
+    fun testSendPreparationWithoutCloudInputDoesNotAdmitSummary() {
+        val owner = seed(); val s = submission(owner)
+        val original = service.displayHistory(owner)
+        val prepared = s.coordinator.prepare(s.frozen)
+        assertNull(prepared.archiveId)
+        assertEquals(original + s.user, prepared.messages)
+        assertEquals(0, s.wire.posts)
+        assertEquals(0L, scalar("SELECT COUNT(*) FROM runtime_preparations WHERE message_id=?", s.assistant.id.value))
+        s.usage.close()
     }
 
     fun testSummaryIsDurableBeforeSendThenSameAuthorityHandsToRunnerAndKeepsLaterMainUsage() {
         val owner = seed(); val s = submission(owner)
-        val prepared = s.coordinator.prepare(s.frozen)
+        val prepared = compressBeforeHandoff(s)
         assertNotNull(prepared.archiveId); assertEquals(1, s.wire.posts)
         val staged = read(owner)
         assertEquals(10L, staged.summary.main.input.reportedTokens)
@@ -144,7 +166,7 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
 
     fun testCancelledPreparationKeepsReportedSnapshotButRotatesOwnerAndRejectsLateDuplicateAndSeal() {
         val owner = seed(); val s = submission(owner)
-        s.coordinator.prepare(s.frozen)
+        compressBeforeHandoff(s)
         val admittedOwner = s.usage.usagePort.parent.request.owner
         s.cancellation.cancel()
         assertEquals("TERMINAL", state(s.assistant.id))
@@ -164,7 +186,7 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
     fun testRestartBeforeAndAfterSendDoesNotRecoverAnAttemptAsPermissionForAnotherPost() {
         for (accepted in listOf(false, true)) {
             val owner = seed(); val s = submission(owner)
-            s.coordinator.prepare(s.frozen)
+            compressBeforeHandoff(s)
             if (accepted) { s.usage.seal(); database.send(s.user, s.assistant) }
             restart() // intentionally no close(): simulate lost preparation objects/process death
             assertEquals("TERMINAL", state(s.assistant.id))
@@ -181,7 +203,7 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
 
     fun testDurableNullCorrectionReplacesSnapshotAndFailedCasDoesNotAcknowledgeOrRepost() {
         val owner = seed(); val s = submission(owner)
-        s.coordinator.prepare(s.frozen)
+        compressBeforeHandoff(s)
         val before = scalar("SELECT revision FROM runtime_preparations WHERE message_id=?", s.assistant.id.value)
         s.usage.usagePort.observe(ModelEvent.Usage(10, 20, 5))
         assertEquals(before, scalar("SELECT revision FROM runtime_preparations WHERE message_id=?", s.assistant.id.value))
@@ -201,7 +223,7 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
 
     fun testFormatRepairUsesTwoDurableRequestsAndTransfersBothWithoutDoubleCounting() {
         val owner = seed(); val s = submission(owner, invalidFirst = true)
-        val prepared = s.coordinator.prepare(s.frozen)
+        val prepared = compressBeforeHandoff(s)
         assertNotNull(prepared.archiveId); assertEquals(2, s.wire.posts)
         assertEquals(1L, scalar("SELECT COUNT(*) FROM runtime_preparation_chunks WHERE message_id=? AND has_usage=1", s.assistant.id.value))
         val staged = read(owner).requests
@@ -230,7 +252,7 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
             database.writableDatabase.execSQL("CREATE TRIGGER reject_chunk BEFORE INSERT ON runtime_preparation_chunks BEGIN SELECT RAISE($action${if (action == "ABORT") ", 'fixture'" else ""}); END")
             try {
                 var failed = false
-                try { s.coordinator.prepare(s.frozen) } catch (_: Exception) { failed = true }
+                try { compressBeforeHandoff(s) } catch (_: Exception) { failed = true }
                 assertTrue(failed)
                 assertEquals(1, s.wire.posts)
                 assertEquals(10L, read(owner).summary.combined.input.reportedTokens)
@@ -282,7 +304,7 @@ class SummaryRuntimeProductionDatabaseTest : InstrumentationTestCase() {
         database.writableDatabase.execSQL("CREATE TRIGGER ignore_summary BEFORE INSERT ON runtime_preparations BEGIN SELECT RAISE(IGNORE); END")
         try {
             var failed = false
-            try { s.coordinator.prepare(s.frozen) } catch (_: Exception) { failed = true }
+            try { compressBeforeHandoff(s) } catch (_: Exception) { failed = true }
             assertTrue("ignored admission accepted", failed)
             assertEquals(0, s.wire.posts)
             assertEquals(0L, scalar("SELECT COUNT(*) FROM runtime_preparations WHERE message_id=?", s.assistant.id.value))

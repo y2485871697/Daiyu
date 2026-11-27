@@ -56,17 +56,17 @@ class JankDiagnosticsContract(unittest.TestCase):
         chat = (APP/'ui/screens/chat/conversation/ChatMessageList.kt').read_text()
         self.assertIn('currentNestedTail.scroller?.isScrollInProgress == true -> "inner-scroll"', chat)
 
-    def test_live_document_overflow_is_restored_before_draw(self):
-        root = __import__('pathlib').Path(__file__).resolve().parents[1]
-        src = (root / 'app/src/main/kotlin/app/daiyu/android/ui/screens/chat/conversation/ChatMessageList.kt').read_text()
+    def test_document_growth_keeps_the_clip_without_snapping_the_body(self):
+        src = (APP / 'ui/screens/chat/conversation/ChatMessageList.kt').read_text()
         restore = src.split('fun correctFollowClearance()', 1)[1].split('fun ', 1)[0]
-        self.assertIn('val liveDocumentOverflow =', restore)
-        self.assertIn('sameFrameReasoning ||\n                liveDocumentOverflow', restore)
-        self.assertLess(restore.index('val liveDocumentOverflow ='), restore.index('pacedFollowing && !viewportCorrection'))
-        overflow = restore.split('val liveDocumentOverflow =', 1)[1].split('if (nestedTail.textClearance', 1)[0]
-        # The typed-out remainder after the stream ends must not fall back to the paced follower.
-        self.assertNotIn('isStreaming', overflow)
-        self.assertIn('revealedTurns[activeTail.listKey] != activeTail', overflow)
+        self.assertIn('currentPacedDocumentOwner != null && currentPacedDocumentOwner == currentTailKey', restore)
+        self.assertIn('if (!viewportCorrection && !sameFrameReasoning && !workflowTextGrowth &&', restore)
+        self.assertIn('(pacedLiveBody || nestedTail.textClearance.pacedFollowing)) return', restore)
+        self.assertNotIn('liveDocumentOverflow', restore)
+        self.assertIn('paceDocumentFollow = turn.listKey == pacedDocumentOwner', src)
+        self.assertIn('!paceDocumentFollow && follows() && !state.followCatchup', src)
+        self.assertIn('(if (paceDocumentFollow) placed else maximum).toFloat()', src)
+        self.assertIn('currentPacedDocumentOwner != currentTailKey &&', src.split('val documentOverflow =', 1)[1].split('var delta', 1)[0])
 
     def test_chat_geometry_trace_is_capture_bounded(self):
         root = __import__('pathlib').Path(__file__).resolve().parents[1]

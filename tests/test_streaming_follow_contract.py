@@ -196,7 +196,8 @@ class StreamingFollowContract(unittest.TestCase):
         correction = self.source.split("fun correctFollowClearance()", 1)[1].split("// A non-following viewport", 1)[0]
         for token in ("observeFollowViewport(layout)",
                       "val viewportCorrection = clearanceLayout.viewportLoss.pendingPx > 0f",
-                      "nestedTail.textClearance.pacedFollowing && !viewportCorrection",
+                      "if (!viewportCorrection && !sameFrameReasoning && !workflowTextGrowth &&",
+                      "(pacedLiveBody || nestedTail.textClearance.pacedFollowing)) return",
                       "shortBoundedTail || boundedTerminalReveal || viewportCorrection",
                       "clearanceLayout.viewportLoss.correction(obscured.toFloat())",
                       "clearanceLayout.viewportLoss.consume(consumed)"):
@@ -242,7 +243,7 @@ class ReasoningCardSameFrameGrowthTest(unittest.TestCase):
         self.assertIn('val reserve = if (!reserveNextLine) 0 else state.textClearance.reservedHeight(', source)
         correction = source.split('fun correctFollowClearance() {', 1)[1].split('// A non-following viewport', 1)[0]
         self.assertIn('if (sameFrameReasoning && nestedTail.followCatchup) return', correction)
-        self.assertIn('!viewportCorrection && !sameFrameReasoning &&\n                !liveDocumentOverflow && !workflowTextGrowth) return', correction)
+        self.assertIn('if (!viewportCorrection && !sameFrameReasoning && !workflowTextGrowth &&', correction)
         self.assertIn('|| viewportCorrection || sameFrameReasoning', correction)
-        self.assertLess(correction.index('val sameFrameReasoning'), correction.index('pacedFollowing && !viewportCorrection'))
+        self.assertLess(correction.index('val sameFrameReasoning'), correction.index('if (!viewportCorrection && !sameFrameReasoning'))
 

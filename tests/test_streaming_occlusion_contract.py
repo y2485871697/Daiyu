@@ -185,6 +185,13 @@ class StreamingOcclusionContract(unittest.TestCase):
                       "assertEquals(candidate.layout.layoutInput, after.layout.layoutInput)"):
             self.assertIn(token, device)
 
+    def test_plain_terminal_fixture_finishes_on_a_measured_unsafe_candidate(self):
+        case = DEVICE.read_text().split('private fun exercisePlainTextSafety', 1)[1]
+        self.assertIn('pendingLeaves = glyphs.any { it.at.y + it.extent > safe + .01f }', case)
+        self.assertIn('next == texts.last() && !completedWhileHeld && pendingLeaves', case)
+        self.assertIn('Finish while a candidate is still behind the safety gate', case)
+        self.assertIn('Completion cannot strand an unpainted candidate', case)
+
     def test_terminal_append_retains_only_its_measured_action_slot(self):
         source = CHAT.read_text()
         assistant = source.split('internal fun AssistantTurn(', 1)[1].split('private fun AssistantTextContent', 1)[0]

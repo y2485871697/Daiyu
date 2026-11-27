@@ -278,6 +278,7 @@ internal fun StreamingTailContainer(
     drawClearance: () -> Int = clearance,
     preserveTextClearance: Boolean = false,
     documentFollow: Boolean = false,
+    paceDocumentFollow: Boolean = false,
     reserveNextLine: Boolean = true,
     trackViewport: Boolean = true,
     onContentPositioned: (() -> Unit)? = null,
@@ -369,7 +370,7 @@ internal fun StreamingTailContainer(
                 val growth = state.contentHeight - previousHeight
                 // Only an already capped extent: short content must never use its partial height as an offset.
                 if (state.bounded && growth != 0 && previousHeight >= currentViewportHeight && state.maxOffset > 0 &&
-                    follows() && !state.followCatchup && state.scrollOffset >= state.maxOffset - 1f) {
+                    !paceDocumentFollow && follows() && !state.followCatchup && state.scrollOffset >= state.maxOffset - 1f) {
                     state.maxOffset = (state.maxOffset + growth).coerceAtLeast(0)
                     state.scrollOffset = state.maxOffset.toFloat()
                 } else if (state.bounded && growth < 0 && state.maxOffset > 0) {
@@ -417,12 +418,14 @@ internal fun StreamingTailContainer(
                 state.scrollOffset = 0f
                 0
             } else if (documentFollow && following && origin != null) {
-                // Keep the viewport at the safe bottom and show the content end. A new line then grows
-                // upward in the same frame; the later list scroll only moves the viewport within the item.
+                // Keep the viewport at the safe bottom. For paced body text, move its clip and scroll
+                // offset together: the outer follower, not a newly measured line, moves the visible ink.
                 val placed = (safeBottom - viewport.height - origin.roundToInt()).coerceIn(0, maximum)
                 // Only a capped extent pins its end. Short content is moved by the list; its maximum comes from an
                 // origin placed before that scroll, so pinning it here would lift the row a second line for a frame.
-                state.scrollOffset = if (state.contentHeight > viewport.height) maximum.toFloat() else 0f
+                state.scrollOffset = if (state.contentHeight > viewport.height) {
+                    (if (paceDocumentFollow) placed else maximum).toFloat()
+                } else 0f
                 state.followCatchup = false
                 placed
             } else {
@@ -578,6 +581,10 @@ internal fun ChatMessageList(
     // the measured growth is cleared by a same-frame list correction instead, and the border never moves.
     val reasoningDocumentOwner = documentFollowOwner?.takeIf { it != liveDocumentOwner }
     val currentReasoningDocumentOwner by rememberUpdatedState(reasoningDocumentOwner)
+    val pacedDocumentOwner = liveDocumentOwner?.takeIf {
+        (turns.lastOrNull() as? ChatTurnUi.Assistant)?.workflowContent()?.work == null
+    }
+    val currentPacedDocumentOwner by rememberUpdatedState(pacedDocumentOwner)
     val tailClearance = if (liveDocumentOwner != null) 28.dp else ChatTailClearance
     val currentFollowClearancePx by rememberUpdatedState(with(density) { tailClearance.roundToPx() })
     val currentDragging by rememberUpdatedState(dragging)
@@ -860,17 +867,13 @@ internal fun ChatMessageList(
             val viewportCorrection = clearanceLayout.viewportLoss.pendingPx > 0f
             val sameFrameReasoning = currentTailKey == assistantOwnerKey && currentReasoningDocumentOwner == currentTailKey
             if (sameFrameReasoning && nestedTail.followCatchup) return
-            // A live document taller than the viewport is followed by a whole line at once. Pay it here,
-            // before draw; the frame follower would show the new line under the edge for one frame first.
-            // Includes the typed-out remainder after the stream ends: those lines grow the same document.
-            val liveDocumentOverflow = activeTail != null && currentTailKey == activeTail.listKey &&
-                activeTail.hasBodyTextActions() && activeTail.workflowContent().work == null &&
-                (activeTail.status == RunStatus.RUNNING || revealedTurns[activeTail.listKey] != activeTail) &&
-                nestedTail.contentHeight >= layout.viewportSize.height - currentOcclusionPx
+            // Body text follows the frame budget even when its extent crosses the viewport.
+            // Only physical viewport loss or an existing workflow anchor is paid before draw.
+            val pacedLiveBody = currentPacedDocumentOwner != null && currentPacedDocumentOwner == currentTailKey
             val workflowTextGrowth = currentWorkflowTailOwner != null && currentWorkflowTailOwner == currentTailKey &&
                 nestedTail.textClearance.pacedFollowing
-            if (nestedTail.textClearance.pacedFollowing && !viewportCorrection && !sameFrameReasoning &&
-                !liveDocumentOverflow && !workflowTextGrowth) return
+            if (!viewportCorrection && !sameFrameReasoning && !workflowTextGrowth &&
+                (pacedLiveBody || nestedTail.textClearance.pacedFollowing)) return
             val shortBoundedTail = nestedTail.bounded && currentTailKey == assistantOwnerKey &&
                 nestedTail.contentHeight > 0 && nestedTail.contentHeight <= layout.viewportSize.height -
                 currentOcclusionPx - with(density) { 11.dp.roundToPx() + currentFollowClearancePx }
@@ -879,7 +882,7 @@ internal fun ChatMessageList(
                 readyTurns[activeTail.listKey] == activeTail &&
                 revealedTurns[activeTail.listKey] != activeTail
             val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal || viewportCorrection || sameFrameReasoning ||
-                liveDocumentOverflow || workflowTextGrowth
+                workflowTextGrowth
             if (nestedTail.followCatchup && !viewportCorrection) return
             if (!protectMeasuredTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return
             var last = layout.visibleItemsInfo.lastOrNull {
@@ -1276,9 +1279,10 @@ internal fun ChatMessageList(
                 // Reveal may be waiting for this very movement to clear its next line.
                 val alignment = resumeFollowPending && !currentNestedTail.textClearance.pacedFollowing
                 val documentOverflow = tail?.listKey == currentTailKey && tail?.isStreaming == true &&
+                    currentPacedDocumentOwner != currentTailKey &&
                     (tail.hasBodyTextActions() && tail.workProcess?.running != true || tail.hasLiveWorkflowReasoning()) &&
                     last.size >= layout.viewportSize.height - currentOcclusionPx
-                // With a document there is no queued character motion. At the physical end,
+                // The immediate document path has no queued outer character motion. At the physical end,
                 // wait for a new measured extent instead of polling the same last pixel.
                 if (documentOverflow && !listState.canScrollForward) {
                     resumeFollowPending = false
@@ -1627,6 +1631,7 @@ internal fun ChatMessageList(
                             preserveTextClearance = turn.listKey == currentTailKey &&
                                 (turn.status == RunStatus.RUNNING || revealedTurns[turn.listKey] != turn),
                             documentFollow = turn.listKey == documentFollowOwner,
+                            paceDocumentFollow = turn.listKey == pacedDocumentOwner,
                             reserveNextLine = turn.listKey != reasoningDocumentOwner && turn.listKey != workflowTailOwner,
                             trackViewport = viewportState.bounded || viewportState.migrating ||
                                 turn.listKey == currentTailKey || turn.listKey == assistantOwnerKey,

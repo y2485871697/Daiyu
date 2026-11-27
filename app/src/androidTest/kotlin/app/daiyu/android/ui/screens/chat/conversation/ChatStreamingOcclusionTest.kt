@@ -677,7 +677,11 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         } else "稳定前文。"
         val texts = listOf(initial, initial + "\n\n第一行新增正文。",
             initial + "\n\n第一行新增正文。\n\n- 第二行新增正文。" +
-                if (crossViewport) (0 until 8).joinToString("\n\n", prefix = "\n\n") { "跨视口新增段落 $it。" } else "")
+                when {
+                    crossViewport -> (0 until 8).joinToString("\n\n", prefix = "\n\n") { "跨视口新增段落 $it。" }
+                    !longBody -> "\n- 仍待绘制的列表项。\n\n最后一段正文。"
+                    else -> ""
+                })
         for (parser in listOf(defaultMarkdownParser, streamingMarkdownParser)) for (text in texts) {
             markdownProjectionCache.put(MarkdownProjection(listOf(text), mapOf(text to parser(text)), parser))
         }
@@ -804,7 +808,6 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             if (crossViewport) assertTrue("Cross-viewport fixture must begin below H=V: H=$initialExtent V=$initialViewport", sawShort)
             verify(force = true)
             for (next in texts.drop(1)) {
-                val beforeUnsafe = unsafeCandidates
                 ui.runOnUiThread { body = next }
                 repeat(if (crossViewport) 240 else 90) { tick ->
                     frame()
@@ -816,8 +819,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                         longBody, extent > viewport)
                     if (tick in 1..12) intermediate++
                     verify()
-                    if (!longBody && !crossViewport && next == texts.last() && !completedWhileHeld &&
-                        unsafeCandidates > beforeUnsafe) {
+                    if (!longBody && !crossViewport && next == texts.last() && !completedWhileHeld && pendingLeaves) {
                         ui.runOnUiThread { live = false }
                         completedWhileHeld = true
                     }
@@ -837,7 +839,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
             assertTrue("Must observe real per-character candidate growth", prefixes.size >= 8)
             assertTrue("Must compare real complete glyphs, not merely find some ink", compared >= 6)
             if (crossViewport) assertTrue("Real Markdown growth must cross H=V", sawShort && sawLong)
-            if (!longBody && !crossViewport) assertTrue("Finish while a candidate is still behind the safety gate", completedWhileHeld)
+            if (!longBody && !crossViewport) assertTrue(
+                "Finish while a candidate is still behind the safety gate: samples=$compared unsafe=$unsafeCandidates\n" +
+                    if (completedWhileHeld) "" else paintDump("ink-wire-tail"), completedWhileHeld)
             assertTrue("Must inspect the original 220ms catchup's intermediate frames", intermediate >= 20)
             if (!longBody) assertTrue("Short growth must really premeasure text beyond the safety edge", unsafeCandidates > 0)
             if (longBody) {

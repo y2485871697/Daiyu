@@ -3,6 +3,12 @@
 set -uo pipefail
 real="$(dirname "$0")/adb.real"
 limit=${ADB_COMMAND_TIMEOUT:-10}
+# The emulator runner sends this immediately after sys.boot_completed. Input can
+# still be initializing; keep a separate bound for exactly this early command.
+if [[ -z ${ADB_COMMAND_TIMEOUT:-} && $# == 6 && ${1:-} == -s && ${2:-} =~ ^emulator-[0-9]+$ &&
+      ${3:-} == shell && ${4:-} == input && ${5:-} == keyevent && ${6:-} == 82 ]]; then
+  limit=45
+fi
 [[ "$limit" =~ ^[1-9][0-9]*$ ]] || exit 2
 log=${ADB_COMMAND_LOG:-smoke/adb-commands.txt}
 mkdir -p "$(dirname "$log")"

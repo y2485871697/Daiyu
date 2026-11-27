@@ -510,6 +510,29 @@ class ProcessTests(unittest.TestCase):
         self.assertIn(b'timed out', result.stderr)
         self.assertIn('exit=124', (self.root / 'smoke/adb-commands.txt').read_text())
 
+    def test_only_emulator_boot_unlock_gets_a_longer_deadline(self):
+        wrapper = self.bin / 'adb'
+        shutil.copy(ROOT / 'scripts/adb_bounded.sh', wrapper)
+        wrapper.chmod(0o755)
+        self.executable('timeout', '#!/bin/sh\nprintf "%s\\n" "$2"\nexit "${TEST_ADB_EXIT:-0}"\n')
+        env = self.env.copy()
+        env.pop('ADB_COMMAND_TIMEOUT', None)
+        unlock = ('-s', 'emulator-5554', 'shell', 'input', 'keyevent', '82')
+        for args, extra, limit, code in (
+            (unlock, {}, 45, 0),
+            (unlock, {'TEST_ADB_EXIT': '124'}, 45, 124),
+            (unlock, {'ADB_COMMAND_TIMEOUT': '3'}, 3, 0),
+            ((*unlock[:-1], '4'), {}, 10, 0),
+            (('-s', 'physical-device', *unlock[2:]), {}, 10, 0),
+            (('-s', 'emulator-5554', 'shell', 'getprop', 'sys.boot_completed'), {}, 10, 0),
+        ):
+            with self.subTest(args=args, extra=extra):
+                result = subprocess.run([str(wrapper), *args], cwd=self.root, env=dict(env, **extra),
+                                        capture_output=True, text=True, timeout=10)
+                self.assertEqual((result.returncode, result.stdout), (code, f'{limit}\n'))
+                if code:
+                    self.assertIn(f'ADB command timed out ({limit}s)', result.stderr)
+
     def test_installer_rejects_double_wrapping(self):
         sdk = self.root / 'sdk/platform-tools'
         sdk.mkdir(parents=True)

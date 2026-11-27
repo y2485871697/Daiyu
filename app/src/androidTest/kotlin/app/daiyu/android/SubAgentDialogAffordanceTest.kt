@@ -7,6 +7,7 @@ import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
+import androidx.test.espresso.Espresso.pressBack
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.delegation.*
@@ -167,6 +168,11 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
             ui.waitUntil(5_000) { active == null }
             node("subagent-config-body").assertDoesNotExist()
         }
+        fun backFromDraft(title: String) {
+            awaitNodeWindowFocus(ui.onNodeWithText(title))
+            dismissIme()
+            pressBack()
+        }
         fun openDraft(newProfile: Boolean) {
             mainThread {
                 active = checkNotNull(SubAgentProfileDraftSession.open(editor,
@@ -248,7 +254,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         assertNull(repository.snapshot(owner).profiles.singleOrNull()?.reasoning)
         assertEquals(initialPreferences, preferences.all.toMap())
         closeThinking(initialTitle)
-        if (adding) ui.onNodeWithText("取消").performClick() else back()
+        if (adding) ui.onNodeWithText("取消").performClick() else backFromDraft(initialTitle)
         awaitDraftClosed()
         assertEquals(initialPreferences, preferences.all.toMap())
 
@@ -271,7 +277,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         assertEquals(ReasoningEffort.HIGH, repository.snapshot(owner).profiles.single().reasoning)
         assertEquals(savedHigh, preferences.all.toMap())
         closeThinking("子代理配置")
-        back()
+        backFromDraft("子代理配置")
         awaitDraftClosed()
         assertEquals(savedHigh, preferences.all.toMap())
 
@@ -291,7 +297,7 @@ class SubAgentDialogAffordanceTest : WiredActivityTestCase() {
         assertEquals(0f, offRange.current)
         assertEquals(0f..6f, offRange.range)
         closeThinking("子代理配置")
-        back()
+        backFromDraft("子代理配置")
         awaitDraftClosed()
         assertEquals(ReasoningEffort.OFF, repository.snapshot(owner).profiles.single().reasoning)
         assertEquals(1, repository.snapshot(owner).profiles.size)

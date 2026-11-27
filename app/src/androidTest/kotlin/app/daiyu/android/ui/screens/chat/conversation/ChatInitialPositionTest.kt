@@ -330,9 +330,9 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
         awaitProbe(probe)
         val saved = draws.filter { it.frameOwner == "first" && it.probeEpoch == probe.second }
         assertTrue("Expected a newly captured visible viewport after the history swipe", saved.isNotEmpty())
-        val bottom = expectedTailBottom()
-        assertTrue("The saved fixture must actually be away from the bottom",
-            saved.maxOf { it.bottom } > bottom + 10f)
+        // Captured pixels are clipped to the viewport, even when the tail extends below it.
+        assertTrue("The history swipe must clip the first conversation tail: $saved",
+            saved.any { it.owner == "first" && it.tail && it.bottom >= viewportBottom - 2f })
         switchTo("second")
         awaitDraw("second")
         draws.removeAll { it.owner == "first" }

@@ -7,6 +7,7 @@ import androidx.compose.runtime.key
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
+import androidx.test.espresso.Espresso.pressBack
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.voice.account.*
@@ -168,11 +169,17 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
             ui.onAllNodesWithText("正在查询云端音色名额…").fetchSemanticsNodes().isEmpty()
         }
     }
-    private fun awaitPickerClosed() {
+    private fun awaitPickerClosed(tag: String = "voice-create-slot-picker") {
         ui.waitUntil(5_000) {
             ui.mainClock.advanceTimeByFrame()
-            ui.onAllNodesWithTag("voice-create-slot-picker").fetchSemanticsNodes().isEmpty()
+            ui.onAllNodesWithTag(tag).fetchSemanticsNodes().isEmpty()
         }
+    }
+    private fun backFromPicker(tag: String = "voice-create-slot-picker") {
+        awaitNodeWindowFocus(node(tag))
+        dismissIme()
+        pressBack()
+        awaitPickerClosed(tag)
     }
     private fun assertNoSideEffects(expectedRequests: Int = 0) {
         assertEquals(beforeIndex, index.readText())
@@ -209,8 +216,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         node("voice-create-slot:S_second").assertIsNotSelected()
         node("voice-create-slot:S_second").performClick().assertIsSelected()
         ui.onAllNodesWithContentDescription("关闭").assertCountEquals(0)
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        awaitPickerClosed()
+        backFromPicker()
         awaitUniqueTag("page:制作声音")
         reveal("settings-field:声音名称", "制作声音").assertTextContains("draft name")
         openPicker()
@@ -228,9 +234,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         enterDraftName("postpaid voice")
         openPicker()
         node("voice-create-slot:S_available").performClick()
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        awaitPickerClosed()
-        awaitPickerClosed()
+        backFromPicker()
         reveal("settings-row:高级：新建后付费音色", "制作声音").performClick()
         reveal("settings-switch:新建后付费音色", "制作声音").performClick()
         node("settings-switch:新建后付费音色").assertIsOn()
@@ -266,9 +270,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         reveal("voice-create-sync-card", "制作声音").assertExists()
         openPicker()
         node("voice-create-slot:S_available").performClick()
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        awaitPickerClosed()
-        awaitPickerClosed()
+        backFromPicker()
         node("voice-create-manual-card").assertDoesNotExist()
         assertNoSideEffects()
     }
@@ -293,9 +295,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         enterDraftName("overwrite voice")
         openPicker()
         node("voice-create-slot:S_available").performClick()
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        awaitPickerClosed()
-        awaitPickerClosed()
+        backFromPicker()
         reveal("settings-row:下一步：选择录音", "制作声音").performClick()
         awaitUniqueTag("voice-training-sample")
         assertNoSideEffects(expectedRequests = 8)
@@ -331,9 +331,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         enterDraftName("stale selection")
         openPicker()
         node("voice-create-slot:S_available").performClick()
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        awaitPickerClosed()
-        awaitPickerClosed()
+        backFromPicker()
         creationRemoteIds = emptyList()
         awaitCreationRejected("没有该名额 ID")
         reveal("settings-row:选择音色名额", "制作声音").assertTextContains("S_available", substring = true)
@@ -371,8 +369,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
             .assertTextContains("训练成功", substring = true).assertHasClickAction()
         assertNoSideEffects(expectedRequests = 4)
         node("voice-create-slot:S_available").performClick()
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        awaitPickerClosed()
+        backFromPicker()
         reveal("settings-row:选择音色名额", "制作声音").assertTextContains("S_available", substring = true)
         reveal("settings-field:声音名称", "制作声音").assertTextContains("keep draft")
         creationRemoteIds = emptyList()
@@ -387,8 +384,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         mount(available = false, verifySlot = true)
         openPicker()
         node("voice-create-slot:S_available").assertExists()
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        awaitPickerClosed()
+        backFromPicker()
         creationQueryFails = true
         openPicker()
         node("voice-create-slot:S_available").assertDoesNotExist()
@@ -420,8 +416,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         node("voice-create-slot-picker").assertExists()
         node("voice-create-slot:S_exhausted").assertIsNotSelected()
         node("voice-create-slot:S_other_account").assertDoesNotExist()
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        awaitPickerClosed()
+        backFromPicker()
         reveal("settings-row:下一步：选择录音", "制作声音").assertHasNoClickAction()
         assertNoSideEffects()
     }
@@ -436,8 +431,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         card.performClick()
         card.assertIsSelected()
         node("voice-create-slot-picker").assertExists()
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        awaitPickerClosed()
+        backFromPicker()
         reveal("settings-row:选择音色名额", "制作声音").assertTextContains("S_available", substring = true)
         reveal("settings-row:下一步：选择录音", "制作声音").assertHasClickAction()
         reveal("settings-field:声音名称", "制作声音").assertTextContains("replacement voice")
@@ -451,8 +445,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         val unused = node("voice-create-slot:S_available").assertIsEnabled().fetchSemanticsNode().boundsInRoot
         assertTrue(cloned.bottom < unused.top)
         assertNoSideEffects()
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        awaitPickerClosed()
+        backFromPicker()
         mount(available = true, ready = true, active = true)
         openPicker()
         node("voice-create-slot:S_available").assertIsNotEnabled()
@@ -480,8 +473,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         node("voice-import-slot:S_second").assertHeightIsAtLeast(48.dp).performClick().assertIsSelected()
         ui.mainClock.advanceTimeBy(3_000)
         node("voice-import-slot-picker").assertIsDisplayed()
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("voice-import-slot-picker").fetchSemanticsNodes().isEmpty() }
+        backFromPicker("voice-import-slot-picker")
         reveal("settings-row:选取我的名额", "导入声音").assertTextContains("S_second", substring = true).performClick()
         awaitUniqueTag("voice-import-slot-picker")
         awaitNodeWindowFocus(node("voice-import-slot-picker"))
@@ -517,8 +509,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         awaitNodeWindowFocus(node("voice-import-slot-picker"))
         ui.waitUntil(5_000) { ui.onAllNodesWithTag("voice-import-slot:S_available").fetchSemanticsNodes().size == 1 }
         node("voice-import-slot:S_available").assertIsEnabled()
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("voice-import-slot-picker").fetchSemanticsNodes().isEmpty() }
+        backFromPicker("voice-import-slot-picker")
         importQueryFails = true
         reveal("settings-row:选取我的名额", "导入声音").performClick()
         awaitUniqueTag("voice-import-slot-picker")
@@ -544,8 +535,7 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         ui.onNode(hasText("已复刻名额查询失败", substring = true) and
             hasAnyAncestor(hasTestTag("voice-import-slot-picker"))).assertDoesNotExist()
         node("voice-import-slot:S_available").assertDoesNotExist()
-        instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
-        ui.waitUntil(5_000) { ui.onAllNodesWithTag("voice-import-slot-picker").fetchSemanticsNodes().isEmpty() }
+        backFromPicker("voice-import-slot-picker")
         importVoiceQueryFails = false
         reveal("settings-row:选取我的名额", "导入声音").performClick()
         awaitUniqueTag("voice-import-slot-picker")

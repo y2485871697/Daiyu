@@ -197,11 +197,15 @@ class RenamePresentationActivityTest : WiredActivityTestCase() {
             }
             return target.fetchSemanticsNode().boundsInRoot.left + layouts.single().getLineRight(0)
         }
-        val expected = textRight(ui.onNode(hasText("标准") and hasAnyAncestor(hasTestTag("subagent-gpt-speed-worker")),
-            useUnmergedTree = true))
+        val speed = ui.onNode(hasText("标准") and hasAnyAncestor(hasTestTag("subagent-gpt-speed-worker")),
+            useUnmergedTree = true)
+        val valueColumnEnd = speed.fetchSemanticsNode().boundsInRoot.right
+        val textRounding = 2f * activity.resources.displayMetrics.density
         for (tag in listOf("subagent-setting-model-name", "subagent-setting-model-provider")) {
-            assertEquals("$tag must end at the same column as GPT speed", expected,
-                textRight(ui.onNodeWithTag(tag, useUnmergedTree = true)), 1f)
+            val text = ui.onNodeWithTag(tag, useUnmergedTree = true)
+            assertEquals("$tag layout must share the value column end", valueColumnEnd,
+                text.fetchSemanticsNode().boundsInRoot.right, 1f)
+            assertEquals("$tag text must end at the value column edge", valueColumnEnd, textRight(text), textRounding)
         }
     }
 

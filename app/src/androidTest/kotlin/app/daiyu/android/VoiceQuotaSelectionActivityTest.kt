@@ -164,11 +164,27 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
     private fun openPicker() {
         reveal("settings-row:选择音色名额", "制作声音").performClick()
         awaitUniqueTag("voice-create-slot-picker")
-        awaitNodeWindowFocus(node("voice-create-slot-picker"))
+        val picker = node("voice-create-slot-picker")
+        awaitDialogEnter(picker)
+        awaitNodeWindowFocus(picker)
         ui.waitUntil(5_000) {
             ui.onAllNodesWithText("正在查询云端音色名额…").fetchSemanticsNodes().isEmpty()
         }
     }
+    private fun revealCreationSlot(id: String): SemanticsNodeInteraction {
+        val tag = "voice-create-slot:$id"
+        node("voice-tone-list").scrollToDescendant(hasTestTag(tag))
+        return node(tag).assertIsDisplayed()
+    }
+
+    private fun assertCreationSlotOrder(first: String, second: String) {
+        revealCreationSlot(second)
+        val before = node("voice-create-slot:$first").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        val after = node("voice-create-slot:$second").assertIsDisplayed().fetchSemanticsNode().boundsInRoot
+        assertTrue("Expected $first above $second without overlap: $before / $after",
+            before.height > 0f && after.height > 0f && before.bottom <= after.top)
+    }
+
     private fun awaitPickerClosed(tag: String = "voice-create-slot-picker") {
         ui.waitUntil(5_000) {
             ui.mainClock.advanceTimeByFrame()
@@ -199,22 +215,19 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
         node("voice-create-slot:S_exhausted").assertIsNotEnabled().performTouchInput { click() }
         node("voice-create-slot-picker").assertExists()
         node("voice-create-slot:S_exhausted").assertIsNotSelected()
-        val firstCard = node("voice-create-slot:S_available").assertIsNotSelected().assertHeightIsAtLeast(48.dp)
-            .fetchSemanticsNode().boundsInRoot
-        val nextCard = node("voice-create-slot:S_exhausted").assertIsNotSelected().assertHeightIsAtLeast(48.dp)
-            .fetchSemanticsNode().boundsInRoot
-        val lastCard = node("voice-create-slot:S_second").assertIsNotSelected().assertHeightIsAtLeast(48.dp)
-            .fetchSemanticsNode().boundsInRoot
-        assertTrue(nextCard.top >= firstCard.bottom)
-        assertTrue(lastCard.top >= nextCard.bottom)
-        node("voice-create-slot:S_second").performClick()
+        for (slot in listOf("S_available", "S_exhausted", "S_second")) {
+            revealCreationSlot(slot).assertIsNotSelected().assertHeightIsAtLeast(48.dp)
+        }
+        assertCreationSlotOrder("S_available", "S_exhausted")
+        assertCreationSlotOrder("S_exhausted", "S_second")
+        revealCreationSlot("S_second").performClick()
         node("voice-create-slot:S_second").assertIsSelected()
         node("voice-create-slot:S_available").assertIsNotSelected()
         ui.mainClock.advanceTimeBy(3_000)
         node("voice-create-slot-picker").assertIsDisplayed()
-        node("voice-create-slot:S_available").performClick().assertIsSelected()
+        revealCreationSlot("S_available").performClick().assertIsSelected()
         node("voice-create-slot:S_second").assertIsNotSelected()
-        node("voice-create-slot:S_second").performClick().assertIsSelected()
+        revealCreationSlot("S_second").performClick().assertIsSelected()
         ui.onAllNodesWithContentDescription("关闭").assertCountEquals(0)
         backFromPicker()
         awaitUniqueTag("page:制作声音")
@@ -442,9 +455,9 @@ class VoiceQuotaSelectionActivityTest : WiredActivityTestCase() {
     fun testClonedVoiceAppearsBeforeUnusedQuotasAndActivatedVoiceRemainsVisibleButLocked() {
         mount(available = true, cloned = true)
         openPicker()
-        val cloned = node("voice-create-slot:S_cloned").assertIsEnabled().fetchSemanticsNode().boundsInRoot
-        val unused = node("voice-create-slot:S_available").assertIsEnabled().fetchSemanticsNode().boundsInRoot
-        assertTrue(cloned.bottom < unused.top)
+        revealCreationSlot("S_cloned").assertIsEnabled()
+        revealCreationSlot("S_available").assertIsEnabled()
+        assertCreationSlotOrder("S_cloned", "S_available")
         assertNoSideEffects()
         backFromPicker()
         mount(available = true, ready = true, active = true)

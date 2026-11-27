@@ -68,11 +68,18 @@ class ModelSelectionSwitchStateActivityTest : WiredActivityTestCase() {
     }
 
     private fun closePicker(page: String) {
-        awaitUniqueTag("settings-model-picker")
-        awaitNodeWindowFocus(node("settings-model-picker"))
+        val tag = "settings-model-picker"
+        awaitUniqueTag(tag)
+        val picker = node(tag)
+        awaitDialogEnter(picker)
+        awaitNodeWindowFocus(picker)
         dismissIme()
+        awaitDialogImeFrame(picker, visible = false)
         pressBack()
-        ui.waitUntil(5000) { ui.onAllNodesWithTag("settings-model-picker").fetchSemanticsNodes().isEmpty() }
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.onAllNodesWithTag(tag).fetchSemanticsNodes().isEmpty()
+        }
         node("page:$page").assertIsDisplayed()
     }
 

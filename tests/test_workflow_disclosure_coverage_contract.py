@@ -16,11 +16,13 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
         self.assertIn('force || boundary.animationIdle', motion)
         self.assertIn('onDispose { motion.dispose() }', motion)
 
-    def test_top_anchor_limits_clearance_to_its_own_disclosure(self):
+    def test_both_anchors_limit_clearance_to_their_own_disclosure(self):
         source = (CHAT / 'WorkflowDisclosureMotion.kt').read_text()
         clearance = source.split('private fun anchorClearance()', 1)[1].split('private fun correctAnchor(', 1)[0]
-        self.assertIn('if (!anchorAtTop) return turnClearance', clearance)
-        self.assertIn('placed.positionInWindow().y + placed.size.height, safe.bottom', clearance)
+        self.assertNotIn('if (!anchorAtTop) return turnClearance', clearance)
+        self.assertIn('val cardBottom = placed.positionInWindow().y + placed.size.height', clearance)
+        self.assertIn('workflowDisclosureCardClearance(turnClearance, cardBottom, safe.bottom)', clearance)
+        self.assertIn('return overflow.takeIf { anchorAtTop || it > 0f }', clearance)
         self.assertIn('minOf(turnClearance, disclosureBottom - safeBottom)', source)
         correction = source.split('private fun correctAnchor(', 1)[1].split('private fun chooseDirection()', 1)[0]
         self.assertEqual(3, correction.count('anchorClearance()'))
@@ -260,7 +262,7 @@ class WorkflowDisclosureCoverageTests(unittest.TestCase):
                       'val boundedTerminalReveal = nestedTail.bounded && currentTailKey == assistantOwnerKey &&',
                       'if (!protectMeasuredTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return',
                       'val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal || viewportCorrection',
-                      'if (nestedTail.followCatchup && !protectMeasuredTail) return',
+                      'if (nestedTail.followCatchup && !viewportCorrection) return',
                       'if (!protectMeasuredTail && resumeFollowPending',
                       'activeTail.status != RunStatus.RUNNING && !activeTail.isStreaming',
                       'readyTurns[activeTail.listKey] == activeTail',

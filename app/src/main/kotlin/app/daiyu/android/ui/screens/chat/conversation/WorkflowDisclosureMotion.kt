@@ -30,7 +30,7 @@ import kotlin.math.abs
 internal fun workflowDisclosureExpandsUp(headerCenter: Float, viewport: Rect): Boolean =
     headerCenter >= viewport.center.y
 
-internal fun workflowDisclosureTopClearance(turnClearance: Float, disclosureBottom: Float, safeBottom: Float): Float =
+internal fun workflowDisclosureCardClearance(turnClearance: Float, disclosureBottom: Float, safeBottom: Float): Float =
     minOf(turnClearance, disclosureBottom - safeBottom)
 
 internal val WorkflowDisclosureUp = SemanticsPropertyKey<Boolean>("WorkflowDisclosureUp")
@@ -276,11 +276,12 @@ internal class WorkflowDisclosureMotion(
         if (!(anchorRequester ?: this).animationIdle) return null
         val context = context ?: return null
         val turnClearance = context.viewport.anchorClearance(context.itemKey) ?: return null
-        if (!anchorAtTop) return turnClearance
         val placed = container?.takeIf { it.isAttached } ?: return null
         val safe = context.viewport.bounds() ?: return null
-        return workflowDisclosureTopClearance(turnClearance,
-            placed.positionInWindow().y + placed.size.height, safe.bottom)
+        // Content appended below the anchored card stays with the paced list follower.
+        val cardBottom = placed.positionInWindow().y + placed.size.height
+        val overflow = workflowDisclosureCardClearance(turnClearance, cardBottom, safe.bottom)
+        return overflow.takeIf { anchorAtTop || it > 0f }
     }
 
     private fun correctAnchor(settling: Boolean = false, refreshGeometry: Boolean = false): Boolean {

@@ -832,8 +832,9 @@ internal fun ChatMessageList(
     fun observeFollowViewport(layout: LazyListLayoutInfo) {
         val viewport = Triple(layout.viewportSize, layout.beforeContentPadding,
             currentOcclusionPx + currentFollowClearancePx)
+        // Enabling the document's output spacer is follow debt, not a physical viewport resize.
         clearanceLayout.viewportLoss.observe(currentTailKey,
-            viewport.first.height - viewport.second - viewport.third, following = canFollowBottom())
+            viewport.first.height - viewport.second - currentOcclusionPx, following = canFollowBottom())
         clearanceLayout.followViewport = viewport
     }
     fun correctFollowClearance() {
@@ -879,7 +880,7 @@ internal fun ChatMessageList(
                 revealedTurns[activeTail.listKey] != activeTail
             val protectMeasuredTail = shortBoundedTail || boundedTerminalReveal || viewportCorrection || sameFrameReasoning ||
                 liveDocumentOverflow || workflowTextGrowth
-            if (nestedTail.followCatchup && !protectMeasuredTail) return
+            if (nestedTail.followCatchup && !viewportCorrection) return
             if (!protectMeasuredTail && (activeTail?.status == RunStatus.RUNNING || nestedTail.bounded)) return
             var last = layout.visibleItemsInfo.lastOrNull {
                 it.index == currentTailIndex && it.key == currentTailKey
@@ -1025,14 +1026,13 @@ internal fun ChatMessageList(
         val tail = tailAssistant ?: return@LaunchedEffect
         val requestSerial = currentScrollSerial
         val migrationTouchEpoch = touchEpoch
-        fun ownsMigration() = currentNestedTail === nestedTail && assistantOwnerKey == tail.listKey &&
+        fun ownsMigration() = currentNestedTail === nestedTail && currentTailKey == tail.listKey &&
+            assistantOwnerKey == tail.listKey &&
             currentAssistants[tail.listKey] == tail && nestedStates[tail.listKey] === nestedTail &&
             currentScrollSerial == requestSerial && currentScrollSerial == consumedScrollSerial &&
             touchEpoch == migrationTouchEpoch && pageActive && scrollResumed && !exactNavigationOwnsScroll
-        if (!nestedTail.bounded || tail.status == RunStatus.RUNNING || !pageActive || !scrollResumed) return@LaunchedEffect
-        // Only a new request or touch can relinquish an exact navigation, not consumption.
-        if (exactNavigationOwnsScroll) return@LaunchedEffect
-        if (currentScrollSerial != null && currentScrollSerial != consumedScrollSerial) return@LaunchedEffect
+        // A separate compression tail must not take ownership of the visible reply's inner anchor.
+        if (!ownsMigration() || !nestedTail.bounded || tail.status == RunStatus.RUNNING) return@LaunchedEffect
         while (readyTurns[tail.listKey] != tail || revealedTurns[tail.listKey] != tail) {
             withFrameNanos { }
             if (!ownsMigration()) return@LaunchedEffect
@@ -1962,10 +1962,17 @@ internal fun rememberAssistantTextBody(plainNarration: Set<String>, sources: Lis
             SideEffect { if (sourceReady) currentReveal.value.presented(text.itemId) }
             Text(displayed.take(end), drawReceipt.fillMaxWidth(), color = conversationColors().muted,
                 style = MiuixTheme.textStyles.footnote1.copy(fontSize = 14.sp, lineHeight = 22.sp))
-        } else RevealedMessageMarkdown(displayed, accepted?.blocksAt(index),
-            currentReveal.value, text.itemId, if (streamAnswer && text.markdownWindow == null) drawReceipt.padding(horizontal = 4.dp) else drawReceipt,
-            generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true,
-            sourceWindow = accepted?.windows?.getOrNull(index) ?: text.markdownWindow, bodyPaintFeedback = streamAnswer)
+        } else {
+            val body: @Composable () -> Unit = {
+                RevealedMessageMarkdown(displayed, accepted?.blocksAt(index), currentReveal.value, text.itemId, drawReceipt,
+                    generationComplete = currentComplete.value && displayed == text.text, deferBlockReveal = true,
+                    sourceWindow = accepted?.windows?.getOrNull(index) ?: text.markdownWindow, bodyPaintFeedback = streamAnswer)
+            }
+            // Put the inset outside the selectable text node so its layout origin is the ink origin.
+            if (streamAnswer && text.markdownWindow == null) {
+                Box(Modifier.padding(horizontal = 4.dp), propagateMinConstraints = true) { body() }
+            } else body()
+        }
     } }
 }
 

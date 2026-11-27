@@ -290,21 +290,21 @@ class WorkflowDisclosureMotionTest {
     }
 
     @Test fun downwardDisclosureDoesNotFollowOverflowFromLaterTurnContent() {
-        val clearance = workflowDisclosureTopClearance(4f, 136f, 305f)
+        val clearance = workflowDisclosureCardClearance(4f, 136f, 305f)
         assertEquals(0f, maxOf(0f, clearance), 0f)
         assertEquals("A negative anchor delta can restore the original top", -4f, maxOf(-4f, clearance), 0f)
     }
 
     @Test fun topAnchorWithClearanceMovesOnlyItsOwnOverflowWhenTheComposerRises() {
-        assertEquals(4f, workflowDisclosureTopClearance(184f, 309f, 305f), 0f)
-        assertEquals(2f, workflowDisclosureTopClearance(2f, 309f, 305f), 0f)
-        assertEquals(0f, workflowDisclosureTopClearance(180f, 305f, 305f), 0f)
+        assertEquals(4f, workflowDisclosureCardClearance(184f, 309f, 305f), 0f)
+        assertEquals(2f, workflowDisclosureCardClearance(2f, 309f, 305f), 0f)
+        assertEquals(0f, workflowDisclosureCardClearance(180f, 305f, 305f), 0f)
     }
 
     @Test fun topAnchorWithClearanceCanReturnWithoutCrossingTheSafeBottom() {
-        val clearance = workflowDisclosureTopClearance(180f, 302f, 305f)
+        val clearance = workflowDisclosureCardClearance(180f, 302f, 305f)
         assertEquals(-3f, maxOf(-10f, clearance), 0f)
-        assertEquals(-10f, maxOf(-10f, workflowDisclosureTopClearance(-12f, 280f, 305f)), 0f)
+        assertEquals(-10f, maxOf(-10f, workflowDisclosureCardClearance(-12f, 280f, 305f)), 0f)
     }
 
 

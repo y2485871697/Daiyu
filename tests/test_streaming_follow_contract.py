@@ -165,7 +165,8 @@ class StreamingFollowContract(unittest.TestCase):
                       "host.invalidate()", "draws.isNotEmpty()",
                       "draws.zipWithNext()", "movingDraws > 1", "tail.size.height",
                       "History and the assistant move as one outer list",
-                      "Viewport resize retains the original immediate clearance alignment"):
+                      "Viewport resize preserves the 28dp live-document output space immediately",
+                      "28f, (safeBottom - bottom) / density, 2f / density"):
             self.assertIn(token, device)
 
         self.assertNotIn("draws += origin to", device)
@@ -202,7 +203,7 @@ class StreamingFollowContract(unittest.TestCase):
             self.assertIn(token, correction)
         observation = self.source.split("fun observeFollowViewport(", 1)[1].split("fun correctFollowClearance", 1)[0]
         self.assertIn("clearanceLayout.viewportLoss.observe(currentTailKey,", observation)
-        self.assertIn("viewport.first.height - viewport.second - viewport.third", observation)
+        self.assertIn("viewport.first.height - viewport.second - currentOcclusionPx", observation)
         self.assertIn("following = canFollowBottom()", observation)
         self.assertIn("clearanceLayout.followViewport = viewport", observation)
         self.assertNotIn("alignViewport", self.follow)

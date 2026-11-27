@@ -60,7 +60,7 @@ class ChatResumeScrollContract(unittest.TestCase):
         observation = self.chat.split('fun observeFollowViewport(', 1)[1].split('fun correctFollowClearance()', 1)[0]
         self.assertIn('val viewport = Triple(layout.viewportSize, layout.beforeContentPadding, currentOcclusionPx + currentFollowClearancePx)', ' '.join(observation.split()))
         self.assertNotIn('layout.afterContentPadding', observation)
-        self.assertIn('viewport.first.height - viewport.second - viewport.third', observation)
+        self.assertIn('viewport.first.height - viewport.second - currentOcclusionPx', observation)
         self.assertIn('following = canFollowBottom()', observation)
         self.assertIn('clearanceLayout.followViewport = viewport', observation)
         self.assertIn('internal val ChatTailClearance = 8.dp', self.chat)

@@ -642,7 +642,9 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                 while (next < total && confirmed[next]) next++
                 val top = inkRect("cadence-host", "chat-turn:cadence-tail").top
                 previousTop?.let { before ->
-                    assertTrue("Cadence follow cannot reverse or jump a line: before=$before after=$top",
+                    assertTrue("Cadence follow cannot reverse or jump a line: tick=$tick time=$clock before=$before after=$top " +
+                        "recent=$traces viewport=${inkRect("cadence-host", "chat-stream-viewport:cadence-tail")} " +
+                        "paint=$next candidates=${glyphs.map { it.layout.layoutInput.text.length }}",
                         before - top in -1f..(14f * density + 1f))
                 }
                 previousTop = top
@@ -2131,6 +2133,7 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
         var appended by mutableStateOf(0.dp)
         var streaming by mutableStateOf(true)
         val work = WorkProcessUi(emptyList(), "已完成")
+        val tailHeight = minOf(bodyHeight, 60)
         mainThread { activity.setMarkdownClockContent({ (ui.mainClock.currentTime + 1L) * 1_000_000L }) { AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
             density = LocalDensity.current.density
             Box(Modifier.size(320.dp, 420.dp).testTag("gap-host")) {
@@ -2140,24 +2143,33 @@ class ChatStreamingOcclusionTest : WiredActivityTestCase() {
                             isStreaming = streaming),
                         ChatScreenActions(), scrollRequest = ChatScrollRequest(1), composerBottomInset = inset,
                         turnExtras = {
+                            if (bodyHeight > tailHeight) {
+                                Box(Modifier.fillMaxWidth().height((bodyHeight - tailHeight).dp).background(Color.Magenta))
+                            }
                             WorkProcessCard(work, "gap-work", content = {
                                 Box(Modifier.fillMaxWidth().height(80.dp).background(Color.Magenta))
                             })
-                            Box(Modifier.fillMaxWidth().height(bodyHeight.dp + appended).background(Color.Magenta))
+                            Box(Modifier.fillMaxWidth().height(tailHeight.dp + appended).background(Color.Magenta))
                             Box(Modifier.fillMaxWidth().height(8.dp).background(Color.Magenta).testTag("gap-end"))
                         })
                 }, composer = { Box(Modifier.fillMaxWidth().height(96.dp).testTag("gap-composer")) })
             }
         } } }
         ui.waitForIdle()
-        // Navigate within the bounded tail without a new touch so opening preserves the following intent.
-        // The long fixture's top header may be offscreen; use its semantic action to begin the same disclosure policy.
+        // Place the header in the lower visible half: opening upwards preserves bottom follow.
+        val header = ui.onNodeWithTag("work-process-header").assertIsDisplayed()
+        val bounds = header.fetchSemanticsNode().boundsInRoot
+        val listTop = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().boundsInRoot.top
+        val safeBottom = ui.onNodeWithTag("gap-composer").fetchSemanticsNode().boundsInRoot.top - ChatTailClearance.value * density
+        assertTrue("A following disclosure must begin in the lower safe half", bounds.center.y >= (listTop + safeBottom) / 2)
         ui.mainClock.autoAdvance = false
         try {
-            ui.onNodeWithTag("work-process-header").performSemanticsAction(SemanticsActions.OnClick) { it() }
+            header.performSemanticsAction(SemanticsActions.OnClick) { it() }
             ui.mainClock.advanceTimeByFrame(); ui.waitForIdle()
             ui.onNodeWithTag("work-process-header").assert(SemanticsMatcher.expectValue(
                 SemanticsProperties.StateDescription, "已展开"))
+            header.assert(SemanticsMatcher.expectValue(WorkflowDisclosureUp, true))
+            assertTrue(header.fetchSemanticsNode().config[WorkflowDisclosureGeometry].invoke().contains("follow=true"))
             ui.runOnUiThread { appended = 52.dp }
             var previous: Float? = null
             var sawUnbounded = false

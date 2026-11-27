@@ -444,7 +444,7 @@ class StreamingOcclusionContract(unittest.TestCase):
                       "protectMeasuredTail && last.size != nestedTail.contentHeight", "layout = listState.layoutInfo"):
             self.assertIn(token, correction)
         self.assertNotIn("nestedTail.migrating || nestedTail.followCatchup", correction)
-        self.assertIn("if (nestedTail.followCatchup && !protectMeasuredTail) return", correction)
+        self.assertIn("if (nestedTail.followCatchup && !viewportCorrection) return", correction)
         self.assertIn("if (!protectMeasuredTail && resumeFollowPending", correction)
         self.assertIn("readyTurns[activeTail.listKey] == activeTail", correction)
         self.assertIn("revealedTurns[activeTail.listKey] != activeTail", correction)
@@ -511,7 +511,8 @@ class StreamingOcclusionContract(unittest.TestCase):
         self.assertIn("layout(viewport.width, contentHeight)", source)
         migration = source.split("// Unwrap only after terminal", 1)[1].split("val requestedIndex", 1)[0]
         self.assertIn("&& !exactNavigationOwnsScroll", migration)
-        self.assertIn("if (exactNavigationOwnsScroll) return@LaunchedEffect", migration)
+        self.assertIn("currentTailKey == tail.listKey", migration)
+        self.assertIn("if (!ownsMigration() || !nestedTail.bounded", migration)
         self.assertIn("val requestTouchEpoch = remember(scrollRequest?.serial) { touchEpoch }", source)
         self.assertIn("touchEpoch == requestTouchEpoch", source)
         self.assertIn("currentScrollSerial == consumedScrollSerial", migration)

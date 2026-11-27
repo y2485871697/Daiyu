@@ -82,8 +82,9 @@ class ModelSelectionSwitchStateActivityTest : WiredActivityTestCase() {
         awaitUniqueTag(tag)
         val picker = node(tag)
         awaitDialogEnter(picker)
-        awaitDialogImeFrame(picker, visible = false)
         awaitNodeWindowFocus(picker)
+        dismissIme()
+        awaitDialogImeFrame(picker, visible = false)
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
         ui.waitUntil(5_000) {
             ui.mainClock.advanceTimeByFrame()

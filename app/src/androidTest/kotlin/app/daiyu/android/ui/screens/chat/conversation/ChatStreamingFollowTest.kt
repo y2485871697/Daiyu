@@ -131,15 +131,15 @@ class ChatStreamingFollowTest : WiredActivityTestCase() {
                 assertTrue("Short body must move through multiple drawn positions", movingDraws > 1)
                 assertTrue("Later bursts must wake the same follower", origin - tailTop() > density)
                 assertTrue("Regression must stay in the short bounded-tail branch",
-                    tail.size.height < (400f - 64f - 11f - ChatTailClearance.value) * density)
+                    tail.size.height < (400f - 64f - 11f - 28f) * density)
             }
             ui.runOnUiThread { windowHeight = 360.dp }
             frame()
             val list = ui.onNodeWithTag("chat-messages").fetchSemanticsNode().layoutInfo.coordinates
             val bottom = tail.positionInRoot().y + tail.size.height
             val safeBottom = list.positionInRoot().y + list.size.height - 64f * density
-            assertEquals("Viewport resize retains the original immediate clearance alignment",
-                ChatTailClearance.value, (safeBottom - bottom) / density, 2f / density)
+            assertEquals("Viewport resize preserves the 28dp live-document output space immediately",
+                28f, (safeBottom - bottom) / density, 2f / density)
         } finally {
             ui.mainClock.autoAdvance = true
             ui.runOnIdle { observer.removeOnDrawListener(listener) }

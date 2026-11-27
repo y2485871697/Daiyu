@@ -2289,12 +2289,18 @@ class ChatController internal constructor(private val application:Application,
             CloudContextUsageStore.read(it, conversation, model)
         }
     }
-    private fun idleAvailable() = !closed && ready && !conversationConfigurations.occupied && !preparing && !dataBusy && catalogDeletionReaders == 0 && active==null &&
+    // Only the covered chat's icon presentation ignores the sheet's own snapshot lease.
+    private fun messageActionPreparationBusy(behindCompressionDialog: Boolean) =
+        preparing && (!behindCompressionDialog || contextVisit?.token !== preparation)
+
+    private fun idleAvailable(behindCompressionDialog: Boolean = false) =
+        !closed && ready && !conversationConfigurations.occupied && !messageActionPreparationBusy(behindCompressionDialog) && !dataBusy && catalogDeletionReaders == 0 && active==null &&
         resources==null && generationEntry==null && virtualDisplayEntry==null && guiEntry==null && generationReaders==0 && pendingShizuku==null && pendingPlatformAction==null && unacceptedTools.isEmpty() &&
         !recoveryFailed && problem?.startsWith("会话恢复失败")!=true
-    @Synchronized internal fun messageMutationsAvailable(): Boolean = idleAvailable() && !hasLiveChildTasks()
-    @Synchronized internal fun messageBranchAvailable(): Boolean = !closed && ready && !recoveryFailed &&
-        !dataBusy && !preparing && !conversationConfigurations.occupied && catalogDeletionReaders == 0 &&
+    @Synchronized internal fun messageMutationsAvailable(behindCompressionDialog: Boolean = false): Boolean =
+        idleAvailable(behindCompressionDialog) && !hasLiveChildTasks()
+    @Synchronized internal fun messageBranchAvailable(behindCompressionDialog: Boolean = false): Boolean = !closed && ready && !recoveryFailed &&
+        !dataBusy && !messageActionPreparationBusy(behindCompressionDialog) && !conversationConfigurations.occupied && catalogDeletionReaders == 0 &&
         problem?.startsWith("会话恢复失败") != true
     @Synchronized internal fun taskConfigurationBusy(): Boolean = preparing || active != null ||
         resources != null || generationEntry != null || virtualDisplayEntry != null || guiEntry != null ||

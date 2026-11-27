@@ -210,8 +210,9 @@ class ChatMenuScrollIsolationContract(unittest.TestCase):
         self.assertIn('if (automaticCompressionPending) return', refresh)
         self.assertIn('automaticCompressionPending = true', refresh)
         self.assertIn('withContext(Dispatchers.IO)', refresh)
-        self.assertIn('ProductionCompressionSettingsStore(applicationContext).snapshot().automatic', refresh)
-        self.assertIn('automaticCompression = value.getOrNull()', refresh)
+        self.assertIn('ProductionCompressionSettingsStore(applicationContext).snapshot()', refresh)
+        self.assertIn('saved.automatic to seed', refresh)
+        self.assertIn('automaticCompression = value?.first', refresh)
         self.assertIn('automaticCompressionPending = false', refresh)
         toggle = source.split('private fun toggleAutomaticCompression() {', 1)[1].split('private fun openChatModels(', 1)[0]
         for guard in ('val expected = automaticCompression ?: return', 'if (automaticCompressionPending) return',

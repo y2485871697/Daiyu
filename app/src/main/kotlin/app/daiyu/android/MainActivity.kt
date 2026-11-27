@@ -88,7 +88,6 @@ import app.daiyu.android.assistants.AssistantSelectionOwner
 import app.daiyu.android.context.ContextService
 import app.daiyu.android.context.ContextManagementOwner
 import app.daiyu.android.context.ContextManagementControllerAdapter
-import app.daiyu.android.ui.screens.chat.context.CompressionDialogDraft
 import app.daiyu.android.ui.screens.chat.context.CompressionDialogSeed
 import app.daiyu.android.ui.screens.chat.context.ContextManagementRoute
 import app.daiyu.android.data.model.AppearanceSettings
@@ -2353,7 +2352,7 @@ class MainActivity : ComponentActivity() {
     private var usageVisit by mutableStateOf<UsageVisit?>(null)
     private var automaticCompression by mutableStateOf<Boolean?>(null)
     private var automaticCompressionPending by mutableStateOf(false)
-    private var compressionDialogSeed by mutableStateOf<CompressionDialogDraft?>(null)
+    private var compressionDialogSeed by mutableStateOf<CompressionDialogSeed?>(null)
     private var compressionSeedRevision = 0L
     private var confirmedModelLabel by mutableStateOf("模型")
     private var confirmedReasoningModel by mutableStateOf("")
@@ -3623,10 +3622,12 @@ class MainActivity : ComponentActivity() {
         }
         val renderedSpeed = confirmedGptSpeed
         val renderedSpeedConversation = selected?.id?.value
+        val behindCompressionDialog = retainedPage == "context-management"
         return ChatScreenActions(
-        messageActionsEnabled = chatRouteSelected && !sidebarVisible && controller.messageMutationsAvailable(),
-        messageBranchEnabled = chatRouteSelected && !sidebarVisible && controller.messageBranchAvailable(),
-        messageSpeechEnabled = chatRouteSelected && !sidebarVisible && displayWindow == null && controller.ready,
+        messageActionsEnabled = controller.messageMutationsAvailable(behindCompressionDialog),
+        messageBranchEnabled = controller.messageBranchAvailable(behindCompressionDialog),
+        messageSpeechEnabled = displayWindow == null && controller.ready,
+        messageActionsCovered = !chatRouteSelected || sidebarVisible,
         onOpenWorkspace = { if (currentChat()) openConversationWorkspace() },
         onReferenceShortcut = { trigger, expected ->
             if (editorMatches() && inlineMessageEditor == null && chatState.composer.enabled && draft == expected)
@@ -8199,7 +8200,7 @@ class MainActivity : ComponentActivity() {
                     .getOrNull()?.let { saved ->
                         val seed = runCatching {
                             val source = app.daiyu.android.ui.screens.settings.SettingsModelSource(applicationContext, controller.providers)
-                            CompressionDialogSeed.from(saved.coordinatorSettings(), source).draft
+                            CompressionDialogSeed.from(saved.coordinatorSettings(), source)
                         }.getOrNull()
                         saved.automatic to seed
                     }

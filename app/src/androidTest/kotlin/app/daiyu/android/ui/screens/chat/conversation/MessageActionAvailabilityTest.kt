@@ -7,6 +7,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.*
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.WiredActivityTestCase
@@ -72,6 +74,34 @@ class MessageActionAvailabilityTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("复制回答").assertIsEnabled().performClick()
         assertEquals(listOf("speak", "speak", "copy"), clicked)
         assertEquals(0, fixture.opens.get())
+    }
+
+    fun testCoveredFooterKeepsItsColorsAndCannotInvokeActions() {
+        var covered by mutableStateOf(false)
+        mainThread {
+            enabled = true
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                    MessageActionBar("reply", actions().copy(messageActionsCovered = covered),
+                        modifier = Modifier.testTag("covered-actions"), showEditAction = true)
+                }
+            }
+        }
+        val labels = listOf("复制回答", "编辑", "朗读", "分支", "重新生成", "删除")
+        for (label in labels) ui.onNodeWithContentDescription(label).assertIsEnabled()
+        val before = node("covered-actions").captureToImage().toPixelMap()
+        mainThread { covered = true }
+        for (label in labels) ui.onNodeWithContentDescription(label).assertIsNotEnabled().performTouchInput { click() }
+        val after = node("covered-actions").captureToImage().toPixelMap()
+        assertEquals(before.width, after.width)
+        assertEquals(before.height, after.height)
+        for (y in 0 until before.height) for (x in 0 until before.width) {
+            assertEquals(before[x, y], after[x, y])
+        }
+        assertTrue(clicked.isEmpty())
+        mainThread { covered = false }
+        ui.onNodeWithContentDescription("朗读").assertIsEnabled().performClick()
+        assertEquals(listOf("speak"), clicked)
     }
 
     fun testPendingUserShowsActionBarImmediatelyAndKeepsSyntheticTargetReadOnly() {

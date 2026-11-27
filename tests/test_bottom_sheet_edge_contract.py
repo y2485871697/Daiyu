@@ -44,7 +44,7 @@ class BottomSheetEdgeContractTest(unittest.TestCase):
 
     def test_compact_usage_keeps_center_alignment_width_and_padding(self):
         text = source("ui/components/UsagePresentation.kt")
-        self.assertIn("PreviewDialog(onDismiss, bottomSheet = !compact)", text)
+        self.assertIn("PreviewDialog(onDismiss, scrimColor = scrimColor, bottomSheet = !compact)", text)
         self.assertIn("if (compact) Alignment.Center else Alignment.BottomCenter", text)
         self.assertIn(".padding(10.dp)", text)
         self.assertIn("RoundedCornerShape(if (compact) 16.dp else 25.dp)", text)

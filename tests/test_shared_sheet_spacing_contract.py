@@ -81,7 +81,7 @@ class SharedSheetSpacingContractTest(unittest.TestCase):
 
     def test_usage_bottom_sheet_matches_spacing_without_changing_centered_mode(self):
         usage = source("ui/components/UsagePresentation.kt")
-        self.assertIn("PreviewDialog(onDismiss, bottomSheet = !compact)", usage)
+        self.assertIn("PreviewDialog(onDismiss, scrimColor = scrimColor, bottomSheet = !compact)", usage)
         self.assertIn("if (compact) Alignment.Center else Alignment.BottomCenter", usage)
         self.assertIn("if (useDefaultHeight && !compact) Modifier.height(defaultBottomSheetHeight(maxHeight))", usage)
         self.assertIn("if (!compact) Box(Modifier.align(Alignment.CenterHorizontally).padding(bottom = 8.dp)", usage)

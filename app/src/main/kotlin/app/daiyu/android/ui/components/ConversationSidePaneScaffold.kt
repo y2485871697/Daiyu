@@ -292,7 +292,7 @@ internal fun ConversationSidePaneScaffold(
         ModalNavigationDrawer(
             drawerState = drawerState,
             gesturesEnabled = backHandlerEnabled,
-            scrimColor = conversationPanePreviewPalette().scrim,
+            scrimColor = Color.Transparent,
             modifier = Modifier.fillMaxSize(),
             drawerContent = {
                 ConversationPanePanel(

@@ -39,7 +39,7 @@ internal class ContextManagementPresentation {
     }
 }
 
-/** Saved display values only; a visit still needs a fresh snapshot to submit. */
+/** Saved values for the local draft; submission still needs a fresh visit snapshot. */
 internal data class CompressionDialogSeed(val draft: CompressionDialogDraft, val binding: SummaryModelBinding?) {
     companion object {
         fun from(saved: CompressionSettings, source: SettingsModelSource): CompressionDialogSeed {
@@ -63,7 +63,7 @@ internal fun ContextManagementRoute(
     presentation: ContextManagementPresentation = remember { ContextManagementPresentation() },
     isCurrent: () -> Boolean = { true },
     onResume: () -> Unit = {},
-    seed: CompressionDialogDraft? = null,
+    seed: CompressionDialogSeed? = null,
 ) {
     val state = adapter?.state?.collectAsState()?.value
     LaunchedEffect(adapter) { adapter?.refresh() }
@@ -78,11 +78,12 @@ internal fun ContextManagementRoute(
         if (configurationReady && saved != null) CompressionDialogSeed.from(saved, source) else null
     }
     var allowSeed by remember(adapter) { mutableStateOf(true) }
+    var earlyConfirmation by remember(adapter) { mutableStateOf(false) }
     val pendingInitialRead = adapter != null && state?.notice == null && state?.requiresRefresh != true &&
         (state?.snapshot == null || state.operation != null)
-    // A preloaded draft is display-only until the current visit has read and checked its snapshot.
-    val draft = presentation.draft ?: initial?.draft ?: seed?.takeIf { allowSeed && pendingInitialRead }
-    val binding = if (presentation.draft == null) initial?.binding else presentation.binding
+    val startingDraft = initial ?: seed?.takeIf { allowSeed && pendingInitialRead }
+    val draft = presentation.draft ?: startingDraft?.draft
+    val binding = if (presentation.draft == null) startingDraft?.binding else presentation.binding
     SideEffect {
         if (presentation.draft == null && initial != null) presentation.retain(initial.draft, initial.binding)
     }
@@ -90,8 +91,10 @@ internal fun ContextManagementRoute(
         BackHandler(onBack = dismiss)
         return
     }
-    val canEdit = draft != null && adapter != null && state?.snapshot != null &&
-        state.operation == null && !state.confirmingCompression
+    val operation = state?.operation
+    val canEdit = draft != null && adapter != null && state?.confirmingCompression != true &&
+        (operation == null || operation == ContextManagementOperation.REFRESH)
+    val canSubmit = configurationReady && state?.snapshot != null
     if (presentation.choosingModel && draft != null) {
         SettingsModelPicker("压缩模型", source, draft.modelKey,
             protocols = setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS),
@@ -118,6 +121,10 @@ internal fun ContextManagementRoute(
                 }
             }, onDismiss = dismiss, onConfirm = confirm@ {
                 if (!isCurrent() || !canEdit || adapter == null || draft == null) return@confirm
+                if (!canSubmit) {
+                    earlyConfirmation = true
+                    return@confirm
+                }
                 val configuration = state?.snapshot?.configuration
                 when {
                     configuration != null && configuration.contextWindowTokens == null ->
@@ -135,12 +142,14 @@ internal fun ContextManagementRoute(
             notice = presentation.notice ?: state?.notice ?: when {
                 adapter == null -> "会话已暂停，请重新读取配置"
                 draft == null -> "压缩配置不可用，请重新读取"
+                earlyConfirmation && !canSubmit -> "配置尚未就绪，请稍后再点确定"
                 else -> null
             }, requiresRefresh = adapter == null || state?.requiresRefresh == true ||
                 (draft == null && (state?.notice != null || state?.snapshot != null)),
             onRefresh = {
                 if (isCurrent()) {
                     allowSeed = false
+                    earlyConfirmation = false
                     presentation.reset()
                     if (adapter == null) onResume() else adapter.refresh()
                 }

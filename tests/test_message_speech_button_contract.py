@@ -66,7 +66,7 @@ class MessageSpeechButtonContractTest(unittest.TestCase):
         bar = (CHAT / 'MessageActionBar.kt').read_text()
         self.assertTrue((CHAT / 'MessageSpeechIcon.kt').is_file())
         icon = (CHAT / 'MessageSpeechIcon.kt').read_text()
-        self.assertIn('if (allowSpeech) ConversationIconButton(onClick = { actions.onSpeak(id) }, enabled = canSpeak)', bar)
+        self.assertIn('if (allowSpeech) ConversationIconButton(onClick = { actions.onSpeak(id) }, enabled = canSpeak && acceptsInput)', bar)
         self.assertIn('val canSpeak = interactionEnabled && actions.messageSpeechEnabled', bar)
         self.assertIn('MessageSpeechIcon(speaking, Modifier.size(13.dp).alpha(if (canSpeak) 1f else .38f), preparing)', bar)
         self.assertLess(icon.index('if (!speaking && !preparing)'), icon.index('val transition = rememberInfiniteTransition'))

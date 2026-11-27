@@ -61,11 +61,12 @@ internal fun UsageGlassDialog(
     compact: Boolean = false,
     adaptiveWidth: Boolean = false,
     useDefaultHeight: Boolean = false,
+    scrimColor: Color? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val colors = usagePalette()
     val shape = RoundedCornerShape(if (compact) 16.dp else 25.dp)
-    PreviewDialog(onDismiss, bottomSheet = !compact) {
+    PreviewDialog(onDismiss, scrimColor = scrimColor, bottomSheet = !compact) {
         val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
         val cardWidth = if (adaptiveWidth) 218.dp * fontScale else 218.dp
         val available = (maxHeight - 30.dp).coerceAtLeast(0.dp)

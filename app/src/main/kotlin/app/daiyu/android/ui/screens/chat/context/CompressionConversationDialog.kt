@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -63,7 +64,7 @@ internal fun CompressionConversationDialog(
 ) {
     val colors = assistantPreviewPalette()
     var showHelp by remember { mutableStateOf(false) }
-    UsageGlassDialog(title = "压缩会话", onDismiss = onDismiss) {
+    UsageGlassDialog(title = "压缩会话", onDismiss = onDismiss, scrimColor = Color.Transparent) {
         LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 430.dp)
             .testTag(if (draft != null) "context-management" else "context-management-unavailable"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (draft != null) {
@@ -100,7 +101,7 @@ internal fun CompressionConversationDialog(
                             val selected = draft.protocol == protocol
                             Row(Modifier.fillMaxWidth().heightIn(min = 48.dp)
                                 .testTag("compression-dialog-api:${protocol.wireName}")
-                                .background(if (selected) colors.fieldBackground else androidx.compose.ui.graphics.Color.Transparent)
+                                .background(if (selected) colors.fieldBackground else Color.Transparent)
                                 .selectable(selected, enabled = enabled, role = Role.RadioButton,
                                     interactionSource = remember { MutableInteractionSource() }, indication = null,
                                     onClick = { onChange(draft.copy(protocol = protocol)) })
@@ -129,7 +130,8 @@ internal fun CompressionConversationDialog(
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f).testTag("context-close"))
             if (draft != null) AssistantPreviewButton("确定", onConfirm, Modifier.weight(1f).testTag("context-compress"),
-                primary = true, enabled = enabled && !requiresRefresh && operation == null)
+                primary = true, enabled = enabled && !requiresRefresh &&
+                    (operation == null || operation == ContextManagementOperation.REFRESH))
         }
     }
 }

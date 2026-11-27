@@ -1660,7 +1660,7 @@ internal fun ChatMessageList(
 internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLoader: MessageImageLoader? = null,
     entrance: UserMessageEntranceMotion? = null) {
     val pageActive = app.daiyu.android.ui.navigation.LocalPageContentActive.current
-    var showMenu by remember(pageActive) { mutableStateOf(false) }
+    var showMenu by remember(pageActive, actions.messageActionsCovered) { mutableStateOf(false) }
     val entering = entrance?.takeIf {
         it.request.messageId == turn.id || it.request.messageId == turn.listKey ||
             it.request.key == turn.id || it.request.key == turn.listKey
@@ -1685,7 +1685,7 @@ internal fun UserTurn(turn: ChatTurnUi.User, actions: ChatScreenActions, imageLo
                 .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomEnd = 5.dp, bottomStart = 16.dp))
                 .background(conversationColors().bubble)
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null,
-                    clickFeedback = false, onClick = {}, onLongClick = { if (!turn.pending) showMenu = true })
+                    clickFeedback = false, onClick = {}, onLongClick = { if (!turn.pending && !actions.messageActionsCovered) showMenu = true })
                 .padding(horizontal = 12.dp, vertical = 9.dp)) {
                 if (entering?.request?.mediaUnavailable == true) {
                     UserMessageText("附件暂不可用")

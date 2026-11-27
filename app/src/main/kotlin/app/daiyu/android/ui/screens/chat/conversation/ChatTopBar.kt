@@ -95,7 +95,7 @@ internal fun ChatTopBar(title: String, actions: ChatScreenActions, modifier: Mod
             val moreShape = RoundedCornerShape(10.dp)
             ChatIconButton(ChatPreviewIcons.More, "更多", { actions.onMore(); expanded = true },
                 Modifier.size(40.dp).semantics { selected = menuExpanded },
-                tint = if (menuExpanded) chrome.accent else chrome.text, iconSize = 22.dp, shape = moreShape, indication = null, enabled = menuAvailable)
+                tint = if (menuExpanded) chrome.accent else chrome.text, iconSize = 22.dp, shape = moreShape, indication = null, enabled = menuAvailable, visualEnabled = true)
             ChatOverflowMenu(menuExpanded, { expanded = false }, actions.onMenuAction,
                 interactiveModeEnabled, interactiveModeChangeEnabled, automaticCompression, automaticCompressionPending,
                 readAutomaticCompression = readAutomaticCompression)

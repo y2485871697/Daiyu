@@ -41,6 +41,7 @@ internal fun MessageActionBar(
     interactionEnabled: Boolean = true,
 ) {
     val colors = conversationColors()
+    val acceptsInput = interactionEnabled && !actions.messageActionsCovered
     val actionsEnabled = interactionEnabled && messageActionsEnabled && actions.messageActionsEnabled
     val canSpeak = interactionEnabled && actions.messageSpeechEnabled
     val canBranch = interactionEnabled && branchEnabled && actions.messageBranchEnabled
@@ -61,29 +62,29 @@ internal fun MessageActionBar(
 
             actions.onCopy(id)
             copied = true
-        }, enabled = interactionEnabled) {
+        }, enabled = acceptsInput) {
             Icon(if (copied) DaiyuIcons.Check else DaiyuIcons.Copy,
                 if (copied) "已复制" else "复制回答", Modifier.size(13.dp),
                 tint = if (copied) colors.success else colors.muted)
         }
-        if (showEditAction) ConversationIconButton(onClick = { actions.onEditUser(id) }, enabled = actionsEnabled) {
+        if (showEditAction) ConversationIconButton(onClick = { actions.onEditUser(id) }, enabled = actionsEnabled && acceptsInput) {
             Icon(DaiyuIcons.Edit, "编辑", Modifier.size(13.dp), tint = actionTint)
         }
-        if (allowSpeech) ConversationIconButton(onClick = { actions.onSpeak(id) }, enabled = canSpeak) {
+        if (allowSpeech) ConversationIconButton(onClick = { actions.onSpeak(id) }, enabled = canSpeak && acceptsInput) {
             MessageSpeechIcon(speaking, Modifier.size(13.dp).alpha(if (canSpeak) 1f else .38f), preparing)
         }
-        TooltipBox(text = "分支", enabled = canBranch) {
-            ConversationIconButton(onClick = { actions.onBranch(id) }, enabled = canBranch) {
+        TooltipBox(text = "分支", enabled = canBranch && acceptsInput) {
+            ConversationIconButton(onClick = { actions.onBranch(id) }, enabled = canBranch && acceptsInput) {
                 Icon(Icons.Rounded.CallSplit, "分支", Modifier.size(14.dp), tint = colors.muted.copy(alpha = if (canBranch) 1f else .38f))
             }
         }
-        if (showRegenerateAction) TooltipBox(text = "重新生成", enabled = actionsEnabled) {
-            ConversationIconButton(onClick = { actions.onRegenerate(id) }, enabled = actionsEnabled) {
+        if (showRegenerateAction) TooltipBox(text = "重新生成", enabled = actionsEnabled && acceptsInput) {
+            ConversationIconButton(onClick = { actions.onRegenerate(id) }, enabled = actionsEnabled && acceptsInput) {
                 Icon(DaiyuIcons.Regenerate, "重新生成", Modifier.size(13.dp), tint = actionTint)
             }
         }
-        TooltipBox(text = "删除", enabled = actionsEnabled) {
-            ConversationIconButton(onClick = { actions.onDeleteTurn(id) }, enabled = actionsEnabled) {
+        TooltipBox(text = "删除", enabled = actionsEnabled && acceptsInput) {
+            ConversationIconButton(onClick = { actions.onDeleteTurn(id) }, enabled = actionsEnabled && acceptsInput) {
                 Icon(DaiyuIcons.Delete, "删除", Modifier.size(13.dp), tint = actionTint)
             }
         }

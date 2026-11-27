@@ -46,7 +46,6 @@ import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.ui.app.AgentAppTheme
 import app.daiyu.android.ui.components.AssistantDisplay
 import app.daiyu.android.ui.components.ConversationSidePaneScaffold
-import app.daiyu.android.ui.components.ConversationPanePreviewPalette
 import app.daiyu.android.ui.model.ConversationFolderUi
 import app.daiyu.android.ui.model.ConversationModeUi
 import app.daiyu.android.ui.model.ConversationPaneUiState
@@ -313,7 +312,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testDrawerOnlyDimsExposedContentWithoutBlurringInBothThemes() {
+    fun testDrawerKeepsExposedContentUndimmedAndUnblurredInBothThemes() {
         for (dark in listOf(false, true)) for (blurEnabled in listOf(false, true)) {
             for (open in listOf(false, true)) {
                 show(dark = dark, compact = true, blurEnabled = blurEnabled, initiallyVisible = open) {
@@ -327,8 +326,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
                 val pixels = node("drawer-host").captureToImage().toPixelMap()
                 val x = pixels.width - (12 * density.get().density).toInt()
                 val boundary = pixels.height / 2
-                for ((base, y) in listOf(Color.White to boundary - 1, Color.Black to boundary)) {
-                    val expected = if (open) ConversationPanePreviewPalette(dark).scrim.compositeOver(base) else base
+                for ((expected, y) in listOf(Color.White to boundary - 1, Color.Black to boundary)) {
                     val actual = pixels[x, y]
                     val label = "dark=$dark blur=$blurEnabled open=$open y=$y"
                     assertEquals(label, expected.red, actual.red, .015f)

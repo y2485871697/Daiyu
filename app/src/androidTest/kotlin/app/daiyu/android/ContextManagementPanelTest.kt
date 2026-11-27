@@ -8,6 +8,7 @@ import androidx.compose.runtime.mutableStateOf
 import app.daiyu.android.storage.ProviderCatalogRunTarget
 import app.daiyu.android.storage.ProviderEditorSlot
 import app.daiyu.android.ui.screens.chat.context.CompressionDialogDraft
+import app.daiyu.android.ui.screens.chat.context.CompressionDialogSeed
 import app.daiyu.android.ui.screens.chat.context.ContextManagementPresentation
 import app.daiyu.android.context.*
 import app.daiyu.android.data.model.AppearanceSettings
@@ -65,7 +66,7 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         override fun previousArchivePage() { error("no archive entry") }
     }
     private fun show(actions: Actions, presentation: ContextManagementPresentation = ContextManagementPresentation(),
-        awaitConfiguration: Boolean = true, seed: CompressionDialogDraft? = null) {
+        awaitConfiguration: Boolean = true, seed: CompressionDialogSeed? = null) {
         val source = SettingsModelSource(fixture.application, fixture.controller.providers)
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
@@ -155,14 +156,19 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
     fun testPreloadedConfigurationOpensDirectlyWithoutAuthorizingCompression() {
         val actions = Actions(holdRefresh = true)
         val presentation = ContextManagementPresentation()
-        val seed = CompressionDialogDraft(true, "cached model", "cached/model", ProviderProtocol.RESPONSES)
+        val seed = CompressionDialogSeed(CompressionDialogDraft(true, "cached model", "cached/model", ProviderProtocol.RESPONSES),
+            binding("cached", ProviderProtocol.RESPONSES))
         show(actions, presentation, seed = seed)
         assertEquals(ContextManagementOperation.REFRESH, actions.state.value.operation)
         assertNull(actions.state.value.snapshot)
-        node("compression-dialog-custom").assertIsOn()
-        node("compression-dialog-model").assertTextContains("cached model")
-        node("compression-dialog-api:responses").assertIsSelected()
-        node("context-compress").assertIsNotEnabled()
+        node("compression-dialog-custom").assertIsEnabled().assertIsOn()
+        node("compression-dialog-model").assertIsEnabled().assertTextContains("cached model")
+        node("compression-dialog-api:responses").assertIsEnabled().assertIsSelected()
+        node("context-compress").assertIsEnabled().performClick()
+        node("context-management").scrollToDescendant(hasTestTag("context-notice"))
+        node("context-notice").assertTextContains("配置尚未就绪，请稍后再点确定")
+        assertEquals(listOf("refresh"), actions.events)
+        node("context-management").performScrollToIndex(0)
         node("context-management-unavailable").assertDoesNotExist()
         assertNull(presentation.draft)
         assertNull(presentation.binding)
@@ -173,6 +179,25 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         node("context-compress").assertIsEnabled()
         assertEquals(listOf("refresh"), actions.events)
         assertNull(actions.selection)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testEditingPreloadedDraftKeepsTheSelectedModelWithoutSubmitting() {
+        val actions = Actions(holdRefresh = true)
+        val presentation = ContextManagementPresentation()
+        val selected = binding("cached", ProviderProtocol.RESPONSES)
+        val seed = CompressionDialogSeed(CompressionDialogDraft(true, "cached model", "cached/model", ProviderProtocol.RESPONSES), selected)
+        show(actions, presentation, seed = seed)
+        node("context-management").scrollToDescendant(hasTestTag("compression-dialog-api:${ProviderProtocol.CHAT_COMPLETIONS.wireName}"))
+        node("compression-dialog-api:${ProviderProtocol.CHAT_COMPLETIONS.wireName}").assertIsEnabled().performClick().assertIsSelected()
+        mainThread { actions.state.value = actions.state.value.copy(operation = null, snapshot = snapshot()) }
+        awaitVisualIdle()
+        assertEquals(selected, presentation.binding)
+        assertEquals(ProviderProtocol.CHAT_COMPLETIONS, presentation.draft?.protocol)
+        assertEquals(listOf("refresh", "dismiss"), actions.events)
+        node("context-compress").assertIsEnabled().performClick()
+        awaitVisualIdle()
+        assertEquals(ContextManagementSelection(selected, ProviderProtocol.CHAT_COMPLETIONS), actions.selection)
         assertEquals(0, fixture.opens.get())
     }
 

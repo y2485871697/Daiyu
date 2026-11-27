@@ -30,7 +30,8 @@ class SummaryProtocolPreferenceContract(unittest.TestCase):
 
     def test_manual_dialog_takes_the_saved_default_but_keeps_its_explicit_selection(self):
         text = (ROOT / "ui/screens/chat/context/ContextManagementPanel.kt").read_text()
-        self.assertIn("state?.snapshot?.savedConfiguration?.summaryProtocol", text)
+        self.assertIn("val saved = state?.snapshot?.savedConfiguration", text)
+        self.assertIn("val protocol = saved.summaryProtocol", text)
         self.assertIn("ContextManagementSelection(if (draft.customModel) binding else null, draft.protocol)", text)
         self.assertNotIn("ProductionCompressionSettingsStore", text)
 

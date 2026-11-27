@@ -65,13 +65,13 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         override fun previousArchivePage() { error("no archive entry") }
     }
     private fun show(actions: Actions, presentation: ContextManagementPresentation = ContextManagementPresentation(),
-        awaitConfiguration: Boolean = true) {
+        awaitConfiguration: Boolean = true, seed: CompressionDialogDraft? = null) {
         val source = SettingsModelSource(fixture.application, fixture.controller.providers)
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 ContextManagementRoute(actions,
                     source, onClose = { routeCloses++ },
-                    presentation = presentation)
+                    presentation = presentation, seed = seed)
             }
         } }
         if (awaitConfiguration) awaitUniqueTag("context-management") else awaitVisualIdle()
@@ -138,8 +138,9 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         val actions = Actions(holdRefresh = true); show(actions, awaitConfiguration = false)
         assertEquals(ContextManagementOperation.REFRESH, actions.state.value.operation)
         assertNull(actions.state.value.snapshot)
-        node("context-management-loading").assertIsDisplayed()
-        node("context-close").assertIsDisplayed()
+        ui.onNodeWithText("压缩会话").assertDoesNotExist()
+        node("context-management-unavailable").assertDoesNotExist()
+        node("context-close").assertDoesNotExist()
         node("context-management").assertDoesNotExist()
         node("compression-dialog-custom").assertDoesNotExist()
         node("compression-dialog-model").assertDoesNotExist()
@@ -148,6 +149,30 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         assertEquals(listOf("refresh", "close"), actions.events)
         assertNull(actions.selection)
         assertEquals(1, routeCloses)
+        assertEquals(0, fixture.opens.get())
+    }
+
+    fun testPreloadedConfigurationOpensDirectlyWithoutAuthorizingCompression() {
+        val actions = Actions(holdRefresh = true)
+        val presentation = ContextManagementPresentation()
+        val seed = CompressionDialogDraft(true, "cached model", "cached/model", ProviderProtocol.RESPONSES)
+        show(actions, presentation, seed = seed)
+        assertEquals(ContextManagementOperation.REFRESH, actions.state.value.operation)
+        assertNull(actions.state.value.snapshot)
+        node("compression-dialog-custom").assertIsOn()
+        node("compression-dialog-model").assertTextContains("cached model")
+        node("compression-dialog-api:responses").assertIsSelected()
+        node("context-compress").assertIsNotEnabled()
+        node("context-management-unavailable").assertDoesNotExist()
+        assertNull(presentation.draft)
+        assertNull(presentation.binding)
+        mainThread { actions.state.value = actions.state.value.copy(operation = null, snapshot = snapshot()) }
+        awaitVisualIdle()
+        node("compression-dialog-custom").assertIsOff()
+        node("compression-dialog-model").assertDoesNotExist()
+        node("context-compress").assertIsEnabled()
+        assertEquals(listOf("refresh"), actions.events)
+        assertNull(actions.selection)
         assertEquals(0, fixture.opens.get())
     }
 

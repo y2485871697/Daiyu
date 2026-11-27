@@ -10,21 +10,32 @@ ANDROID_TEST = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ContextManag
 
 
 class ContextDialogInitializationContractTest(unittest.TestCase):
-    def test_only_a_completed_snapshot_can_initialize_a_new_draft(self):
+    def test_only_a_completed_snapshot_can_initialize_the_retained_draft(self):
         source = SOURCE.read_text()
-        self.assertIn('val configurationReady = state?.snapshot?.savedConfiguration != null && state.operation == null && !state.requiresRefresh', source)
-        initializer = source.split('val initial = remember(', 1)[1].split('val draft =', 1)[0]
-        self.assertLess(initializer.index('if (!configurationReady) return@remember null'),
-                        initializer.index('CompressionDialogDraft('))
-        self.assertIn('val draft = presentation.draft ?: initial', source)
-        self.assertIn('if (!isCurrent() || adapter == null || draft == null) return@confirm', source)
-        self.assertIn('enabled = draft != null && adapter != null', source)
+        self.assertIn('val configurationReady = state != null && state.operation == null && !state.requiresRefresh', source)
+        self.assertIn('if (configurationReady && saved != null) CompressionDialogSeed.from(saved, source) else null', source)
+        self.assertIn('presentation.draft ?: initial?.draft ?: seed?.takeIf { allowSeed && pendingInitialRead }', source)
+        self.assertIn('presentation.retain(initial.draft, initial.binding)', source)
+        self.assertIn('initial?.binding else presentation.binding', source)
+        self.assertIn('if (!isCurrent() || !canEdit || adapter == null || draft == null) return@confirm', source)
+        self.assertIn('val canEdit = draft != null && adapter != null && state?.snapshot != null', source)
 
-    def test_pending_and_failure_paths_preserve_close_and_explicit_resume(self):
+    def test_prefetch_reuses_existing_local_read_and_never_replaces_visit_snapshot(self):
+        activity = (SOURCE.parents[4] / 'MainActivity.kt').read_text()
+        loader = activity.split('private fun refreshAutomaticCompression()', 1)[1].split('private fun toggleAutomaticCompression()', 1)[0]
+        self.assertIn('withContext(Dispatchers.IO)', loader)
+        self.assertIn('CompressionDialogSeed.from(saved.coordinatorSettings(), source).draft', loader)
+        self.assertIn('compressionSeedRevision == revision', loader)
+        self.assertIn('seed = compressionDialogSeed', activity)
+        self.assertIn('onMore = { if (currentChat()) refreshAutomaticCompression() }', activity)
+        self.assertIn('LaunchedEffect(adapter) { adapter?.refresh() }', SOURCE.read_text())
+
+    def test_pending_cold_path_has_no_sheet_but_failure_can_be_retried(self):
         source = SOURCE.read_text()
         dialog = SOURCE.with_name('CompressionConversationDialog.kt').read_text()
         self.assertEqual(1, source.count('CompressionConversationDialog('))
-        self.assertIn('正在读取会话配置', source)
+        self.assertNotIn('正在读取会话配置', source)
+        self.assertIn('if (draft == null && pendingInitialRead) {\n        BackHandler(onBack = dismiss)\n        return', source)
         self.assertIn('if (adapter == null) onResume() else', source)
         self.assertIn('val dismiss = { if (isCurrent()) { adapter?.close(); onClose() } }', source)
         self.assertIn('Modifier.weight(1f).testTag("context-close")', dialog)
@@ -34,6 +45,7 @@ class ContextDialogInitializationContractTest(unittest.TestCase):
     def test_delayed_saved_enabled_disabled_and_failed_states_have_route_regressions(self):
         tests = ANDROID_TEST.read_text()
         for name in ('testOpeningWhileRefreshIsPendingNeverShowsAnUnloadedConfigurationAndBackCloses',
+                     'testPreloadedConfigurationOpensDirectlyWithoutAuthorizingCompression',
                      'testDelayedSavedCustomModelAndProtocolAppearTogetherInTheFirstConfiguration',
                      'testDelayedDisabledConfigurationDoesNotInferCustomModelFromAStaleLabel',
                      'testInitialLoadFailureKeepsRetryAndCloseWithoutShowingFalseDefaults',

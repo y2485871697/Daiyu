@@ -51,7 +51,7 @@ class CompressionPresentationResumeContractTest(unittest.TestCase):
         self.assertIn('else presentation.binding',self.panel)
         self.assertIn('state.operation == null && !state.requiresRefresh',self.panel)
         self.assertIn('ContextManagementSelection(if (draft.customModel) binding else null, draft.protocol)',self.panel)
-        self.assertIn('if (!isCurrent() || adapter == null || draft == null) return@confirm',self.panel)
+        self.assertIn('if (!isCurrent() || !canEdit || adapter == null || draft == null) return@confirm',self.panel)
         self.assertIn('LaunchedEffect(adapter) { adapter?.refresh() }',self.panel)
 
 if __name__ == '__main__': unittest.main()

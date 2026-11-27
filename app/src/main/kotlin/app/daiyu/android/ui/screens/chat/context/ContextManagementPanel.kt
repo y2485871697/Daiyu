@@ -1,5 +1,6 @@
 package app.daiyu.android.ui.screens.chat.context
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.SideEffect
@@ -10,6 +11,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import app.daiyu.android.context.CatalogSummaryBindings
+import app.daiyu.android.context.CompressionSettings
 import app.daiyu.android.context.ContextManagementControllerAdapter
 import app.daiyu.android.context.SummaryModelBinding
 import app.daiyu.android.context.ContextManagementSelection
@@ -37,6 +39,21 @@ internal class ContextManagementPresentation {
     }
 }
 
+/** Saved display values only; a visit still needs a fresh snapshot to submit. */
+internal data class CompressionDialogSeed(val draft: CompressionDialogDraft, val binding: SummaryModelBinding?) {
+    companion object {
+        fun from(saved: CompressionSettings, source: SettingsModelSource): CompressionDialogSeed {
+            val binding = saved.summaryModel
+            val protocol = saved.summaryProtocol
+                ?: runCatching { binding?.let(CatalogSummaryBindings::decode)?.protocol }.getOrNull()
+                ?: source.protocol("compression") ?: ProviderProtocol.CHAT_COMPLETIONS
+            return CompressionDialogSeed(CompressionDialogDraft(customModel = binding != null,
+                modelLabel = source.label("compression"), modelKey = source.key("compression"),
+                protocol = if (protocol == ProviderProtocol.RESPONSES) protocol else ProviderProtocol.CHAT_COMPLETIONS), binding)
+        }
+    }
+}
+
 /** Conversation compression: choosing a model is local; starting a summary is explicit. */
 @Composable
 internal fun ContextManagementRoute(
@@ -46,6 +63,7 @@ internal fun ContextManagementRoute(
     presentation: ContextManagementPresentation = remember { ContextManagementPresentation() },
     isCurrent: () -> Boolean = { true },
     onResume: () -> Unit = {},
+    seed: CompressionDialogDraft? = null,
 ) {
     val state = adapter?.state?.collectAsState()?.value
     LaunchedEffect(adapter) { adapter?.refresh() }
@@ -54,23 +72,26 @@ internal fun ContextManagementRoute(
     }
     DisposableEffect(adapter) { onDispose { adapter?.close() } }
     val dismiss = { if (isCurrent()) { adapter?.close(); onClose() } }
-    val configurationReady = state?.snapshot?.savedConfiguration != null && state.operation == null && !state.requiresRefresh
-    val initial = remember(adapter, state?.snapshot?.savedConfiguration, configurationReady) {
-        if (!configurationReady) return@remember null
-        val binding = state?.snapshot?.savedConfiguration?.summaryModel
-        val protocol = state?.snapshot?.savedConfiguration?.summaryProtocol
-            ?: runCatching { binding?.let(CatalogSummaryBindings::decode)?.protocol }.getOrNull()
-            ?: source.protocol("compression") ?: ProviderProtocol.CHAT_COMPLETIONS
-        CompressionDialogDraft(customModel = binding != null,
-            modelLabel = source.label("compression"), modelKey = source.key("compression"),
-            protocol = if (protocol == ProviderProtocol.RESPONSES) protocol else ProviderProtocol.CHAT_COMPLETIONS)
+    val saved = state?.snapshot?.savedConfiguration
+    val configurationReady = state != null && state.operation == null && !state.requiresRefresh
+    val initial = remember(adapter, saved, configurationReady) {
+        if (configurationReady && saved != null) CompressionDialogSeed.from(saved, source) else null
     }
-    val draft = presentation.draft ?: initial
-    val binding = if (presentation.draft == null) state?.snapshot?.savedConfiguration?.summaryModel else presentation.binding
+    var allowSeed by remember(adapter) { mutableStateOf(true) }
+    val pendingInitialRead = adapter != null && state?.notice == null && state?.requiresRefresh != true &&
+        (state?.snapshot == null || state.operation != null)
+    // A preloaded draft is display-only until the current visit has read and checked its snapshot.
+    val draft = presentation.draft ?: initial?.draft ?: seed?.takeIf { allowSeed && pendingInitialRead }
+    val binding = if (presentation.draft == null) initial?.binding else presentation.binding
     SideEffect {
-        if (presentation.draft == null && initial != null)
-            presentation.retain(initial, state?.snapshot?.savedConfiguration?.summaryModel)
+        if (presentation.draft == null && initial != null) presentation.retain(initial.draft, initial.binding)
     }
+    if (draft == null && pendingInitialRead) {
+        BackHandler(onBack = dismiss)
+        return
+    }
+    val canEdit = draft != null && adapter != null && state?.snapshot != null &&
+        state.operation == null && !state.confirmingCompression
     if (presentation.choosingModel && draft != null) {
         SettingsModelPicker("压缩模型", source, draft.modelKey,
             protocols = setOf(ProviderProtocol.RESPONSES, ProviderProtocol.MESSAGES, ProviderProtocol.CHAT_COMPLETIONS),
@@ -85,18 +106,18 @@ internal fun ContextManagementRoute(
             }, onDismiss = { if (isCurrent()) presentation.choosingModel = false })
     } else {
         CompressionConversationDialog(draft, onChange = change@ {
-                if (!isCurrent() || adapter == null || draft == null) return@change
+                if (!isCurrent() || !canEdit || adapter == null || draft == null) return@change
                 adapter.dismissCompression()
                 presentation.retain(it, binding)
                 presentation.notice = null
             }, onChooseModel = {
-                if (isCurrent() && adapter != null && draft != null) {
+                if (isCurrent() && canEdit && adapter != null && draft != null) {
                     adapter.dismissCompression()
                     presentation.retain(draft, binding)
                     presentation.choosingModel = true
                 }
             }, onDismiss = dismiss, onConfirm = confirm@ {
-                if (!isCurrent() || adapter == null || draft == null) return@confirm
+                if (!isCurrent() || !canEdit || adapter == null || draft == null) return@confirm
                 val configuration = state?.snapshot?.configuration
                 when {
                     configuration != null && configuration.contextWindowTokens == null ->
@@ -110,16 +131,16 @@ internal fun ContextManagementRoute(
                             presentation.notice = adapter.state.value.notice ?: "当前不可准备压缩，请刷新后重试"
                     }
                 }
-            }, enabled = draft != null && adapter != null && state?.snapshot != null && state.operation == null && !state.confirmingCompression,
+            }, enabled = canEdit,
             notice = presentation.notice ?: state?.notice ?: when {
                 adapter == null -> "会话已暂停，请重新读取配置"
-                state?.snapshot == null -> "正在读取会话配置…"
                 draft == null -> "压缩配置不可用，请重新读取"
                 else -> null
             }, requiresRefresh = adapter == null || state?.requiresRefresh == true ||
                 (draft == null && (state?.notice != null || state?.snapshot != null)),
             onRefresh = {
                 if (isCurrent()) {
+                    allowSeed = false
                     presentation.reset()
                     if (adapter == null) onResume() else adapter.refresh()
                 }

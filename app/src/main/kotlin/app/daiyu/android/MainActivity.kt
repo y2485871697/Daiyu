@@ -88,6 +88,8 @@ import app.daiyu.android.assistants.AssistantSelectionOwner
 import app.daiyu.android.context.ContextService
 import app.daiyu.android.context.ContextManagementOwner
 import app.daiyu.android.context.ContextManagementControllerAdapter
+import app.daiyu.android.ui.screens.chat.context.CompressionDialogDraft
+import app.daiyu.android.ui.screens.chat.context.CompressionDialogSeed
 import app.daiyu.android.ui.screens.chat.context.ContextManagementRoute
 import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceSettingsStore
@@ -1407,7 +1409,10 @@ class MainActivity : ComponentActivity() {
                 childStatusVisit = null
                 usageVisit = null
                 revokeBackupExportPage()
-                if (value == "chat") refreshConfirmedModelLabel()
+                if (value == "chat") {
+                    refreshConfirmedModelLabel()
+                    if (compressionDialogSeed == null) refreshAutomaticCompression()
+                }
             }
             if (value != "browser") closeBrowserVisualVisit()
             // Revoke before any navigation work, not a later Compose disposal or IO callback.
@@ -1433,6 +1438,10 @@ class MainActivity : ComponentActivity() {
             if (value != "title-model-settings") {
                 titleSettingsPageOwner?.revoke()
                 titleSettingsPageOwner = null
+            }
+            if (value == "compression-settings" && value != retainedPageState) {
+                compressionDialogSeed = null
+                compressionSeedRevision++
             }
             if (value != "compression-settings") {
                 compressionSettingsPageOwner?.revoke()
@@ -2344,6 +2353,8 @@ class MainActivity : ComponentActivity() {
     private var usageVisit by mutableStateOf<UsageVisit?>(null)
     private var automaticCompression by mutableStateOf<Boolean?>(null)
     private var automaticCompressionPending by mutableStateOf(false)
+    private var compressionDialogSeed by mutableStateOf<CompressionDialogDraft?>(null)
+    private var compressionSeedRevision = 0L
     private var confirmedModelLabel by mutableStateOf("模型")
     private var confirmedReasoningModel by mutableStateOf("")
     private var confirmedGptSpeed: ChatGptSpeedSelection? = null
@@ -3188,7 +3199,7 @@ class MainActivity : ComponentActivity() {
                                     contextManagementEntryEpoch == epoch && selected?.id == page.conversation &&
                                     editorGeneration == page.generation && retainedPage == "context-management" &&
                                     !sidebarVisible && voiceForeground && generationResumed()
-                            }, onResume = { resumeContextManagementPage(page, epoch) })
+                            }, onResume = { resumeContextManagementPage(page, epoch) }, seed = compressionDialogSeed)
                     }
                 }
                 if (retainedPage == "browser") {
@@ -8181,12 +8192,23 @@ class MainActivity : ComponentActivity() {
     private fun refreshAutomaticCompression() {
         if (automaticCompressionPending) return
         automaticCompressionPending = true
+        val revision = compressionSeedRevision
         lifecycleScope.launch {
-            val value = withContext(Dispatchers.IO) { runCatching {
-                app.daiyu.android.context.ProductionCompressionSettingsStore(applicationContext).snapshot().automatic
-            } }
-            automaticCompression = value.getOrNull()
+            val value = withContext(Dispatchers.IO) {
+                runCatching { app.daiyu.android.context.ProductionCompressionSettingsStore(applicationContext).snapshot() }
+                    .getOrNull()?.let { saved ->
+                        val seed = runCatching {
+                            val source = app.daiyu.android.ui.screens.settings.SettingsModelSource(applicationContext, controller.providers)
+                            CompressionDialogSeed.from(saved.coordinatorSettings(), source).draft
+                        }.getOrNull()
+                        saved.automatic to seed
+                    }
+            }
             automaticCompressionPending = false
+            if (compressionSeedRevision == revision && retainedPage != "compression-settings") {
+                automaticCompression = value?.first
+                compressionDialogSeed = value?.second
+            } else if (retainedPage == "chat") refreshAutomaticCompression()
         }
     }
     private fun toggleAutomaticCompression() {

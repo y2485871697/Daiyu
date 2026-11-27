@@ -65,7 +65,7 @@ internal fun CompressionConversationDialog(
     var showHelp by remember { mutableStateOf(false) }
     UsageGlassDialog(title = "压缩会话", onDismiss = onDismiss) {
         LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 430.dp)
-            .testTag(if (draft != null) "context-management" else "context-management-loading"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            .testTag(if (draft != null) "context-management" else "context-management-unavailable"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (draft != null) {
                 item("custom-model") {
                     Row(Modifier.fillMaxWidth().heightIn(min = 44.dp),

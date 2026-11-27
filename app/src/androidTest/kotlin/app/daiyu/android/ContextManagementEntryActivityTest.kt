@@ -179,6 +179,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
                     node("page-enter-blocker").assertDoesNotExist()
                     node("page-back-departure").assertDoesNotExist()
                     node("page-back-target").assertDoesNotExist()
+                    node("context-management-unavailable").assertDoesNotExist()
                     assertEquals(initial, node("page-back-surface").fetchSemanticsNode().boundsInRoot)
                     assertFalse("retained chat must not be disposed while the modal owns input", initialDraw.visit in disposed)
                     assertEquals(initialDraw, draws.last())

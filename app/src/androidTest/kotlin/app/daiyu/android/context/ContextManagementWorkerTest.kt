@@ -108,12 +108,14 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
     fun testOneShotSelectionUsesNewBindingWithoutSavingOrChangingAutomaticPolicy() {
         val lease = seed()
         val saved = configuration
-        val before = worker.snapshot(lease)
+        val before = worker.snapshotForCompression(lease)
+        assertNull(before.summaryTarget)
         val selectedBinding = SummaryModelBinding("explicit-only", "chosen-summary")
         val selected = worker.selectCompression(lease, before,
             ContextManagementSelection(selectedBinding, app.daiyu.android.model.ProviderProtocol.RESPONSES))
         assertSame(saved, selected.savedConfiguration)
         assertEquals(selectedBinding, selected.configuration!!.summaryModel)
+        assertEquals(app.daiyu.android.model.ProviderProtocol.RESPONSES, selected.selectedProtocol)
         assertEquals(saved, configuration)
         assertEquals(0, requests); assertEquals(0, resolutions)
         resolve = { bound(selectedBinding) }

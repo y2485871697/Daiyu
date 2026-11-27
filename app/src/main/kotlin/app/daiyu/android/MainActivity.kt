@@ -3198,7 +3198,8 @@ class MainActivity : ComponentActivity() {
                                     contextManagementEntryEpoch == epoch && selected?.id == page.conversation &&
                                     editorGeneration == page.generation && retainedPage == "context-management" &&
                                     !sidebarVisible && voiceForeground && generationResumed()
-                            }, onResume = { resumeContextManagementPage(page, epoch) }, seed = compressionDialogSeed)
+                            }, onResume = { resumeContextManagementPage(page, epoch) }, seed = compressionDialogSeed,
+                            seedLoading = automaticCompressionPending)
                     }
                 }
                 if (retainedPage == "browser") {

@@ -494,7 +494,7 @@ class ChatController internal constructor(private val application:Application,
                 !closed && contextVisit === visit && visit.owner == candidate &&
                     contextVisit?.adapter === visit.adapter
             val admission = object : ContextManagementAdmission {
-                override fun submitCompression(owner: ContextManagementOwner, expected: ContextManagementSnapshot,
+                override fun submitCompression(owner: ContextManagementOwner, expected: ContextManagementSnapshot?,
                     selection: ContextManagementSelection?): Boolean = synchronized(this@ChatController) {
                     if (!current(owner)) false else submitContextCompression(owner, expected, selection)
                 }
@@ -578,13 +578,13 @@ class ChatController internal constructor(private val application:Application,
     }
 
     private fun submitContextCompression(owner: ContextManagementOwner,
-        expected: ContextManagementSnapshot, selection: ContextManagementSelection?): Boolean {
-        if (closed || dataBusy || expected.conversationId != owner.conversationId) return false
+        expected: ContextManagementSnapshot?, selection: ContextManagementSelection?): Boolean {
+        if (closed || dataBusy || (expected != null && expected.conversationId != owner.conversationId)) return false
         val original = active?.takeIf { it.conversationId == owner.conversationId && it.status == RunStatus.RUNNING }
         val running = runner
         val submitted = app.daiyu.android.timeline.CompressionActivity(java.util.UUID.randomUUID().toString(),
             owner.conversationId.value, 0, null, agentLabel = "主代理", runId = original?.runId?.value,
-            anchor = MessageHistory.expand(expected.originals).let { logical ->
+            anchor = expected?.originals?.let(MessageHistory::expand)?.let { logical ->
                 logical.takeIf { it.isNotEmpty() }?.let {
                     app.daiyu.android.timeline.TimelineAnchor.at(it, it.lastIndex)
                 }
@@ -607,7 +607,9 @@ class ChatController internal constructor(private val application:Application,
             postCompressionActivity(waiting)
             val accepted = running.requestCompaction(create = { capacity ->
                 postCompressionActivity(waiting.copy(running = false))
-                contextManagementBackend(owner.conversationId).runCompression(lease, expected, selection, original, capacity.windowTokens, capacity.sendBudgetTokens, currentProvider, systemPrompt = capacity.systemPrompt) { activity ->
+                val backend = contextManagementBackend(owner.conversationId)
+                val snapshot = expected ?: backend.snapshotForCompression(lease)
+                backend.runCompression(lease, snapshot, selection, original, capacity.windowTokens, capacity.sendBudgetTokens, currentProvider, systemPrompt = capacity.systemPrompt) { activity ->
                     if (activity.running) runtimeStore?.bindCompressionModel(original, activity.model)
                     postCompressionActivity(activity)
                 }
@@ -634,17 +636,26 @@ class ChatController internal constructor(private val application:Application,
         }
         postCompressionActivity(submitted)
         try { executor.execute {
+            var activity = submitted
             try {
                 lease.checkCurrent()
                 val backend = contextManagementBackend(owner.conversationId)
-                val selected = if (selection == null) expected else backend.selectCompression(lease, expected, selection)
+                val snapshot = expected ?: backend.snapshotForCompression(lease)
+                val logical = MessageHistory.expand(snapshot.originals)
+                activity = submitted.copy(anchor = logical.takeIf { it.isNotEmpty() }?.let {
+                    app.daiyu.android.timeline.TimelineAnchor.at(it, it.lastIndex)
+                })
+                val selected = if (selection == null) snapshot else backend.selectCompression(lease, snapshot, selection)
                 lease.checkCurrent()
-                postCompressionActivity(submitted.copy(running = false))
-                backend.compress(lease, selected)
+                postCompressionActivity(activity.copy(running = false))
+                val receipt = backend.compress(lease, selected)
+                if (selection != null && receipt.archiveId == null) synchronized(this) {
+                    if (!preparationCancelled(token)) problem = "暂无可安全压缩的内容，原始上下文保留"
+                }
             } catch (failure: Exception) {
                 if (!compressionStarted && !token.cancellation.isCancelled &&
                     failure !is java.util.concurrent.CancellationException && failure !is InterruptedException)
-                    postCompressionActivity(submitted.copy(running = false,
+                    postCompressionActivity(activity.copy(running = false,
                         failure = app.daiyu.android.context.compressionFailureMessage(failure)))
             } finally {
                 postCompressionActivity(submitted.copy(running = false))

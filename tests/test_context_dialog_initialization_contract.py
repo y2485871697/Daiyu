@@ -10,18 +10,20 @@ ANDROID_TEST = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/ContextManag
 
 
 class ContextDialogInitializationContractTest(unittest.TestCase):
-    def test_preloaded_draft_is_editable_but_only_current_snapshot_can_submit(self):
+    def test_preloaded_draft_can_submit_without_a_current_snapshot(self):
         source = SOURCE.read_text()
         self.assertIn('val configurationReady = state != null && state.operation == null && !state.requiresRefresh', source)
         self.assertIn('if (configurationReady && saved != null) CompressionDialogSeed.from(saved, source) else null', source)
-        self.assertIn('val startingDraft = initial ?: seed?.takeIf { allowSeed && pendingInitialRead }', source)
+        self.assertIn('val startingDraft = initial ?: seed?.takeIf { allowSeed }', source)
         self.assertIn('val draft = presentation.draft ?: startingDraft?.draft', source)
-        self.assertIn('presentation.retain(initial.draft, initial.binding)', source)
+        self.assertIn('presentation.retain(startingDraft.draft, startingDraft.binding)', source)
         self.assertIn('startingDraft?.binding else presentation.binding', source)
         self.assertIn('if (!isCurrent() || !canEdit || adapter == null || draft == null) return@confirm', source)
-        self.assertIn('val canSubmit = configurationReady && state?.snapshot != null', source)
-        self.assertIn('operation == null || operation == ContextManagementOperation.REFRESH', source)
-        self.assertLess(source.index('if (!canSubmit)'), source.index('adapter.submitCompression(selection)'))
+        confirm = source.split('onConfirm = confirm@ {', 1)[1].split('}, enabled =', 1)[0]
+        self.assertNotIn('snapshot', confirm)
+        self.assertNotIn('earlyConfirmation', source)
+        self.assertIn('adapter.submitCompression(selection)', confirm)
+        self.assertIn('state?.compressionAccepted != true && operation == null', source)
 
     def test_prefetch_reuses_existing_local_read_and_never_replaces_visit_snapshot(self):
         activity = (SOURCE.parents[4] / 'MainActivity.kt').read_text()
@@ -31,7 +33,8 @@ class ContextDialogInitializationContractTest(unittest.TestCase):
         self.assertIn('compressionSeedRevision == revision', loader)
         self.assertIn('seed = compressionDialogSeed', activity)
         self.assertIn('onMore = { if (currentChat()) refreshAutomaticCompression() }', activity)
-        self.assertIn('LaunchedEffect(adapter) { adapter?.refresh() }', SOURCE.read_text())
+        self.assertNotIn('LaunchedEffect(adapter) { adapter?.refresh() }', SOURCE.read_text())
+        self.assertIn('else adapter.refresh()', SOURCE.read_text())
 
     def test_pending_cold_path_has_no_sheet_but_failure_can_be_retried(self):
         source = SOURCE.read_text()
@@ -47,15 +50,15 @@ class ContextDialogInitializationContractTest(unittest.TestCase):
 
     def test_delayed_saved_enabled_disabled_and_failed_states_have_route_regressions(self):
         tests = ANDROID_TEST.read_text()
-        for name in ('testOpeningWhileRefreshIsPendingNeverShowsAnUnloadedConfigurationAndBackCloses',
-                     'testPreloadedConfigurationOpensDirectlyWithoutAuthorizingCompression',
-                     'testEditingPreloadedDraftKeepsTheSelectedModelWithoutSubmitting',
+        for name in ('testOpeningWhileSeedIsPendingNeverShowsAnUnloadedConfigurationAndBackCloses',
+                     'testPreloadedConfigurationCanSubmitOnceBeforeAnySnapshotExists',
+                     'testEditingPreloadedDraftKeepsTheSelectedModelUntilConfirmation',
                      'testDelayedSavedCustomModelAndProtocolAppearTogetherInTheFirstConfiguration',
                      'testDelayedDisabledConfigurationDoesNotInferCustomModelFromAStaleLabel',
                      'testInitialLoadFailureKeepsRetryAndCloseWithoutShowingFalseDefaults',
                      'testPausedBeforeFirstConfigurationHasExplicitResumeAndCloseWithoutFalseDefaults',
                      'testExplicitRefreshInitializesOnlyFromCompletedFreshSnapshot',
-                     'testAdapterReplacementKeepsUnsavedExactTargetAndOnlyRefreshes'):
+                     'testAdapterReplacementKeepsUnsavedExactTargetWithoutSubmitting'):
             self.assertIn('fun ' + name + '()', tests)
 
 

@@ -42,7 +42,7 @@ internal interface ContextManagementControllerAdapter : AutoCloseable {
 internal interface ContextManagementAdmission {
     fun isCurrent(owner: ContextManagementOwner): Boolean
     fun tryReserve(owner: ContextManagementOwner): ContextManagementLease?
-    fun submitCompression(owner: ContextManagementOwner, expected: ContextManagementSnapshot,
+    fun submitCompression(owner: ContextManagementOwner, expected: ContextManagementSnapshot?,
         selection: ContextManagementSelection?): Boolean = false
 }
 
@@ -96,19 +96,10 @@ internal class ControlledContextManagementAdapter(
 
     override fun submitCompression(selection: ContextManagementSelection?): Boolean {
         val state = mutable.value
-        val expected = state.snapshot ?: return false
         if (!available() || state.requiresRefresh || state.compressionAccepted) return false
-        val configuration = expected.configuration
-        if (configuration == null) {
-            confirmedSnapshot = null
-            mutable.value = state.copy(confirmingCompression = false, requiresRefresh = true,
-                notice = "压缩配置不可用，请刷新后重新选择")
-            return false
-        }
-        if (configuration.contextWindowTokens == null) {
-            mutable.value = state.copy(notice = "请先在模型目录设置上下文窗口")
-            return false
-        }
+        val expected = if (selection == null) {
+            state.snapshot?.takeIf { it.configuration?.contextWindowTokens != null } ?: return false
+        } else null
         if (!admission.submitCompression(state.owner, expected, selection)) return false
         confirmedSnapshot = null
         mutable.value = state.copy(confirmingCompression = false, compressionAccepted = true, notice = null)

@@ -66,13 +66,14 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         override fun previousArchivePage() { error("no archive entry") }
     }
     private fun show(actions: Actions, presentation: ContextManagementPresentation = ContextManagementPresentation(),
-        awaitConfiguration: Boolean = true, seed: CompressionDialogSeed? = null) {
+        awaitConfiguration: Boolean = true, seed: CompressionDialogSeed? = null,
+        seedLoading: Boolean = false) {
         val source = SettingsModelSource(fixture.application, fixture.controller.providers)
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 ContextManagementRoute(actions,
                     source, onClose = { routeCloses++ },
-                    presentation = presentation, seed = seed)
+                    presentation = presentation, seed = seed, seedLoading = seedLoading)
             }
         } }
         if (awaitConfiguration) awaitUniqueTag("context-management") else awaitVisualIdle()
@@ -132,12 +133,12 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
             "context-select-target", "context-current-message-0")) node(tag).assertDoesNotExist()
         ui.onNodeWithText("查看本机上下文", substring = true).assertDoesNotExist()
         ui.onNodeWithText("<script>do not execute tools", substring = true).assertDoesNotExist()
-        assertEquals(listOf("refresh"), actions.events)
+        assertTrue(actions.events.isEmpty())
         assertEquals(0, fixture.opens.get())
     }
-    fun testOpeningWhileRefreshIsPendingNeverShowsAnUnloadedConfigurationAndBackCloses() {
-        val actions = Actions(holdRefresh = true); show(actions, awaitConfiguration = false)
-        assertEquals(ContextManagementOperation.REFRESH, actions.state.value.operation)
+    fun testOpeningWhileSeedIsPendingNeverShowsAnUnloadedConfigurationAndBackCloses() {
+        val actions = Actions(holdRefresh = true); show(actions, awaitConfiguration = false, seedLoading = true)
+        assertNull(actions.state.value.operation)
         assertNull(actions.state.value.snapshot)
         ui.onNodeWithText("压缩会话").assertDoesNotExist()
         node("context-management-unavailable").assertDoesNotExist()
@@ -147,42 +148,32 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         node("compression-dialog-model").assertDoesNotExist()
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
         awaitVisualIdle()
-        assertEquals(listOf("refresh", "close"), actions.events)
+        assertEquals(listOf("close"), actions.events)
         assertNull(actions.selection)
         assertEquals(1, routeCloses)
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testPreloadedConfigurationOpensDirectlyWithoutAuthorizingCompression() {
+    fun testPreloadedConfigurationCanSubmitOnceBeforeAnySnapshotExists() {
         val actions = Actions(holdRefresh = true)
-        val presentation = ContextManagementPresentation()
-        val seed = CompressionDialogSeed(CompressionDialogDraft(true, "cached model", "cached/model", ProviderProtocol.RESPONSES),
-            binding("cached", ProviderProtocol.RESPONSES))
-        show(actions, presentation, seed = seed)
-        assertEquals(ContextManagementOperation.REFRESH, actions.state.value.operation)
+        val selected = binding("cached", ProviderProtocol.RESPONSES)
+        val seed = CompressionDialogSeed(CompressionDialogDraft(true, "cached model", "cached/model", ProviderProtocol.RESPONSES), selected)
+        show(actions, seed = seed)
         assertNull(actions.state.value.snapshot)
+        assertNull(actions.state.value.operation)
+        assertTrue(actions.events.isEmpty())
         node("compression-dialog-custom").assertIsEnabled().assertIsOn()
         node("compression-dialog-model").assertIsEnabled().assertTextContains("cached model")
         node("compression-dialog-api:responses").assertIsEnabled().assertIsSelected()
         node("context-compress").assertIsEnabled().performClick()
-        node("context-management").scrollToDescendant(hasTestTag("context-notice"))
-        node("context-notice").assertTextContains("配置尚未就绪，请稍后再点确定")
-        assertEquals(listOf("refresh"), actions.events)
-        node("context-management").performScrollToIndex(0)
-        node("context-management-unavailable").assertDoesNotExist()
-        assertNull(presentation.draft)
-        assertNull(presentation.binding)
-        mainThread { actions.state.value = actions.state.value.copy(operation = null, snapshot = snapshot()) }
         awaitVisualIdle()
-        node("compression-dialog-custom").assertIsOff()
-        node("compression-dialog-model").assertDoesNotExist()
-        node("context-compress").assertIsEnabled()
-        assertEquals(listOf("refresh"), actions.events)
-        assertNull(actions.selection)
+        assertEquals(listOf("submit"), actions.events)
+        assertEquals(ContextManagementSelection(selected, ProviderProtocol.RESPONSES), actions.selection)
+        assertEquals(1, routeCloses)
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testEditingPreloadedDraftKeepsTheSelectedModelWithoutSubmitting() {
+    fun testEditingPreloadedDraftKeepsTheSelectedModelUntilConfirmation() {
         val actions = Actions(holdRefresh = true)
         val presentation = ContextManagementPresentation()
         val selected = binding("cached", ProviderProtocol.RESPONSES)
@@ -190,11 +181,10 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         show(actions, presentation, seed = seed)
         node("context-management").scrollToDescendant(hasTestTag("compression-dialog-api:${ProviderProtocol.CHAT_COMPLETIONS.wireName}"))
         node("compression-dialog-api:${ProviderProtocol.CHAT_COMPLETIONS.wireName}").assertIsEnabled().performClick().assertIsSelected()
-        mainThread { actions.state.value = actions.state.value.copy(operation = null, snapshot = snapshot()) }
-        awaitVisualIdle()
+        assertNull(actions.state.value.snapshot)
         assertEquals(selected, presentation.binding)
         assertEquals(ProviderProtocol.CHAT_COMPLETIONS, presentation.draft?.protocol)
-        assertEquals(listOf("refresh", "dismiss"), actions.events)
+        assertEquals(listOf("dismiss"), actions.events)
         node("context-compress").assertIsEnabled().performClick()
         awaitVisualIdle()
         assertEquals(ContextManagementSelection(selected, ProviderProtocol.CHAT_COMPLETIONS), actions.selection)
@@ -229,7 +219,7 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
             node("compression-dialog-custom").assertIsOn()
             assertEquals(bounds, node("context-management").fetchSemanticsNode().boundsInRoot)
         }
-        assertEquals(listOf("refresh"), actions.events)
+        assertTrue(actions.events.isEmpty())
         assertNull(actions.selection)
         assertEquals(0, fixture.opens.get())
     }
@@ -255,13 +245,13 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         node("compression-dialog-custom").assertDoesNotExist()
         node("compression-dialog-refresh").performClick()
         awaitVisualIdle()
-        assertEquals(listOf("refresh", "refresh"), actions.events)
+        assertEquals(listOf("refresh"), actions.events)
         node("compression-dialog-custom").assertDoesNotExist()
         mainThread { actions.state.value = actions.state.value.copy(operation = null,
             requiresRefresh = true, notice = "配置读取失败，请刷新") }
         node("context-close").assertIsEnabled().performClick()
         awaitVisualIdle()
-        assertEquals(listOf("refresh", "refresh", "close"), actions.events)
+        assertEquals(listOf("refresh", "close"), actions.events)
         assertEquals(1, routeCloses)
         assertEquals(0, fixture.opens.get())
     }
@@ -305,7 +295,7 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         node("context-compress").performClick()
         awaitVisualIdle()
         assertEquals(ContextManagementSelection(null, ProviderProtocol.CHAT_COMPLETIONS), actions.selection)
-        assertEquals(listOf("refresh", "submit"), actions.events)
+        assertEquals(listOf("submit"), actions.events)
         assertTrue(actions.state.value.compressionAccepted)
         assertEquals(1, routeCloses)
         node("context-compression-confirmation").assertDoesNotExist()
@@ -317,12 +307,12 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         val actions = Actions(accepts = false); show(actions)
         node("context-compress").performClick()
         awaitVisualIdle()
-        assertEquals(listOf("refresh", "submit"), actions.events)
+        assertEquals(listOf("submit"), actions.events)
         assertFalse(actions.state.value.compressionAccepted)
         assertEquals(0, routeCloses)
         node("context-management").assertExists()
         node("context-compression-confirmation").assertDoesNotExist()
-        ui.onNodeWithText("当前不可准备压缩，请刷新后重试").assertExists()
+        ui.onNodeWithText("当前有任务占用，未开始压缩；请稍后重试").assertExists()
         assertEquals(0, fixture.opens.get())
     }
     fun testFailureRefreshNeverSelectsOrConfirmsAutomatically() {
@@ -332,7 +322,7 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         node("compression-dialog-refresh").scrollToVisible().performClick()
         awaitVisualIdle()
         node("context-compress").assertIsEnabled()
-        assertEquals(listOf("refresh", "refresh"), actions.events)
+        assertEquals(listOf("refresh"), actions.events)
         assertNull(actions.selection)
         assertEquals(0, fixture.opens.get())
     }
@@ -372,7 +362,7 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
-    fun testAdapterReplacementKeepsUnsavedExactTargetAndOnlyRefreshes() {
+    fun testAdapterReplacementKeepsUnsavedExactTargetWithoutSubmitting() {
         val a = binding("A", ProviderProtocol.RESPONSES)
         val b = binding("B", ProviderProtocol.CHAT_COMPLETIONS)
         val presentation = ContextManagementPresentation().apply {
@@ -400,12 +390,12 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         awaitVisualIdle()
         node("compression-dialog-custom").assertIsOn()
         assertEquals(a, presentation.binding)
-        assertEquals(listOf("refresh"), fresh.events)
+        assertTrue(fresh.events.isEmpty())
         assertFalse(old.events.contains("submit"))
         node("context-compress").performClick()
         awaitVisualIdle()
         assertEquals(ContextManagementSelection(a, ProviderProtocol.RESPONSES), fresh.selection)
-        assertEquals(listOf("refresh", "submit"), fresh.events)
+        assertEquals(listOf("submit"), fresh.events)
         assertEquals(0, fixture.opens.get())
         assertEquals(0, routeCloses)
     }

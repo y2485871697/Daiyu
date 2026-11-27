@@ -19,7 +19,7 @@ class CompressionPresentationResumeContractTest(unittest.TestCase):
         self.assertIn('if (!preservePresentation || submitted) contextManagementPage = null',revoke)
         self.assertLess(revoke.index('val submitted ='),revoke.index('controller.invalidateContextManagement'))
 
-    def test_auto_reopen_rechecks_owner_and_only_reads(self):
+    def test_auto_reopen_rechecks_owner_without_restoring_consent(self):
         body=self.main.split('private fun resumeContextManagementPage(',1)[1].split('private var retainedPageState',1)[0]
         for guard in ('contextManagementPage !== page','selected?.id != page.conversation',
                       'editorGeneration != page.generation','contextManagementEntryEpoch != epoch',
@@ -52,6 +52,6 @@ class CompressionPresentationResumeContractTest(unittest.TestCase):
         self.assertIn('state.operation == null && !state.requiresRefresh',self.panel)
         self.assertIn('ContextManagementSelection(if (draft.customModel) binding else null, draft.protocol)',self.panel)
         self.assertIn('if (!isCurrent() || !canEdit || adapter == null || draft == null) return@confirm',self.panel)
-        self.assertIn('LaunchedEffect(adapter) { adapter?.refresh() }',self.panel)
+        self.assertNotIn('LaunchedEffect(adapter) { adapter?.refresh() }',self.panel)
 
 if __name__ == '__main__': unittest.main()

@@ -130,8 +130,7 @@ internal fun CompressionConversationDialog(
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             AssistantPreviewButton("取消", onDismiss, Modifier.weight(1f).testTag("context-close"))
             if (draft != null) AssistantPreviewButton("确定", onConfirm, Modifier.weight(1f).testTag("context-compress"),
-                primary = true, enabled = enabled && !requiresRefresh &&
-                    (operation == null || operation == ContextManagementOperation.REFRESH))
+                primary = true, enabled = enabled && !requiresRefresh && operation == null)
         }
     }
 }

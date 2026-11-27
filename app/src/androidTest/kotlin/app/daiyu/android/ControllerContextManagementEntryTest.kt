@@ -108,6 +108,49 @@ class ControllerContextManagementEntryTest : InstrumentationTestCase() {
         controlMain { f.controller.invalidateContextManagement(adapter) }
     }
 
+    fun testOneConfirmationReservesBeforeReadingAndReportsWorkerFailureWithoutRetry() {
+        val entered = CountDownLatch(1)
+        val unblock = release()
+        val reads = AtomicInteger()
+        val reason = "测试：压缩配置已失效"
+        val f = fresh { context, service ->
+            object : ContextManagementBackend by ContextManagementWorker.production(context, service) {
+                override fun snapshotForCompression(lease: ContextManagementLease): ContextManagementSnapshot {
+                    check(Looper.myLooper() != Looper.getMainLooper())
+                    reads.incrementAndGet()
+                    entered.countDown()
+                    check(unblock.await(10, TimeUnit.SECONDS))
+                    lease.checkCurrent()
+                    error(reason)
+                }
+            }
+        }
+        val before = f.db.exportBackup()
+        val adapter = open(f)
+        val selection = ContextManagementSelection(null, app.daiyu.android.model.ProviderProtocol.RESPONSES)
+        controlMain {
+            assertNull(adapter.state.value.snapshot)
+            assertNull(preparation(f))
+            assertTrue(adapter.submitCompression(selection))
+            assertTrue(adapter.state.value.compressionAccepted)
+            assertFalse(adapter.submitCompression(selection))
+        }
+        await(entered)
+        controlMain {
+            assertNotNull(preparation(f))
+            assertNull(adapter.state.value.snapshot)
+            f.controller.invalidateContextManagement(adapter)
+            assertFalse(adapter.submitCompression(selection))
+        }
+        unblock.countDown()
+        awaitControl("admitted compression reports its failed snapshot and exits") {
+            preparation(f) == null && f.controller.problem == "主代理：$reason"
+        }
+        assertEquals(1, reads.get())
+        assertEquals(0, f.calls.get())
+        assertEquals(before, f.db.exportBackup())
+    }
+
     fun testSameIdNewVisitRejectsOldInvalidationAndOldCommands() {
         val creations = AtomicInteger()
         val f = fresh { c, s -> creations.incrementAndGet(); ContextManagementWorker.production(c, s) }

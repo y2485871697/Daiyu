@@ -16,6 +16,17 @@ class SummaryCompressionChainContract(unittest.TestCase):
         self.assertNotIn("adapter.requestCompression()", route)
         self.assertIn("state?.compressionAccepted == true && isCurrent()", route)
 
+    def test_manual_snapshot_is_read_under_the_admitted_worker_not_on_open(self):
+        adapter = (APP / "context/ContextManagementControllerAdapter.kt").read_text()
+        controller = (APP / "ChatController.kt").read_text()
+        submit = controller.split("private fun submitContextCompression", 1)[1].split("internal fun invalidateContextManagement", 1)[0]
+        running, idle = submit.split("val token = reservePreparation(owner.conversationId)", 1)
+        self.assertIn("else null", adapter.split("override fun submitCompression(selection:", 1)[1].split("private fun selectCompressionLegacy", 1)[0])
+        self.assertLess(running.index("running.requestCompaction(create ="), running.index("backend.snapshotForCompression(lease)"))
+        self.assertLess(idle.index("executor.execute"), idle.index("backend.snapshotForCompression(lease)"))
+        self.assertLess(idle.index("backend.snapshotForCompression(lease)"), idle.index("backend.selectCompression(lease, snapshot, selection)"))
+        self.assertIn("compressionFailureMessage(failure)", idle)
+
     def test_live_manual_request_only_queues_without_cancelling_the_tool_or_stream(self):
         runner = (DOMAIN / "ChatRunner.kt").read_text()
         queued = runner.split("fun requestCompaction(", 1)[1].split("@Volatile private var pauseRequested", 1)[0]

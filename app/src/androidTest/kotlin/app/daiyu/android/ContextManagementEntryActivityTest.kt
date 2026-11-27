@@ -4,11 +4,13 @@ import androidx.compose.ui.test.*
 import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 import app.daiyu.android.context.CompressionSettings
 import app.daiyu.android.context.ContextManagementControllerAdapter
+import app.daiyu.android.context.ContextManagementSelection
 import app.daiyu.android.context.ContextManagementState
 import app.daiyu.android.context.SummaryModelBinding
 import app.daiyu.android.context.SummaryProfileDescriptor
 import kotlinx.coroutines.flow.MutableStateFlow
 import app.daiyu.android.domain.*
+import app.daiyu.android.model.ProviderProtocol
 
 /** 用隔离数据库检查 Main 上下文入口、路由和只读工作线程。 */
 @Suppress("DEPRECATION")
@@ -53,12 +55,12 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("context-management")
         node("context-management-paused").assertDoesNotExist()
         lateinit var result: ContextManagementControllerAdapter
-        awaitControl("fresh read-only context visit after resume") {
+        awaitControl("fresh context visit after resume") {
             val getter = MainActivity::class.java.declaredMethods.single { it.name == "getContextManagementVisit" }
             val visit = getter.apply { isAccessible = true }.invoke(activity)
             if (visit == null) false else {
                 result = adapter()
-                result.state.value.operation == null && result.state.value.snapshot != null
+                result.state.value.operation == null && result.state.value.snapshot == null
             }
         }
         assertFalse(result.state.value.confirmingCompression)
@@ -139,9 +141,8 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("context-management")
         lateinit var result: ContextManagementControllerAdapter
         mainThread { result = adapter() }
-        awaitControl("context route production read") {
-            result.state.value.operation == null && result.state.value.snapshot != null
-        }
+        assertNull(result.state.value.operation)
+        assertNull(result.state.value.snapshot)
         return result
     }
     fun testCompressionSheetNeverSlidesOrRemountsChatOnRepeatedOpenAndClose() {
@@ -199,9 +200,8 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
                 } finally { ui.mainClock.autoAdvance = true }
                 lateinit var openedAdapter: ContextManagementControllerAdapter
                 mainThread { openedAdapter = adapter() }
-                awaitControl("compression snapshot ready before dismissal") {
-                    openedAdapter.state.value.operation == null && openedAdapter.state.value.snapshot != null
-                }
+                assertNull(openedAdapter.state.value.operation)
+                assertNull(openedAdapter.state.value.snapshot)
                 awaitUniqueTag("context-management")
                 node("chat-overflow-menu").assertDoesNotExist()
                 ui.waitForIdle()
@@ -223,14 +223,14 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             if (!drawingWasEnabled) androidx.test.platform.graphics.HardwareRendererCompat.setDrawingEnabled(false)
         }
     }
-    fun testRealClickReadsOriginalConversationWithoutSendingOrChangingDraftAndBackFencesOldClick() {
+    fun testRealClickOpensWithoutReadingHistoryOrChangingDraftAndBackFencesOldClick() {
         val conversation = seedAndSelect()
         val before = fixture.database.exportBackup()
         lateinit var oldClick: () -> Unit
         mainThread { oldClick = retainedCompressionClick() }
         val old = openAndAwait()
         assertEquals(conversation.id, old.state.value.owner.conversationId)
-        assertEquals(2, old.state.value.snapshot!!.originals.size)
+        assertNull(old.state.value.snapshot)
         assertEquals(before, fixture.database.exportBackup())
         backToChat(activity)
         node("context-management").assertDoesNotExist()
@@ -260,7 +260,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         node("compression-dialog-custom").performClick().assertIsOff()
         assertFalse(adapter.state.value.confirmingCompression)
         assertNull(adapter.state.value.operation)
-        assertTrue(adapter.state.value.snapshot != null)
+        assertNull(adapter.state.value.snapshot)
         node("compression-dialog-custom").performClick().assertIsOn()
         node("compression-dialog-model").performClick()
         awaitUniqueTag("settings-model-picker")
@@ -296,16 +296,11 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             // Force a deterministic unavailable configuration without using any installed profile.
             val mutable = adapter.javaClass.getDeclaredField("mutable").apply { isAccessible = true }
                 .get(adapter) as MutableStateFlow<ContextManagementState>
-            val snapshot = requireNotNull(mutable.value.snapshot)
-            mutable.value = mutable.value.copy(snapshot = snapshot.copy(configuration = null, savedConfiguration = null))
+            mutable.value = mutable.value.copy(requiresRefresh = true, notice = "压缩配置不可用，请重新保存设置")
         }
         node("context-view").assertDoesNotExist()
         node("context-refresh").assertDoesNotExist()
         node("context-advanced").assertDoesNotExist()
-        node("context-compress").performClick()
-        awaitControl("unavailable selection requires refresh") {
-            adapter.state.value.operation == null && adapter.state.value.requiresRefresh
-        }
         awaitUniqueTag("compression-dialog-refresh")
         node("context-compress").assertIsNotEnabled()
         node("context-compression-confirmation").assertDoesNotExist()
@@ -326,6 +321,8 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         seedAndSelect()
         val before = fixture.database.exportBackup()
         val old = openAndAwait()
+        mainThread { old.refresh() }
+        awaitControl("explicit read for legacy consent revocation") { old.state.value.snapshot != null && old.state.value.operation == null }
         mainThread {
             offerConfirmationMetadata(old)
             old.requestCompression()
@@ -341,7 +338,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         mainThread {
             old.refresh(); old.confirmCompression()
             assertSame(next, adapter())
-            assertNotNull(next.state.value.snapshot)
+            assertNull(next.state.value.snapshot)
         }
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
@@ -359,7 +356,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
             realPauseResume(activity, atPause = {
                 assertNoVisit()
                 old.refresh(); old.confirmCompression()
-                assertFalse(old.submitCompression(null))
+                assertFalse(old.submitCompression(ContextManagementSelection(null, ProviderProtocol.RESPONSES)))
             })
             previous = restoredAndAwait()
             assertNotSame(old, previous)
@@ -371,7 +368,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         val old = previous
         stopped {
             assertNoVisit()
-            old.refresh(); assertFalse(old.submitCompression(null))
+            old.refresh(); assertFalse(old.submitCompression(ContextManagementSelection(null, ProviderProtocol.RESPONSES)))
         }
         val next = restoredAndAwait()
         assertNotSame(old, next)
@@ -519,10 +516,12 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         }
         node("context-management").assertDoesNotExist()
         val old = openAndAwait()
+        mainThread { old.refresh() }
+        awaitControl("explicit read for legacy consent revocation") { old.state.value.snapshot != null && old.state.value.operation == null }
         mainThread { offerConfirmationMetadata(old) }
         node("context-confirm-compress").assertDoesNotExist()
         // Retain the actual one-step submit callback without issuing a paid request.
-        val oldSubmit: () -> Boolean = { old.submitCompression(null) }
+        val oldSubmit: () -> Boolean = { old.submitCompression(ContextManagementSelection(null, ProviderProtocol.RESPONSES)) }
         stopped {
             assertNoVisit()
             assertNull(old.state.value.snapshot)
@@ -543,7 +542,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         mainThread {
             old.refresh(); assertFalse(oldSubmit()); oldClick(); backgroundClick()
             assertSame(next, adapter())
-            assertNotNull(next.state.value.snapshot)
+            assertNull(next.state.value.snapshot)
         }
         assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())

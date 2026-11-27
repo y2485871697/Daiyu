@@ -11,6 +11,7 @@ class ConversationModelBindingContractTest(unittest.TestCase):
         source = text("storage/ConversationModelSelections.kt")
         schema = re.search(r'db.execSQL\("(CREATE TABLE IF NOT EXISTS conversation_model_selections[^"\n]+)"\)', source).group(1)
         db = sqlite3.connect(":memory:")
+        self.addCleanup(db.close)
         db.execute(schema)
         db.execute("INSERT INTO conversation_model_selections VALUES(?,?,?)", ("A", "p1", "m1"))
         db.execute("INSERT INTO conversation_model_selections VALUES(?,?,?)", ("B", "p1", "m2"))

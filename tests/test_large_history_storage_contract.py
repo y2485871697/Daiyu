@@ -55,6 +55,7 @@ class LargeHistoryStorageContractTest(unittest.TestCase):
     def test_chunk_sql_roundtrips_multibyte_nul_null_and_all_four_raw_fields(self):
         chunk_bytes, initial_sql, continuation_sql = self.reader_sql()
         with sqlite3.connect(":memory:") as db:
+            self.addCleanup(db.close)
             db.execute("CREATE TABLE messages(id TEXT PRIMARY KEY,blocks TEXT,protocol TEXT,history_segments TEXT,error TEXT)")
             large = "head\0" + "数🙂" * 340_000 + "\0tail"
             values = ("[ " + large + " ]", " {" + large + "} ", "[" + large + "]", None)

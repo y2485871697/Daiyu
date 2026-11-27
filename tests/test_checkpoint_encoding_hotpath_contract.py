@@ -91,6 +91,7 @@ class CheckpointEncodingHotpathContract(unittest.TestCase):
         chunk = 1024 * 1024
         sql = template.replace('$column', 'payload').replace('$table', 'messages').replace('$key', 'id').replace('$CHUNK_BYTES', str(chunk))
         with sqlite3.connect(':memory:') as db:
+            self.addCleanup(db.close)
             db.execute('CREATE TABLE messages(id TEXT PRIMARY KEY, payload TEXT)')
             for text in [None, '', 'a', 'a' * 65535, 'a' * 65536, 'a' * 65537, 'a' * 65535 + '🙂\x00中' * 30000, 'a' * (chunk - 1) + '🙂\x00中' * 30000]:
                 db.execute('DELETE FROM messages')

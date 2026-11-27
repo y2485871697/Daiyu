@@ -40,6 +40,7 @@ class BranchConfigurationInheritanceContractTest(unittest.TestCase):
         source = (SRC / 'storage/ConversationModelSelections.kt').read_text()
         schema = re.search(r'db.execSQL\("(CREATE TABLE IF NOT EXISTS conversation_model_selections[^"\n]+)"\)', source).group(1)
         db = sqlite3.connect(':memory:')
+        self.addCleanup(db.close)
         db.execute('CREATE TABLE conversations(id TEXT PRIMARY KEY)')
         db.execute(schema)
         db.executemany('INSERT INTO conversation_model_selections VALUES(?,?,?)', [('source', 'other-provider', 'same-name-local-id'), ('', 'global-provider', 'global-local-id'), ('empty', None, None)])

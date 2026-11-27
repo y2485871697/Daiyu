@@ -110,6 +110,7 @@ class TaskConfigurationAdmissionContractTest(unittest.TestCase):
         source = (SRC / 'assistants/SqliteAssistantStore.kt').read_text()
         query = re.search(r'rawQuery\("(SELECT 1 FROM conversations c JOIN messages m[^"\n]+)"', source)[1]
         with sqlite3.connect(':memory:') as db:
+            self.addCleanup(db.close)
             db.executescript("""
                 CREATE TABLE conversations(id TEXT PRIMARY KEY, assistant_id TEXT);
                 CREATE TABLE messages(conversation_id TEXT, status TEXT);

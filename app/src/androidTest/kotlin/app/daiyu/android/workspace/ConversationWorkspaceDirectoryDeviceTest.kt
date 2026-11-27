@@ -9,7 +9,10 @@ class ConversationWorkspaceDirectoryDeviceTest : InstrumentationTestCase() {
     private fun fixture(action: (File, ConversationWorkspaceAccess) -> Unit) {
         val context = instrumentation.targetContext
         val storage = File(context.filesDir, "picker-test-${java.util.UUID.randomUUID()}").apply { mkdir() }
-        val wrapped = object : ContextWrapper(context) { override fun getFilesDir(): File = storage }
+        val wrapped = object : ContextWrapper(context) {
+            override fun getFilesDir(): File = storage
+            override fun getApplicationContext(): Context = this
+        }
         try { action(storage, ConversationWorkspaceAccess(wrapped) { null }) }
         finally { Files.walk(storage.toPath()).use { paths ->
             paths.sorted(compareByDescending { it.nameCount }).forEach { Files.deleteIfExists(it) }

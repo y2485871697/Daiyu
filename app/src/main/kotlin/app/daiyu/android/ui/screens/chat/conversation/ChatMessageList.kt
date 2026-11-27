@@ -423,9 +423,8 @@ internal fun StreamingTailContainer(
                 val placed = (safeBottom - viewport.height - origin.roundToInt()).coerceIn(0, maximum)
                 // Only a capped extent pins its end. Short content is moved by the list; its maximum comes from an
                 // origin placed before that scroll, so pinning it here would lift the row a second line for a frame.
-                state.scrollOffset = if (state.contentHeight > viewport.height) {
-                    (if (paceDocumentFollow) placed else maximum).toFloat()
-                } else 0f
+                val pinnedOffset = if (paceDocumentFollow) placed else maximum
+                state.scrollOffset = if (state.contentHeight > viewport.height) pinnedOffset.toFloat() else 0f
                 state.followCatchup = false
                 placed
             } else {

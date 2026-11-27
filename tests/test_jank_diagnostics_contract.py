@@ -65,7 +65,7 @@ class JankDiagnosticsContract(unittest.TestCase):
         self.assertNotIn('liveDocumentOverflow', restore)
         self.assertIn('paceDocumentFollow = turn.listKey == pacedDocumentOwner', src)
         self.assertIn('!paceDocumentFollow && follows() && !state.followCatchup', src)
-        self.assertIn('(if (paceDocumentFollow) placed else maximum).toFloat()', src)
+        self.assertIn('val pinnedOffset = if (paceDocumentFollow) placed else maximum', src)
         self.assertIn('currentPacedDocumentOwner != currentTailKey &&', src.split('val documentOverflow =', 1)[1].split('var delta', 1)[0])
 
     def test_chat_geometry_trace_is_capture_bounded(self):

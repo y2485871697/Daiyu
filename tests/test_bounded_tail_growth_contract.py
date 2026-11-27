@@ -31,8 +31,12 @@ class BoundedTailGrowthContractTest(unittest.TestCase):
     def test_document_follow_pins_content_end_inside_capped_viewport(self):
         ui = SRC.read_text()
         branch = ui.split('} else if (documentFollow && following && origin != null) {', 1)[1].split('} else {', 1)[0]
-        # Pinning to the item origin left each new line below the edge until the next list scroll.
-        self.assertIn('state.scrollOffset = if (state.contentHeight > viewport.height) maximum.toFloat() else 0f', branch)
+        # Preserve the original end pin for workflows while ordinary body text uses capped frame pacing.
+        self.assertIn('val pinnedOffset = if (paceDocumentFollow) placed else maximum', branch)
+        self.assertIn('state.scrollOffset = if (state.contentHeight > viewport.height) pinnedOffset.toFloat() else 0f', branch)
+        self.assertIn('paceDocumentFollow: Boolean = false', ui)
+        self.assertIn('!paceDocumentFollow && follows()', ui)
+        self.assertIn('paceDocumentFollow = turn.listKey == pacedDocumentOwner', ui)
         self.assertNotIn('state.scrollOffset = placed.toFloat()', branch)
 
 

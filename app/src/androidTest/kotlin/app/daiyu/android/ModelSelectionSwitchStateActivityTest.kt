@@ -4,6 +4,7 @@ import android.view.KeyEvent
 import androidx.activity.compose.setContent
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import app.daiyu.android.context.CatalogSummaryBindings
 import app.daiyu.android.context.CompressionSettingsEditor
@@ -48,11 +49,20 @@ class ModelSelectionSwitchStateActivityTest : WiredActivityTestCase() {
         awaitDialogEnter(node("settings-model-picker"))
         val picker = node("settings-model-picker")
         awaitNodeWindowFocus(picker)
-        node("chat-model-search").performTextReplacement(choice.selection.record.id)
-        dismissIme()
-        awaitDialogImeFrame(picker, visible = false)
-        val option = (hasTestTag("chat-model-option:${choice.selection.record.id}") or
-            hasTestTag("chat-model-option:${choice.provider.slotId}:${choice.selection.record.id}")) and
+        val slot = choice.provider.slotId
+        val id = choice.selection.record.id
+        val list = node("chat-model-list")
+        val providerTag = "chat-model-provider:$slot"
+        val provider = node(providerTag)
+        val loaded = hasTestTag("chat-model-picker") and SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "模型目录读取完成")
+        ui.waitUntil(5_000) { ui.onAllNodes(loaded).fetchSemanticsNodes().size == 1 }
+        list.performScrollToKey("heading:$slot")
+        awaitNodeTouchReady(provider)
+        val expanded = hasTestTag(providerTag) and SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已展开")
+        if (ui.onAllNodes(expanded).fetchSemanticsNodes().isEmpty()) provider.performClick()
+        ui.waitUntil(5_000) { ui.onAllNodes(expanded).fetchSemanticsNodes().size == 1 }
+        list.performScrollToKey("model:$slot:$id")
+        val option = (hasTestTag("chat-model-option:$id") or hasTestTag("chat-model-option:$slot:$id")) and
             hasClickAction() and isEnabled()
         ui.waitUntil(5000) { ui.onAllNodes(option).fetchSemanticsNodes().size == 1 }
         val row = ui.onNode(option)
@@ -72,8 +82,6 @@ class ModelSelectionSwitchStateActivityTest : WiredActivityTestCase() {
         awaitUniqueTag(tag)
         val picker = node(tag)
         awaitDialogEnter(picker)
-        awaitNodeWindowFocus(picker)
-        dismissIme()
         awaitDialogImeFrame(picker, visible = false)
         awaitNodeWindowFocus(picker)
         instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)

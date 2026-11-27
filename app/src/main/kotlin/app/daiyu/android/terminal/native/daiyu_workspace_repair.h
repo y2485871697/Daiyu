@@ -77,6 +77,7 @@ static int ws_metadata(int fd,struct ws_recovery *state) {
 }
 static int ws_open(int parent,const char *name,struct ws_recovery *state,struct stat *before) {
     if(fstatat(parent,name,before,AT_SYMLINK_NOFOLLOW)<0) return -1;
+    if(S_ISLNK(before->st_mode)) { errno=ELOOP; return -1; }
     if(!S_ISDIR(before->st_mode) && !S_ISREG(before->st_mode)) { errno=EPERM; return -1; }
     int fd=openat(parent,name,O_CLOEXEC|O_NOFOLLOW|O_NONBLOCK|
         (S_ISDIR(before->st_mode)?O_RDONLY|O_DIRECTORY:O_PATH));
@@ -180,7 +181,11 @@ static int workspace_repair_main(int argc,char **argv) {
     state.label_size=(size_t)label_size;
     struct stat before;
     held=ws_open(storage,"workspace",&state,&before);
-    if(held<0) { if(!repair && errno==EACCES) result=77; goto done; }
+    if(held<0) {
+        if(inspect && errno==EACCES) result=77;
+        if(inspect && errno==ELOOP) result=78;
+        goto done;
+    }
     char relative[4097]; memcpy(relative,argv[5],strlen(argv[5])+1);
     char *part=relative;
     while(*part) {
@@ -190,7 +195,11 @@ static int workspace_repair_main(int argc,char **argv) {
         if(!repair && ws_metadata(held,&state)<0) { if(errno==EACCES) result=77; goto done; }
         if(ancestor_count>=2048) goto done;
         int next=ws_open(held,part,&state,&before);
-        if(next<0) { if(!repair && errno==EACCES) result=77; goto done; }
+        if(next<0) {
+            if(inspect && errno==EACCES) result=77;
+            if(inspect && errno==ELOOP) result=78;
+            goto done;
+        }
         if(repair) ancestors[ancestor_count++]=held;
         else close(held);
         held=next;

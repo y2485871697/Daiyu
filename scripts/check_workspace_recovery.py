@@ -100,6 +100,8 @@ class NativeWorkspaceRecoveryTest(unittest.TestCase):
         outside = self.dirty(self.storage / "outside", "outside")
         before = outside.stat()
         (self.workspace / "link").symlink_to(outside)
+        checked = self.run_helper("link")
+        self.assertEqual((78, b""), (checked.returncode, checked.stdout))
         self.assertNotEqual(0, self.run_helper("link", repair=True).returncode)
         self.assertEqual(0, self.run_helper(tree=True, repair=True).returncode)
         self.assertEqual((before.st_uid, before.st_gid, before.st_mode),

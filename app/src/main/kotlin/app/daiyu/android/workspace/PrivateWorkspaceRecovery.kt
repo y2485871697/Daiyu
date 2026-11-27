@@ -44,6 +44,7 @@ private class AndroidPrivateWorkspaceRecovery(private val context: Context) : Pr
             if (recursive) "1" else "0", "DWSP1", (System.nanoTime() / 1_000_000 + 8_000).toString())
         val checked = execute(arguments("--workspace-check"), cancelled)
         if (checked == 0) return
+        check(checked != 78) { "workspace_symlink_not_supported" }
         check(checked == 77) { "workspace_recovery_rejected" }
         check(AndroidRunningModeStore.get(context).mode.value == RunningMode.ROOT) { "workspace_recovery_root_required" }
         val su = AndroidRunningModeAuthorization.rootExecutable() ?: error("workspace_recovery_root_unavailable")

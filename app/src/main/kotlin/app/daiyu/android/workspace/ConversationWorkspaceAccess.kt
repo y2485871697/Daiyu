@@ -56,9 +56,12 @@ internal class ConversationWorkspaceAccess(private val context: Context,
         require(sourceId == "private") { "workspace_selection_root_required" }
         val selected = java.io.File(path).toPath()
         require(selected.isAbsolute && selected.normalize() == selected) { "workspace_selection_root_required" }
-        val roots = listOf(context.filesDir.absoluteFile, context.filesDir.toPath().toRealPath().toFile())
-            .map { java.io.File(it, "workspace").toPath() }
-        val root = roots.firstOrNull { selected.startsWith(it) } ?: error("workspace_selection_root_required")
+        val storage = listOf(context.filesDir.absoluteFile, context.filesDir.toPath().toRealPath().toFile())
+        require(storage.any { selected.startsWith(it.toPath()) && selected != it.toPath() }) {
+            "workspace_private_root_required"
+        }
+        val roots = storage.map { java.io.File(it, "workspace").toPath() }
+        val root = requireNotNull(roots.firstOrNull { selected.startsWith(it) }) { "workspace_selection_root_required" }
         recovery.prepare(root.relativize(selected).joinToString("/"), false, null, cancelled)
     }
 

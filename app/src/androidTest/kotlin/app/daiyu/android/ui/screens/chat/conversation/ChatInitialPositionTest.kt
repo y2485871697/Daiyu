@@ -225,11 +225,17 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
         awaitCapturedFrames()
     }
 
+    private fun expectedTailBottom(liveBody: Boolean = false): Float {
+        // Only the fixture's streaming-body target uses the active document reserve.
+        val clearance = if (liveBody) 28.dp else 8.dp
+        return viewportBottom - clearance.value * activity.resources.displayMetrics.density
+    }
+
     private fun assertOnlyAlignedDraws(id: String) {
         awaitCapturedFrames()
         val samples = draws.filter { it.frameOwner == id }
         assertTrue("Expected a real drawn frame for $id", samples.isNotEmpty())
-        val bottom = viewportBottom - 24f * activity.resources.displayMetrics.density
+        val bottom = expectedTailBottom(liveBody = id == "stream")
         samples.forEach {
             assertEquals("$id exposed another conversation", id, it.owner)
             assertTrue("$id exposed an earlier history row", it.tail)
@@ -324,7 +330,7 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
         awaitProbe(probe)
         val saved = draws.filter { it.frameOwner == "first" && it.probeEpoch == probe.second }
         assertTrue("Expected a newly captured visible viewport after the history swipe", saved.isNotEmpty())
-        val bottom = viewportBottom - 24f * activity.resources.displayMetrics.density
+        val bottom = expectedTailBottom()
         assertTrue("The saved fixture must actually be away from the bottom",
             saved.maxOf { it.bottom } > bottom + 10f)
         switchTo("second")
@@ -478,7 +484,7 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
                 samples.forEach { sample ->
                     assertEquals("A pending frame exposed another owner: $probe", "first", sample.owner)
                     assertTrue("A pending frame exposed earlier history: $probe", sample.tail)
-                    assertEquals(viewportBottom - 24f * activity.resources.displayMetrics.density, sample.bottom, 2f)
+                    assertEquals(expectedTailBottom(), sample.bottom, 2f)
                 }
             }
             assertTrue(reads.flatten().none { it.startsWith("cold-") })
@@ -497,7 +503,7 @@ class ChatInitialPositionTest : WiredActivityTestCase() {
             awaitCapturedFrames()
             val committed = draws.filter { it.frameOwner == "cold" && it.probeEpoch == finalProbe.second }
             assertTrue("Target must replace the retained viewport", committed.isNotEmpty())
-            val expectedBottom = viewportBottom - 24f * activity.resources.displayMetrics.density
+            val expectedBottom = expectedTailBottom()
             committed.forEach {
                 assertEquals("cold", it.owner)
                 assertTrue(it.tail)

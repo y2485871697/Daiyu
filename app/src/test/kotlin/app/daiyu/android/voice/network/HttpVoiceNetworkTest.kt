@@ -215,12 +215,18 @@ class HttpVoiceNetworkTest {
                 }
             }
             val call = factory.enqueuedCall.await()
-            val body = TrackedBody(ByteArray(100_000), -1)
+            val backpressured = CompletableDeferred<Unit>()
+            val body = TrackedBody(ByteArray(100_000), -1) { bytesRead ->
+                if (bytesRead >= 4 * 8192L) backpressured.complete(Unit)
+            }
             // Model OkHttp's callback thread independently of the collector's coroutine scope.
             val callback = java.util.concurrent.FutureTask<Unit> { call.respond(body) }
             val thread = Thread(callback, "test-voice-http-callback").apply { isDaemon = true; start() }
             try {
                 received.await()
+                // First block is held by the collector; two more fill the channel.
+                backpressured.await()
+                assertFalse(callback.isDone)
                 task.cancelAndJoin()
                 callback.get(5, java.util.concurrent.TimeUnit.SECONDS)
             } finally {
@@ -274,12 +280,19 @@ class HttpVoiceNetworkTest {
                 .header("Retry-After", "0").body(body).build())
         }
     }
-    private class TrackedBody(bytes: ByteArray, private val declaredLength: Long) : ResponseBody() {
+    private class TrackedBody(
+        bytes: ByteArray,
+        private val declaredLength: Long,
+        private val afterRead: (Long) -> Unit = {},
+    ) : ResponseBody() {
         var closed = false
         var readBytes = 0L
         private val source = object : ForwardingSource(Buffer().write(bytes)) {
             override fun read(sink: Buffer, byteCount: Long): Long = super.read(sink, byteCount).also {
-                if (it > 0) readBytes += it
+                if (it > 0) {
+                    readBytes += it
+                    afterRead(readBytes)
+                }
             }
             override fun close() { closed = true; super.close() }
         }.buffer()

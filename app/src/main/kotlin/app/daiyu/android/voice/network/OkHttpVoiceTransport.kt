@@ -8,11 +8,11 @@ import app.daiyu.android.voice.providers.VoiceHttpResponse
 import app.daiyu.android.voice.providers.VoiceHttpTransport
 import app.daiyu.android.voice.providers.VoiceHttpStreamingTransport
 import app.daiyu.android.voice.providers.VoiceHttpChunk
-import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.trySendBlocking
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.buffer
-import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.flow
 import java.util.concurrent.atomic.AtomicBoolean
 import java.io.ByteArrayOutputStream
 import java.io.IOException
@@ -114,61 +114,66 @@ internal class OkHttpVoiceTransport(
         }
     }
 
-    override fun stream(request: VoiceHttpRequest, maxResponseBytes: Int): Flow<VoiceHttpChunk> = callbackFlow {
+    @OptIn(DelicateCoroutinesApi::class)
+    override fun stream(request: VoiceHttpRequest, maxResponseBytes: Int): Flow<VoiceHttpChunk> = flow {
         val call = newCall(request, maxResponseBytes)
+        val chunks = Channel<VoiceHttpChunk>(2)
         val finished = AtomicBoolean()
         try {
-            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_SUBMITTED)
-            call.enqueue(object : Callback {
-                override fun onFailure(call: Call, e: IOException) {
-                    diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_FAILED)
-                    finished.set(true)
-                    close(networkFailure())
-                }
-                override fun onResponse(call: Call, response: Response) {
-                    try {
-                        response.use {
-                            if (isClosedForSend) return
-                            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_RESPONSE_HEADERS)
-                            trySendBlocking(VoiceHttpChunk.Headers(it.code, it.header("Content-Type"))).getOrThrow()
-                            val source = it.body ?: throw networkFailure()
-                            checkNetwork(source.contentLength() <= maxResponseBytes)
-                            source.byteStream().use { input ->
-                                val buffer = ByteArray(8192)
-                                var total = 0
-                                while (!isClosedForSend) {
-                                    val count = input.read(buffer, 0, minOf(buffer.size, maxResponseBytes - total + 1))
-                                    if (count < 0) break
-                                    checkNetwork(total.toLong() + count <= maxResponseBytes)
-                                    if (count == 0) continue
-                                    if (total == 0) diagnostics?.recordAsync(DiagnosticEvent.SPEECH_RESPONSE_FIRST_BYTES)
-                                    total += count
-                                    // A two-block channel supplies backpressure; cancellation unblocks this send.
-                                    trySendBlocking(VoiceHttpChunk.Bytes(buffer.copyOf(count))).getOrThrow()
-                                }
-                            }
-                            if (!isClosedForSend) diagnostics?.recordAsync(DiagnosticEvent.SPEECH_RESPONSE_BODY_COMPLETED)
-                        }
-                        finished.set(true)
-                        close()
-                    } catch (_: Exception) {
+            try {
+                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_SUBMITTED)
+                call.enqueue(object : Callback {
+                    override fun onFailure(call: Call, e: IOException) {
                         diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_FAILED)
                         finished.set(true)
-                        call.cancel()
-                        close(networkFailure())
+                        chunks.close(networkFailure())
                     }
-                }
-            })
-        } catch (_: Exception) {
-            finished.set(true)
-            call.cancel()
-            close(networkFailure())
-        }
-        awaitClose {
+                    override fun onResponse(call: Call, response: Response) {
+                        try {
+                            response.use {
+                                if (chunks.isClosedForSend) return
+                                diagnostics?.recordAsync(DiagnosticEvent.SPEECH_RESPONSE_HEADERS)
+                                if (chunks.trySendBlocking(VoiceHttpChunk.Headers(it.code, it.header("Content-Type"))).isFailure) return
+                                val source = it.body ?: throw networkFailure()
+                                checkNetwork(source.contentLength() <= maxResponseBytes)
+                                source.byteStream().use { input ->
+                                    val buffer = ByteArray(8192)
+                                    var total = 0
+                                    while (!chunks.isClosedForSend) {
+                                        val count = input.read(buffer, 0, minOf(buffer.size, maxResponseBytes - total + 1))
+                                        if (count < 0) break
+                                        checkNetwork(total.toLong() + count <= maxResponseBytes)
+                                        if (count == 0) continue
+                                        if (total == 0) diagnostics?.recordAsync(DiagnosticEvent.SPEECH_RESPONSE_FIRST_BYTES)
+                                        total += count
+                                        if (chunks.trySendBlocking(VoiceHttpChunk.Bytes(buffer.copyOf(count))).isFailure) return
+                                    }
+                                }
+                                if (!chunks.isClosedForSend) diagnostics?.recordAsync(DiagnosticEvent.SPEECH_RESPONSE_BODY_COMPLETED)
+                            }
+                            finished.set(true)
+                            chunks.close()
+                        } catch (_: Exception) {
+                            diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_FAILED)
+                            finished.set(true)
+                            call.cancel()
+                            chunks.close(networkFailure())
+                        }
+                    }
+                })
+            } catch (_: Exception) {
+                finished.set(true)
+                call.cancel()
+                chunks.close(networkFailure())
+            }
+            for (chunk in chunks) emit(chunk)
+        } finally {
+            // Closing preserves pending sends; cancelling wakes a callback blocked behind a full buffer.
+            chunks.cancel()
             if (!finished.get()) diagnostics?.recordAsync(DiagnosticEvent.SPEECH_CALL_CANCELLED)
             call.cancel()
         }
-    }.buffer(2)
+    }
 
     companion object {
         internal val speechClient: OkHttpClient by lazy {

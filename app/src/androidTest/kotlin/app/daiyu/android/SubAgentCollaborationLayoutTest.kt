@@ -431,7 +431,7 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
             node("subagent-config-window").assertDoesNotExist()
             assertSame(parentRoot, parent.fetchSemanticsNode().root)
             assertEquals("Collaboration shade survives the window handoff", baseline, background(parentViewport), .06f)
-            node("subagent-model-name-worker").assertTextEquals("gemini-3")
+            ui.onNodeWithTag("subagent-model-name-worker", useUnmergedTree = true).assertIsDisplayed().assertTextEquals("gemini-3")
             assertEquals("Confirm writes the chosen model once", revisionBeforeConfirm + 1, revision.value)
             assertEquals(0, fixture.opens.get())
         } finally {

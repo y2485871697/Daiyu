@@ -72,8 +72,8 @@ class SharedBalanceProductionActivityTest : WiredActivityTestCase() {
         }
     }
 
-    private fun invoke(name: String) = mainThread {
-        MainActivity::class.java.getDeclaredMethod(name).apply { isAccessible = true }.invoke(activity)
+    private fun invoke(name: String, vararg arguments: Any) = mainThread {
+        invokeHost(activity, name, *arguments)
     }
     fun testUnselectedProvidersRefreshIndependentlyAndGlobalPollingSurvivesBackground() {
         val primary = runBlocking { testHost.get(ProviderRegistry.PRIMARY) }
@@ -95,7 +95,7 @@ class SharedBalanceProductionActivityTest : WiredActivityTestCase() {
             }
         }
         amount.set("8.09")
-        invoke("openChatModels")
+        invoke("openChatModels", false)
         ui.waitUntil(5000) { primary.state.value.amountValue?.toPlainString() == "8.09" &&
             other.state.value.amountValue?.toPlainString() == "8.19" }
         ui.waitUntil(5000) {

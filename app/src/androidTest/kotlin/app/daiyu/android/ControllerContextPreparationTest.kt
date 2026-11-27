@@ -149,11 +149,12 @@ class ControllerContextPreparationTest : InstrumentationTestCase() {
             ContextPreparationCancellation(), {}, { throw android.database.sqlite.SQLiteException("fixture") })
         val close = ChatController::class.java.getDeclaredMethod("closeSummaryPreparationSafely", RuntimeSummaryPreparation::class.java)
             .apply { isAccessible = true }
-        val idle = ChatController::class.java.getDeclaredMethod("idleAvailable").apply { isAccessible = true }
+        val idle = ChatController::class.java.getDeclaredMethod("idleAvailable", Boolean::class.javaPrimitiveType)
+            .apply { isAccessible = true }
         main {
             close.invoke(f.controller, reservation)
             assertTrue(f.controller.problem?.contains("摘要用量清理未确认") == true)
-            assertEquals(false, idle.invoke(f.controller))
+            assertEquals(false, idle.invoke(f.controller, false))
         }
         assertEquals(0, opens.get())
     }

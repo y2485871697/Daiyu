@@ -446,9 +446,10 @@ class ControllerMessageActionsTest : InstrumentationTestCase() {
             val edited = action(f, MessageAction.SAVE_EDIT, target, "edit-$index") as MessageActionResult.Regenerated
             assertEquals(RegenerationSendOutcome.ACCEPTED, edited.outcome)
             val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(15)
-            val idle = ChatController::class.java.getDeclaredMethod("idleAvailable").apply { isAccessible = true }
-            while (!synchronized(f.controller) { idle.invoke(f.controller) as Boolean } && System.nanoTime() < deadline) Thread.sleep(10)
-            assertTrue(synchronized(f.controller) { idle.invoke(f.controller) as Boolean })
+            val idle = ChatController::class.java.getDeclaredMethod("idleAvailable", Boolean::class.javaPrimitiveType)
+                .apply { isAccessible = true }
+            while (!synchronized(f.controller) { idle.invoke(f.controller, false) as Boolean } && System.nanoTime() < deadline) Thread.sleep(10)
+            assertTrue(synchronized(f.controller) { idle.invoke(f.controller, false) as Boolean })
             val rows = history(f, owner.id)
             assertEquals(user.id, rows.first().id)
             assertEquals("edit-$index", rows.first().blocks.filterIsInstance<MessageBlock.Text>().single().text)

@@ -185,7 +185,7 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase(object : andro
             val first = frame(); val second = frame()
             assertTrue("Fixture must still move after UP: reading=$reading first=$first second=$second tail=$tail", second > first)
             assertTrue(second < tail)
-            ui.runOnUiThread { invokeHost(activity, "openChatModels") }
+            ui.runOnUiThread { invokeHost(activity, "openChatModels", false) }
             var afterOpen = second
             repeat(4) {
                 afterOpen = frame()
@@ -239,7 +239,7 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase(object : andro
                 (invokeHost(activity, "getContextModelRevision") as Long) > revision
         } }
         val confirmedRevision = ui.runOnIdle { invokeHost(activity, "getContextModelRevision") as Long }
-        mainThread { invokeHost(activity, "openChatModels") }
+        mainThread { invokeHost(activity, "openChatModels", false) }
         awaitUniqueTag("chat-model-search")
         ui.waitUntil(5_000) { ui.runOnIdle {
             chatModelPicker()?.loading == false
@@ -267,7 +267,7 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase(object : andro
         }.apply { start() }
         try {
             assertTrue(entered.await(5, TimeUnit.SECONDS))
-            mainThread { invokeHost(activity, "openChatModels") }
+            mainThread { invokeHost(activity, "openChatModels", false) }
             awaitUniqueTag("chat-model-search")
             awaitNodeWindowFocus(node("chat-model-search"))
             mainThread { assertTrue(checkNotNull(chatModelPicker()).loading) }
@@ -290,7 +290,7 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase(object : andro
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)
             awaitHostWindowFocus(activity)
             assertDraft("打开目录不改变聊天")
-            mainThread { invokeHost(activity, "openChatModels") }
+            mainThread { invokeHost(activity, "openChatModels", false) }
             awaitUniqueTag("chat-model-search")
             ui.waitUntil(5_000) { ui.runOnIdle {
                 chatModelPicker()?.loading == false
@@ -303,7 +303,7 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase(object : andro
 
     fun testChatModelSearchSurvivesPauseAndStopWithoutAnySelection() {
         awaitControl("chat local readers idle") { !fixture.controller.dataBusy }
-        mainThread { invokeHost(activity, "openChatModels") }
+        mainThread { invokeHost(activity, "openChatModels", false) }
         awaitUniqueTag("chat-model-search")
         node("chat-model-search").performTextReplacement("unfinished model search")
         dismissIme()

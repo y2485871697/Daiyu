@@ -509,8 +509,7 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             mainThread {
                 val parent = activity.lifecycleScope.coroutineContext[Job]!!
                 val previousJobs = parent.children.toSet()
-                MainActivity::class.java.getDeclaredMethod("openChatModels")
-                    .apply { isAccessible = true }.invoke(activity)
+                invokeHost(activity, "openChatModels", false)
                 val pending = parent.children.filter { it !in previousJobs }.toList()
                 assertTrue("opening picker started background work", pending.isNotEmpty())
                 val remaining = AtomicInteger(pending.size)

@@ -256,11 +256,17 @@ class MarkdownTypingContract(unittest.TestCase):
     def test_message_actions_wait_for_the_exact_body_and_all_reconnect_reveals(self):
         assistant = self.chat.split("internal fun AssistantTurn(", 1)[1].split(
             "private fun AssistantTextContent(", 1)[0]
+        self.assertIn("val responseVisible = remember(turn) { turn.hasVisibleResponse() }", assistant)
+        self.assertIn(
+            "val actionResponseVisible = if (actionTurn === turn) responseVisible\n"
+            "        else remember(actionTurn) { actionTurn.hasVisibleResponse() }",
+            assistant,
+        )
         self.assertIn(
             "    val actionsVisible = showActions && when {\n"
-            "        stoppedFooter -> true\n"
+            "        stoppedFooter -> actionResponseVisible\n"
             "        actionRunning -> hasTextActions\n"
-            "        else -> generationComplete && revealSettled\n",
+            "        else -> actionResponseVisible && generationComplete && revealSettled\n",
             assistant)
         self.assertIn(
             "        if (actionsVisible) {\n"

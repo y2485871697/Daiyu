@@ -76,6 +76,30 @@ class MessageActionAvailabilityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    fun testEmptyTerminalReplyDoesNotLeaveIdentityOrActions() {
+        var reply by mutableStateOf(ChatTurnUi.Assistant("empty-reply", status = RunStatus.RUNNING))
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
+                AssistantTurn(reply, actions())
+            }
+        } }
+        val identity = ui.onNodeWithTag("reply-identity:empty-reply")
+        val regenerate = ui.onNodeWithContentDescription("重新生成")
+        for (status in listOf(RunStatus.STOPPED, RunStatus.COMPLETED)) {
+            mainThread { reply = reply.copy(status = status) }
+            identity.assertDoesNotExist()
+            regenerate.assertDoesNotExist()
+        }
+        mainThread { reply = reply.copy(status = RunStatus.STOPPED, finalText = "已收到一部分正文") }
+        identity.assertIsDisplayed()
+        ui.onNodeWithContentDescription("复制回答").assertIsEnabled().performClick()
+        mainThread { reply = reply.copy(finalText = "") }
+        identity.assertDoesNotExist()
+        regenerate.assertDoesNotExist()
+        assertEquals(listOf("copy"), clicked)
+        assertEquals(0, fixture.opens.get())
+    }
+
     fun testCoveredFooterKeepsItsColorsAndCannotInvokeActions() {
         var covered by mutableStateOf(false)
         mainThread {

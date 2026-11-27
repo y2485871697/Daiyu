@@ -356,6 +356,27 @@ class MarkdownRevealInvalidationTest {
         assertFalse(reveal.ready("missing", ""))
     }
 
+    @Test fun snapshotCompletionWaitsForPublicationWithoutRequiringAnInkCursor() {
+        val source = MarkdownTypingSource("body", "done")
+        val target = MarkdownTypingTarget(listOf(MarkdownTypingPart(source, 4)),
+            start = 0, streaming = false, terminal = true)
+        val frame = mutableStateOf(MarkdownTypingFrame(target, 3))
+        val publication = MarkdownPaintPublication().apply { active = true; start(target) }
+        val reveal = MarkdownReveal(target, frame, exact = true, publication = publication)
+
+        assertFalse(reveal.settled)
+        publication.reserve(target, 3, 4)
+        frame.value = MarkdownTypingFrame(target, 4)
+        publication.presented(source.id, source)
+        assertFalse(reveal.settled)
+        publication.applied(target, source.id, 4)
+        assertTrue(reveal.settled)
+        assertTrue(reveal.bodyInkComplete())
+
+        val inkReveal = MarkdownReveal(target, frame, exact = true, publication = publication, inkEnabled = true)
+        assertFalse(inkReveal.bodyInkComplete())
+    }
+
     @Test fun aFullyRevealedStaleProjectionIsNotSettled() {
         val target = MarkdownTypingTarget(listOf(MarkdownTypingPart(MarkdownTypingSource("id", "text"), 4)),
             start = 4, streaming = false, terminal = true)

@@ -340,8 +340,8 @@ internal class MarkdownTypingState(private val baseline: List<MarkdownTypingSour
             lastFrame = 0L
             return previous
         }
-        if (streamSnapshot) {
-            // A body snapshot is already paced by its producer, not by a second character clock.
+        if (streamSnapshot && !(expected.terminal && expected.paceTerminal)) {
+            // Live receipts already have a producer clock. An undisplayed terminal suffix does not.
             position = end.toDouble()
             lastAdvanceFrame = frameNanos
             onAdvance()

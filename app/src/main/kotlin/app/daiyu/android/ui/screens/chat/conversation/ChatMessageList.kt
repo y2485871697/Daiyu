@@ -863,6 +863,7 @@ internal fun ChatMessageList(
             // before draw; the frame follower would show the new line under the edge for one frame first.
             // Includes the typed-out remainder after the stream ends: those lines grow the same document.
             val liveDocumentOverflow = activeTail != null && currentTailKey == activeTail.listKey &&
+                activeTail.hasBodyTextActions() && activeTail.workflowContent().work == null &&
                 (activeTail.status == RunStatus.RUNNING || revealedTurns[activeTail.listKey] != activeTail) &&
                 nestedTail.contentHeight >= layout.viewportSize.height - currentOcclusionPx
             val workflowTextGrowth = currentWorkflowTailOwner != null && currentWorkflowTailOwner == currentTailKey &&
@@ -1803,10 +1804,13 @@ internal fun AssistantTurn(
     val stoppedFooter = actionTurn.status == RunStatus.STOPPED || LocalReplyPlayback.current?.control?.stopped == true
     val actionRunning = actionTurn.status == RunStatus.RUNNING
     val hasTextActions = remember(actionTurn) { actionTurn.hasMessageActionText() }
+    val responseVisible = remember(turn) { turn.hasVisibleResponse() }
+    val actionResponseVisible = if (actionTurn === turn) responseVisible
+        else remember(actionTurn) { actionTurn.hasVisibleResponse() }
     val actionsVisible = showActions && when {
-        stoppedFooter -> true
+        stoppedFooter -> actionResponseVisible
         actionRunning -> hasTextActions
-        else -> generationComplete && revealSettled
+        else -> actionResponseVisible && generationComplete && revealSettled
     }
     if (previousActionSlotSources != actionSlotSources) {
         val appended = assistantActionSlotAppended(previousActionSlotSources, actionSlotSources)
@@ -1816,7 +1820,7 @@ internal fun AssistantTurn(
         if (!retainDetachedSlot || actionsVisible) previousActionSlotSources = actionSlotSources
     }
     val holdActionSlot = actionSlotOwner && actionTurn.status != RunStatus.RUNNING && actionSlotHeightPx > 0 &&
-        (!generationComplete || !revealSettled || !showActions)
+        actionResponseVisible && (!generationComplete || !revealSettled || !showActions)
     val identity = turn.assistantIdentity
     val customAvatar = identity?.avatarPng
     val avatar = key(customAvatar) {
@@ -1824,12 +1828,10 @@ internal fun AssistantTurn(
             if (customAvatar != null) value = withContext(Dispatchers.IO) { runCatching { identity?.avatarBitmap() } }
         }
     }
-    // A run stopped before any output has nothing to show or act on; the stopped divider says enough.
-    val stoppedEmpty = stoppedFooter && !turn.hasVisibleResponse() && !actionTurn.hasVisibleResponse()
     val animateReplyEntrance = turn.status == RunStatus.RUNNING
     val replyEntranceActive = LocalChatPresentationActive.current && !stoppedFooter && !actionTurn.stopRequested
     // A ready but empty reconnect tail must not add a spaced child before its action bar exists.
-    if (!stoppedEmpty && (turn.hasVisibleResponse() || actionsVisible || holdActionSlot)) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    if (responseVisible || actionsVisible || holdActionSlot) Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (showIdentity) Row(Modifier.testTag("reply-identity:${turn.listKey}").workflowInkClearance().drawWithContent {
             if (customAvatar == null || avatar.value != null) drawContent()
         }.replyEntrance(visualScope, ReplyEntrancePart.Identity, animateReplyEntrance, replyEntranceActive,

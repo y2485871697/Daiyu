@@ -1072,6 +1072,23 @@ class MarkdownRevealTest {
         assertEquals(40, callbacks)
     }
 
+    @Test fun terminalSnapshotKeepsPaintedPrefixAndPacesItsRemainingGraphemes() {
+        val prefix = "已绘正文"
+        val text = prefix + "😀终态正文".repeat(8)
+        val state = MarkdownTypingState(emptyList())
+        state.receive(listOf(source(prefix)), 1_000_000_000L)
+        val live = state.update(listOf(part(prefix)), 0, streaming = true, terminal = false, paceTerminal = true)!!
+        assertEquals(prefix.length, state.advance(live, 1_000_000_000L, live.total, streamSnapshot = true))
+        state.receive(listOf(source(text)), 1_500_000_000L)
+        val terminal = state.update(listOf(part(text)), 0, streaming = false, terminal = true, paceTerminal = true)!!
+        assertEquals(prefix.length, state.visible(terminal))
+        assertEquals(prefix.length + "😀".length,
+            state.advance(terminal, 1_500_000_000L, terminal.total, streamSnapshot = true))
+        repeat(180) { frame -> state.advance(terminal, 1_516_000_000L + frame * 16_000_000L,
+            terminal.total, streamSnapshot = true) }
+        assertEquals(text.length, state.visible(terminal))
+    }
+
     @Test fun unicodeRevealAdmitsOnlyOneCompleteCharacterPerFrame() {
         val text = "A😀𠮷e\u0301👩‍💻Z"
         val boundaries = MarkdownTextBoundaries(text)

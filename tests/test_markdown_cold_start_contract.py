@@ -29,7 +29,7 @@ class MarkdownColdStartContract(unittest.TestCase):
         source = (BASE / 'ChatMessageList.kt').read_text().split('internal fun AssistantTurn(', 1)[1]
         self.assertIn('val contentReady = projection?.sources == sources', source)
         self.assertIn('val generationComplete = turn.status != RunStatus.RUNNING && ordered.pending.isEmpty() && contentReady', source)
-        self.assertIn('else -> generationComplete && revealSettled', source)
+        self.assertIn('else -> actionResponseVisible && generationComplete && revealSettled', source)
         self.assertIn('SideEffect { onContentReady(contentReady) }', source)
         self.assertIn('val revealSettled = reveal.settled', source)
         self.assertIn('SideEffect { onRevealSettled(revealSettled) }', source)

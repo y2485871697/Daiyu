@@ -67,7 +67,7 @@ class ReportedReasoningMarkdownContractTest(unittest.TestCase):
         source = (CHAT / "ChatMessageList.kt").read_text()
         assistant = source.split("internal fun AssistantTurn(", 1)[1].split("private fun AssistantTextContent", 1)[0]
         self.assertIn("val actionsVisible = showActions && when {", assistant)
-        gate = assistant.index("if (!stoppedEmpty && (turn.hasVisibleResponse() || actionsVisible || holdActionSlot))")
+        gate = assistant.index("if (responseVisible || actionsVisible || holdActionSlot)")
         self.assertLess(assistant.index("SideEffect { onContentReady(contentReady) }"), gate)
         self.assertLess(assistant.index("SideEffect { onContentDisplayed(hasDisplayBody || contentReady) }"), gate)
         self.assertLess(gate, assistant.index('Modifier.testTag("reply-identity:'))

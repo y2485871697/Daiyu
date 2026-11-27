@@ -95,7 +95,7 @@ class ReasoningFlowStabilityContractTest(unittest.TestCase):
         listing = self.read('ChatMessageList.kt')
         self.assertIn('actionTurn: ChatTurnUi.Assistant = turn', listing)
         self.assertIn('MessageActionBar(actionTurn.actionKey, actions', listing)
-        self.assertIn('else -> generationComplete && revealSettled', listing)
+        self.assertIn('else -> actionResponseVisible && generationComplete && revealSettled', listing)
         reconnect = self.read('ReconnectedAssistantTurn.kt')
         self.assertIn('val actionsReady = turn.status == RunStatus.RUNNING || turn.status == RunStatus.STOPPED', reconnect)
         self.assertIn('parts.parts.all { ready[it.turn.listKey] == it && settled[it.turn.listKey] == it }', reconnect)

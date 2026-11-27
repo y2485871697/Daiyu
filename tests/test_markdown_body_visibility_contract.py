@@ -138,7 +138,7 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
         self.assertIn('desiredRate = rate', motion)
         self.assertIn('lastFrame = 0L', motion)
         self.assertIn('resuming = true', motion)
-        before, direct = motion.split('if (streamSnapshot) {', 1)
+        before, direct = motion.split('if (streamSnapshot && !(expected.terminal && expected.paceTerminal)) {', 1)
         body, paced = direct.split('return end', 1)
         self.assertIn('val end = maxOf(previous, expected.boundary(limit))', before)
         self.assertIn('if (lastAdvanceFrame == frameNanos) return previous', before)

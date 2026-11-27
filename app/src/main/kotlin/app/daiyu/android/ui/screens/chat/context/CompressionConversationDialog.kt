@@ -64,7 +64,7 @@ internal fun CompressionConversationDialog(
 ) {
     val colors = assistantPreviewPalette()
     var showHelp by remember { mutableStateOf(false) }
-    UsageGlassDialog(title = "压缩会话", onDismiss = onDismiss, scrimColor = Color.Transparent) {
+    UsageGlassDialog(title = "压缩会话", onDismiss = onDismiss) {
         LazyColumn(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 430.dp)
             .testTag(if (draft != null) "context-management" else "context-management-unavailable"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (draft != null) {

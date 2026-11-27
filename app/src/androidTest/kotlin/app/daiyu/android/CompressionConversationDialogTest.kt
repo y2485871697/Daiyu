@@ -1,10 +1,16 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.*
@@ -15,6 +21,7 @@ import app.daiyu.android.data.model.AppearanceSettings
 import app.daiyu.android.data.model.AppearanceThemeMode
 import app.daiyu.android.model.ProviderProtocol
 import app.daiyu.android.ui.app.AgentAppTheme
+import app.daiyu.android.ui.components.subagent.ConversationAgentSheet
 import app.daiyu.android.ui.screens.assistants.AssistantPreviewPalette
 import app.daiyu.android.ui.screens.chat.context.CompressionConversationDialog
 import app.daiyu.android.ui.screens.chat.context.CompressionDialogDraft
@@ -45,6 +52,54 @@ class CompressionConversationDialogTest : WiredActivityTestCase() {
             }
         }
         awaitUniqueTag("context-management")
+    }
+
+    fun testCompressionDimsBackgroundLikeCollaborationAndOutsideTapDismisses() {
+        var showReference by mutableStateOf(true)
+        var showCompression by mutableStateOf(true)
+        mainThread {
+            activity.setContent {
+                AgentAppTheme(AppearanceSettings(themeMode = AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
+                    Box(Modifier.fillMaxSize().background(Color.White)) {
+                        if (showReference) {
+                            ConversationAgentSheet(onDismiss = {}, useDefaultHeight = true) {}
+                        } else if (showCompression) {
+                            CompressionConversationDialog(draft, onChange = { draft = it },
+                                onChooseModel = { picks++ }, onConfirm = { confirms++ }, onDismiss = {
+                                    cancels++
+                                    showCompression = false
+                                })
+                        }
+                    }
+                }
+            }
+        }
+        val scrim = node("preview-dialog-scrim")
+        fun sample(sheetTag: String): Color {
+            awaitUniqueTag(sheetTag)
+            val sheet = node(sheetTag)
+            awaitDialogEnter(sheet)
+            val viewport = scrim.fetchSemanticsNode().boundsInRoot
+            val outsideHeight = sheet.fetchSemanticsNode().boundsInRoot.top - viewport.top
+            assertTrue("The sheet must leave room for the outside sample", outsideHeight >= viewport.height * .16f)
+            val pixels = captureScreenNode(scrim).toPixelMap()
+            return pixels[pixels.width / 2, (pixels.height * .14f).toInt()]
+        }
+        val expected = sample("conversation-agent-sheet")
+        assertTrue("The reference sheet must visibly shade the white background: $expected", expected.red < .8f)
+        mainThread { showReference = false }
+        val actual = sample("usage-glass-dialog")
+        assertEquals("Compression backdrop red", expected.red, actual.red, .025f)
+        assertEquals("Compression backdrop green", expected.green, actual.green, .025f)
+        assertEquals("Compression backdrop blue", expected.blue, actual.blue, .025f)
+        scrim.performTouchInput { click(Offset(center.x, height * .14f)) }
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("usage-glass-dialog").fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+        }
+        assertEquals(1, cancels)
+        assertEquals(0, confirms)
+        assertEquals(0, picks)
+        assertEquals(0, fixture.opens.get())
     }
 
     fun testOriginalControlsUseNewThemeAndOnlyDispatchExplicitActions() {

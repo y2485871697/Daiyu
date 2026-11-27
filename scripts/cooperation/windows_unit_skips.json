@@ -21,6 +21,10 @@
     "crashAfterClaimBeforeExecutionIsLookupOnly",
     "independentJvmProcessesSerializeAndRestartDoesNotReexecute"
   ],
+  "app.daiyu.android.integration.tools.RunCommandToolsTest": [
+    "preFactoryLinuxClaimFailureCanDrainItsUnstartedMetadataLease",
+    "fileImagesReuseTheFrozenLinuxTransportAndCancellationPreventsReceiptPublication"
+  ],
   "app.daiyu.android.integration.tools.RunTerminalToolsTest": [
     "linuxFailedStartupKeepsBothOriginalCleanupAndApprovalPinUntilJoin",
     "abandonedLinuxApprovalCanReleaseOnlyItsUnclaimedSnapshot",
@@ -53,17 +57,21 @@
     "startupCleanupSharesSingleFlightAndCloseDoesNotReleaseDuringWait",
     "unstartedFailureTransfersOriginalPinWhenSettlementMustRetry"
   ],
-  "app.daiyu.android.terminal.LinuxSettingsApplicationFreezeTest": [
-    "onlyExistingMatchingTrustedSelectionCanProduceNonStartingPinnedLaunch"
-  ],
-  "app.daiyu.android.integration.tools.RunCommandToolsTest": [
-    "preFactoryLinuxClaimFailureCanDrainItsUnstartedMetadataLease"
-  ],
   "app.daiyu.android.terminal.LinuxRunnerGenerationPinsTest": [
     "legacyAndExclusiveUnknownPinsNeverBecomeSharedOccupancy",
     "deadOwnerSharedPinAllowsNewSharedWorkWithoutSettlingOldRun",
     "realJvmOwnerWritesBootWitnessButAnotherJvmInSameBootIsStillDenied",
     "retainedSharedPinRequiresExactBootSourceContentAndInode"
+  ],
+  "app.daiyu.android.terminal.LinuxSettingsApplicationFreezeTest": [
+    "onlyExistingMatchingTrustedSelectionCanProduceNonStartingPinnedLaunch"
+  ],
+  "app.daiyu.android.terminal.TerminalImageReadTest": [
+    "completedReaderErrorsRetainTheirRecoveryGuidanceAndUnknownExitDoesNot",
+    "cancellationDestroysTheOwnedReaderAndAllowsTheOriginalRegistryToDrain",
+    "imageBytesUseTheExistingBackendButNeverCreateTerminalLogsOrMetadata",
+    "finishedImageReadsAndFailedStartsLeaveNoProcessRegistryEntries",
+    "traversalNonAsciiMalformedAndTruncatedFramesAreNotDelivered"
   ],
   "app.daiyu.android.terminal.TerminalRegistryRetentionTest": [
     "moreThan64DistinctSessionsCanOpen",
@@ -77,6 +85,11 @@
     "sixtyFiveRunningAsyncJobsAreNotRejectedByCumulativeQuota",
     "eofObservedBeforePumpFinishesDoesNotLoseLaterOutput",
     "continuous130CommandsKeepAllHistoryAndReplayNeverStartsAgain",
-    "finishedDaemonCanReleaseResourcesAndRetainInspectableHistoryAfterClose"
+    "finishedDaemonCanReleaseResourcesAndRetainInspectableHistoryAfterClose",
+    "rootExitKnowledgeNeverCrashesOrReplaysInAnyMode",
+    "completedPageWinsWhenTimedWaitReportsFalseAtTheExitBoundary",
+    "interruptedPumpCleanupKeepsUnknownOwnershipWithoutUncaughtException",
+    "syncWaitExpiryKeepsTheOwnedJobAndLaterPersistsExactCompletion",
+    "failedOutputRetainsPrefixAndOwnershipUntilProcessActuallyEnds"
   ]
 }

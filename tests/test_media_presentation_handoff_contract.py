@@ -47,6 +47,13 @@ class MediaPresentationHandoffContract(unittest.TestCase):
         self.assertLess(composer.index('ComposerAttachmentExit {'), composer.index('attachmentContent()'))
         self.assertLess(composer.index('attachmentContent()'), composer.index('key(state.editorGeneration, actions.editingMessageKey) {'))
 
+    def test_software_attachment_raster_uses_shader_free_fallbacks(self):
+        source = (SRC / 'ui/screens/chat/conversation/ComposerAttachmentExit.kt').read_text()
+        subtree = source.rsplit('CompositionLocalProvider(', 1)[1]
+        self.assertIn('LocalComposerAttachmentVisualChange provides changed', subtree)
+        self.assertIn('LocalSquircleEnabled provides false', subtree)
+        self.assertIn('content = content', subtree)
+
     def test_ready_images_use_asset_identity_without_weakening_operation_keys(self):
         source = (SRC / 'ui/screens/chat/attachments/ImageAttachments.kt').read_text()
         self.assertIn('key(if (item is ImageAttachmentItem.Ready) item.attachment else item.key)', source)

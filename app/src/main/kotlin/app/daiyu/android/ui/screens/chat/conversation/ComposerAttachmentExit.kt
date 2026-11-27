@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.drawscope.draw
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
+import top.yukonga.miuix.kmp.squircle.LocalSquircleEnabled
 
 private class ComposerAttachmentFrame {
     var visualRevision by mutableIntStateOf(0)
@@ -101,5 +102,12 @@ internal fun ComposerAttachmentExit(content: @Composable () -> Unit) {
                 drawImage(checkNotNull(frame.bitmap))
             }
         },
-    ) { CompositionLocalProvider(LocalComposerAttachmentVisualChange provides changed) { content() } }
+    ) {
+        // The attachment subtree is rasterized on a software canvas; use rounded-corner fallbacks.
+        CompositionLocalProvider(
+            LocalComposerAttachmentVisualChange provides changed,
+            LocalSquircleEnabled provides false,
+            content = content,
+        )
+    }
 }

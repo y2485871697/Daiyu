@@ -28,7 +28,7 @@ class AuxiliaryModelDefaultsContract(unittest.TestCase):
         worker = (MAIN / 'context/ContextManagementWorker.kt').read_text()
         self.assertIn('else selection.binding == null', worker)
         self.assertIn('if (frozenCurrent != null) chatModel(frozenCurrent, windowTokens, usage)', worker)
-        self.assertIn('else requireNotNull(profiles.freeze(checkNotNull(target), usage))', worker)
+        self.assertIn('else requireNotNull(profiles.freeze(checkNotNull(target), usage, selection?.protocol))', worker)
 
     def test_default_title_retains_the_configuration_revision_and_revocation_checks(self):
         store = (MAIN / 'title/TitleModelSettingsStore.kt').read_text()

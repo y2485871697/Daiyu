@@ -34,8 +34,9 @@ class R46BatchContract(unittest.TestCase):
         self.assertIn('assertSame(next, adapter())', text)
         continued = source.split('private fun restoredAndAwait()', 1)[1].split('return result', 1)[0]
         for token in ('node("context-management-paused").assertDoesNotExist()', 'awaitUniqueTag("context-management")',
-                      'result.state.value.operation == null && result.state.value.snapshot != null',
-                      'assertFalse(result.state.value.confirmingCompression)'):
+                      'result.state.value.operation == null && result.state.value.snapshot == null',
+                      'assertFalse(result.state.value.confirmingCompression)',
+                      'assertFalse(result.state.value.compressionAccepted)'):
             self.assertIn(token, continued)
 
     def test_mcp_rejection_compares_persisted_values_and_generation(self):

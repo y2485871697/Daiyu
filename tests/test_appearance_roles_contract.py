@@ -91,8 +91,8 @@ class AppearanceRolesContractTest(unittest.TestCase):
         bar = source('ui/screens/chat/conversation/MessageActionBar.kt')
         self.assertIn('val actionsEnabled = interactionEnabled && messageActionsEnabled && actions.messageActionsEnabled', bar)
         self.assertIn('val actionTint = colors.muted.copy(alpha = if (actionsEnabled) 1f else .38f)', bar)
-        delete = bar.split('TooltipBox(text = "删除", enabled = actionsEnabled)', 1)[1].split('if (timestamp.isNotBlank())', 1)[0]
-        self.assertIn('ConversationIconButton(onClick = { actions.onDeleteTurn(id) }, enabled = actionsEnabled)', delete)
+        delete = bar.split('TooltipBox(text = "删除", enabled = actionsEnabled && acceptsInput)', 1)[1].split('if (timestamp.isNotBlank())', 1)[0]
+        self.assertIn('ConversationIconButton(onClick = { actions.onDeleteTurn(id) }, enabled = actionsEnabled && acceptsInput)', delete)
         self.assertIn('Icon(DaiyuIcons.Delete, "删除", Modifier.size(13.dp), tint = actionTint)', delete)
         self.assertNotIn('colorScheme.error', delete)
 

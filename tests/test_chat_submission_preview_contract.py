@@ -45,7 +45,7 @@ class ChatSubmissionPreviewContractTest(unittest.TestCase):
 
     def test_pending_user_is_not_an_action_target(self):
         source = (CHAT / 'ChatMessageList.kt').read_text().split('internal fun UserTurn(', 1)[1].split('internal fun AssistantTurn(', 1)[0]
-        self.assertIn('if (!turn.pending) showMenu = true', source)
+        self.assertIn('if (!turn.pending && !actions.messageActionsCovered) showMenu = true', source)
         self.assertIn('if (actions.editingMessageKey != turn.listKey) MessageActionBar(', source)
         self.assertIn('messageActionsEnabled = !turn.pending', source)
         self.assertIn('branchEnabled = !turn.pending', source)

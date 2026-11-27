@@ -54,7 +54,7 @@ class DeletionOriginalRedContractTest(unittest.TestCase):
         bar = source('ui/screens/chat/conversation/MessageActionBar.kt')
         self.assertIn('val actionsEnabled = interactionEnabled && messageActionsEnabled && actions.messageActionsEnabled', bar)
         self.assertIn('val actionTint = colors.muted.copy(alpha = if (actionsEnabled) 1f else .38f)', bar)
-        delete = bar.split('TooltipBox(text = "删除", enabled = actionsEnabled)', 1)[1].split('if (timestamp.isNotBlank())', 1)[0]
+        delete = bar.split('TooltipBox(text = "删除", enabled = actionsEnabled && acceptsInput)', 1)[1].split('if (timestamp.isNotBlank())', 1)[0]
         self.assertIn('tint = actionTint', delete)
         self.assertNotIn('destructiveColors', delete)
         self.assertNotIn('deletionAppearance', source('ui/screens/settings/WorkspaceSettingsScreen.kt'))

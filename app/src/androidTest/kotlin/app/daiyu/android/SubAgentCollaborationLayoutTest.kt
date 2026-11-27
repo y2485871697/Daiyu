@@ -371,7 +371,6 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
         val data = profileFixture()
         val before = data.repository.snapshot(data.editor.owner)
         val revision = data.repository.revision(data.editor.owner)
-        val initialRevision = revision.value
         val source = object : SubAgentModelSource {
             override val providers = kotlinx.coroutines.flow.MutableStateFlow(listOf(data.provider))
         }
@@ -403,16 +402,23 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
         awaitDialogTouchReady(candidate)
         candidate.performClick()
         assertEquals(before, data.repository.snapshot(data.editor.owner))
+        val picker = node("chat-selection-sheet")
+        awaitNodeWindowFocus(picker)
+        dismissIme()
+        awaitDialogImeFrame(picker, visible = false)
         instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-        val confirm = ui.onNode(hasText("确认") and hasClickAction())
+        ui.waitUntil(5_000) { ui.onAllNodesWithTag("chat-selection-sheet").fetchSemanticsNodes().isEmpty() }
+        val confirm = ui.onNode(hasText("确认") and hasClickAction() and
+            hasAnyAncestor(hasTestTag("subagent-config-window")))
         awaitDialogTouchReady(confirm)
         model.assertTextContains("gemini-3", substring = true)
+        val revisionBeforeConfirm = revision.value
 
         val autoAdvance = ui.mainClock.autoAdvance
         try {
             ui.mainClock.autoAdvance = false
             confirm.assertIsEnabled().performClick()
-            ui.waitUntil(5_000) { revision.value > initialRevision }
+            ui.waitUntil(5_000) { revision.value > revisionBeforeConfirm }
             val exit = ui.onNode(SemanticsMatcher.expectValue(DialogDismissing, true), useUnmergedTree = true)
             for (step in listOf(96L, 80L)) {
                 ui.mainClock.advanceTimeBy(step)
@@ -426,7 +432,7 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
             assertSame(parentRoot, parent.fetchSemanticsNode().root)
             assertEquals("Collaboration shade survives the window handoff", baseline, background(parentViewport), .06f)
             node("subagent-model-name-worker").assertTextEquals("gemini-3")
-            assertEquals("Confirm writes the chosen model once", initialRevision + 1, revision.value)
+            assertEquals("Confirm writes the chosen model once", revisionBeforeConfirm + 1, revision.value)
             assertEquals(0, fixture.opens.get())
         } finally {
             ui.mainClock.autoAdvance = autoAdvance

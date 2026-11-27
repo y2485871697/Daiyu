@@ -1,6 +1,10 @@
 package app.daiyu.android
 
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.requiredWidth
@@ -360,6 +364,72 @@ class SubAgentCollaborationLayoutTest : WiredActivityTestCase() {
             mainThread { profile = data.profile.copy(providerId = "", modelId = "") }
             ui.onNodeWithText("无").assertExists()
             chip.assertDoesNotExist()
+        }
+    }
+
+    fun testConfirmModelSwitchKeepsCollaborationBackgroundDimmedThroughExit() {
+        val data = profileFixture()
+        val before = data.repository.snapshot(data.editor.owner)
+        val revision = data.repository.revision(data.editor.owner)
+        val initialRevision = revision.value
+        val source = object : SubAgentModelSource {
+            override val providers = kotlinx.coroutines.flow.MutableStateFlow(listOf(data.provider))
+        }
+        mainThread { activity.setContent {
+            AgentAppTheme(AppearanceSettings(themeMode = AppearanceThemeMode.LIGHT), applyInterfaceScale = false) {
+                Box(Modifier.fillMaxSize().background(Color.White)) {
+                    ConversationCollaborationDialog(true, data.editor.owner.value, {},
+                        repositoryFactory = { data.repository }, modelSource = source)
+                }
+            }
+        } }
+        val parent = node("subagent-collaboration-card")
+        awaitDialogEnter(parent)
+        val parentRoot = parent.fetchSemanticsNode().root
+        val parentViewport = ui.onNode(hasTestTag("preview-dialog-viewport") and
+            SemanticsMatcher("collaboration window") { it.root === parentRoot }, useUnmergedTree = true)
+        fun background(target: SemanticsNodeInteraction): Float {
+            val pixels = captureScreenNode(target, advanceAnimationClock = false).toPixelMap()
+            return pixels[pixels.width / 2, pixels.height * 7 / 100].red
+        }
+        val baseline = background(parentViewport)
+        assertTrue("The collaboration window dims the white host: $baseline", baseline in 0.05f..0.80f)
+        ui.onNodeWithText("使用当前配置").assertIsEnabled().performClick()
+        ui.onNodeWithContentDescription("配置Worker").assertIsEnabled().performClick()
+        val model = ui.onNodeWithContentDescription("草稿模型")
+        awaitDialogTouchReady(model)
+        model.performClick()
+        val candidate = node("chat-model-option:other-local")
+        awaitDialogTouchReady(candidate)
+        candidate.performClick()
+        assertEquals(before, data.repository.snapshot(data.editor.owner))
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        val confirm = ui.onNode(hasText("确认") and hasClickAction())
+        awaitDialogTouchReady(confirm)
+        model.assertTextContains("gemini-3", substring = true)
+
+        val autoAdvance = ui.mainClock.autoAdvance
+        try {
+            ui.mainClock.autoAdvance = false
+            confirm.assertIsEnabled().performClick()
+            ui.waitUntil(5_000) { revision.value > initialRevision }
+            val exit = ui.onNode(SemanticsMatcher.expectValue(DialogDismissing, true), useUnmergedTree = true)
+            for (step in listOf(96L, 80L)) {
+                ui.mainClock.advanceTimeBy(step)
+                val progress = exit.fetchSemanticsNode().config[DialogMotionProgress]
+                assertTrue("The saved config window must still be exiting: $progress", progress > 0f && progress < 1f)
+                assertEquals("No brightness jump at exit progress $progress", baseline, background(exit), .06f)
+            }
+            assertEquals("other-local", data.repository.snapshot(data.editor.owner).profiles.single().modelId)
+            ui.mainClock.advanceTimeBy(224)
+            node("subagent-config-window").assertDoesNotExist()
+            assertSame(parentRoot, parent.fetchSemanticsNode().root)
+            assertEquals("Collaboration shade survives the window handoff", baseline, background(parentViewport), .06f)
+            node("subagent-model-name-worker").assertTextEquals("gemini-3")
+            assertEquals("Confirm writes the chosen model once", initialRevision + 1, revision.value)
+            assertEquals(0, fixture.opens.get())
+        } finally {
+            ui.mainClock.autoAdvance = autoAdvance
         }
     }
 

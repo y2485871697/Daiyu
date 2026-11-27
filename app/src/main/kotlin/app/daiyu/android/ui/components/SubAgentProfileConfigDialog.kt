@@ -18,6 +18,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import app.daiyu.android.delegation.*
 import app.daiyu.android.model.GptSpeedMode
 import app.daiyu.android.ui.components.subagent.*
@@ -115,10 +118,12 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
     LaunchedEffect(session, current) { if (!current) { session.dismiss(); latestDismiss() } }
     if (!current) return
     val scope = rememberCoroutineScope()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var saveCompleted by remember(session) { mutableStateOf(false) }
     val draft = session.draft
     val presentationProviders = session.editor.modelDisplayProviders?.collectAsState()?.value ?: providers
     val modelRefreshing by session.editor.modelRefreshing.collectAsState()
-    val usable = !modelRefreshing && session.canCommit(currentEditor, enabled) && !session.submitting
+    val usable = !modelRefreshing && session.canCommit(currentEditor, enabled) && !session.submitting && !saveCompleted
     var modelPicker by remember(session) { mutableStateOf(false) }
     var thinkingPicker by remember(session) { mutableStateOf(false) }
     var choices by remember(session) { mutableStateOf<String?>(null) }
@@ -147,15 +152,20 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
     val verifiedGrok = boundConfig?.grokImage ?: false
     val ready = usable && boundConfig != null && session.parallelBoundTo(boundConfig) && session.name.trim().isNotBlank() && session.parallelIsValid()
     val editing = session.expectedProfile != null
-    val secondaryEnabled = !session.submitting && (!editing || session.canDelete(currentEditor, enabled))
-    val interact: (() -> Unit) -> Unit = { action -> if (session.canCommit(latestEditor, latestEnabled) && !session.submitting) { action() } }
+    val secondaryEnabled = !session.submitting && (!editing || session.canDelete(currentEditor, enabled)) && !saveCompleted
+    val interact: (() -> Unit) -> Unit = { action -> if (session.canCommit(latestEditor, latestEnabled) && !session.submitting && !saveCompleted) { action() } }
     val dismiss = { session.dismiss(); latestDismiss() }
     val userDismiss = { if (!session.submitting) dismiss() }
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) {
+        if (saveCompleted) dismiss()
+    }
     // Settings and conversation drafts share the same sheet, compact form and themed controls.
     // Keep the style scope around child pickers too; changing only the window leaves old dialogs behind.
     CompositionLocalProvider(LocalRippleConfiguration provides null, LocalConversationAgentStyle provides true) {
         WithoutPressRipple {
             SubAgentConfigurationWindow(title = if (session.expectedProfile == null) "添加子代理" else "子代理配置", onDismiss = userDismiss) {
+                // Let the lower window regain its scrim before removing this window.
+                CloseBottomSheetWhen(saveCompleted, dismiss)
                 Column(Modifier.fillMaxWidth().weight(1f, fill = false).heightIn(max = 520.dp).testTag("subagent-config-body").verticalScroll(rememberScrollState())) {
                     if (LocalConversationAgentStyle.current) ConversationAgentField("名称", session.name, { if (usable) session.name = it.take(80) }, usable)
                     else DaiyuFormTextField(session.name, { if (usable) session.name = it.take(80) }, hint = "名称", singleLine = true, enabled = usable, modifier = Modifier.fillMaxWidth())
@@ -189,7 +199,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                 SubAgentDraftDialogActions(ready, secondaryEnabled, if (editing) "删除" else "取消", deletion = editing, onSecondary = {
                     val expected = session.expectedProfile
                     if (expected == null) userDismiss()
-                    else if (!session.submitting && session.canDelete(latestEditor, latestEnabled)) {
+                    else if (!session.submitting && !saveCompleted && session.canDelete(latestEditor, latestEnabled)) {
                         val ticket = session.openToken
                         session.submitting = true; session.error = null
                         try {
@@ -200,7 +210,7 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                         } finally { session.submitting = false }
                     }
                 }, onConfirm = {
-                    if (ready && !session.submitting && session.canCommit(latestEditor, latestEnabled)) {
+                    if (ready && !session.submitting && !saveCompleted && session.canCommit(latestEditor, latestEnabled)) {
                         val capturedDraft = session.draft.copy(name = session.name.trim()); val capturedTicket = session.openToken
                         val capturedExpected = session.expectedProfile; val capturedApplication = session.expectedApplicationToken; val capturedParallel = session.parallelChange()
                         session.submitting = true; session.error = null
@@ -208,8 +218,12 @@ internal fun SubAgentProfileConfigDialog(session: SubAgentProfileDraftSession, c
                             try {
                                 val result = session.editor.commitProfileDraft(capturedDraft, capturedExpected, capturedApplication, capturedParallel,
                                     canCommit = { session.canCommit(latestEditor, latestEnabled, capturedTicket) })
-                                if (result is ConversationSubAgentPreferences.WriteResult.Saved && session.isCurrent(latestEditor, latestEnabled)) { dismiss() }
-                                else if (session.isCurrent(latestEditor, latestEnabled)) session.error = "未保存：配置或模型已变更，请检查后重试；草稿已保留。"
+                                if (session.isCurrent(latestEditor, latestEnabled)) {
+                                    if (result is ConversationSubAgentPreferences.WriteResult.Saved) {
+                                        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) saveCompleted = true
+                                        else dismiss()
+                                    } else session.error = "未保存：配置或模型已变更，请检查后重试；草稿已保留。"
+                                }
                             } catch (cancelled: CancellationException) { throw cancelled }
                             catch (_: Exception) { session.error = "保存失败，草稿已保留，请重试。" }
                             finally { session.submitting = false }

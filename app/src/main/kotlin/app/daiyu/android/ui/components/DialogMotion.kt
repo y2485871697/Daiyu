@@ -91,6 +91,20 @@ internal fun rememberBottomSheetAction(): (() -> Unit) -> Unit {
     } }
 }
 
+/** A completed operation may request exit while an earlier dismiss is being vetoed. */
+@Composable
+internal fun CloseBottomSheetWhen(ready: Boolean, onClose: () -> Unit) {
+    val motion = LocalBottomSheetMotion.current
+    val source = motion?.dismissSource
+    val latestClose by rememberUpdatedState(onClose)
+    LaunchedEffect(ready, motion, source) {
+        if (ready && source == null) {
+            if (motion == null) latestClose()
+            else motion.requestAction { latestClose() }
+        }
+    }
+}
+
 @Composable
 internal fun DialogMotionProvider(
     motion: BottomSheetMotion?,

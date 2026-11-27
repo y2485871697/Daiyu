@@ -52,13 +52,14 @@ class ManualSummaryProductionDatabaseTest : InstrumentationTestCase() {
         profiles.save(SummaryProfileSettings(binding, provider,
             SummaryProfileBudgets(2_000_000, 1_900_000, 97_000, 1000, 2000, 60_000)))
         val id = database.create("default").id
-        repeat(4) { n ->
-            val user = Message(MessageId("u-$n"), id, RunId("history-$n"), "user",
-                listOf(MessageBlock.Text("u", "retained evidence $n ".repeat(100))), RunStatus.COMPLETED)
-            val assistant = user.copy(id = MessageId("a-$n"), role = "assistant", status = RunStatus.RUNNING)
-            database.send(user, assistant); database.save(assistant.copy(status = RunStatus.COMPLETED))
-        }
+        repeat(4) { appendExchange(id, it) }
         lease = Lease(ContextManagementOwner(id, 7))
+    }
+    private fun appendExchange(id: ConversationId, n: Int) {
+        val user = Message(MessageId("u-$n"), id, RunId("history-$n"), "user",
+            listOf(MessageBlock.Text("u", "retained evidence $n ".repeat(100))), RunStatus.COMPLETED)
+        val assistant = user.copy(id = MessageId("a-$n"), role = "assistant", status = RunStatus.RUNNING)
+        database.send(user, assistant); database.save(assistant.copy(status = RunStatus.COMPLETED))
     }
     override fun tearDown() {
         try { database.close(); context.deleteDatabase("conversations.db"); context.filesDir.deleteRecursively() }
@@ -209,11 +210,18 @@ class ManualSummaryProductionDatabaseTest : InstrumentationTestCase() {
         assertEquals(0L, read().summary.combined.requestSnapshotCount)
         assertEquals(0L, scalar("SELECT has_usage FROM context_usage"))
         assertEquals("SUCCEEDED", text("SELECT terminal_reason FROM context_usage"))
+        val id = lease.owner.conversationId
+        val archive = service.prepareSend(id).archiveId
+        assertNotNull(archive)
+        appendExchange(id, 4)
+        val originals = historyRows()
         val failed = Wire(bodyOverride = "data: {\"type\":\"response.failed\"}\n\n")
         val failingWorker = worker(failed)
         rejected { failingWorker.compress(lease, failingWorker.snapshot(lease)) }
         assertEquals(2, read().parentCoverage.manualSummaryWithoutUsage)
         assertEquals(1, failed.posts); assertTrue(failed.disconnected)
+        assertEquals(archive, service.prepareSend(id).archiveId)
+        assertEquals(originals, historyRows())
         assertEquals(1L, scalar("SELECT COUNT(*) FROM context_usage WHERE terminal_reason='FAILED'"))
         assertEquals(0L, scalar("SELECT COUNT(*) FROM runtime_checkpoints"))
     }

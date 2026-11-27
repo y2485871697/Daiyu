@@ -66,15 +66,16 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
     }
     private fun seed(turns: Int = 6): Lease {
         val id = database.create("default").id
-        repeat(turns) { n ->
-            val run = RunId("r-$n-${id.value}")
-            val user = Message(MessageId("u-$n-${id.value}"), id, run, "user",
-                listOf(MessageBlock.Text("u", "事实$n ".repeat(100))), RunStatus.COMPLETED)
-            val assistant = Message(MessageId("a-$n-${id.value}"), id, run, "assistant",
-                listOf(MessageBlock.Text("a", "已确认$n ".repeat(100))), RunStatus.RUNNING)
-            database.send(user, assistant); database.save(assistant.copy(status = RunStatus.COMPLETED))
-        }
+        repeat(turns) { appendExchange(id, it) }
         return Lease(ContextManagementOwner(id, 17))
+    }
+    private fun appendExchange(id: ConversationId, n: Int) {
+        val run = RunId("r-$n-${id.value}")
+        val user = Message(MessageId("u-$n-${id.value}"), id, run, "user",
+            listOf(MessageBlock.Text("u", "事实$n ".repeat(100))), RunStatus.COMPLETED)
+        val assistant = Message(MessageId("a-$n-${id.value}"), id, run, "assistant",
+            listOf(MessageBlock.Text("a", "已确认$n ".repeat(100))), RunStatus.RUNNING)
+        database.send(user, assistant); database.save(assistant.copy(status = RunStatus.COMPLETED))
     }
     private fun bound(selectedBinding: SummaryModelBinding = binding) = BoundSummaryModel(selectedBinding, SummaryModelTransport { history, _ ->
         requests++
@@ -248,11 +249,21 @@ class ContextManagementWorkerTest : InstrumentationTestCase() {
         assertEquals(receipt.archiveId, compressed.archiveId)
         assertTrue(DaiyuCompaction.history(compressed.messages) < originalTokens)
         assertEquals(1, requests)
+        assertEquals(before.messages, service.displayHistory(id))
+        assertNull(worker.compress(lease, worker.snapshot(lease)).archiveId)
+        assertEquals(1, requests)
+        assertEquals(compressed, service.prepareSend(id))
+
+        appendExchange(id, 1)
+        val withNewExchange = service.prepareSend(id)
+        val originals = service.displayHistory(id)
+        assertEquals(4, originals.size)
+        assertEquals(receipt.archiveId, withNewExchange.archiveId)
         modelReply = { "模型无视预算，返回没有真正缩小的摘要".repeat(500) }
         val rejected = failure { worker.compress(lease, worker.snapshot(lease)) }
         assertEquals("压缩未缩小；保留原文", rejected.message)
-        assertEquals(compressed, service.prepareSend(id))
-        assertEquals(before.messages, service.displayHistory(id))
+        assertEquals(withNewExchange, service.prepareSend(id))
+        assertEquals(originals, service.displayHistory(id))
         assertEquals(2, requests)
     }
 

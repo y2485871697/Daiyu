@@ -72,6 +72,10 @@ class DaiyuSummaryRequestTest {
         assertEquals(0, DaiyuCompaction.cut(listOf(row), 32_000, idle = true))
         assertEquals(0, DaiyuCompaction.cut(listOf(row, reply.copy(status = RunStatus.RUNNING)), 32_000, idle = true))
         assertEquals(2, DaiyuCompaction.cut(listOf(row, reply), 32_000, idle = true))
+        val orphan = row.copy(id = MessageId("pending-user"), runId = RunId("pending-run"))
+        assertEquals(2, DaiyuCompaction.cut(listOf(row, reply, orphan), 32_000, idle = true))
+        val running = reply.copy(id = MessageId("pending-assistant"), runId = orphan.runId, status = RunStatus.RUNNING)
+        assertEquals(2, DaiyuCompaction.cut(listOf(row, reply, orphan, running), 32_000, idle = true))
     }
 
     @Test fun opaqueReplayCutKeepsNewestBatchAndOnlyResponsesCountsReduction() {

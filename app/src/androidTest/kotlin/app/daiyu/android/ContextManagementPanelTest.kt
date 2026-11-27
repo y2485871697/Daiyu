@@ -40,7 +40,7 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
             events.add("refresh")
             state.value = state.value.copy(snapshot = if (holdRefresh) null else state.value.snapshot,
                 operation = if (holdRefresh || delayNextRefresh) ContextManagementOperation.REFRESH else null,
-                requiresRefresh = false, notice = null)
+                confirmingCompression = false, requiresRefresh = false, notice = null)
         }
         override fun selectCompression(selection: ContextManagementSelection): Boolean = error("no legacy selection step")
         override fun submitCompression(selection: ContextManagementSelection?): Boolean {
@@ -282,7 +282,7 @@ class ContextManagementPanelTest : WiredActivityTestCase() {
         node("compression-dialog-refresh").scrollToVisible().performClick()
         awaitVisualIdle()
         node("context-compress").assertIsEnabled()
-        assertEquals(listOf("refresh", "dismiss", "refresh"), actions.events)
+        assertEquals(listOf("refresh", "refresh"), actions.events)
         assertNull(actions.selection)
         assertEquals(0, fixture.opens.get())
     }

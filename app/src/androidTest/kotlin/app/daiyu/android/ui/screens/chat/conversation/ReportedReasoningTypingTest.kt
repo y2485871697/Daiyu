@@ -84,14 +84,16 @@ class ReportedReasoningTypingTest : WiredActivityTestCase() {
             "expected=<$text>, actual=<$lastObservedText>")
     }
 
-    fun testStoppedEmptyReplyShowsFooterWithoutWaitingForBody() {
+    fun testStoppedWithoutOutputDoesNotRenderAnEmptyReplyOrReadOnlyActions() {
         mainThread { activity.setContent {
             AgentAppTheme(AppearanceSettings(), applyInterfaceScale = false) {
                 AssistantTurn(ChatTurnUi.Assistant("stopped", status = RunStatus.STOPPED), ChatScreenActions())
             }
         } }
-        ui.onNodeWithContentDescription("分支", useUnmergedTree = true).assertExists()
-        ui.onNodeWithContentDescription("复制回答", useUnmergedTree = true).assertDoesNotExist()
+        ui.onNodeWithTag("reply-identity:stopped", useUnmergedTree = true).assertDoesNotExist()
+        for (label in listOf("分支", "复制回答", "朗读")) {
+            ui.onNodeWithContentDescription(label, useUnmergedTree = true).assertDoesNotExist()
+        }
     }
 
     private fun assertLivePath(path: Path) {

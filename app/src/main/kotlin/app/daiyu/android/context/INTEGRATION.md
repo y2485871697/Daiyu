@@ -1,19 +1,17 @@
 # F11/F19 接缝（接口冻结）
 
-## 当前实现：Harness 估算与压缩（随对应代码同次提交，待云端验证）
+## 当前生产发送、计量与压缩
 
-本节优先于下方历史接缝记录。最新要求采用固定上游 `deepseek-ai/deepseek-harness@ca33fd6843b205e279c7ccb6cb73a472c78f5760` 的计量与压缩语义，不再采用“完全不使用本地估算”的旧方向。
+- 生产发送由 `ContextPreparationCoordinator.prepare` 读取有效历史、冻结待发输入并给出原文版本。宿主在提交时复查所有者和版本，向 `ChatRunner` 传入已含待发用户消息的 `PreparedSendContext.messages`，不重复追加。
+- 自动压缩由 `ChatRunner.awaitContextCapacity` 在安全边界触发。只认同一请求头下经校验的主请求云端 input（缓存是其中的子集）；默认门槛为完整窗口的 80%，配置上限 90%。无 input、请求头不匹配或低于门槛均不触发；云端超限错误本身不代替用量。已尝试处理的这次高压信号不会紧接着重复发摘要。摘要请求用量单独入账，不写入主请求触发器。
+- 本地估算按 CJK 1.5、其他字符 0.25 加结构开销，用于容量估计、缩减判定和留尾校准，不作自动压缩触发依据。界面云端占用沿用已确认的供应商回执。
+- 运行中的手动选择和自动压缩共用切点及摘要生成流程；空闲手动压缩最多归档到最后一条已结束且工具配对完整的回复，不纳入后面的孤立用户消息。没有新的完整交换则不发摘要请求。Responses 按实际可重放的推理批次保护近期历史。
+- `HarnessContextSummarizer` 冻结请求和只读证据；预算内且协议可重放时一次发送，否则按最多 32 块、4 层生成证据摘要。八节格式不合格可修复一次；只有明确的输出上限截断且窗口还有余量才提高上限重试一次，各请求独立记用量、共用时限。压缩正文与重放附加的归档引用分别处理；候选必须缩减上下文才提交，失败保留原文及旧有效档案。
+- CI 结果及真机验证状态见 `docs/重构清单.md` 和 `更新说明.md`；此处说明当前源码接线，不记录验收通过。
 
-- canonical surface 使用 UTF-16 字符长度每4字符1 token、block/role开销、规范化工具schema；云端返回的原始usage单独保存，测量以 `max(anchorEstimate, reportedTotal) + surfaceDelta` 校准，不将估算写入计费用量。
-- 内部压缩压力按规范化 input（已包含缓存子集）加 surface 差值投影；首请求尚无receipt时使用canonical估算。模型/请求头变化不沿用旧测量anchor。聊天框右上方上下文严格沿用原云端receipt展示、校验和失效逻辑，不展示估算或投影，不增加 `≈`。
-- 生产 tokenTail 不再按本地预算拒绝发送或持久化容量暂停；自动压缩为best-effort，最多两次。关闭自动压缩或不可压缩路线直接发送，由真实云端上下文拒绝返回错误；确认上下文溢出且可自动压缩时最多恢复一次，不重放工具。
-- 普通压缩阈值为 `min(window×80%, window-reservedCompletionTokens-65536)`；保留近期原文至少 `(window-reservedCompletionTokens)×16%`。16%不是压缩后完整请求或云端显示目标。保留system前导节点并保持工具调用/结果配对；手动压缩和溢出恢复使用零留尾策略。
-- 摘要指令追加为重放对话最后一条user，输出使用 `<compacted-summary>` 包装，只接受文本；不再分块摘要或格式修复。摘要输出上限65536，小窗口沿用不超过半窗口的协议适配。图片缺少可用读取计划时保留原文并报告压缩失败，不伪造图片内容。
-- checkpoint v11持久化计量anchor和投影状态；v1–v10兼容。压缩原文仍入既有档案，计费用量、暂停/取消/恢复语义分别保存。
+## 历史接缝记录（含基线 65db994）
 
-此段描述候选接线，不是验证通过声明。Kotlin单测、instrumentation和APK构建均仅在GitHub执行；精确SHA/run/attempt见唯一清单和更新说明。下文旧UTF-8估算、`fitsSendBudget`硬拒绝及尚未接线判断仅作历史资料，非当前生产tokenTail合同。
-
-## 当前增量：R11 / P09 / P10 / P42（基线 65db994）
+下文保留集成时的接口与验证来源。历史中的“生产未接线”、发送前按本地估算触发、UTF-8 容量策略及候选要求不代表当前生产路径。
 
 本节覆盖下方历史记录中“生产未用 Context”的过时判断，旧记录保留作来源，不据此重复接线。只读核对当前 `ChatController.sendPrepared`：已在 `database.send` 前调用共享 helper 的 `ContextService.prepareSend(conversationId)`，将 `prepared.messages + user` 交给 runner，且将同一结果的 `archiveId` 交给 `ScopedContextTools`。但该调用仍使用默认未知窗口、不传 summarizer / 待发输入 / 取消标志；不能据此认自动压缩和 P42 已闭环。此次不改 Controller、数据库、runtime、model settings 或已保留的边界/估算/修订算法。
 

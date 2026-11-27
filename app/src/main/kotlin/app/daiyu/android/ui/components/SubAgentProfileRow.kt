@@ -74,7 +74,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
             SubAgentGptSpeedButton(profile, presentationProviders, usable, settings = true)
             Box(Modifier.fillMaxWidth()) {
                 SubAgentSettingRow("职责", profile.roleLabel, Icons.Rounded.Assignment,
-                    "选择${profile.name}职责", enabled = usable, dropdown = true,
+                    "选择${profile.name}职责", enabled = usable,
                     onClick = { if (currentUsable) { rolePicker = !rolePicker } })
                 Box(Modifier.align(Alignment.CenterEnd).size(40.dp)) {
                     if (usable && rolePicker) OptionSelectionSheet("职责", { rolePicker = false }) {
@@ -89,7 +89,7 @@ internal fun SubAgentProfileRow(profile: SubAgentProfile, providers: List<SubAge
             if (profile.supportsTaskTier) {
                 Box(Modifier.fillMaxWidth()) {
                     SubAgentSettingRow("任务分工", profile.tier?.label ?: "未设置分工", Icons.Rounded.AccountTree,
-                        "设置${profile.name}任务分工", enabled = usable, dropdown = true,
+                        "设置${profile.name}任务分工", enabled = usable,
                         onClick = { if (currentUsable) { tierPicker = !tierPicker } })
                     Box(Modifier.align(Alignment.CenterEnd).size(40.dp)) {
                         if (usable && tierPicker) OptionSelectionSheet("任务分工", { tierPicker = false }) {

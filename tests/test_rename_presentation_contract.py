@@ -91,6 +91,10 @@ class RenamePresentationContractTest(unittest.TestCase):
         self.assertIn('testTag("subagent-setting-model-name")', block)
         self.assertIn('testTag("subagent-setting-model-provider")', block)
         self.assertEqual(2, block.count('maxLines = 1'))
+        self.assertEqual(2, block.count('textAlign = TextAlign.End'))
+        self.assertEqual(2, row.count('Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null,'))
+        self.assertNotIn('ExpandMore', row)
+        self.assertNotIn('dropdown =', profile)
         self.assertLess(block.index('Text(value'), block.index('Text(badge'))
         self.assertIn('Arrangement.spacedBy(8.dp, Alignment.End)', row)
         self.assertIn('if (stackedValue) Modifier else Modifier.widthIn', row)
@@ -138,7 +142,7 @@ class RenamePresentationContractTest(unittest.TestCase):
         for mode in ('compile', 'release', 'daily', 'candidate'):
             self.assertEqual('full', recorder.command_for('python3', dict(SMOKE_MODE=mode, SMOKE_TEST_CLASSES=target))[1])
 
-    def test_inventory_discovers_only_the_exact_six_device_methods(self):
+    def test_inventory_discovers_only_the_exact_seven_device_methods(self):
         script = (ROOT / 'scripts/smoke_boot.sh').read_text().split("target_spec=$(python3 - <<'PYCOUNT'\n", 1)[1].split('\nPYCOUNT', 1)[0]
         fixture = ROOT / 'app/src/androidTest/kotlin/app/daiyu/android/RenamePresentationActivityTest.kt'
         with tempfile.TemporaryDirectory() as directory:
@@ -155,5 +159,5 @@ class RenamePresentationContractTest(unittest.TestCase):
             inventory = json.loads((root / 'smoke/instrumentation-shards.json').read_text())
             self.assertEqual('targeted', inventory['discovery_scope'])
             selection = json.loads((root / 'smoke/selection.json').read_text())
-            self.assertEqual(6, selection['expected_tests'])
+            self.assertEqual(7, selection['expected_tests'])
             self.assertEqual([recorder.RENAME_PRESENTATION_PLATFORM_CLASS], selection['selected_classes'])

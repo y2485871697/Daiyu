@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.KeyboardArrowRight
-import androidx.compose.material.icons.rounded.ExpandMore
 import androidx.compose.material3.*
 
 import androidx.compose.runtime.Composable
@@ -29,7 +28,7 @@ import androidx.compose.ui.platform.testTag
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun SubAgentSettingRow(label: String, value: String, icon: ImageVector, description: String,
-    enabled: Boolean = true, dropdown: Boolean = false, badge: String? = null, onClick: () -> Unit,
+    enabled: Boolean = true, badge: String? = null, onClick: () -> Unit,
     onLongClick: (() -> Unit)? = null, trailing: (@Composable () -> Unit)? = null, modifier: Modifier = Modifier, divider: Boolean = false, stackedValue: Boolean = false) {
     if (app.daiyu.android.ui.components.subagent.LocalConversationAgentStyle.current) {
         val colors = app.daiyu.android.ui.components.subagent.conversationAgentColors()
@@ -72,11 +71,11 @@ internal fun SubAgentSettingRow(label: String, value: String, icon: ImageVector,
         if (stackedValue) {
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text(value, Modifier.fillMaxWidth().testTag("subagent-setting-model-name"),
-                    style = MaterialTheme.typography.bodyMedium, maxLines = 1,
+                    style = MaterialTheme.typography.bodyMedium, textAlign = TextAlign.End, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, color = colors.onSurface.copy(alpha = alpha))
                 if (!badge.isNullOrBlank()) Text(badge,
                     Modifier.fillMaxWidth().testTag("subagent-setting-model-provider"),
-                    style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                    style = MaterialTheme.typography.labelSmall, textAlign = TextAlign.End, maxLines = 1,
                     overflow = TextOverflow.Ellipsis, color = accent.copy(alpha = alpha))
                 trailing?.let { content ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) { content() }
@@ -93,7 +92,7 @@ internal fun SubAgentSettingRow(label: String, value: String, icon: ImageVector,
             }
             trailing?.invoke()
         }
-        Icon(if (dropdown) Icons.Rounded.ExpandMore else Icons.AutoMirrored.Rounded.KeyboardArrowRight, null,
+        Icon(Icons.AutoMirrored.Rounded.KeyboardArrowRight, null,
             Modifier.size(18.dp), tint = accent.copy(alpha = alpha))
     }
 }

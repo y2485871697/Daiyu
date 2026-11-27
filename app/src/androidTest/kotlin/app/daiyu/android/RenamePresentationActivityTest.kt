@@ -6,7 +6,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import app.daiyu.android.data.model.AppearanceSettings
@@ -40,13 +42,17 @@ class RenamePresentationActivityTest : WiredActivityTestCase() {
         var enabled by mutableStateOf(true)
     }
 
-    private fun profileFixture(defaultSpeed: GptSpeedMode = GptSpeedMode.NORMAL): ProfileFixture {
+    private fun profileFixture(
+        defaultSpeed: GptSpeedMode = GptSpeedMode.NORMAL,
+        modelName: String = "gpt-6.1-sol-very-long-model-name",
+        providerName: String = "主模型服务商名称很长也不会挤压模型",
+    ): ProfileFixture {
         val name = "rename-settings-${UUID.randomUUID()}"
         preferenceNames += name
         val repository = ConversationSubAgentPreferences(instrumentation.targetContext.getSharedPreferences(name, 0))
         val owner = SubAgentConfigKey.Conversation("settings-fixture")
-        val provider = SubAgentProvider("provider", "主模型服务商名称很长也不会挤压模型", listOf(
-            SubAgentModel("gpt-local", "gpt-6.1-sol", displayName = "gpt-6.1-sol-very-long-model-name",
+        val provider = SubAgentProvider("provider", providerName, listOf(
+            SubAgentModel("gpt-local", "gpt-6.1-sol", displayName = modelName,
                 supportsGptSpeed = true, defaultGptSpeed = defaultSpeed),
             SubAgentModel("other-local", "gemini-3")))
         val profile = SubAgentProfile("worker", "Worker", role = "implementation", providerId = provider.id,
@@ -178,6 +184,24 @@ class RenamePresentationActivityTest : WiredActivityTestCase() {
                 useUnmergedTree = true).assertIsDisplayed()
             assertTrue("Model text must retain useful horizontal space", model.width > 80f * activity.resources.displayMetrics.density)
             assertTrue("Single-line model text must not become a vertical column", model.width > model.height * 2f)
+        }
+    }
+
+    fun testModelAndProviderTextAlignWithSettingsValues() {
+        val data = profileFixture(modelName = "gpt-6.1-sol", providerName = "开车")
+        mountProfile(data, width = 300)
+        fun textRight(target: SemanticsNodeInteraction): Float {
+            val layouts = mutableListOf<TextLayoutResult>()
+            target.assertIsDisplayed().performSemanticsAction(SemanticsActions.GetTextLayoutResult) {
+                assertTrue(it(layouts))
+            }
+            return target.fetchSemanticsNode().boundsInRoot.left + layouts.single().getLineRight(0)
+        }
+        val expected = textRight(ui.onNode(hasText("标准") and hasAnyAncestor(hasTestTag("subagent-gpt-speed-worker")),
+            useUnmergedTree = true))
+        for (tag in listOf("subagent-setting-model-name", "subagent-setting-model-provider")) {
+            assertEquals("$tag must end at the same column as GPT speed", expected,
+                textRight(ui.onNodeWithTag(tag, useUnmergedTree = true)), 1f)
         }
     }
 

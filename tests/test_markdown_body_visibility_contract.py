@@ -104,7 +104,10 @@ class MarkdownBodyVisibilityContract(unittest.TestCase):
     def test_running_body_shares_the_ink_and_word_layout_path(self):
         leaf = (BASE / 'ChatMessageList.kt').read_text().split('internal fun rememberAssistantTextBody(', 1)[1].split('private fun AssistantWorkflow', 1)[0]
         self.assertNotIn('StreamingAnswer(', leaf)
-        self.assertIn('else RevealedMessageMarkdown(displayed, accepted?.blocksAt(index)', leaf)
+        self.assertEqual(1, leaf.count('RevealedMessageMarkdown(displayed, accepted?.blocksAt(index)'))
+        self.assertIn('currentReveal.value, text.itemId, drawReceipt,', leaf)
+        self.assertIn('Box(Modifier.padding(horizontal = 4.dp), propagateMinConstraints = true) { body() }', leaf)
+        self.assertIn('} else body()', leaf)
         self.assertIn('bodyPaintFeedback = streamAnswer', leaf)
         inline = (BASE / 'MessageMarkdown.kt').read_text()
         self.assertIn('paintOffset + body.length > ink.baselineEnd', inline)

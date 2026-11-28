@@ -19,6 +19,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.runner.Description
 import org.junit.runners.model.Statement
@@ -818,23 +819,55 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
         settings.assertIsEnabled().performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         ui.waitUntil(timeoutMillis = 5_000) { ui.onAllNodesWithTag("page:设置").fetchSemanticsNodes().size == 1 }
     }
-    protected fun openVoiceConversationPanel() {
+    protected fun pickVoiceEntryMode(mode: ChatMenuAction, expectChange: Boolean = false) {
+        val preferences = instrumentation.targetContext.getSharedPreferences("chat-voice-entry", 0)
         if (voicePreferenceSnapshot == null) {
-            val preferences = instrumentation.targetContext.getSharedPreferences("chat-voice-entry", 0)
             voicePreferenceSnapshot = preferences.contains("mode") to preferences.getString("mode", null)
         }
-        ui.onNodeWithContentDescription("语音输入").assertIsEnabled().performTouchInput { longClick() }
-        node("chat-menu:VOICE_CHAT").assertIsEnabled().performClick()
+        val description = if (preferences.getString("mode", null) == ChatMenuAction.VOICE_DOUBAO.name)
+            "开始豆包实时通话" else "语音输入"
+        ui.onNodeWithContentDescription(description).assertIsEnabled().performTouchInput { longClick() }
+        val picker = node("chat-voice-mode-menu")
+        awaitNodeWindowFocus(picker)
+        val row = node("chat-menu:${mode.name}").assertIsEnabled()
+        if (expectChange) row.assertIsNotSelected()
+        row.performClick().assertIsSelected()
+        assertEquals(mode.name, preferences.getString("mode", null))
         node("voice-universal-control").assertDoesNotExist()
-        node("chat-menu:VOICE_CHAT").assertIsSelected()
         androidx.test.espresso.Espresso.pressBack()
         ui.waitUntil(5_000) {
-            ui.onAllNodesWithTag("chat-menu:VOICE_CHAT").fetchSemanticsNodes().isEmpty()
+            ui.onAllNodesWithTag("chat-voice-mode-menu").fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
         }
-        ui.onNodeWithContentDescription("语音输入").assertIsEnabled()
-            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
-        awaitUniqueTag("voice-universal-control")
+        awaitNodeWindowFocus(node("chat-draft"))
     }
+
+    protected fun withoutCallOverlayPermission(action: (List<Intent>) -> Unit) {
+        val context = instrumentation.targetContext
+        val packageName = context.packageName
+        fun shell(command: String) = android.os.ParcelFileDescriptor.AutoCloseInputStream(
+            instrumentation.uiAutomation.executeShellCommand(command)).bufferedReader().use { it.readText() }
+        val operation = "SYSTEM_ALERT_WINDOW"
+        val previousMode = Regex("$operation: (allow|ignore|deny|default|foreground)")
+            .find(shell("appops get $packageName $operation"))?.groupValues?.get(1) ?: "default"
+        val launches = java.util.concurrent.CopyOnWriteArrayList<Intent>()
+        val monitor = object : android.app.Instrumentation.ActivityMonitor() {
+            override fun onStartActivity(intent: Intent): android.app.Instrumentation.ActivityResult? {
+                if (intent.action != android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION) return null
+                launches += Intent(intent)
+                return android.app.Instrumentation.ActivityResult(android.app.Activity.RESULT_CANCELED, null)
+            }
+        }
+        instrumentation.addMonitor(monitor)
+        try {
+            shell("appops set $packageName $operation ignore")
+            assertFalse("The emulator must deny overlay permission", android.provider.Settings.canDrawOverlays(context))
+            action(launches)
+        } finally {
+            instrumentation.removeMonitor(monitor)
+            shell("appops set $packageName $operation $previousMode")
+        }
+    }
+
     protected fun menu(label: String) {
         ui.onNodeWithContentDescription("更多").performSemanticsAction(SemanticsActions.OnClick) { it() }
         ui.onNodeWithText(label).scrollToVisible().performClick()

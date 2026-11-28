@@ -2,6 +2,7 @@ package app.daiyu.android
 
 import androidx.compose.ui.test.*
 import app.daiyu.android.domain.*
+import app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction
 import app.daiyu.android.ui.screens.settings.SettingsCatalog
 import app.daiyu.android.voice.control.*
 import kotlinx.coroutines.runBlocking
@@ -34,27 +35,30 @@ class P32ProductionEntryActivityTest : WiredActivityTestCase() {
         VoiceControlProfile("${it.revision}:configured", 0, "conversation")
     }
 
-    fun testRealUniversalPanelOpenAndSelectionNeverStartsAudioOrSends() {
-        kotlinx.coroutines.runBlocking {
+    fun testVoiceModeSelectionThenExplicitEntryStopsAtOverlayPermission() {
+        runBlocking {
             fixture.controller.voiceRuntime.save(VoiceConfiguration(dictation = "DOUBAO", asrKey = "fixture-asr"), VoiceProfile.CONVERSATION)
         }
-        openVoiceConversationPanel()
-        node("voice-universal-control").assertExists()
-        assertEquals(0, fixture.opens.get())
-        assertNull(fixture.controller.textSendState())
-        ui.onNodeWithText("关闭面板并结束本次").scrollToVisible().performClick()
-        node("voice-universal-control").assertDoesNotExist()
-        assertEquals(0, fixture.opens.get())
-    }
-
-    fun testExistingDraftRejectsExplicitUniversalEntryWithoutOverwritingOrPermission() {
         val conversation = fixture.database.create("default")
+        fixture.database.draft(conversation.id, "keep this draft")
         mainThread { activity.select(conversation) }
-        setDraft("keep this draft")
-        mainThread { call("startUniversalVoice", profile(), VoiceControlLimits()) }
         assertDraft("keep this draft")
-        assertNull(field("universalPermissionPermit"))
-        assertEquals(0, fixture.opens.get())
+        val before = fixture.database.exportBackup()
+        withoutCallOverlayPermission { requests ->
+            pickVoiceEntryMode(ChatMenuAction.VOICE_CHAT)
+            assertTrue("Choosing the mode must not request overlay permission", requests.isEmpty())
+            ui.onNodeWithContentDescription("语音输入").assertIsEnabled().performTouchInput { click() }
+            assertEquals("Only the explicit short tap requests overlay permission", 1, requests.size)
+            assertEquals("package:${instrumentation.targetContext.packageName}", requests.single().dataString)
+            assertNull(field("voiceCallStarting"))
+            assertNull(field("voiceCallConversation"))
+            assertNull(field("voiceCallPermissionContinuation"))
+            assertNull(field("universalPermissionPermit"))
+            assertNull(fixture.controller.textSendState())
+            assertDraft("keep this draft")
+            assertEquals(before, fixture.database.exportBackup())
+            assertEquals(0, fixture.opens.get())
+        }
     }
 
     fun testSettingsAccountManagementIsReachableAndEntryDoesNotSynthesize() {

@@ -243,49 +243,52 @@ class ChatMenuEntryActivityTest : WiredActivityTestCase() {
         } finally { mainThread { store.setEnabled(previous) } }
     }
 
-    fun testVoiceMenuOpensRealControlsWithoutMicrophoneOrProviderRequest() {
+    private fun configureConversationVoice() {
         kotlinx.coroutines.runBlocking {
             fixture.controller.voiceRuntime.save(VoiceConfiguration(dictation = "DOUBAO", asrKey = "fixture-asr"), VoiceProfile.CONVERSATION)
         }
-        selectDraft()
-        openVoiceConversationPanel()
-        node("voice-universal-control").assertExists()
-        assertEquals(0, fixture.opens.get())
-        // A selection change permanently loses this open request, not just its composition.
-        mainThread { activity.select(null) }
-        node("voice-universal-control").assertDoesNotExist()
-        assertEquals(0, fixture.opens.get())
     }
 
-    fun testVoiceMenuRequestFollowsOnlyItsOwnEditorMigrations() {
-        kotlinx.coroutines.runBlocking {
-            fixture.controller.voiceRuntime.save(VoiceConfiguration(dictation = "DOUBAO", asrKey = "fixture-asr"), VoiceProfile.CONVERSATION)
-        }
+    fun testVoiceMenuPersistsSelectionWithoutStartingCallOrSending() {
+        configureConversationVoice()
         selectDraft()
-        openVoiceConversationPanel()
-        node("voice-universal-control").assertExists()
-        val ownerField = MainActivity::class.java.getDeclaredField("voiceConversationDialogOwner\$delegate")
-            .apply { isAccessible = true }
-        fun owner() = (ownerField.get(activity) as androidx.compose.runtime.State<*>).value as? ChatController.TextSendOwner
-        val migrate = MainActivity::class.java.getDeclaredMethod("migrateUniversalEditor",
-            ChatController.TextSendOwner::class.java, ChatController.TextSendOwner::class.java).apply { isAccessible = true }
-        mainThread {
-            val before = checkNotNull(owner())
-            val after = before.copy(draftRevision = before.draftRevision + 1)
-            migrate.invoke(activity, before, after)
-            assertEquals(after, owner())
-            migrate.invoke(activity, before, after.copy(draftRevision = after.draftRevision + 1))
-            assertEquals(after, owner())
+        val before = fixture.database.exportBackup()
+        withoutCallOverlayPermission { requests ->
+            pickVoiceEntryMode(ChatMenuAction.VOICE_DOUBAO)
+            pickVoiceEntryMode(ChatMenuAction.VOICE_CHAT, expectChange = true)
+            assertTrue("Mode selection must not even request overlay permission", requests.isEmpty())
+            assertNull(fixture.controller.textSendState())
+            assertEquals(before, fixture.database.exportBackup())
+            assertDraft("menu draft stays unsent")
+            assertEquals(0, fixture.opens.get())
         }
-        mainThread { activity.select(null) }
-        mainThread {
-            assertNull(owner())
-            val old = ChatController.TextSendOwner(null, -1, -1)
-            migrate.invoke(activity, old, old.copy(draftRevision = 0))
-            assertNull(owner())
+    }
+
+    fun testShortTapCannotUseOldVoiceCallbackAfterEditorReplacement() {
+        configureConversationVoice()
+        selectDraft()
+        val original = fixture.database.conversations().single()
+        val replacement = fixture.database.create("default")
+        fixture.database.draft(replacement.id, "other editor")
+        val before = fixture.database.exportBackup()
+        withoutCallOverlayPermission { requests ->
+            pickVoiceEntryMode(ChatMenuAction.VOICE_CHAT)
+            val stale = retainedControls(activity).onVoice
+            mainThread { activity.select(replacement) }
+            assertDraft("other editor")
+            mainThread { stale() }
+            assertTrue("A callback must not enter another conversation", requests.isEmpty())
+            mainThread { activity.select(original) }
+            assertDraft("menu draft stays unsent")
+            mainThread { stale() }
+            assertTrue("Reselecting the conversation must not revive an old editor", requests.isEmpty())
+            ui.onNodeWithContentDescription("语音输入").assertIsEnabled().performTouchInput { click() }
+            assertEquals("A fresh short tap reaches the overlay permission check", 1, requests.size)
+            assertEquals("package:${instrumentation.targetContext.packageName}", requests.single().dataString)
+            assertNull(fixture.controller.textSendState())
+            assertEquals(before, fixture.database.exportBackup())
+            assertEquals(0, fixture.opens.get())
         }
-        node("voice-universal-control").assertDoesNotExist()
-        assertEquals(0, fixture.opens.get())
     }
 
     fun testWorkspaceMenuOpensExistingReadOnlyPageWithoutPickerOrModelAndReturnsDirectlyToChat() {

@@ -61,11 +61,15 @@ class CandidateWindowPublicationContract(unittest.TestCase):
         self.assertIn('HOME must retain the original host', (TEST / 'ChatComposerImeActivityTest.kt').read_text())
 
     def test_voice_closes_retained_mode_menu_before_business_entry(self):
-        source = (TEST / 'ComposeActivityTestCase.kt').read_text().split('protected fun openVoiceConversationPanel()', 1)[1].split('protected fun menu(', 1)[0]
-        self.assertLess(source.index('assertIsSelected()'), source.index('Espresso.pressBack()'))
-        self.assertLess(source.index('Espresso.pressBack()'), source.index('performSemanticsAction(SemanticsActions.OnClick)'))
-        self.assertIn('node("voice-universal-control").assertDoesNotExist()', source)
-        self.assertIn('awaitUniqueTag("voice-universal-control")', source)
+        fixture = (TEST / 'ComposeActivityTestCase.kt').read_text()
+        picker = fixture.split('protected fun pickVoiceEntryMode(', 1)[1].split('protected fun withoutCallOverlayPermission(', 1)[0]
+        self.assertLess(picker.index('assertIsSelected()'), picker.index('Espresso.pressBack()'))
+        self.assertLess(picker.index('Espresso.pressBack()'), picker.index('awaitNodeWindowFocus(node("chat-draft"))'))
+        self.assertIn('node("voice-universal-control").assertDoesNotExist()', picker)
+        source = (TEST / 'P32ProductionEntryActivityTest.kt').read_text().split('fun testVoiceModeSelectionThenExplicitEntryStopsAtOverlayPermission()', 1)[1].split('    fun ', 1)[0]
+        self.assertLess(source.index('pickVoiceEntryMode('), source.index('requests.isEmpty()'))
+        self.assertLess(source.index('requests.isEmpty()'), source.index('performTouchInput { click() }'))
+        self.assertLess(source.index('performTouchInput { click() }'), source.index('requests.single()'))
 
     def test_footer_baseline_is_stable_without_hiding_after_scroll(self):
         source = (TEST / 'SubAgentCollaborationLayoutTest.kt').read_text().split('fun testProfileFormKeepsEqualFooter', 1)[1]

@@ -28,6 +28,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         val alias = "app.daiyu.android.test.child.$id"
         val settings = ModelSettingsStore(app, alias)
         val childOpened = AtomicInteger(); val parentOpened = AtomicInteger()
+        val factoryCalls = AtomicInteger()
         val childSettings = java.util.concurrent.CopyOnWriteArrayList<ModelSettings>()
         val entered = CountDownLatch(1); val cancelled = CountDownLatch(1); val release = CountDownLatch(if (held) 1 else 0)
         val child = SubAgentModel(UUID.randomUUID().toString(), childModel)
@@ -47,6 +48,7 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
                     CatalogModelParameters(localIdentity = child.id)))) { false }
                 == CatalogCommitResult.COMMITTED)
             val factory: (ModelSettings) -> ModelPort = { config ->
+                factoryCalls.incrementAndGet()
                 object : CatalogFixturePort {
                     override fun open(history: List<Message>): ModelSession = error("explicit definitions required")
                     override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
@@ -86,7 +88,10 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
                 }
             }
             controller = ChatController(app, database, settings, app.getSharedPreferences("conversation-ui", 0),
-                if (sessionAware) { _ -> error("session-aware path must not fall back") } else factory,
+                if (sessionAware) { _ ->
+                    factoryCalls.incrementAndGet()
+                    error("session-aware path must not fall back")
+                } else factory,
                 sessionModel = if (!sessionAware) null else { p, _, session ->
                     sessionOwners.add(p.model to session.conversationId)
                     factory(p.asModelSettings())
@@ -259,10 +264,15 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
 
     fun testSessionAwareMissingSavedSelectionRejectsWithoutAnyFactory() {
         val f = fresh(sessionAware = true)
-        f.preferences.update(SubAgentConfigKey.Conversation(f.conversation.id.value)) {
-            it.copy(profiles = listOf(f.profile.copy(modelId = "deleted-selection")))
-        }
+        val key = SubAgentConfigKey.Conversation(f.conversation.id.value)
+        val profile = f.profile.copy(modelId = "deleted-selection")
+        assertTrue(f.preferences.update(key) {
+            it.copy(profiles = listOf(profile))
+        } is ConversationSubAgentPreferences.WriteResult.Saved)
+        assertEquals(listOf(profile), f.preferences.snapshot(key).profiles)
         assertNull(f.controller.sendWithChildren(f.conversation, "missing selection"))
+        assertEquals("子模型配置不可用、已变更或不支持", f.controller.problem)
+        assertEquals(0, f.factoryCalls.get())
         assertTrue(f.sessionOwners.isEmpty()); assertEquals(0, f.parentOpened.get()); assertEquals(0, f.childOpened.get())
         assertTrue(f.database.messages(f.conversation.id).isEmpty())
         assertEquals("preserve draft", f.database.conversations().single { it.id == f.conversation.id }.draft)
@@ -296,8 +306,12 @@ class ControllerChildModelsTest : InstrumentationTestCase() {
         val f = fresh()
         val key = SubAgentConfigKey.Conversation(f.conversation.id.value)
         for (profile in listOf(f.profile.copy(providerId = "deleted-provider"), f.profile.copy(modelId = "deleted-model"))) {
-            f.preferences.update(key) { it.copy(profiles = listOf(profile)) }
+            assertTrue(f.preferences.update(key) { it.copy(profiles = listOf(profile)) }
+                is ConversationSubAgentPreferences.WriteResult.Saved)
+            assertEquals(listOf(profile), f.preferences.snapshot(key).profiles)
             assertNull(f.controller.sendWithChildren(f.conversation, "unavailable selection"))
+            assertEquals("子模型配置不可用、已变更或不支持", f.controller.problem)
+            assertEquals(0, f.factoryCalls.get())
         }
         assertEquals(0, f.parentOpened.get()); assertEquals(0, f.childOpened.get())
         assertTrue(f.database.messages(f.conversation.id).isEmpty())

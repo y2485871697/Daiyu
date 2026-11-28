@@ -2006,7 +2006,8 @@ class ChatController internal constructor(private val application:Application,
             readSavedChildProviderModel(profile.providerId, profile.modelId).model
         }
     private fun freezeSavedChildModels(key: SubAgentConfigKey.Conversation, hotUpdates: Boolean = true,
-        profileId: String? = null, runModel: ChildRunModelFactory): FrozenSubAgentModels {
+        profileId: String? = null, requireAvailableSelection: Boolean = false,
+        runModel: ChildRunModelFactory): FrozenSubAgentModels {
         val ownerState = childPreferences.ownerState(key)
         val runtimeStart = childPreferences.openRuntime(key)
         val config = runtimeStart.config
@@ -2032,6 +2033,11 @@ class ChatController internal constructor(private val application:Application,
         }
         val projected = savedSubAgentProviders()
         val admitted = if (profileId == null) selection.withAvailableModels(projected) else selection
+        if (requireAvailableSelection && config.enabled && admitted.profiles.isEmpty()) {
+            check(config.profiles.none { !it.isMedia && it.providerId.isNotBlank() && it.modelId.isNotBlank() }) {
+                "child_model_binding_unavailable"
+            }
+        }
         return try { childBindings.freeze(key, admitted, projected, ::readSavedChildProviderModel, bindingsCurrent, runModel,
             latestConfig = if (hotUpdates) ({ childPreferences.snapshot(key) }) else null,
             latestModel = if (hotUpdates) ({ id -> freezeSavedChildModels(key, hotUpdates = false,
@@ -4161,7 +4167,7 @@ class ChatController internal constructor(private val application:Application,
         }
         val childPreparation = if (!withChildren) null else try {
             val key = SubAgentConfigKey.Conversation(conversationId.value)
-            freezeSavedChildModels(key, runModel = childRunFactory)
+            freezeSavedChildModels(key, requireAvailableSelection = true, runModel = childRunFactory)
         } catch (failure:Exception) {
             problem=if (failure is app.daiyu.android.domain.ModelRequestException) failure.userMessage
                 else "子模型配置不可用、已变更或不支持"

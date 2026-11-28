@@ -9,6 +9,8 @@ import androidx.compose.ui.test.*
 import androidx.compose.ui.text.AnnotatedString
 
 class AssistantNavigationActivityTest : WiredActivityTestCase() {
+    private fun originNodeId(tag: String) = ui.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().id
+
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     private fun openPicker(fromSettings: Boolean) {
         if (fromSettings) {
@@ -95,7 +97,7 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
         for (fromSettings in listOf(false, true)) {
             openPicker(fromSettings)
             val originTag = if (fromSettings) "page:设置" else "chat-draft"
-            val origin = node(originTag).fetchSemanticsNode().id
+            val origin = originNodeId(originTag)
             val before = store.list()
             if (fromSettings) {
                 node("assistant-search-input").performTextInput("no matching assistant")
@@ -109,7 +111,7 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
             awaitDialogEnter(node("assistant-editor"))
             mainThread { staleCreate() }
             ui.onNodeWithTag("assistant-list").assertDoesNotExist()
-            assertEquals(origin, node(originTag).fetchSemanticsNode().id)
+            assertEquals(origin, originNodeId(originTag))
             assertEquals(before.size + 1, store.list().size)
             val created = store.list().single { candidate -> before.none { it.id == candidate.id } }
             assertEquals("新助手", created.name)
@@ -146,7 +148,7 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
             assertEquals(before.size + 1, restored.list().size)
             node("assistant-done").performClick()
             awaitUniqueTag(originTag)
-            assertEquals(origin, node(originTag).fetchSemanticsNode().id)
+            assertEquals(origin, originNodeId(originTag))
             if (fromSettings) backToChat(activity)
         }
         assertEquals(bindings, fixture.database.conversations().associate { it.id to fixture.database.assistantId(it.id) })
@@ -317,20 +319,20 @@ class AssistantNavigationActivityTest : WiredActivityTestCase() {
         for (fromSettings in listOf(false, true)) {
             openPicker(fromSettings)
             val tag = if (fromSettings) "page:设置" else "chat-draft"
-            val original = node(tag).fetchSemanticsNode().id
+            val original = originNodeId(tag)
             for (system in listOf(false, true)) {
                 actions(profile.id)
                 edit()
-                assertEquals(original, node(tag).fetchSemanticsNode().id)
+                assertEquals(original, originNodeId(tag))
                 back(system)
                 awaitUniqueTag("assistant-action-edit")
-                assertEquals(original, node(tag).fetchSemanticsNode().id)
+                assertEquals(original, originNodeId(tag))
                 back(system)
                 awaitUniqueTag("assistant-list")
-                assertEquals(original, node(tag).fetchSemanticsNode().id)
+                assertEquals(original, originNodeId(tag))
             }
             dismissOutside(fromSettings)
-            assertEquals(original, node(tag).fetchSemanticsNode().id)
+            assertEquals(original, originNodeId(tag))
             if (fromSettings) backToChat(activity)
         }
         assertEquals(before, fixture.database.exportBackup())

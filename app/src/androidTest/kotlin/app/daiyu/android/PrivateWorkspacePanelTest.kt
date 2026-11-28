@@ -18,8 +18,8 @@ class PrivateWorkspacePanelTest : WiredActivityTestCase() {
         ui.onNodeWithText(title).assertIsDisplayed()
         ui.onNodeWithText("将删除", substring = true).assertDoesNotExist()
         ui.onNodeWithContentDescription("关闭").assertDoesNotExist()
-        node("dialog-cancel").assertIsDisplayed().assertIsEnabled().assertTextContains("取消")
-        node("dialog-confirm").assertIsDisplayed().assertIsEnabled().assertTextContains("删除")
+        node("dialog-cancel").assertIsDisplayed().assertIsEnabled().assertTextEquals(activity.getString(R.string.action_cancel))
+        node("dialog-confirm").assertIsDisplayed().assertIsEnabled().assertTextEquals(activity.getString(R.string.action_delete))
     }
 
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)

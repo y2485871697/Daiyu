@@ -34,7 +34,8 @@ class ModalRouteBackgroundActivityTest : WiredActivityTestCase() {
         ui.waitForIdle()
         captureScreenNode(ui.onNodeWithTag("page-back-host"))
         val initial = node("page-back-surface").fetchSemanticsNode().boundsInRoot
-        val originalDraftId = node("chat-draft").fetchSemanticsNode().id
+        val draft = ui.onNodeWithTag("chat-draft", useUnmergedTree = true)
+        val originalDraftId = draft.fetchSemanticsNode().id
         val before = fixture.database.exportBackup()
         fun assertStationaryFrames() {
             repeat(40) {
@@ -42,7 +43,7 @@ class ModalRouteBackgroundActivityTest : WiredActivityTestCase() {
                 for (tag in listOf("page-enter-previous", "page-enter-scrim", "page-enter-blocker",
                     "page-back-departure", "page-back-target")) node(tag).assertDoesNotExist()
                 assertEquals(initial, node("page-back-surface").fetchSemanticsNode().boundsInRoot)
-                assertEquals(originalDraftId, node("chat-draft").fetchSemanticsNode().id)
+                assertEquals(originalDraftId, draft.fetchSemanticsNode().id)
             }
         }
         repeat(2) { attempt ->

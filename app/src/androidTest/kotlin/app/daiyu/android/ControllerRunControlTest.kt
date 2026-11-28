@@ -264,6 +264,7 @@ class ControllerRunControlTest:InstrumentationTestCase() {
         assertTrue(results.poll(5,TimeUnit.SECONDS) is app.daiyu.android.domain.runtime.SupplementAdmission.Rejected)
         val id=MessageId("streaming-added")
         controlMain {assertTrue(f.controller.admitSupplement(owner,id,"added") {results.add(it)})}
+        first.release.countDown()
         awaitControl("streaming durable receipt") {results.isNotEmpty()}
         assertEquals(app.daiyu.android.domain.runtime.SupplementAdmission.Accepted(id),results.poll())
         assertTrue(second.entered.await(30,TimeUnit.SECONDS))

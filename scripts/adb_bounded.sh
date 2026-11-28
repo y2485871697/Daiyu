@@ -12,6 +12,11 @@ fi
 [[ "$limit" =~ ^[1-9][0-9]*$ ]] || exit 2
 log=${ADB_COMMAND_LOG:-smoke/adb-commands.txt}
 mkdir -p "$(dirname "$log")"
+# A caller with its own process-group timeout must not start a second group.
+if [[ ${ADB_OUTER_TIMEOUT:-} == 1 ]]; then
+  printf '%s begin timeout=external command=%q\n' "$(date -u +%FT%TZ)" "$*" >> "$log"
+  exec "$real" "$@"
+fi
 printf '%s begin timeout=%s command=%q\n' "$(date -u +%FT%TZ)" "$limit" "$*" >> "$log"
 timeout --kill-after=5 "$limit" "$real" "$@"
 code=$?

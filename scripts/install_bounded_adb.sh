@@ -8,5 +8,5 @@ timeout --kill-after=5 10 "$adb_path" version
 mv "$adb_path" "$adb_path.real"
 cp scripts/adb_bounded.sh "$adb_path"
 chmod +x "$adb_path"
-timeout --kill-after=5 10 "$adb_path" version
+ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 10 "$adb_path" version
 printf 'Bounded ADB installed at %s\n' "$adb_path"

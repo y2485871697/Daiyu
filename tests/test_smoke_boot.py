@@ -521,6 +521,19 @@ class ProcessTests(unittest.TestCase):
         self.assertIn(b'timed out', result.stderr)
         self.assertIn('exit=124', (self.root / 'smoke/adb-commands.txt').read_text())
 
+    def test_external_timeout_reaps_wrapped_adb_with_pipe_holding_child(self):
+        wrapper = self.bin / 'adb'
+        shutil.copy(ROOT / 'scripts/adb_bounded.sh', wrapper)
+        wrapper.chmod(0o755)
+        self.executable('adb.real', '#!/bin/sh\nprintf "ready\\n"; sleep 8 & wait\n')
+        started = time.monotonic()
+        result = subprocess.run(['timeout', '--kill-after=1', '1', str(wrapper)], cwd=self.root,
+                                env=dict(self.env, ADB_OUTER_TIMEOUT='1', ADB_COMMAND_TIMEOUT='8'),
+                                capture_output=True, timeout=10)
+        self.assertEqual((result.returncode, result.stdout), (124, b'ready\n'))
+        self.assertLess(time.monotonic() - started, 5)
+        self.assertIn("timeout=external", (self.root / "smoke/adb-commands.txt").read_text())
+
     def test_only_emulator_boot_unlock_gets_a_longer_deadline(self):
         wrapper = self.bin / 'adb'
         shutil.copy(ROOT / 'scripts/adb_bounded.sh', wrapper)

@@ -16,7 +16,7 @@ adb_stage() {
   local phase=$1 limit=$2 code=0
   shift 2
   printf '%s begin phase=%s budget=%ss\n' "$(date -u +%FT%TZ)" "$phase" "$limit" | tee -a smoke/stages.txt >&3
-  timeout --kill-after=5 "$limit" adb "$@" || code=$?
+  ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 "$limit" adb "$@" || code=$?
   printf '%s end phase=%s exit=%s\n' "$(date -u +%FT%TZ)" "$phase" "$code" | tee -a smoke/stages.txt >&3
   return "$code"
 }
@@ -615,29 +615,29 @@ printf '%s\n%s\n' "$expected" "$test_classes" > smoke/instrumentation-targets.tx
 collect_diagnostics() {
   local exit_status=$?
   if test "${call_clock_demo:-0}" = 1; then
-    timeout --kill-after=5 10 adb shell am broadcast --receiver-foreground -a com.android.systemui.demo --es command exit > smoke/call-clock-exit.txt 2>&1 || true
+    ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 10 adb shell am broadcast --receiver-foreground -a com.android.systemui.demo --es command exit > smoke/call-clock-exit.txt 2>&1 || true
     if test "$call_clock_previous" = null; then
-      timeout --kill-after=5 10 adb shell settings delete global sysui_demo_allowed > smoke/call-clock-restore.txt 2>&1 || true
+      ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 10 adb shell settings delete global sysui_demo_allowed > smoke/call-clock-restore.txt 2>&1 || true
     else
-      timeout --kill-after=5 10 adb shell settings put global sysui_demo_allowed "$call_clock_previous" > smoke/call-clock-restore.txt 2>&1 || true
+      ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 10 adb shell settings put global sysui_demo_allowed "$call_clock_previous" > smoke/call-clock-restore.txt 2>&1 || true
     fi
   fi
   if test "$exit_status" -ne 0 && test -f smoke/platform-tests.txt; then
-    timeout --kill-after=5 20 adb pull /sdcard/Android/data/app.daiyu.android/files/settings-ui smoke/settings-ui > smoke/settings-ui-pull.txt 2>&1 || true
+    ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 20 adb pull /sdcard/Android/data/app.daiyu.android/files/settings-ui smoke/settings-ui > smoke/settings-ui-pull.txt 2>&1 || true
   fi
-  timeout --kill-after=5 10 adb devices -l > smoke/devices.txt 2>&1 || true
-  timeout --kill-after=5 10 adb shell getprop > smoke/properties.txt 2>&1 || true
-  timeout --kill-after=5 10 adb shell df -h /data > smoke/storage.txt 2>&1 || true
-  timeout --kill-after=5 10 adb shell cat /proc/meminfo > smoke/memory-exit.txt 2>&1 || true
-  timeout --kill-after=5 15 adb logcat -d -b all > smoke/logcat-exit.txt 2>&1 || true
-  timeout --kill-after=5 15 adb shell dumpsys dropbox --print data_app_anr > smoke/anr-dropbox.txt 2>&1 || true
-  timeout --kill-after=5 10 adb shell ime list -a > smoke/ime-list-exit.txt 2>&1 || true
-  timeout --kill-after=5 10 adb shell dumpsys input_method > smoke/input-method-exit.txt 2>&1 || true
-  timeout --kill-after=5 10 adb shell dumpsys window > smoke/window-exit.txt 2>&1 || true
-  timeout --kill-after=5 10 adb shell dumpsys input > smoke/input-exit.txt 2>&1 || true
-  timeout --kill-after=5 10 adb shell dumpsys package com.google.android.inputmethod.latin > smoke/ime-package.txt 2>&1 || true
-  timeout --kill-after=5 10 adb shell 'getprop vendor.qemu.vport.uwb; ls -l /dev/hvc2 /dev/uwb0; for p in /sys/class/virtio-ports/*; do printf "%s " "$p"; cat "$p/name"; done' > smoke/uwb-transport.txt 2>&1 || true
-  timeout --kill-after=5 20 adb pull /sdcard/Android/data/app.daiyu.android/files/visual-diagnostics smoke/visual-diagnostics > smoke/visual-diagnostics-pull.txt 2>&1 || true
+  ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 10 adb devices -l > smoke/devices.txt 2>&1 || true
+  ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 10 adb shell getprop > smoke/properties.txt 2>&1 || true
+  ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 10 adb shell df -h /data > smoke/storage.txt 2>&1 || true
+  ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 10 adb shell cat /proc/meminfo > smoke/memory-exit.txt 2>&1 || true
+  ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 15 adb logcat -d -b all > smoke/logcat-exit.txt 2>&1 || true
+  ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 15 adb shell dumpsys dropbox --print data_app_anr > smoke/anr-dropbox.txt 2>&1 || true
+  ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 10 adb shell ime list -a > smoke/ime-list-exit.txt 2>&1 || true
+  ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 10 adb shell dumpsys input_method > smoke/input-method-exit.txt 2>&1 || true
+  ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 10 adb shell dumpsys window > smoke/window-exit.txt 2>&1 || true
+  ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 10 adb shell dumpsys input > smoke/input-exit.txt 2>&1 || true
+  ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 10 adb shell dumpsys package com.google.android.inputmethod.latin > smoke/ime-package.txt 2>&1 || true
+  ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 10 adb shell 'getprop vendor.qemu.vport.uwb; ls -l /dev/hvc2 /dev/uwb0; for p in /sys/class/virtio-ports/*; do printf "%s " "$p"; cat "$p/name"; done' > smoke/uwb-transport.txt 2>&1 || true
+  ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 20 adb pull /sdcard/Android/data/app.daiyu.android/files/visual-diagnostics smoke/visual-diagnostics > smoke/visual-diagnostics-pull.txt 2>&1 || true
   ps axww -o args= | grep '[q]emu-system-' > smoke/qemu-command.txt || true
   return "$exit_status"
 }
@@ -671,7 +671,7 @@ fi
 wait_for_framework_ready() {
   local stable=0 previous="" current current_boot_id boot_changed
   for attempt in $(seq 1 60); do
-    current=$(timeout --kill-after=5 5 adb shell 'cat /proc/sys/kernel/random/boot_id && pidof system_server && pidof surfaceflinger' 2>/dev/null | tr -d '\r') || current=""
+    current=$(ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 5 adb shell 'cat /proc/sys/kernel/random/boot_id && pidof system_server && pidof surfaceflinger' 2>/dev/null | tr -d '\r') || current=""
     current_boot_id=${current%%$'\n'*}
     current=${current#*$'\n'}
     boot_changed=1
@@ -680,8 +680,8 @@ wait_for_framework_ready() {
       boot_changed=0
     fi
     if test "$boot_changed" = 1 && test -n "$current" && test "$current" = "$previous" &&
-       test "$(timeout --kill-after=5 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 &&
-       timeout --kill-after=5 5 adb shell cmd package list packages -f android 2>&1 | tr -d '\r' > smoke/package-ready.txt &&
+       test "$(ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 &&
+       ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 5 adb shell cmd package list packages -f android 2>&1 | tr -d '\r' > smoke/package-ready.txt &&
        grep -Eq '^package:/[^[:space:]=]+\.apk=android$' smoke/package-ready.txt; then
       stable=$((stable + 1))
     else

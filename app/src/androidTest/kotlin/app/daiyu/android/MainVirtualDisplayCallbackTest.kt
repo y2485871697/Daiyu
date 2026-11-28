@@ -159,6 +159,8 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
     private fun retainCancel(entry: ControllerVirtualDisplayEntry, request: VirtualDisplayApprovalRequest?): () -> Unit =
         invokeMain("virtualDisplayCancelAction", entry, request) as () -> Unit
 
+    private fun cleanupNode(tag: String) = ui.onNodeWithTag(tag)
+
     private fun awaitEnabled(tag: String) {
         ui.waitUntil(5_000) {
             ui.onAllNodes(hasTestTag(tag) and isEnabled())
@@ -431,8 +433,8 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
                 as app.daiyu.android.vdapproval.R08CleanupApprovalRequest?
             request != null
         }
-        node("r08-cleanup-confirm").assertDoesNotExist()
-        node("r08-cleanup-reject").assertDoesNotExist()
+        cleanupNode("r08-cleanup-confirm").assertDoesNotExist()
+        cleanupNode("r08-cleanup-reject").assertDoesNotExist()
         return checkNotNull(request)
     }
 
@@ -497,10 +499,10 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
 
     private fun openInitializedCleanup(): app.daiyu.android.vdapproval.R08CleanupApprovalRequest {
         tapCleanupEntry()
-        node("r08-cleanup-confirm").assertDoesNotExist()
-        node("r08-cleanup-reject").assertDoesNotExist()
+        cleanupNode("r08-cleanup-confirm").assertDoesNotExist()
+        cleanupNode("r08-cleanup-reject").assertDoesNotExist()
         assertEquals(0, cleanupSends.get())
-        node("vd-cleanup-release-only").assertIsEnabled().performClick()
+        cleanupNode("vd-cleanup-release-only").assertIsEnabled().performClick()
         return awaitCleanupRequest()
     }
 
@@ -508,13 +510,13 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         tapCleanupEntry()
         assertEquals(0, taskObservations.get())
         assertEquals(0, handoffSends.get())
-        node("vd-cleanup-observe-tasks").assertIsEnabled().performClick()
+        cleanupNode("vd-cleanup-observe-tasks").assertIsEnabled().performClick()
         awaitUniqueTag("vd-delivery-task-23")
-        node("vd-delivery-task-12").assertIsOff()
-        node("vd-delivery-task-23").assertIsOff()
-        node("vd-cleanup-freeze-delivery").assertIsNotEnabled()
-        node("vd-delivery-task-23").performClick()
-        node("vd-cleanup-freeze-delivery").assertIsEnabled()
+        cleanupNode("vd-delivery-task-12").assertIsOff()
+        cleanupNode("vd-delivery-task-23").assertIsOff()
+        cleanupNode("vd-cleanup-freeze-delivery").assertIsNotEnabled()
+        cleanupNode("vd-delivery-task-23").performClick()
+        cleanupNode("vd-cleanup-freeze-delivery").assertIsEnabled()
         assertEquals(1, taskObservations.get())
         assertEquals(0, handoffSends.get())
         assertEquals(0, cleanupSends.get())
@@ -525,7 +527,7 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
 
     private fun openDeliveryApproval(): app.daiyu.android.vdapproval.R08CleanupApprovalRequest {
         selectDeliveryTasks()
-        node("vd-cleanup-freeze-delivery").performClick()
+        cleanupNode("vd-cleanup-freeze-delivery").performClick()
         return awaitCleanupRequest()
     }
 
@@ -562,15 +564,15 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         tapCleanupEntry()
         assertEquals(0, taskObservations.get())
         assertEquals(0, handoffSends.get())
-        node("vd-cleanup-observe-tasks").assertIsEnabled().performClick()
+        cleanupNode("vd-cleanup-observe-tasks").assertIsEnabled().performClick()
         awaitUniqueTag("vd-delivery-task-23")
-        node("vd-delivery-task-12").assertIsOff()
-        node("vd-delivery-task-23").assertIsOff()
-        node("vd-cleanup-freeze-delivery").assertIsNotEnabled()
+        cleanupNode("vd-delivery-task-12").assertIsOff()
+        cleanupNode("vd-delivery-task-23").assertIsOff()
+        cleanupNode("vd-cleanup-freeze-delivery").assertIsNotEnabled()
         assertEquals(1, taskObservations.get())
         assertEquals(0, handoffSends.get())
         assertEquals(0, cleanupSends.get())
-        node("vd-cleanup-freeze-empty").assertIsEnabled().performClick()
+        cleanupNode("vd-cleanup-freeze-empty").assertIsEnabled().performClick()
         awaitCleanupRequest()
         mainThread {
             val visit = checkNotNull(invokeMain("getVirtualDisplayCleanupVisit"))
@@ -607,7 +609,7 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         val (entry, _) = initializedCleanupEntry()
         val beforeObserve = observations.get()
         val visit = selectDeliveryTasks()
-        node("vd-cleanup-close").performClick()
+        cleanupNode("vd-cleanup-close").performClick()
         mainThread {
             assertNull(invokeMain("getVirtualDisplayCleanupVisit"))
             invokeMain("prepareVirtualDisplayTaskHandoff", visit, false)
@@ -649,13 +651,13 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         assertEquals(messages, fixture.database.messages(entry.conversationId))
         lateinit var oldVisit: Any
         mainThread { oldVisit = checkNotNull(invokeMain("getVirtualDisplayCleanupVisit")) }
-        node("vd-cleanup-close").performClick()
+        cleanupNode("vd-cleanup-close").performClick()
         mainThread {
             assertFalse(invokeMain("answerVirtualDisplayCleanup", oldVisit, cleanup, true) as Boolean)
             assertFalse(checkNotNull(entry.session).answerCleanupFromUi(cleanup, true))
         }
         tapCleanupEntry()
-        node("vd-cleanup-release-only").performClick()
+        cleanupNode("vd-cleanup-release-only").performClick()
         awaitControl("another visit cannot recreate an answered/attempted cleanup") {
             val visit = invokeMain("getVirtualDisplayCleanupVisit") ?: return@awaitControl false
             val status = visit.javaClass.getDeclaredMethod("getStatus").apply { isAccessible = true }.invoke(visit) as String
@@ -675,11 +677,11 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         val (entry, _) = initializedCleanupEntry()
         val beforeObserve = observations.get()
         tapCleanupEntry()
-        node("r08-cleanup-confirm").assertDoesNotExist()
-        node("r08-cleanup-reject").assertDoesNotExist()
+        cleanupNode("r08-cleanup-confirm").assertDoesNotExist()
+        cleanupNode("r08-cleanup-reject").assertDoesNotExist()
         lateinit var oldVisit: Any
         mainThread { oldVisit = checkNotNull(invokeMain("getVirtualDisplayCleanupVisit")) }
-        node("vd-cleanup-close").performClick()
+        cleanupNode("vd-cleanup-close").performClick()
         mainThread {
             assertNull(invokeMain("getVirtualDisplayCleanupVisit"))
             invokeMain("prepareVirtualDisplayCleanup", oldVisit)
@@ -696,7 +698,7 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         val beforeObserve = observations.get()
         var old: Any? = null
         tapCleanupEntry()
-        node("vd-cleanup-release-only").performClick()
+        cleanupNode("vd-cleanup-release-only").performClick()
         awaitControl("explicit cleanup unavailable without initialized evidence") {
             val visit = invokeMain("getVirtualDisplayCleanupVisit") ?: return@awaitControl false
             old = visit
@@ -713,7 +715,7 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
             assertSame(entry, fixture.controller.virtualDisplayEntry())
         }
         assertEquals(beforeObserve, observations.get()) // no physical probe on prepare/replacement
-        node("vd-cleanup-close").performClick()
+        cleanupNode("vd-cleanup-close").performClick()
         mainThread { assertNull(invokeMain("getVirtualDisplayCleanupVisit")) }
         assertEquals(0, starts.get()); assertEquals(0, gate.availablePermits())
         assertSame(entry, fixture.controller.virtualDisplayEntry())

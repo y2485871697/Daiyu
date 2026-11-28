@@ -23,7 +23,7 @@ adb_stage() {
 APK=$(find delivery -maxdepth 1 -name '*.apk' -print -quit)
 test -n "$APK"
 mkdir -p smoke
-rm -f smoke/stages.txt smoke/platform-tests.txt smoke/instrumentation-result.json smoke/selection.json smoke/instrumentation-shards.json smoke/instrumentation-targets.txt smoke/shard-plan.json smoke/webview.txt smoke/webview-package.txt smoke/logcat-before.txt smoke/properties-before.txt smoke/hwui-renderer.txt smoke/logcat-first-boot.txt smoke/ime-default-restored.txt smoke/readiness.txt smoke/ime-enabled-before.txt smoke/ime-enabled-selected.txt smoke/ime-enabled-after.txt smoke/ime-fixture-{path,enable,set,selected,package,after}.txt
+rm -f smoke/stages.txt smoke/readiness-command.txt smoke/platform-tests.txt smoke/instrumentation-result.json smoke/selection.json smoke/instrumentation-shards.json smoke/instrumentation-targets.txt smoke/shard-plan.json smoke/webview.txt smoke/webview-package.txt smoke/logcat-before.txt smoke/properties-before.txt smoke/hwui-renderer.txt smoke/logcat-first-boot.txt smoke/ime-default-restored.txt smoke/readiness.txt smoke/ime-enabled-before.txt smoke/ime-enabled-selected.txt smoke/ime-enabled-after.txt smoke/ime-fixture-{path,enable,set,selected,package,after}.txt
 rm -rf smoke/settings-ui smoke/visual-diagnostics
 # Explicitly name every source test class: legacy default discovery scans all dependency DEX.
 target_spec=$(python3 - <<'PYCOUNT'
@@ -669,17 +669,37 @@ if test "$api" -ge 36; then
   adb_stage navigation 15 shell cmd overlay list > smoke/navigation-overlays.txt
 fi
 wait_for_framework_ready() {
-  local stable=0 previous="" current current_boot_id boot_changed
+  local stable=0 previous="" current current_boot_id boot_changed probe_status=0 probe_failures=0 unready_attempts=0 system_server_pids surfaceflinger_pids
   for attempt in $(seq 1 60); do
-    current=$(ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 5 adb shell 'cat /proc/sys/kernel/random/boot_id && pidof system_server && pidof surfaceflinger' 2>/dev/null | tr -d '\r') || current=""
-    current_boot_id=${current%%$'\n'*}
-    current=${current#*$'\n'}
+    probe_status=0
+    probe=$(ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 5 adb shell 'boot_id=$(cat /proc/sys/kernel/random/boot_id) || exit; system_server=$(pidof system_server 2>/dev/null || true); surfaceflinger=$(pidof surfaceflinger 2>/dev/null || true); printf "boot_id=%s\nsystem_server=%s\nsurfaceflinger=%s\n" "$boot_id" "$system_server" "$surfaceflinger"' 2>>smoke/readiness-command.txt | tr -d '\r') || probe_status=$?
+    current_boot_id=$(printf '%s\n' "$probe" | sed -n 's/^boot_id=//p' | head -n 1)
+    system_server_pids=$(printf '%s\n' "$probe" | sed -n 's/^system_server=//p' | head -n 1)
+    surfaceflinger_pids=$(printf '%s\n' "$probe" | sed -n 's/^surfaceflinger=//p' | head -n 1)
+    current="$system_server_pids $surfaceflinger_pids"
     boot_changed=1
     if ! [[ "$current_boot_id" =~ ^[0-9a-fA-F-]{36}$ ]] ||
        { test -n "${previous_boot_id:-}" && test "$current_boot_id" = "$previous_boot_id"; }; then
       boot_changed=0
     fi
-    if test "$boot_changed" = 1 && test -n "$current" && test "$current" = "$previous" &&
+    if test "$probe_status" -ne 0; then probe_failures=$((probe_failures + 1)); else probe_failures=0; fi
+    if [[ "$current_boot_id" =~ ^[0-9a-fA-F-]{36}$ ]] && test -n "$system_server_pids" && test -n "$surfaceflinger_pids"; then
+      unready_attempts=0
+    else
+      unready_attempts=$((unready_attempts + 1))
+    fi
+    if test "$probe_failures" -ge 3; then
+      printf '%s readiness abort: ADB framework probe failed %s consecutive times (exit=%s); preserving diagnostic output\n' "$(date -u +%FT%TZ)" "$probe_failures" "$probe_status" | tee -a smoke/readiness.txt >&2
+      printf '%s attempt=%s stable=%s boot_changed=%s probe_exit=%s boot_id=%s system_server=%s surfaceflinger=%s\n' "$(date -u +%FT%TZ)" "$attempt" "$stable" "$boot_changed" "$probe_status" "$current_boot_id" "$system_server_pids" "$surfaceflinger_pids" | tee -a smoke/readiness.txt >&2
+      return 1
+    fi
+    if test "$unready_attempts" -ge 15; then
+      printf '%s readiness abort: framework boot id or system_server/surfaceflinger PIDs stayed unavailable for %s attempts; preserving diagnostic output\n' "$(date -u +%FT%TZ)" "$unready_attempts" | tee -a smoke/readiness.txt >&2
+      printf '%s attempt=%s stable=%s boot_changed=%s probe_exit=%s boot_id=%s system_server=%s surfaceflinger=%s\n' "$(date -u +%FT%TZ)" "$attempt" "$stable" "$boot_changed" "$probe_status" "$current_boot_id" "$system_server_pids" "$surfaceflinger_pids" | tee -a smoke/readiness.txt >&2
+      return 1
+    fi
+    if test "$probe_status" = 0 && test "$boot_changed" = 1 &&
+       [[ "$current_boot_id" =~ ^[0-9a-fA-F-]{36}$ ]] && test -n "$system_server_pids" && test -n "$surfaceflinger_pids" && test "$current" = "$previous" &&
        test "$(ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 5 adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 &&
        ADB_OUTER_TIMEOUT=1 timeout --kill-after=5 5 adb shell cmd package list packages -f android 2>&1 | tr -d '\r' > smoke/package-ready.txt &&
        grep -Eq '^package:/[^[:space:]=]+\.apk=android$' smoke/package-ready.txt; then
@@ -688,7 +708,7 @@ wait_for_framework_ready() {
       stable=0
     fi
     previous="$current"
-    printf '%s attempt=%s stable=%s boot_changed=%s pids=%s\n' "$(date -u +%FT%TZ)" "$attempt" "$stable" "$boot_changed" "$current" | tee -a smoke/readiness.txt >&2
+    printf '%s attempt=%s stable=%s boot_changed=%s probe_exit=%s boot_id=%s system_server=%s surfaceflinger=%s\n' "$(date -u +%FT%TZ)" "$attempt" "$stable" "$boot_changed" "$probe_status" "$current_boot_id" "$system_server_pids" "$surfaceflinger_pids" | tee -a smoke/readiness.txt >&2
     if test "$stable" -ge 15; then break; fi
     sleep 2
   done

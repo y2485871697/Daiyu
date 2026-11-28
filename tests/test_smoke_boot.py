@@ -626,8 +626,9 @@ fake_boot_id() {
   if [ -f smoke/rebooted ] && [ "$CASE" != reboot-unchanged ]; then
    polls=0; [ ! -f smoke/boot-id-polls ] || polls=$(cat smoke/boot-id-polls)
    polls=$((polls + 1)); printf '%s' "$polls" > smoke/boot-id-polls
-   if [ "$CASE" = reboot-delayed ] && [ "$polls" -le 20 ]; then
+   if [ "$CASE" = reboot-delayed ] && [ "$polls" -le 2 ]; then
     printf '11111111-1111-1111-1111-111111111111\n'
+   elif [ "$CASE" = reboot-pids-missing ]; then printf '22222222-2222-2222-2222-222222222222\n'
    else printf '22222222-2222-2222-2222-222222222222\n'; fi
   else printf '11111111-1111-1111-1111-111111111111\n'; fi
 }
@@ -675,6 +676,13 @@ case "$*" in
   touch smoke/fixture-ime-selected ;;
  'reboot') [ "$CASE" != reboot-fail ] || exit 7; touch smoke/rebooted ;;
 
+ *boot_id*system_server*surfaceflinger*)
+  [ "$CASE" != reboot-probe-fails ] || { printf 'adb shell transport failed\n' >&2; exit 124; }
+  boot_id=$(fake_boot_id)
+  printf 'boot_id=%s\n' "$boot_id"
+  if [ "$CASE" = reboot-pids-missing ] && [ -f smoke/rebooted ]; then
+   printf 'system_server=\nsurfaceflinger=\n'
+  else printf 'system_server=123\nsurfaceflinger=456\n'; fi ;;
  *pidof*) fake_boot_id; printf '123\n456\n' ;;
  'shell cmd package list packages -f android')
   [ "$CASE" != framework-package-missing ] || { printf 'package:/system/framework/fake.apk=not.android\n'; exit 0; }
@@ -871,12 +879,31 @@ exit 0
         self.assertEqual(result.returncode, 0, result.stderr.decode())
         readiness = [row for row in (self.root / 'smoke/readiness.txt').read_text().splitlines()
                      if ' attempt=' in row]
-        self.assertEqual(len(readiness), 35)
-        self.assertTrue(all('stable=0 boot_changed=0' in row for row in readiness[:20]))
+        self.assertEqual(len(readiness), 17)
+        self.assertTrue(all('stable=0 boot_changed=0' in row for row in readiness[:2]))
         self.assertIn('stable=15 boot_changed=1', readiness[-1])
         calls = (self.root / 'smoke/adb-calls.txt').read_text().splitlines()
         self.assertEqual(calls.count('reboot'), 1)
         self.assertLess(calls.index('reboot'), calls.index('install delivery/app.apk'))
+
+    def test_api26_fails_fast_when_new_boot_has_no_framework_pids(self):
+        result = self.smoke(case='reboot-pids-missing')
+        self.assertNotEqual(result.returncode, 0)
+        readiness = [row for row in (self.root / 'smoke/readiness.txt').read_text().splitlines()
+                     if ' attempt=' in row]
+        self.assertEqual(len(readiness), 15, result.stderr.decode())
+        self.assertIn('readiness abort', (self.root / 'smoke/readiness.txt').read_text())
+        self.assertTrue((self.root / 'smoke/readiness-command.txt').exists())
+
+    def test_api26_aborts_after_repeated_framework_probe_transport_timeouts(self):
+        result = self.smoke(case='reboot-probe-fails')
+        self.assertNotEqual(result.returncode, 0)
+        readiness = [row for row in (self.root / 'smoke/readiness.txt').read_text().splitlines()
+                     if ' attempt=' in row]
+        self.assertEqual(len(readiness), 3)
+        self.assertIn('probe_exit=124', readiness[-1])
+        self.assertIn('ADB framework probe failed', (self.root / 'smoke/readiness.txt').read_text())
+        self.assertIn('adb shell transport failed', (self.root / 'smoke/readiness-command.txt').read_text())
 
     def test_api26_selects_one_preinstalled_real_ime_before_tests_without_disabling_original(self):
         for api in (26, 37):

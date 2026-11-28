@@ -9,6 +9,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.*
 import androidx.lifecycle.lifecycleScope
+import app.daiyu.android.model.ProviderHeaders
 import app.daiyu.android.model.ProviderRequestOptions
 import app.daiyu.android.model.catalog.CatalogCommitResult
 import app.daiyu.android.model.catalog.CatalogModelParameters
@@ -29,7 +30,7 @@ import java.util.concurrent.atomic.AtomicReference
 class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     override val engineeringUi: Boolean
         get() = name !in setOf(
-            "testCustomRequestBodySaveReopenRejectsInvalidBodyAndHidesUnsupportedTiers",
+            "testCustomRequestHeaderSaveReopenRejectsOwnedHeaderAndHidesUnsupportedTiers",
             "testUnavailableRequestPolicyRequiresExplicitReplacementWithoutLosingOriginalOnFailure",
         )
     private lateinit var fixture: RunControlFixture
@@ -717,34 +718,63 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
             backToChat(activity); assertEquals(before, fixture.settings.load())
         }
     }
-    fun testCustomRequestBodySaveReopenRejectsInvalidBodyAndHidesUnsupportedTiers() {
-        val before = fixture.settings.load().requestOptions
-        val body = """{"temperature":0.25}"""
-        openModels(); addInlineBodyField("temperature", "0.25"); saveModel()
-        val expected = before.copy(customBody = body)
-        assertEquals(expected, fixture.settings.load().requestOptions)
+    private fun openRequestHeaders() {
+        val disclosure = reveal("model-custom-headers", lazyKey = "provider_headers")
+        if (ui.onAllNodesWithTag("model-header-add").fetchSemanticsNodes().isEmpty()) {
+            disclosure.assertIsEnabled().performClick()
+        }
+    }
+    private fun headerName() = reveal("model-header-name:0", lazyKey = "provider_headers")
+    private fun headerValue() = reveal("model-header-value:0", lazyKey = "provider_headers")
+    private fun addRequestHeader(name: String, value: String) {
+        openRequestHeaders()
+        reveal("model-header-add", lazyKey = "provider_headers").assertIsEnabled().performClick()
+        headerName().performTextReplacement(name)
+        headerValue().performTextReplacement(value)
+    }
+    private fun assertRequestHeader(name: String, value: String) {
+        openRequestHeaders()
+        headerName().assertEditableText(name)
+        headerValue().assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+        reveal("settings-secret-visibility:值", lazyKey = "provider_headers").performClick()
+        headerValue().assertEditableText(value)
+        reveal("settings-secret-visibility:值", lazyKey = "provider_headers").performClick()
+        headerValue().assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Password))
+    }
+    private fun assertRejectedProviderSave(message: String) {
+        saveModel()
+        reveal("model-save-error", lazyKey = "model_save").assertIsDisplayed().assertTextContains(message)
+    }
+    fun testCustomRequestHeaderSaveReopenRejectsOwnedHeaderAndHidesUnsupportedTiers() {
+        val before = fixture.settings.load()
+        val expected = ProviderHeaders.parse("""{"x-regression":"fixture-header"}""")
+        openModels()
+        addRequestHeader("x-regression", "fixture-header")
+        saveModel()
+        awaitControl("saved custom request header") { fixture.settings.load().customHeaders == expected }
         val saved = fixture.settings.load()
+        assertEquals(before.requestOptions, saved.requestOptions)
         awaitModelEditor()
         backToChat(activity)
-        openModels(); openInlineBodyFields()
-        inlineBodyControl("model-body-field-name:0").assertEditableText("temperature")
-        inlineBodyControl("model-body-field-value:0").assertEditableText("0.25")
-        inlineBodyControl("model-body-field-name:0").performTextReplacement("messages")
-        inlineBodyControl("model-body-field-value:0").performTextReplacement("[]")
-        attemptBlockedInlineBodySave()
+
+        openModels()
+        assertRequestHeader("x-regression", "fixture-header")
+        headerName().performTextReplacement("Authorization")
+        assertRejectedProviderSave("请求头名称或值无效；认证与传输请求头由系统管理。")
         assertEquals(saved, fixture.settings.load())
-        assertEquals(expected, fixture.settings.load().requestOptions); node("model-save").assertExists()
-        inlineBodyControl("model-body-field-value:0").performTextReplacement("0.25")
-        inlineBodyControl("model-body-field-name:0").performTextReplacement("temperature")
+        headerName().performTextReplacement("x-regression")
+        headerValue().performTextReplacement("corrected-header")
         saveModel()
-        assertEquals(expected, fixture.settings.load().requestOptions)
+        val corrected = ProviderHeaders.parse("""{"x-regression":"corrected-header"}""")
+        awaitControl("saved corrected request header") { fixture.settings.load().customHeaders == corrected }
+        assertEquals(saved.requestOptions, fixture.settings.load().requestOptions)
         ui.onAllNodesWithText("超快速").assertCountEquals(0)
         ui.onAllNodesWithText("Codex 档位").assertCountEquals(0)
         backToChat(activity)
-        activity = recreateActivity(activity); openModels(); openInlineBodyFields()
-        inlineBodyControl("model-body-field-name:0").assertEditableText("temperature")
-        inlineBodyControl("model-body-field-value:0").assertEditableText("0.25")
-        assertEquals(expected, fixture.settings.load().requestOptions)
+        activity = recreateActivity(activity)
+        openModels()
+        assertRequestHeader("x-regression", "corrected-header")
+        assertEquals(corrected, fixture.settings.load().customHeaders)
         backToChat(activity)
         assertEquals(0, fixture.opens.get())
     }
@@ -801,23 +831,36 @@ class IntegrationSettingsActivityTest : ComposeActivityTestCase() {
     }
     fun testUnavailableRequestPolicyRequiresExplicitReplacementWithoutLosingOriginalOnFailure() {
         val prefs = fixture.application.getSharedPreferences("model-settings", 0)
-        check(prefs.edit().putString("request-options", "not-json").commit()); val before = HashMap(prefs.all)
-        openModels(); reveal("settings-switch:授权替换策略").assertIsOff()
-        editModel("API Key", "replacement-key"); addInlineBodyField("temperature", "0.5"); saveModel()
+        check(prefs.edit().putString("request-options", "not-json").commit())
+        val before = HashMap(prefs.all)
+        openModels()
+        val authorization = "settings-switch:授权替换策略"
+        reveal(authorization, lazyKey = "model_connection").assertIsOff()
+        editModel("API Key", "replacement-key")
+        assertRejectedProviderSave("未保存，请检查输入和必要确认。")
         assertEquals(before, prefs.all)
-        reveal("settings-switch:授权替换策略").performClick(); openInlineBodyFields()
-        inlineBodyControl("model-body-field-name:0").performTextReplacement("tools")
-        inlineBodyControl("model-body-field-value:0").performTextReplacement("[]")
-        attemptBlockedInlineBodySave()
+
+        reveal(authorization, lazyKey = "model_connection").performClick().assertIsOn()
+        addRequestHeader("Authorization", "fixture-header")
+        assertRejectedProviderSave("请求头名称或值无效；认证与传输请求头由系统管理。")
         assertEquals(before, prefs.all)
-        inlineBodyControl("model-body-field-value:0").performTextReplacement("0.5")
-        inlineBodyControl("model-body-field-name:0").performTextReplacement("temperature")
+
+        headerName().performTextReplacement("x-regression")
         saveModel()
-        assertEquals(ProviderRequestOptions("""{"temperature":0.5}"""), fixture.settings.load().requestOptions)
-        assertEquals("replacement-key", fixture.settings.load().apiKey)
+        val expectedHeaders = ProviderHeaders.parse("""{"x-regression":"fixture-header"}""")
+        awaitControl("authorized replacement committed") {
+            fixture.settings.load().let { it.apiKey == "replacement-key" && it.customHeaders == expectedHeaders }
+        }
+        assertEquals(ProviderRequestOptions(), fixture.settings.load().requestOptions)
+        assertFalse(fixture.settings.loadForEditing().requestOptionsUnavailable)
         awaitModelEditor()
         backToChat(activity)
-        openModels(); reveal("model-save"); node("settings-switch:授权替换策略").assertDoesNotExist(); backToChat(activity)
+        openModels()
+        reveal("settings-field:API Key", lazyKey = "model_connection")
+        node(authorization).assertDoesNotExist()
+        assertModelSecret("replacement-key")
+        assertRequestHeader("x-regression", "fixture-header")
+        backToChat(activity)
         assertEquals(0, fixture.opens.get())
     }
 }

@@ -51,10 +51,13 @@ class SheetSelectionExitActivityTest : WiredActivityTestCase() {
             val savedBefore = preferences.all.toMap()
             val description = when (field) { "model" -> "草稿模型"; "role" -> "草稿职责"; else -> "草稿任务分工" }
             ui.onNodeWithContentDescription(description).scrollToVisible().performClick()
+            fun childChoice(label: String) = ui.onNode(
+                hasText(label) and hasClickAction() and hasAnyAncestor(hasTestTag("chat-selection-sheet"))
+            )
             val option = when (field) {
                 "model" -> node("chat-model-option:second")
-                "role" -> ui.onNode(hasText("审查／总结") and hasClickAction())
-                else -> ui.onNode(hasText(SubAgentTaskTier.entries.last().label) and hasClickAction())
+                "role" -> childChoice("审查／总结")
+                else -> childChoice(SubAgentTaskTier.entries.last().label)
             }
             awaitNodeWindowFocus(option)
             awaitDialogEnter(option)

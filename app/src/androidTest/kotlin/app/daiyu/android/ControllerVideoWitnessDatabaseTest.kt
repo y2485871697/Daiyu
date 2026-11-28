@@ -99,7 +99,10 @@ class ControllerVideoWitnessDatabaseTest : InstrumentationTestCase() {
     private fun table(sql: SQLiteDatabase, name: String): List<List<String?>> {
         // sqlite_master is queryable but, unlike ordinary tables, does not list itself.
         if (name != "sqlite_master" && !tableExists(sql, name)) return listOf(listOf("<absent>"))
-        return sql.rawQuery("SELECT * FROM $name ORDER BY rowid", null).use { c ->
+        // Fresh and migrated databases can append columns in a different order.
+        val columns = if (name == "conversations")
+            "id,title,draft,updated,folder,pinned,assistant_id,workspace_binding,sidebar_date" else "*"
+        return sql.rawQuery("SELECT $columns FROM $name ORDER BY rowid", null).use { c ->
             buildList {
                 while (c.moveToNext()) add((0 until c.columnCount).map { column ->
                     when (c.getType(column)) {

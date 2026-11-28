@@ -18,10 +18,10 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
     private val expectedPlatformActions = listOf(
         "platform_set_alarm", "platform_set_timer", "platform_set_volume", "platform_media_key"
     ) + if (Build.VERSION.SDK_INT < 29) listOf("platform_set_wifi") else emptyList()
-    private val expectedBaseCatalog = listOf("get_battery_status", "ask_user", "context_usage",
+    private val expectedBaseCatalog = listOf("get_battery_status", "ask_user", "read_compacted_history", "context_usage",
         "conversation_reference_read",
         "assistant_memory_read", "assistant_memory_search", "list_subagents", "inspect_child_tasks", "control_child_task", "get_child_task",
-        "terminal_exec", "terminal_read") + expectedPlatformActions +
+        "terminal_exec", "terminal_read", "read_image") + expectedPlatformActions +
         listOf("screen", "screen_action", "launch_app", "terminal_job_start", "terminal_job_read")
     private val expectedSideEffects = setOf(
         "ask_user", "terminal_exec", "screen_action", "launch_app", "terminal_job_start"

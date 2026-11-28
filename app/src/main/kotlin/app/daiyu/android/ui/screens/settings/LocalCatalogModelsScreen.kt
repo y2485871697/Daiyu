@@ -244,7 +244,10 @@ internal fun <T> LocalCatalogModelsScreen(
         }
     }
     LaunchedEffect(visit) { reload(force = false) }
-    LaunchedEffect(snapshot) { if (current()) reconcile(snapshot) }
+    LaunchedEffect(catalog, snapshot, loaded, catalog.failed) {
+        // A null snapshot is authoritative only after a successful read.
+        if (current() && catalog.loaded && !catalog.failed) reconcile(catalog.snapshot)
+    }
     val back = { if (current()) {
         if (selectedIds != null) { selectedIds = null; deletingSelected = null }
         else { visit.set(false); cancel(); onBack() }

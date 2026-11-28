@@ -340,7 +340,12 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
         node("page:${instrumentation.targetContext.getString(R.string.stats_page_title)}").assertExists()
         ui.onNodeWithText("关闭").assertDoesNotExist()
         ui.onNodeWithContentDescription(activity.getString(R.string.action_back)).performClick()
-        node("page:设置").assertExists()
+        awaitUniqueTag("page:设置")
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            node("page:设置").isDisplayed() &&
+                ui.onAllNodesWithTag("usage-stats-screen").fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+        }
         node("usage-stats-screen").assertDoesNotExist()
         backToChat(activity); assertDraft("原聊天草稿")
         assertEquals(0, fixture.opens.get()); assertTopBarBlurCompatibility()

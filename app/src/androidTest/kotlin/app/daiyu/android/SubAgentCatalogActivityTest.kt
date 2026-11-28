@@ -1,6 +1,8 @@
 package app.daiyu.android
 
 import android.content.ContextWrapper
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.platform.ViewRootForTest
 import androidx.compose.ui.test.*
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.semantics.SemanticsActions
@@ -53,6 +55,7 @@ class SubAgentCatalogActivityTest : WiredActivityTestCase() {
         ui.onNodeWithContentDescription("草稿模型").assertTextContains("run-control", substring = true)
     }
 
+    @OptIn(ExperimentalComposeUiApi::class)
     fun testPresetPickerUsesSavedDirectoryWithoutDecryptingKeyAndRefreshesAfterResume() {
         setDraft("catalog preset unsent")
         val before = fixture.database.exportBackup()
@@ -66,6 +69,21 @@ class SubAgentCatalogActivityTest : WiredActivityTestCase() {
             ui.onNodeWithContentDescription("编辑子代理组${preset.name}").assertIsEnabled().performClick()
             ui.onNode(hasText("添加子代理") and hasClickAction()).assertIsEnabled().performClick()
             assertPickerContainsSavedModel()
+            fun dismissWindow(tag: String) {
+                val target = node(tag)
+                awaitNodeWindowFocus(target)
+                dismissIme()
+                val view = (target.fetchSemanticsNode().root as ViewRootForTest).view
+                instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+                ui.waitUntil(5_000) {
+                    ui.mainClock.advanceTimeByFrame()
+                    var detached = false
+                    instrumentation.runOnMainSync { detached = !view.isAttachedToWindow }
+                    detached
+                }
+            }
+            dismissWindow("chat-model-picker")
+            awaitNodeWindowFocus(node("subagent-config-window"))
             ui.onNodeWithContentDescription("草稿思考深度").scrollToVisible().assertIsEnabled().performClick()
             awaitUniqueTag("thinking-depth-slider")
             awaitNodeWindowFocus(node("thinking-depth-slider"))
@@ -79,17 +97,23 @@ class SubAgentCatalogActivityTest : WiredActivityTestCase() {
             val range = node("thinking-depth-slider").fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo]
             assertEquals(0f..6f, range.range)
             assertEquals(5, range.steps)
-            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-            ui.waitForIdle()
+            dismissWindow("thinking-depth-slider")
+            awaitNodeWindowFocus(node("subagent-config-window"))
             node("thinking-depth-slider").assertDoesNotExist()
             assertTrue(repo.snapshot(SubAgentConfigKey.Preset(preset.id)).profiles.isEmpty())
             assertEquals(before, fixture.database.exportBackup())
             assertEquals(0, fixture.opens.get())
-            instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
-            ui.waitForIdle()
+            dismissWindow("subagent-config-window")
+            val addAgent = ui.onNode(hasText("添加子代理") and hasClickAction())
+            awaitNodeWindowFocus(addAgent)
+            addAgent.assertIsDisplayed()
             mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-            ui.waitForIdle()
-            ui.onNodeWithText("添加子代理组").assertExists()
+            val addGroup = ui.onNodeWithText("添加子代理组")
+            ui.waitUntil(5_000) {
+                ui.mainClock.advanceTimeByFrame()
+                addGroup.isDisplayed()
+            }
+            addGroup.assertIsDisplayed()
             backToChat(activity)
             awaitDirectory("leaving clears directory") { source().models.isEmpty() }
             assertDraft("catalog preset unsent")

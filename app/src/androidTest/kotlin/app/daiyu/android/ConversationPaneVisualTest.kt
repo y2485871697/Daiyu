@@ -648,6 +648,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             val normalBounds = bounds("drawer-conversation:second")
             node("drawer-conversation:second").performTouchInput { longClick() }
             ui.onNodeWithText(text(R.string.action_rename)).assertIsDisplayed()
+            ui.onNodeWithText(text(R.string.action_delete)).assertIsDisplayed()
             assertEquals(normalBounds, bounds("drawer-conversation:second"))
             assertNull(action)
             mainThread { activity.onBackPressedDispatcher.onBackPressed() }
@@ -660,7 +661,7 @@ class ConversationPaneVisualTest : WiredActivityTestCase() {
             ui.onNodeWithText(text(R.string.conversation_pin)).assertIsDisplayed()
             ui.onNodeWithText(text(R.string.conversation_export)).assertIsDisplayed()
             ui.onNodeWithText(text(R.string.drawer_move_to_folder)).assertIsDisplayed()
-            ui.onNodeWithText(text(R.string.action_delete)).assertIsDisplayed()
+            ui.onNodeWithText(text(R.string.conversation_batch_delete)).assertIsDisplayed()
             node("drawer-conversation:second").assertIsNotSelected()
             node("drawer-conversation:first").assertIsSelected()
             node("drawer-selection-count").assertTextEquals("已选择 1 项")

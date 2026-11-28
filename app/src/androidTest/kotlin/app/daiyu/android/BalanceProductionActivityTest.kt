@@ -117,8 +117,7 @@ class BalanceProductionActivityTest : WiredActivityTestCase() {
         ui.onNodeWithText("独立余额设置").assertIsDisplayed()
         assertSame(runtime, runBlocking { testHost.get(ProviderRegistry.PRIMARY) })
         assertEquals(revision, runtime.state.value.revision)
-        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-        node("page:设置").assertIsDisplayed()
+        backToPage(activity, "page:设置")
         mainThread { activity.onBackPressedDispatcher.onBackPressed() }
         assertComposerMoney()
     }

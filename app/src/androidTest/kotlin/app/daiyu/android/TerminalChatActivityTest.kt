@@ -133,16 +133,21 @@ class TerminalChatActivityTest : WiredActivityTestCase() {
     fun testMountedRunButtonSubmitsPtyOnlyAfterOriginalReceipt() = mountedRun(async = false)
     fun testMountedRunButtonSubmitsAsyncOnlyAfterOriginalReceipt() = mountedRun(async = true)
     private fun mountedRun(async: Boolean) {
-        openEditor(async)
-        val before = fixture.database.draft()
+        val editor = openEditor(async)
+        val before = editorValue(editor, "getDraft") as TerminalDraftSnapshot
+        assertEquals(before.text, fixture.database.draft())
         val session = fixture.session(holdSeconds = 120)
         workerBlocked { release ->
             clickRun()
             awaitControl("original terminal ticket") { fixture.controller.textSendState() != null }
             val identity = if (async) checkNotNull(fixture.controller.terminalJobPreparation()).identity
                 else checkNotNull(fixture.controller.terminalPreparation()).identity
-            assertEquals(before, fixture.database.draft())
-            assertDraft(before)
+            assertEquals(before.text, fixture.database.draft())
+            mainThread { assertEquals(before, invoke(activity, "terminalDraft")) }
+            assertDraft("")
+            awaitUniqueTag("chat-send-preview")
+            ui.onNode(hasText(before.text) and hasAnyAncestor(hasTestTag("chat-send-preview")),
+                useUnmergedTree = true).assertExists()
             assertTrue(fixture.database.conversations().isEmpty())
             assertEquals(0, fixture.opens.get())
             assertFalse(session.entered.await(50, TimeUnit.MILLISECONDS))
@@ -150,6 +155,7 @@ class TerminalChatActivityTest : WiredActivityTestCase() {
             assertTrue(session.entered.await(10, TimeUnit.SECONDS))
             awaitTextSendResult(activity)
             assertDraft("")
+            mainThread { assertEquals("", (invoke(activity, "terminalDraft") as TerminalDraftSnapshot).text) }
             val conversation = fixture.database.conversations().single()
             val assistant = fixture.database.messages(conversation.id).single { it.second.role == "assistant" }.second
             assertEquals(identity.conversationId, conversation.id)

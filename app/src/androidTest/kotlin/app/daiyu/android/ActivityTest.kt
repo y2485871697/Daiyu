@@ -253,7 +253,8 @@ class ActivityTest : WiredActivityTestCase() {
             mainThread {
                 try { activity.select(null); fail("busy selection must reject") } catch (_: IllegalStateException) {}
             }
-            activity = recreateActivity(activity); node("chat-draft").assertIsNotEnabled()
+            activity = recreateActivity(activity)
+            ui.onNodeWithTag("chat-draft", useUnmergedTree = true).assertIsNotEnabled()
             release.countDown(); awaitControl("import completes") { !fixture.controller.dataBusy && fixture.controller.dataRevision > 0 }
             ui.waitForIdle(); node("chat-draft").assertIsEnabled(); assertDraft(imported)
             mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.NEW_CHAT) }; assertDraft("")

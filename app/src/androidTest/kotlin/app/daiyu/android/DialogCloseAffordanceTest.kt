@@ -112,7 +112,12 @@ class DialogCloseAffordanceTest : WiredActivityTestCase() {
         node("chat-attachment-path-toggle").assertDoesNotExist()
         ui.onNodeWithText("声明图片能力").assertDoesNotExist()
         ui.onNodeWithText("输入文件路径").assertDoesNotExist()
-        node("chat-attachment:ATTACH_IMAGE").performClick()
+        val attachImage = "chat-attachment:ATTACH_IMAGE"
+        node(attachImage).performClick()
+        ui.waitUntil(5_000) {
+            ui.mainClock.advanceTimeByFrame()
+            ui.runOnIdle { closes > 0 && action != null }
+        }
         assertEquals(app.daiyu.android.ui.screens.chat.conversation.ChatMenuAction.ATTACH_IMAGE, action)
         assertEquals(1, closes)
         node("chat-attachment:ATTACH_IMAGE").assertDoesNotExist()

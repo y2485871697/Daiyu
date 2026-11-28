@@ -54,12 +54,19 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase(object : andro
         awaitHostWindowFocus(original)
         assertRenewed(previous)
     }
-    private fun openWorkspace() {
+    private fun openWorkspace(withDraft: Boolean = false) {
         awaitControl("chat local readers idle") { !fixture.controller.dataBusy }
         awaitHostWindowFocus(activity)
         dismissIme()
-        val distance = 80f * activity.resources.displayMetrics.density
-        node("chat-workspace-gesture-area").performTouchInput { swipe(center, center + Offset(0f, -distance)) }
+        val strip = node("chat-workspace-gesture-area")
+        if (withDraft) {
+            strip.performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick) { action ->
+                assertTrue(action())
+            }
+        } else {
+            val distance = 80f * activity.resources.displayMetrics.density
+            strip.performTouchInput { swipe(center, center + Offset(0f, -distance)) }
+        }
         awaitUniqueTag("conversation-workspace-sheet")
     }
     private fun loadedDirectory(path: String) {
@@ -73,7 +80,7 @@ class OrdinaryDialogLifecycleActivityTest : WiredActivityTestCase(object : andro
     }
     fun testWorkspaceManagementSurvivesPauseAndStopButOldClickNeverRevives() {
         setDraft("后台返回必须保留的草稿")
-        openWorkspace()
+        openWorkspace(withDraft = true)
         val originalBackup = fixture.database.exportBackup()
         val oldAdd = node("workspace-add").fetchSemanticsNode().config[RetainedWorkspaceAction]
         val oldLease = activeLease()

@@ -407,7 +407,7 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
         model.release.countDown()
         awaitControl("initialized Runner returned and original catalog locally drained") {
             entry.revoked && entry.catalog?.virtualDisplayCleanupLocallyDrained(checkNotNull(entry.session)) == true &&
-                fixture.controller.problem?.contains("UNKNOWN") == true
+                fixture.controller.problem == "副屏清理结果未确认"
         }
         mainThread { invokeMain("cancelVirtualDisplayEditor", entry); assertNull(editor()) }
         assertEquals(1, starts.get()); assertEquals(0, cleanupSends.get())

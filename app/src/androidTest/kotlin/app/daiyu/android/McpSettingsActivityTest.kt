@@ -31,16 +31,31 @@ class McpSettingsActivityTest : WiredActivityTestCase() {
         assertEquals(before, fixture.database.exportBackup())
         assertNull(fixture.controller.active); assertEquals(0, fixture.opens.get())
     }
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testBackAndRecreationRevokeExactlyTheOriginalSettingsOwner() {
         enter()
-        val old = currentOwner(); assertTrue(old.current())
-        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
-        ui.waitForIdle(); assertFalse(old.current())
-        node("page:设置").assertExists()
+        val old = currentOwner()
+        mainThread { assertTrue("original owner must be current on entry", old.current()) }
+        val screen = node("mcp-settings")
+        val root = (screen.fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest).view
+        awaitNodeWindowFocus(screen)
+        dismissIme(root)
+        awaitNodeWindowFocus(screen)
+        instrumentation.sendKeyDownUpSync(android.view.KeyEvent.KEYCODE_BACK)
+        awaitUniqueTag("page:设置")
+        node("page:设置").assertIsDisplayed()
+        ui.waitUntil(5_000) {
+            ui.onAllNodesWithTag("mcp-settings").fetchSemanticsNodes(atLeastOneRootRequired = false).isEmpty()
+        }
         node("settings-search").assertDoesNotExist()
+        mainThread { assertFalse("back must revoke the original MCP owner", old.current()) }
         reveal("settings-row:MCP 服务器", "设置").performClick()
-        val replacement = currentOwner(); assertNotSame(old, replacement); assertTrue(replacement.current())
+        awaitUniqueTag("mcp-settings")
+        val replacement = currentOwner()
+        assertNotSame(old, replacement)
+        mainThread { assertTrue("new MCP visit must have its own current owner", replacement.current()) }
         activity = recreateActivity(activity)
-        assertFalse(replacement.current()); assertEquals(0, fixture.opens.get())
+        mainThread { assertFalse("recreation must revoke the replacement owner", replacement.current()) }
+        assertEquals(0, fixture.opens.get())
     }
 }

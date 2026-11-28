@@ -288,6 +288,7 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get())
     }
 
+    @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
     fun testUnavailableSelectionOffersOnlyCompactNoticeAndExplicitRefresh() {
         seedAndSelect()
         val before = fixture.database.exportBackup()
@@ -313,7 +314,18 @@ class ContextManagementEntryActivityTest : WiredActivityTestCase() {
         node("context-compress").assertIsEnabled()
         assertFalse(adapter.state.value.confirmingCompression)
         assertEquals(before, fixture.database.exportBackup())
+        val close = node("context-close")
+        val dialog = (close.fetchSemanticsNode().root as androidx.compose.ui.platform.ViewRootForTest).view
+        close.performClick()
+        ui.waitUntil(5_000) {
+            var detached = false
+            instrumentation.runOnMainSync { detached = !dialog.isAttachedToWindow }
+            detached
+        }
+        node("context-management").assertDoesNotExist()
+        awaitUniqueTag("chat-draft")
         assertDraft("retained unsent draft")
+        assertEquals(before, fixture.database.exportBackup())
         assertEquals(0, fixture.opens.get())
     }
 

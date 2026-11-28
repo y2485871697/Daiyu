@@ -212,6 +212,8 @@ class EditingAttachmentSelectionTest : InstrumentationTestCase() {
         main { controller.observe(listener); listener() }; await(ready)
         main { controller.unobserve(listener) }
         assertNull(controller.problem)
+        val binding = requireNotNull(controller.providers.selectedConversationModel())
+        assertTrue(f.db.bindModel(f.conversation.id, null, binding))
         return controller
     }
     private fun action(controller: ChatController, target: MessageActionTarget, text: String,

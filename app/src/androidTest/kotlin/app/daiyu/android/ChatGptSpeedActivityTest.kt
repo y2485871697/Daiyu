@@ -63,7 +63,7 @@ class ChatGptSpeedActivityTest : WiredActivityTestCase() {
         awaitUniqueTag("chat-composer-provider-balance")
         mainThread {
             invokeHost(activity, "refreshConfirmedModelLabel")
-            assertNull(invokeHost(activity, "getBalanceRuntime"))
+            assertSame(runtime, invokeHost(activity, "getBalanceRuntime"))
         }
         awaitUniqueTag("chat-composer-provider-balance")
     }

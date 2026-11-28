@@ -8132,7 +8132,10 @@ class MainActivity : ComponentActivity() {
             if (!activityUsable() || retainedPage != "chat" || selected?.id?.value != conversationId ||
                 confirmedGptSpeed?.editor != expected.editor || confirmedGptSpeed?.editing?.settings?.model != value.model) return@saveConversationGptSpeed
             if (success) {
-                confirmedGptSpeed = expected.copy(editing = expected.editing.copy(settings = value))
+                val saved = expected.copy(editing = expected.editing.copy(settings = value))
+                val configurationChanged = confirmedGptSpeed?.hasSameConfiguration(saved) != true
+                confirmedGptSpeed = saved
+                if (configurationChanged) contextModelRevision++
                 toast(chatGptSpeedToast(next))
             } else toast("速度切换未保存，请重新尝试")
             publishChat(rowsChanged = false)

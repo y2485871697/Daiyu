@@ -45,7 +45,7 @@ class VoiceToneSelectionActivityTest : WiredActivityTestCase() {
     }
 
     @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
-    fun testToneTitleStartsLeftAndSelectionPaintUpdatesWithoutClosingInBothThemes() {
+    fun testToneTitleIsCenteredAndSelectionPaintUpdatesWithoutClosingInBothThemes() {
         for (dark in listOf(false, true)) for (title in listOf("音色", "选择音色")) {
             val selected = mutableStateOf(first)
             val open = mutableStateOf(true)
@@ -70,10 +70,13 @@ class VoiceToneSelectionActivityTest : WiredActivityTestCase() {
                 useUnmergedTree = true)
             titleNode.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
             assertEquals(1, layouts.size)
-            assertEquals(TextAlign.Start, layouts.single().layoutInput.style.textAlign)
-            assertEquals(0f, layouts.single().getLineLeft(0), 1f)
-            val sheetLeft = node("voice-tone-dialog").fetchSemanticsNode().boundsInRoot.left
-            assertEquals(sheetLeft, titleNode.fetchSemanticsNode().boundsInRoot.left, 1f)
+            val titleLayout = layouts.single()
+            assertEquals(1, titleLayout.lineCount)
+            assertEquals(TextAlign.Center, titleLayout.layoutInput.style.textAlign)
+            assertEquals(titleLayout.size.width / 2f,
+                (titleLayout.getLineLeft(0) + titleLayout.getLineRight(0)) / 2f, 1f)
+            val sheetCenter = node("voice-tone-dialog").fetchSemanticsNode().boundsInRoot.center.x
+            assertEquals(sheetCenter, titleNode.fetchSemanticsNode().boundsInRoot.center.x, 1f)
             node("voice-tone-option:$first").assertIsSelected()
             node("voice-tone-option:$second").assertIsNotSelected()
             assertSelectedPaint(first, "第一音色", palette)

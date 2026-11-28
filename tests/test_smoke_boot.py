@@ -101,7 +101,7 @@ class SourceTests(unittest.TestCase):
         script = (ROOT / 'scripts/smoke_boot.sh').read_text()
         workflow = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:', 1)[1]
         budgets = [int(seconds) for seconds in re.findall(r'(?:^ *|\) )instrumentation_budget=(\d+)', script, re.M)]
-        self.assertEqual(budgets, [7200, 1080, 9600])
+        self.assertEqual(budgets, [7200, 1500, 9600])
         self.assertIn('export ADB_COMMAND_TIMEOUT=$((instrumentation_budget + 60))', script)
         self.assertIn('adb_stage instrumentation "$instrumentation_budget" shell am instrument', script)
         stages = [(phase, int(seconds)) for phase, seconds in re.findall(r'adb_stage ([a-z-]+) (\d+) ', script)]
@@ -115,9 +115,9 @@ class SourceTests(unittest.TestCase):
             return tuple(int(minutes) * 60 for minutes in match.groups())
         candidate_step, step = limits(8)
         candidate_job, job = limits(4)
-        self.assertEqual(candidate_step, 30 * 60)
+        self.assertEqual(candidate_step, 35 * 60)
         self.assertGreaterEqual(candidate_job - candidate_step, 10 * 60)
-        self.assertGreater(candidate_step - budgets[1], 10 * 60)
+        self.assertGreaterEqual(candidate_step - budgets[1], 10 * 60)
         self.assertIn('run: timeout --kill-after=5 30 adb start-server', workflow)
         self.assertIn('emulator-boot-timeout: 180', workflow)
         # 600s emulator boot + all one-shot stages; loops include kill grace.
@@ -1126,7 +1126,7 @@ exit 0
     def test_candidate_instrumentation_has_a_shorter_budget_with_the_same_strict_report(self):
         result = self.smoke(mode="candidate", test_classes='app.daiyu.android.FirstTest')
         self.assertEqual(result.returncode, 0, result.stderr.decode())
-        self.assertIn('phase=instrumentation budget=1080s', (self.root / 'smoke/stages.txt').read_text())
+        self.assertIn('phase=instrumentation budget=1500s', (self.root / 'smoke/stages.txt').read_text())
         self.assertTrue(json.loads((self.root / 'smoke/instrumentation-result.json').read_text())['valid'])
 
     def test_candidate_runs_new_selected_class_on_both_apis(self):

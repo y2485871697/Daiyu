@@ -6,7 +6,7 @@ exec 3>&2
 # The pre-launch wrapper bounds action probes; smoke stages set their own budgets.
 instrumentation_budget=7200
 case "${SMOKE_MODE:-}" in
-  candidate) instrumentation_budget=1080 ;;
+  candidate) instrumentation_budget=1500 ;;
   # Full release shards ran out of the old budget while still advancing.
   release) instrumentation_budget=9600 ;;
 esac

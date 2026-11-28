@@ -117,11 +117,11 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         activity = startMain()
     }
 
-    private fun finishHost() {
+    private fun finishHost(waitForVisualIdle: Boolean = true) {
         val finishing = activity
-        mainThread { finishing.finish() }
+        if (waitForVisualIdle) mainThread { finishing.finish() } else controlMain { finishing.finish() }
         awaitControl("image Activity destroyed before replacing controller") { finishing.isDestroyed }
-        ui.waitForIdle()
+        if (waitForVisualIdle) ui.waitForIdle()
     }
 
     override fun tearDown() {
@@ -479,8 +479,14 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         val tag = "drawer-conversation:${image.expectedOwner.conversationId}"
         ui.waitUntil(10_000) { ui.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
         node(tag).performClick()
-        fun ready() = ui.waitUntil(10_000) {
-            ui.onAllNodesWithContentDescription("消息图片 1", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        fun ready() {
+            awaitControl("original image conversation and history loader are current") {
+                invokeHost(activity, "getRetainedPage") == "chat" &&
+                    host().session.owner.conversationId == image.expectedOwner.conversationId && host().historyLoader != null
+            }
+            ui.waitUntil(10_000) {
+                ui.onNodeWithContentDescription("消息图片 1", useUnmergedTree = true).isDisplayed()
+            }
         }
         ready()
         controlMain {
@@ -489,14 +495,18 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         awaitControl("reselected history chat remains visible with drawer closed") {
             invokeHost(activity, "getRetainedPage") == "chat" && invokeHost(activity, "getSidebarVisible") == false
         }
-        finishHost()
-        activity = startMain()
+        finishHost(waitForVisualIdle = false)
+        activity = startMain(waitForVisualIdle = false)
         ready()
         ui.onNode(hasContentDescription("打开侧边栏") and hasClickAction()).performClick()
         node("drawer-dock-settings").performClick()
-        ui.waitForIdle()
+        awaitControl("settings route revoked the history loader") {
+            invokeHost(activity, "getRetainedPage") == "settings" && host().historyLoader == null
+        }
+        val settings = ui.onNodeWithTag("page:设置")
+        ui.waitUntil(10_000) { settings.isDisplayed() }
         assertNull(host().historyLoader)
-        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        controlMain { activity.onBackPressedDispatcher.onBackPressed() }
         ready()
         assertEquals(1, calls.get())
         assertEquals(1, documents.opens.get())
@@ -780,7 +790,7 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
 
             // Another real process-boundary equivalent proves that the successor is durable,
             // not an Activity-only workaround. Do not edit the empty text before sending.
-            finishHost()
+            finishHost(waitForVisualIdle = false)
             controller.close()
             beforeFactory = {}
             controller = ChatController(app, ConversationDatabase(app), settings,
@@ -788,8 +798,11 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
                 { error("image-only fixture") }, { beforeFactory(); model },
                 providerBalanceHost = { fixtureBalanceHost })
             awaitControl("successor controller ready") { controller.ready }
-            mainThread { (instrumentation.targetContext.applicationContext as ChatApplication).controller = controller }
-            activity = startMain()
+            controlMain { (instrumentation.targetContext.applicationContext as ChatApplication).controller = controller }
+            activity = startMain(waitForVisualIdle = false)
+            awaitControl("cold Activity restored the durable successor without an image-send fence") {
+                host().session.owner == successor && !host().fenced
+            }
             assertDraft("")
             assertEquals(successor, host().session.owner)
             assertEquals(frozen.revision, revisionField.getLong(activity))
@@ -901,6 +914,9 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             assertDraft("仅发送一次")
             val other = controller.database.create()
             val pendingAttempt = checkNotNull(host().session.attempt)
+            val pendingOwner = host().session.owner
+            val selectionReady = MainActivity::class.java.getDeclaredField("selectionReady").apply { isAccessible = true }
+            val selected = MainActivity::class.java.getDeclaredField("selected").apply { isAccessible = true }
             controlMain {
                 // Leaving cancels the handle, but DB beginCommit has already won.
                 activity.select(other)
@@ -911,10 +927,17 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
                     host().session.attempt === pendingAttempt && host().sending
             }
             assertTrue(host().sending)
-            activity = recreateActivity(activity)
-            assertTrue(host().sending)
-            mainThread { queue.release() }
-            ui.waitUntil(10_000) { !host().sending }
+            activity = recreateActivity(activity, waitForVisualIdle = false)
+            awaitControl("recreated selected editor owns the same still-pending committed attempt") {
+                selectionReady.getBoolean(activity) && (selected.get(activity) as? Conversation)?.id == conversation.id &&
+                    invokeHost(activity, "getRetainedPage") == "chat" && invokeHost(activity, "getSidebarVisible") == false &&
+                    host().session.owner == pendingOwner && host().session.attempt === pendingAttempt && host().sending
+            }
+            controlMain { queue.release() }
+            awaitControl("the committed receipt settles the recreated editor") {
+                !host().sending && !host().fenced && host().session.owner.conversationId == conversation.id.value &&
+                    host().session.owner != pendingOwner
+            }
             assertDraft("")
             assertEquals("", controller.database.conversations().single { it.id == conversation.id }.draft)
             assertEquals(1, controller.database.messages(conversation.id).count { it.second.role == Message.USER_ROLE })

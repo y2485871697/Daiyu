@@ -13,79 +13,121 @@ import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 class ActivityTest : WiredActivityTestCase() {
-    private fun refresh() { mainThread { MainActivity::class.java.getDeclaredMethod("refresh").apply { isAccessible = true }.invoke(activity) } }
     fun testStreamingFollowStopsOnTouchAndEarlierHistory() {
         val db = fixture.database
         val conversation = db.create("default")
-        repeat(70) { i ->
+        repeat(69) { i ->
             val run = RunId("scroll-$i")
             val user = Message(MessageId("su-$i"), conversation.id, run, "user", listOf(MessageBlock.Text("u", "历史用户 $i")), RunStatus.COMPLETED)
             val assistant = Message(MessageId("sa-$i"), conversation.id, run, "assistant", listOf(MessageBlock.Text("a", "历史正文 $i\n".repeat(12))), RunStatus.RUNNING)
             db.send(user, assistant)
-            if (i < 69) db.save(assistant.copy(status = RunStatus.COMPLETED))
+            db.save(assistant.copy(status = RunStatus.COMPLETED))
         }
         mainThread { activity.select(conversation) }
-        node("chat-turn:sa-69").assertIsDisplayed()
-        val tail = db.messages(conversation.id).last().second
-        mainThread { db.save(tail.copy(blocks = listOf(MessageBlock.Text("a", "流式正文\n".repeat(80))))) }
-        refresh()
-        val viewport = node("chat-messages").fetchSemanticsNode().boundsInRoot
-        val bottom = node("chat-turn:sa-69").fetchSemanticsNode().boundsInRoot.bottom
-        assertTrue("stream growth follows the measured bottom", bottom <= viewport.bottom + 2f)
-        val followingRange = node("chat-messages").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
-        assertEquals("stream reaches actual scroll end", followingRange.maxValue(), followingRange.value(), 0.01f)
-        node("chat-messages").performTouchInput { swipeDown(startY = height * 0.7f, endY = height * 0.9f) }
-        node("chat-messages").performScrollToIndex(8)
-        ui.mainClock.advanceTimeByFrame()
-        ui.waitForIdle()
-        val candidates = ui.onAllNodes(SemanticsMatcher("turn tag") {
-            it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("chat-turn:") == true
-        }, useUnmergedTree = true).fetchSemanticsNodes()
-        val anchor = candidates.first { it.boundsInRoot.bottom > viewport.top && it.boundsInRoot.top < viewport.bottom }
-        val tag = anchor.config[SemanticsProperties.TestTag]
-        val top = anchor.boundsInRoot.top
-        mainThread { db.save(tail.copy(blocks = listOf(MessageBlock.Text("a", "新正文\n".repeat(100))))) }
-        refresh()
-        assertEquals("touch stops streaming follow", top, node(tag).fetchSemanticsNode().boundsInRoot.top, 1f)
-        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.LOAD_EARLIER) }
-        assertEquals("prepend preserves visible key offset", top, node(tag).fetchSemanticsNode().boundsInRoot.top, 1f)
-        val shownField = MainActivity::class.java.getDeclaredField("shown").apply { isAccessible = true }
-        @Suppress("UNCHECKED_CAST")
-        fun shown() = shownField.get(activity) as List<Pair<Long, Message>>
-        mainThread {
-            assertTrue(shown().size > 50)
-            assertEquals(RunStatus.RUNNING, shown().last().second.status)
+        val session = fixture.session("结束", holdSeconds = 120)
+        try {
+            val prompt = "流式滚动验证"
+            setDraft(prompt)
+            mainThread { retainedControls(activity).onSend(prompt) }
+            awaitTextSendResult(activity)
+            assertTrue(session.entered.await(5, TimeUnit.SECONDS))
+            val owner = checkNotNull(fixture.controller.active)
+            assertEquals(conversation.id, owner.conversationId)
+            val sink = checkNotNull(session.sink.get())
+            val tailTag = "chat-turn:${owner.id.value}"
+            val shownField = MainActivity::class.java.getDeclaredField("shown").apply { isAccessible = true }
+            @Suppress("UNCHECKED_CAST")
+            fun shown() = shownField.get(activity) as List<Pair<Long, Message>>
+            var body = ""
+            fun append(label: String, delta: String) {
+                body += delta
+                sink(ModelEvent.TextDelta("body", delta))
+                awaitControl(label) {
+                    shown().lastOrNull()?.second?.let {
+                        it.id == owner.id && it.runId == owner.runId && it.conversationId == conversation.id &&
+                            it.status == RunStatus.RUNNING && it.blocks.filterIsInstance<MessageBlock.Text>()
+                                .joinToString("") { block -> block.text } == body
+                    } == true
+                }
+            }
+            fun awaitTailGrowth(previousHeight: Int) = ui.waitUntil(5_000) {
+                val row = ui.onAllNodesWithTag(tailTag, useUnmergedTree = true)
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).singleOrNull()
+                row != null && row.size.height > previousHeight
+            }
+            val messages = ui.onNodeWithTag("chat-messages")
+            fun messageRange() = messages.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+            fun atScrollEnd(): Boolean = messageRange().let { kotlin.math.abs(it.maxValue() - it.value()) <= 0.01f }
+            fun awaitFollowingEnd(marker: String) {
+                ui.waitUntil(10_000) {
+                    ui.onAllNodesWithText(marker, substring = true, useUnmergedTree = true)
+                        .fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty() && atScrollEnd()
+                }
+            }
+
+            append("initial streaming revision published", "开始\n")
+            val initialHeight = node(tailTag).assertIsDisplayed().fetchSemanticsNode().size.height
+            val firstMarker = "首段正文完毕"
+            append("first streaming growth published", "流式正文\n".repeat(80) + "$firstMarker\n")
+            awaitTailGrowth(initialHeight)
+            awaitFollowingEnd(firstMarker)
+            val viewport = messages.fetchSemanticsNode().boundsInRoot
+            val bottom = node(tailTag).fetchSemanticsNode().let { it.positionInRoot.y + it.size.height }
+            assertTrue("stream growth follows the measured bottom", bottom <= viewport.bottom + 2f)
+            val followingRange = messageRange()
+            assertEquals("stream reaches actual scroll end", followingRange.maxValue(), followingRange.value(), 0.01f)
+            node("chat-messages").performTouchInput { swipeDown(startY = height * 0.7f, endY = height * 0.9f) }
+            node("chat-messages").performScrollToIndex(8)
+            ui.mainClock.advanceTimeByFrame()
+            ui.waitForIdle()
+            val candidates = ui.onAllNodes(SemanticsMatcher("turn tag") {
+                it.config.getOrNull(SemanticsProperties.TestTag)?.startsWith("chat-turn:") == true
+            }, useUnmergedTree = true).fetchSemanticsNodes()
+            val anchor = candidates.first { it.boundsInRoot.bottom > viewport.top && it.boundsInRoot.top < viewport.bottom }
+            val tag = anchor.config[SemanticsProperties.TestTag]
+            val top = anchor.positionInRoot.y
+            val preTapMarker = "触摸前正文完毕"
+            append("post-swipe streaming revision published", "新正文\n".repeat(100) + "$preTapMarker\n")
+            assertEquals("touch stops streaming follow", top, node(tag).fetchSemanticsNode().positionInRoot.y, 1f)
+            var beforePrepend: List<Pair<Long, Message>> = emptyList()
+            controlMain { beforePrepend = shown() }
+            mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.LOAD_EARLIER) }
+            awaitControl("earlier history is prepended around the live owner") {
+                val history = shown()
+                history.size > beforePrepend.size && history.first().first < beforePrepend.first().first &&
+                    history.last().second.id == owner.id && history.last().second.status == RunStatus.RUNNING
+            }
+            assertEquals("prepend preserves visible key offset", top, node(tag).fetchSemanticsNode().positionInRoot.y, 1f)
+            var choice = -1
+            mainThread {
+                choice = shown().map { it.second }.filter { it.role == Message.USER_ROLE }
+                    .indexOfFirst { it.id == MessageId("su-21") }
+                assertTrue("the requested historical user is loaded", choice >= 0)
+                retainedControls(activity).onMenuAction(ChatMenuAction.LOCATE_USER)
+            }
+            node("prompt-choice:$choice").performClick()
+            val located = ui.onNodeWithTag("chat-turn:su-21")
+            ui.waitUntil(5_000) { located.isDisplayed() }
+            assertTrue(located.fetchSemanticsNode().positionInRoot.y >= viewport.top - 2f)
+            mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.BOTTOM) }
+            awaitFollowingEnd(preTapMarker)
+            val tailRow = node(tailTag).assertIsDisplayed()
+            val originalHeight = tailRow.fetchSemanticsNode().size.height
+            val preTapRange = messageRange()
+            assertEquals("tap begins at the scroll end", preTapRange.maxValue(), preTapRange.value(), 0.01f)
+            node("chat-messages").performTouchInput { click(center) }
+            append("post-tap streaming revision published", "点击后正文\n".repeat(60))
+            awaitTailGrowth(originalHeight)
+            val touchedRange = messageRange()
+            assertTrue("a down without a drag also stops follow", touchedRange.value() < touchedRange.maxValue())
+            session.release.countDown()
+            awaitControl("stream finished") { fixture.controller.active == null }
+            mainThread { activity.select(null) }
+            node(tailTag).assertDoesNotExist()
+            assertEquals(1, fixture.opens.get())
+        } finally {
+            session.release.countDown()
         }
-        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.LOCATE_USER) }
-        node("prompt-choice:1").performClick()
-        // After prepend, the second loaded user is su-21 (the original page began at su-45).
-        node("chat-turn:su-21").assertIsDisplayed()
-        assertTrue(node("chat-turn:su-21").fetchSemanticsNode().boundsInRoot.top >= viewport.top - 2f)
-        val beforeTap = "新正文\n".repeat(100)
-        fun hasPublished(text: String) = shown().lastOrNull()?.second?.let {
-            it.id == tail.id && it.blocks == listOf(MessageBlock.Text("a", text))
-        } == true
-        awaitControl("pre-tap streaming revision published") { hasPublished(beforeTap) }
-        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.BOTTOM) }
-        val tailRow = node("chat-turn:sa-69").assertIsDisplayed()
-        val originalHeight = tailRow.fetchSemanticsNode().size.height
-        node("chat-messages").performTouchInput { click(center) }
-        val appended = beforeTap + "点击后正文\n".repeat(60)
-        mainThread { db.save(tail.copy(blocks = listOf(MessageBlock.Text("a", appended)))) }
-        refresh()
-        awaitControl("post-tap streaming revision published") { hasPublished(appended) }
-        // Detached reply rendering can measure the tail without exposing its offscreen text semantics.
-        ui.waitUntil(5_000) {
-            val row = ui.onAllNodesWithTag("chat-turn:sa-69", useUnmergedTree = true)
-                .fetchSemanticsNodes(atLeastOneRootRequired = false).singleOrNull()
-            row != null && row.size.height > originalHeight
-        }
-        ui.waitForIdle()
-        val touchedRange = node("chat-messages").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
-        assertTrue("a down without a drag also stops follow", touchedRange.value() < touchedRange.maxValue())
-        mainThread { activity.select(null) }
-        node("chat-turn:sa-69").assertDoesNotExist()
-        assertEquals(0, fixture.opens.get())
     }
 
     fun testVideoLifecycleBindingStaysWithRouteAcrossEditorAndActivityReplacement() {

@@ -312,9 +312,9 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
             android.os.SystemClock.sleep(20)
         }
     }
-    protected fun dismissIme(knownRoot: android.view.View? = null) {
+    protected fun dismissIme(knownRoot: android.view.View? = null, waitForVisualIdle: Boolean = true) {
         val root = knownRoot ?: run {
-            ui.waitForIdle()
+            if (waitForVisualIdle) ui.waitForIdle()
             focusedWindowRoot()
         }
         fun requestHide() {
@@ -344,7 +344,7 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
             failure?.let { throw it }
             hidden
         }
-        ui.waitForIdle()
+        if (waitForVisualIdle) ui.waitForIdle()
     }
     protected fun awaitDialogTouchReady(target: SemanticsNodeInteraction) {
         awaitDialogEnter(target)
@@ -1183,27 +1183,31 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
         ui.waitForIdle()
     }
 
-    protected fun recreateActivity(activity: MainActivity, afterImeHidden: () -> Unit = {},
-        afterDestroyed: () -> Unit = {}): MainActivity {
-        dismissIme()
+    protected fun recreateActivity(activity: MainActivity, waitForVisualIdle: Boolean = true,
+        afterImeHidden: () -> Unit = {}, afterDestroyed: () -> Unit = {}): MainActivity {
+        fun onLifecycleThread(action: () -> Unit) {
+            if (waitForVisualIdle) mainThread(action) else controlMain(action)
+        }
+        dismissIme(waitForVisualIdle = waitForVisualIdle)
         afterImeHidden()
         val monitor = instrumentation.addMonitor(MainActivity::class.java.name, null, false)
         try {
-            mainThread { androidx.core.app.ActivityCompat.recreate(activity) }
+            onLifecycleThread { androidx.core.app.ActivityCompat.recreate(activity) }
             awaitControl("original Activity destroyed before recreated UI waits") { activity.isDestroyed }
             afterDestroyed()
             val replacement = instrumentation.waitForMonitorWithTimeout(monitor, 5000) as? MainActivity
             assertNotNull("framework recreation must resume a new Activity", replacement)
             val created = checkNotNull(replacement)
             try {
-                ui.waitForIdle()
+                if (waitForVisualIdle) ui.waitForIdle()
                 assertTrue(activity.isDestroyed)
+                assertNotSame(activity, created)
                 currentHost = created
-                awaitHostWindowFocus(created)
+                awaitHostWindowFocus(created, waitForVisualIdle)
                 return created
             } catch (failure: Throwable) {
                 try {
-                    mainThread { created.finish() }
+                    onLifecycleThread { created.finish() }
                     awaitControl("failed-recreation Activity destroyed") { created.isDestroyed }
                 } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
                 throw failure

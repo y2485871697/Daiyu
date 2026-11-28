@@ -1,6 +1,7 @@
 package app.daiyu.android
 
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
@@ -288,11 +289,24 @@ class FeatureHubActivityTest : WiredActivityTestCase() {
     }
     fun testSettingsNavigationDoesNotSendPauseOrStopAnActiveRun() {
         val session = fixture.session(holdSeconds = 120)
-        setDraft("运行正文"); node("chat-send").performClick()
-        awaitTextSendResult(activity)
-        setDraft("保留追加草稿")
-        assertTrue(session.entered.await(5, TimeUnit.SECONDS)); val owner = checkNotNull(fixture.controller.active)
         try {
+            setDraft("运行正文")
+            assertDraft("运行正文")
+            node("chat-send").assertIsEnabled().performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+            awaitTextSendResult(activity)
+            try {
+                awaitControl("the accepted settings fixture starts exactly one held model session") {
+                    session.entered.count == 0L && fixture.opens.get() == 1 && fixture.controller.active != null
+                }
+            } catch (failure: AssertionError) {
+                controlMain {
+                    failure.addSuppressed(AssertionError("opens=${fixture.opens.get()} owner=${fixture.controller.active?.id} " +
+                        "pending=${invokeHost(activity, "getPendingTextSend") != null}"))
+                }
+                throw failure
+            }
+            val owner = checkNotNull(fixture.controller.active)
+            setDraft("保留追加草稿")
             openHub()
             for (title in listOf("发送消息", "暂停与继续", "停止回复", "交互问答")) {
 

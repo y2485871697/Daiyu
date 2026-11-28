@@ -123,14 +123,14 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
             physicalUnknown.set(false)
             val entry = fixture.controller.virtualDisplayEntry()
             if (entry != null) {
-                mainThread { fixture.controller.cancelVirtualDisplay(entry) }
+                controlMain { fixture.controller.cancelVirtualDisplay(entry) }
                 awaitControl("fixture original catalog locally drained") {
                     fixture.controller.virtualDisplayEntry() == null ||
                         entry.session?.let { session ->
                             entry.catalog?.virtualDisplayCleanupLocallyDrained(session) == true
                         } == true
                 }
-                mainThread {
+                controlMain {
                     if (fixture.controller.virtualDisplayEntry() === entry)
                         assertTrue(fixture.controller.observeVirtualDisplayClose(entry))
                 }
@@ -409,7 +409,8 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
             entry.revoked && entry.catalog?.virtualDisplayCleanupLocallyDrained(checkNotNull(entry.session)) == true &&
                 fixture.controller.problem == "副屏清理结果未确认"
         }
-        mainThread { invokeMain("cancelVirtualDisplayEditor", entry); assertNull(editor()) }
+        controlMain { invokeMain("cancelVirtualDisplayEditor", entry); assertNull(editor()) }
+        awaitEnabled("vd-cleanup-entry")
         assertEquals(1, starts.get()); assertEquals(0, cleanupSends.get())
         return entry to original
     }

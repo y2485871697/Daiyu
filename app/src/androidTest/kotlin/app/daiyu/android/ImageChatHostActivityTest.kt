@@ -483,7 +483,12 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             ui.onAllNodesWithContentDescription("消息图片 1", useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
         }
         ready()
-        mainThread { activity.onBackPressedDispatcher.onBackPressed() }
+        controlMain {
+            if (invokeHost(activity, "getSidebarVisible") == true) activity.onBackPressedDispatcher.onBackPressed()
+        }
+        awaitControl("reselected history chat remains visible with drawer closed") {
+            invokeHost(activity, "getRetainedPage") == "chat" && invokeHost(activity, "getSidebarVisible") == false
+        }
         finishHost()
         activity = startMain()
         ready()
@@ -745,7 +750,12 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
                 providerBalanceHost = { fixtureBalanceHost })
             awaitControl("existing conversation replacement ready") { controller.ready }
             mainThread { (instrumentation.targetContext.applicationContext as ChatApplication).controller = controller }
-            activity = startMain()
+            activity = startMain(waitForVisualIdle = false)
+            awaitControl("replacement restored the exact recoverable image attempt") {
+                val restored = host()
+                restored !== oldHost && restored.session.owner == oldOwner &&
+                    restored.session.frozen == frozen && restored.canRecover
+            }
             assertTrue(host() !== oldHost)
             assertEquals(conversation.id.value, controller.preferences.getString("selected", null))
             assertEquals(oldOwner, host().session.owner)
@@ -890,10 +900,15 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
             assertFalse(checkNotNull(host().session.attempt).cancelled)
             assertDraft("仅发送一次")
             val other = controller.database.create()
-            mainThread {
+            val pendingAttempt = checkNotNull(host().session.attempt)
+            controlMain {
                 // Leaving cancels the handle, but DB beginCommit has already won.
                 activity.select(other)
                 activity.select(conversation)
+            }
+            awaitControl("reselected editor still holds the committed attempt pending receipt") {
+                host().session.owner.conversationId == conversation.id.value &&
+                    host().session.attempt === pendingAttempt && host().sending
             }
             assertTrue(host().sending)
             activity = recreateActivity(activity)

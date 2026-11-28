@@ -50,25 +50,35 @@ class ActivityTest : WiredActivityTestCase() {
         mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.LOAD_EARLIER) }
         assertEquals("prepend preserves visible key offset", top, node(tag).fetchSemanticsNode().boundsInRoot.top, 1f)
         val shownField = MainActivity::class.java.getDeclaredField("shown").apply { isAccessible = true }
+        @Suppress("UNCHECKED_CAST")
+        fun shown() = shownField.get(activity) as List<Pair<Long, Message>>
         mainThread {
-            @Suppress("UNCHECKED_CAST") val shown = shownField.get(activity) as List<Pair<Long, Message>>
-            assertTrue(shown.size > 50)
-            assertEquals(RunStatus.RUNNING, shown.last().second.status)
+            assertTrue(shown().size > 50)
+            assertEquals(RunStatus.RUNNING, shown().last().second.status)
         }
         mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.LOCATE_USER) }
         node("prompt-choice:1").performClick()
         // After prepend, the second loaded user is su-21 (the original page began at su-45).
         node("chat-turn:su-21").assertIsDisplayed()
         assertTrue(node("chat-turn:su-21").fetchSemanticsNode().boundsInRoot.top >= viewport.top - 2f)
-        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.BOTTOM) }; node("chat-turn:sa-69").assertIsDisplayed()
+        val beforeTap = "新正文\n".repeat(100)
+        fun hasPublished(text: String) = shown().lastOrNull()?.second?.let {
+            it.id == tail.id && it.blocks == listOf(MessageBlock.Text("a", text))
+        } == true
+        awaitControl("pre-tap streaming revision published") { hasPublished(beforeTap) }
+        mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.BOTTOM) }
+        val tailRow = node("chat-turn:sa-69").assertIsDisplayed()
+        val originalHeight = tailRow.fetchSemanticsNode().size.height
         node("chat-messages").performTouchInput { click(center) }
-        mainThread { db.save(tail.copy(blocks = listOf(MessageBlock.Text("a", "点击后正文\n".repeat(160))))) }
+        val appended = beforeTap + "点击后正文\n".repeat(60)
+        mainThread { db.save(tail.copy(blocks = listOf(MessageBlock.Text("a", appended)))) }
         refresh()
-        // refresh starts an IO history read and Markdown parses off-main; wait for that exact update,
-        // not the previously settled 100-line snapshot, before asserting touch ownership.
+        awaitControl("post-tap streaming revision published") { hasPublished(appended) }
+        // Detached reply rendering can measure the tail without exposing its offscreen text semantics.
         ui.waitUntil(5_000) {
-            ui.onAllNodes(hasText("点击后正文", substring = true), useUnmergedTree = true)
-                .fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
+            val row = ui.onAllNodesWithTag("chat-turn:sa-69", useUnmergedTree = true)
+                .fetchSemanticsNodes(atLeastOneRootRequired = false).singleOrNull()
+            row != null && row.size.height > originalHeight
         }
         ui.waitForIdle()
         val touchedRange = node("chat-messages").fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
@@ -82,7 +92,7 @@ class ActivityTest : WiredActivityTestCase() {
         val host = fixture.controller.videoHost
         val first = fixture.database.create("default")
         val second = fixture.database.create("default")
-        for (conversation in listOf(first, second, first, first)) {
+        for ((index, conversation) in listOf(first, second, first, first).withIndex()) {
             mainThread { activity.select(conversation) }
             awaitControl("video route visible after selection") {
                 host.state.visible && host.state.conversation == conversation.id.value
@@ -91,7 +101,7 @@ class ActivityTest : WiredActivityTestCase() {
                 assertTrue("single binding guard remains active", runCatching { host.bindLifecycle(activity) }.isFailure)
             }
             node("chat-draft").assertIsDisplayed()
-            awaitControl("current composer controls survive subcomposition replacement") {
+            awaitControl("current composer controls survive subcomposition replacement #$index (${conversation.id.value})") {
                 invokeHost(activity, "getVideoComposerControls") != null
             }
         }

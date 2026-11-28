@@ -2674,7 +2674,7 @@ class MainActivity : ComponentActivity() {
                                             val editor = inlineMessageEditor
                                             if (editor == null) {
                                                 ImageComposerPanel()
-                                                VideoComposerPanel()
+                                                if (pageCurrent && presented) VideoComposerPanel()
                                             } else {
                                                 val removalGeneration = editorGeneration
                                                 val removalRevision = draftRevision

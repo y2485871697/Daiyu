@@ -258,13 +258,13 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
             !output.contains("Error:") && !output.contains("Exception"))
     }
 
-    protected fun awaitHostWindowFocus(host: MainActivity) {
+    protected fun awaitHostWindowFocus(host: MainActivity, waitForVisualIdle: Boolean = true) {
         awaitControl("host resumed before focused-window check") {
             !host.isDestroyed && !host.isFinishing &&
                 host.lifecycle.currentState == androidx.lifecycle.Lifecycle.State.RESUMED
         }
         check(currentHost === host)
-        awaitVisualIdle()
+        if (waitForVisualIdle) awaitVisualIdle()
         focusedWindowRoot()
     }
 
@@ -1221,7 +1221,13 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
         awaitControl("previous MainActivities destroyed before fixture replacement") { existing.all { it.isDestroyed } }
     }
 
-    protected fun startMain(intent: Intent = Intent(instrumentation.targetContext, MainActivity::class.java)): MainActivity {
+    protected fun startMain(
+        intent: Intent = Intent(instrumentation.targetContext, MainActivity::class.java),
+        waitForVisualIdle: Boolean = true,
+    ): MainActivity {
+        fun onLifecycleThread(action: () -> Unit) {
+            if (waitForVisualIdle) mainThread(action) else controlMain(action)
+        }
         val app = instrumentation.targetContext.applicationContext as ChatApplication
         val created = mutableListOf<MainActivity>()
         var cleanupRequested = false
@@ -1239,22 +1245,22 @@ abstract class ComposeActivityTestCase(motionDurationScale: MotionDurationScale?
             override fun onActivitySaveInstanceState(activity: android.app.Activity, state: Bundle) = Unit
             override fun onActivityDestroyed(activity: android.app.Activity) = Unit
         }
-        mainThread { app.registerActivityLifecycleCallbacks(callbacks) }
+        onLifecycleThread { app.registerActivityLifecycleCallbacks(callbacks) }
         try {
             instrumentation.runOnMainSync { app.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) }
             awaitControl("MainActivity created by explicit launch") { created.isNotEmpty() }
             val activity = created.single()
             currentHost = activity
-            awaitHostWindowFocus(activity)
+            awaitHostWindowFocus(activity, waitForVisualIdle)
             return activity
         } catch (failure: Throwable) {
             try {
-                mainThread { cleanupRequested = true; created.forEach { if (!it.isDestroyed) it.finish() } }
+                onLifecycleThread { cleanupRequested = true; created.forEach { if (!it.isDestroyed) it.finish() } }
                 awaitControl("failed-start Activities destroyed") { created.all { it.isDestroyed } }
             } catch (cleanup: Throwable) { failure.addSuppressed(cleanup) }
             throw failure
         } finally {
-            mainThread { app.unregisterActivityLifecycleCallbacks(callbacks) }
+            onLifecycleThread { app.unregisterActivityLifecycleCallbacks(callbacks) }
         }
     }
 }

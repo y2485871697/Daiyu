@@ -304,21 +304,27 @@ class LocalCatalogModelsActivityTest : WiredActivityTestCase() {
         assertEquals(0, fixture.opens.get()); assertNull(fixture.controller.active)
     }
     fun testOldConfirmationAfterPauseCannotModifyOrDismissFreshConfirmation() {
+        fun openDeleteConfirmation() {
+            reveal("local-model-rename:extra-local").performClick()
+            awaitUniqueTag("catalog-model-editor")
+            val editor = node("catalog-model-editor")
+            awaitDialogEnter(editor)
+            val deleteTag = "local-model-delete:extra-local"
+            editor.scrollToDescendant(hasTestTag(deleteTag))
+            val delete = node(deleteTag)
+            awaitNodeTouchReady(delete)
+            delete.performClick()
+            awaitUniqueTag("delete-confirm-dialog")
+        }
         openLocalModels()
-        reveal("local-model-rename:extra-local").performClick()
-        node("catalog-model-editor").scrollToDescendant(hasTestTag("local-model-delete:extra-local"))
-        node("local-model-delete:extra-local").performClick()
-        awaitUniqueTag("delete-confirm-dialog")
+        openDeleteConfirmation()
         val stale = retainedClickCallback(node("dialog-confirm"))
         val staleCancel = retainedClickCallback(node("dialog-cancel"))
         realPauseResume(activity)
         awaitUniqueTag("page:主模型服务商")
         node("delete-confirm-dialog").assertDoesNotExist()
         openLocalModelTab()
-        reveal("local-model-rename:extra-local").performClick()
-        node("catalog-model-editor").scrollToDescendant(hasTestTag("local-model-delete:extra-local"))
-        node("local-model-delete:extra-local").performClick()
-        awaitUniqueTag("delete-confirm-dialog")
+        openDeleteConfirmation()
         val before = checkNotNull(fixture.settings.localModelCatalogSnapshot())
         for (callback in listOf(stale, staleCancel)) {
             mainThread { callback() }

@@ -122,6 +122,8 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
         lateinit var f: Fixture
         lateinit var conversation: Conversation
         val factories = AtomicInteger(); val opens = AtomicInteger()
+        val opened = CountDownLatch(1)
+        val openFailure = AtomicReference<Throwable>()
         f = fresh { config ->
             factories.incrementAndGet()
             assertTrue(f.db.messages(conversation.id).isEmpty())
@@ -131,32 +133,41 @@ class ControllerModelPreparationTest : InstrumentationTestCase() {
                 override fun open(history: List<Message>): ModelSession = error("explicit frozen tools required")
                 override fun open(history: List<Message>, tools: Set<ReadOnlyTool>): ModelSession = error("legacy enums must not swallow catalog")
                 override fun open(history: List<Message>, definitions: List<ToolDefinition>): ModelSession {
-                    f.settings.save(config.copy(model="later-model", apiKey="later-key", batteryEnabled=false, deviceStatusEnabled=true))
-                    opens.incrementAndGet()
-                    assertEquals(expectedBaseCatalog, definitions.map { it.name })
-                    assertEquals(expectedSideEffects, definitions.filter {it.sideEffect}.map {it.name}.toSet())
-                    assertEquals("fixture-model", config.model)
-                    assertEquals("fixture-key", config.apiKey)
-                    val runTools = ChatController::class.java.getDeclaredField("runTools").apply { isAccessible = true }
-                        .get(f.controller)
-                    val bound = runTools.javaClass.getDeclaredField("owner").apply { isAccessible = true }.get(runTools)
-                        as app.daiyu.android.domain.runtime.RunExecutionOwner
-                    val assistant = f.db.messages(conversation.id).last().second
-                    assertTrue(bound.owns(assistant))
-                    f.db.readableDatabase.rawQuery(
-                        "SELECT owner,conversation_id,run_id FROM runtime_checkpoints WHERE message_id=?",
-                        arrayOf(assistant.id.value)).use { row ->
-                        assertTrue(row.moveToFirst())
-                        assertEquals(bound.ownerId, row.getString(0))
-                        assertEquals(bound.conversationId.value, row.getString(1))
-                        assertEquals(bound.runId.value, row.getString(2))
+                    try {
+                        f.settings.save(config.copy(model="later-model", apiKey="later-key", batteryEnabled=false, deviceStatusEnabled=true))
+                        opens.incrementAndGet()
+                        assertEquals(expectedBaseCatalog, definitions.map { it.name })
+                        assertEquals(expectedSideEffects, definitions.filter {it.sideEffect}.map {it.name}.toSet())
+                        assertEquals("fixture-model", config.model)
+                        assertEquals("fixture-key", config.apiKey)
+                        val runTools = ChatController::class.java.getDeclaredField("runTools").apply { isAccessible = true }
+                            .get(f.controller)
+                        val bound = runTools.javaClass.getDeclaredField("owner").apply { isAccessible = true }.get(runTools)
+                            as app.daiyu.android.domain.runtime.RunExecutionOwner
+                        val assistant = f.db.messages(conversation.id).last().second
+                        assertTrue(bound.owns(assistant))
+                        f.db.readableDatabase.rawQuery(
+                            "SELECT owner,conversation_id,run_id FROM runtime_checkpoints WHERE message_id=?",
+                            arrayOf(assistant.id.value)).use { row ->
+                            assertTrue(row.moveToFirst())
+                            assertEquals(bound.ownerId, row.getString(0))
+                            assertEquals(bound.conversationId.value, row.getString(1))
+                            assertEquals(bound.runId.value, row.getString(2))
+                        }
+                        return session(config.model)
+                    } catch (failure: Throwable) {
+                        openFailure.set(failure)
+                        throw failure
+                    } finally {
+                        opened.countDown()
                     }
-                    return session(config.model)
                 }
             }
         }
         conversation = f.db.create("default"); f.db.draft(conversation.id, "keep until accepted")
         assertNotNull(f.controller.send(conversation, "accepted"))
+        assertTrue("frozen catalog port did not open", opened.await(10, TimeUnit.SECONDS))
+        openFailure.get()?.let { throw it }
         awaitState(f) { f.controller.active == null }
         assertEquals(1, factories.get()); assertEquals(1, opens.get())
         assertEquals("later-model", f.settings.load().model)

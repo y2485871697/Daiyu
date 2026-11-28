@@ -296,7 +296,7 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
             assertNotNull(entry.authorization)
             assertEquals(request.plan.effects, entry.authorization!!.allowedWrites)
             f.modelRelease.countDown()
-            awaitControl("ambiguous launch retained") { f.controller.problem?.contains("UNKNOWN") == true }
+            awaitControl("ambiguous launch retained") { f.controller.problem == "副屏清理结果未确认" }
             assertSame(entry, f.controller.virtualDisplayEntry())
             assertNotNull(entry.session); assertEquals(0, f.gate.availablePermits())
             controlMain { f.controller.cancelVirtualDisplay(entry); f.controller.observeVirtualDisplayClose(entry) }
@@ -312,7 +312,7 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
             val retained = entry.session
             controlMain { f.controller.cancelVirtualDisplay(entry) }
             awaitControl("lost release receipt") { f.releases.get() == 1 }
-            awaitControl("unknown published") { f.controller.problem?.contains("UNKNOWN") == true }
+            awaitControl("unknown published") { f.controller.problem == "副屏清理结果未确认" }
             assertSame(entry, f.controller.virtualDisplayEntry())
             assertSame(retained, entry.session)
             assertSame(request.plan.owner, entry.owner)
@@ -355,7 +355,7 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
                 f.modelRelease.countDown()
                 awaitControl("returned Runner and retained locally drained catalog") {
                     catalog.virtualDisplayCleanupLocallyDrained(session) &&
-                        f.controller.problem?.contains("UNKNOWN") == true
+                        f.controller.problem == "副屏清理结果未确认"
                 }
                 val beforeObserve = f.host.observations.get()
                 lateinit var adapter: ControllerVirtualCleanupAdapter
@@ -422,7 +422,7 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
             controlMain { f.controller.cancelVirtualDisplay(entry) }
             awaitControl("cleanup parent drain") {
                 entry.catalog?.virtualDisplayCleanupLocallyDrained(checkNotNull(entry.session)) == true &&
-                    f.controller.problem?.contains("UNKNOWN") == true
+                    f.controller.problem == "副屏清理结果未确认"
             }
             val owner = app.daiyu.android.vdapproval.R08CleanupUiOwner()
             val current = AtomicReference(owner)
@@ -450,7 +450,10 @@ class ControllerVirtualDisplayParentTest : InstrumentationTestCase() {
             controlMain { assertTrue(f.controller.cancelVirtualDisplay(entry)) }
             assertNull(entry.session)
             f.factoryRelease.countDown()
-            awaitControl("late session retained") { entry.session != null && f.controller.problem?.contains("UNKNOWN") == true }
+            awaitControl("late session retained") {
+                entry.session != null && (f.controller.problem == "副屏清理结果未确认" ||
+                    f.controller.problem == "运行准备资源清理结果未确认")
+            }
             assertSame(entry, f.controller.virtualDisplayEntry())
             assertEquals(1, f.allocations.get())
             assertEquals(0, f.host.starts.get()); assertEquals(0, f.opens.get())

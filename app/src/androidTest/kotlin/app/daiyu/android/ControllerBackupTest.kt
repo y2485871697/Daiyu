@@ -130,7 +130,7 @@ class ControllerBackupTest:InstrumentationTestCase() {
         assertTrue(f.preferences.edit().remove("responses-path").remove("device-status").putString("model","updated").commit())
         val updated=config(export(f,"updated.json"));assertEquals(3,updated.length());assertEquals("updated",updated.getString("model"))
         val bad=File(File(f.directory,"missing-parent"),"failed.json")
-        assertTrue(task(f) {f.controller.exportUserBackup(Uri.fromFile(bad),true)}.startsWith("导出失败"))
+        assertEquals("附件读取或备份写入失败",task(f) {f.controller.exportUserBackup(Uri.fromFile(bad),true)})
         assertFalse(bad.exists());assertEquals(metadata,f.backup.importedConfiguration().toString())
         assertTrue(f.preferences.edit().clear().commit());assertEquals(0,config(export(f,"empty.json")).length())
         assertEquals(metadata,f.backup.importedConfiguration().toString());assertEquals(before,f.db.exportBackup())
@@ -158,7 +158,7 @@ class ControllerBackupTest:InstrumentationTestCase() {
         val before=target.backup.exportPackage()
         listOf(text to true,complete to false,malformed to true,malformed to false).forEach {(input,mode)->
             val bytes=input.readBytes();val notice=task(target) {target.controller.importUserBackup(Uri.fromFile(input),mode)}
-            assertTrue(notice.startsWith("导入失败"));if(input==malformed) assertTrue(notice.contains("有效UTF-8"))
+            assertEquals(if(input==malformed) "备份不是有效 UTF-8 文本" else "备份格式、校验或身份冲突",notice)
             assertEquals(0L,target.controller.dataRevision);assertEquals(before,target.backup.exportPackage())
             assertTrue(bytes.contentEquals(input.readBytes()))
         }
@@ -316,10 +316,10 @@ class ControllerBackupTest:InstrumentationTestCase() {
         catch(_:IllegalArgumentException) {}
         var imports=0
         val stream=object:java.io.ByteArrayInputStream(text.toByteArray()) {override fun close() {throw java.io.IOException("synthetic close failure")}}
-        assertTrue(task(f) {f.controller.dataTask(importing=true) {
+        assertEquals("备份读取或附件写入失败",task(f) {f.controller.dataTask(importing=true) {
             val read=stream.use {f.controller.readBackupText(it,16L*1024*1024)}
             imports++;f.db.importBackup(read);"unexpected import"
-        }}.startsWith("导入失败"))
+        }})
         assertEquals(0,imports);assertEquals(before,f.db.exportBackup());assertEquals(0L,f.controller.dataRevision)
     }
     fun testSingleConversationUriExportUsesExplicitIdAndNeverExportsSettingsOrOtherDrafts() {
@@ -354,7 +354,7 @@ class ControllerBackupTest:InstrumentationTestCase() {
         assertEquals(setOf(first,last),target.db.conversations().map {it.id}.toSet())
         for(ids in listOf(emptyList(),listOf(first,ConversationId("missing")))) {
             output.writeText("existing target")
-            assertTrue(task(f) {f.controller.exportConversationsBackup(Uri.fromFile(output),ids)}.startsWith("导出失败"))
+            assertEquals("备份导出失败",task(f) {f.controller.exportConversationsBackup(Uri.fromFile(output),ids)})
             assertEquals("existing target",output.readText())
         }
         assertEquals(before,f.backup.exportPackage());assertEquals(0L,f.controller.dataRevision);assertEquals(0,f.calls.get())
@@ -364,11 +364,11 @@ class ControllerBackupTest:InstrumentationTestCase() {
         val deleted=f.db.create().id;f.db.delete(deleted);val before=f.backup.exportPackage()
         val output=File(f.directory,"unchanged.json").apply {writeText("existing target must not be truncated")}
         for(id in listOf(ConversationId("missing"),deleted,ConversationId("' OR 1=1 --"))) {
-            assertTrue(task(f) {f.controller.exportConversationBackup(Uri.fromFile(output),id)}.startsWith("导出失败"))
+            assertEquals("备份导出失败",task(f) {f.controller.exportConversationBackup(Uri.fromFile(output),id)})
             assertEquals("existing target must not be truncated",output.readText())
         }
         val invalid=File(File(f.directory,"missing-parent"),"failed.json")
-        assertTrue(task(f) {f.controller.exportConversationBackup(Uri.fromFile(invalid),selected)}.startsWith("导出失败"))
+        assertEquals("附件读取或备份写入失败",task(f) {f.controller.exportConversationBackup(Uri.fromFile(invalid),selected)})
         assertFalse(invalid.exists());assertEquals(before,f.backup.exportPackage())
         assertEquals(0L,f.controller.dataRevision);assertEquals(0,f.calls.get())
     }

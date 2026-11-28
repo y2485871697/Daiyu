@@ -90,7 +90,7 @@ class ActivityTest : WiredActivityTestCase() {
             append("post-swipe streaming revision published", "新正文\n".repeat(100) + "$preTapMarker\n")
             assertEquals("touch stops streaming follow", top, node(tag).fetchSemanticsNode().positionInRoot.y, 1f)
             var beforePrepend: List<Pair<Long, Message>> = emptyList()
-            controlMain { beforePrepend = shown() }
+            controlMain { beforePrepend = shown().toList() }
             mainThread { retainedControls(activity).onMenuAction(ChatMenuAction.LOAD_EARLIER) }
             awaitControl("earlier history is prepended around the live owner") {
                 val history = shown()

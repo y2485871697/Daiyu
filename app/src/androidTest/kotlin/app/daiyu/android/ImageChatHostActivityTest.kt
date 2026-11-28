@@ -480,9 +480,16 @@ class ImageChatHostActivityTest : ComposeActivityTestCase() {
         ui.waitUntil(10_000) { ui.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
         node(tag).performClick()
         fun ready() {
-            awaitControl("original image conversation and history loader are current") {
-                invokeHost(activity, "getRetainedPage") == "chat" &&
-                    host().session.owner.conversationId == image.expectedOwner.conversationId && host().historyLoader != null
+            ui.waitUntil(10_000) {
+                // Settings Back can await an outgoing preview frame before it restores chat.
+                ui.mainClock.advanceTimeByFrame()
+                var restored = false
+                controlMain {
+                    val current = host()
+                    restored = invokeHost(activity, "getRetainedPage") == "chat" &&
+                        current.session.owner.conversationId == image.expectedOwner.conversationId && current.historyLoader != null
+                }
+                restored
             }
             ui.waitUntil(10_000) {
                 ui.onNodeWithContentDescription("消息图片 1", useUnmergedTree = true).isDisplayed()

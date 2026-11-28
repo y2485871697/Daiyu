@@ -100,15 +100,26 @@ class SourceTests(unittest.TestCase):
     def test_smoke_nested_and_outer_budgets_cover_all_stages(self):
         script = (ROOT / 'scripts/smoke_boot.sh').read_text()
         workflow = (ROOT / '.github/workflows/build.yml').read_text().split('  smoke:', 1)[1]
-        budgets = [int(seconds) for seconds in re.findall(r'^ *instrumentation_budget=(\d+)$', script, re.M)]
-        self.assertEqual(budgets, [7200, 9600])
+        budgets = [int(seconds) for seconds in re.findall(r'(?:^ *|\) )instrumentation_budget=(\d+)', script, re.M)]
+        self.assertEqual(budgets, [7200, 1080, 9600])
         self.assertIn('export ADB_COMMAND_TIMEOUT=$((instrumentation_budget + 60))', script)
         self.assertIn('adb_stage instrumentation "$instrumentation_budget" shell am instrument', script)
         stages = [(phase, int(seconds)) for phase, seconds in re.findall(r'adb_stage ([a-z-]+) (\d+) ', script)]
         stages.append(('instrumentation', max(budgets)))
         self.assertIn('adb_stage launch 30 shell am start -S -W -n app.daiyu.android/.MainActivity', script)
-        step = int(re.search(r'        timeout-minutes: (\d+)', workflow).group(1)) * 60
-        job = int(re.search(r'^    timeout-minutes: (\d+)', workflow, re.M).group(1)) * 60
+        def limits(indent):
+            line = next(line.strip() for line in workflow.splitlines()
+                        if line.startswith(' ' * indent + "timeout-minutes: $"))
+            match = re.fullmatch(r"timeout-minutes: \$\{\{ fromJSON\(inputs.mode == 'candidate' && '(\d+)' \|\| '(\d+)'\) \}\}", line)
+            self.assertIsNotNone(match)
+            return tuple(int(minutes) * 60 for minutes in match.groups())
+        candidate_step, step = limits(8)
+        candidate_job, job = limits(4)
+        self.assertEqual(candidate_step, 30 * 60)
+        self.assertGreaterEqual(candidate_job - candidate_step, 10 * 60)
+        self.assertGreater(candidate_step - budgets[1], 10 * 60)
+        self.assertIn('run: timeout --kill-after=5 30 adb start-server', workflow)
+        self.assertIn('emulator-boot-timeout: 180', workflow)
         # 600s emulator boot + all one-shot stages; loops include kill grace.
         maximum = 600 + sum(seconds + 5 for _, seconds in stages)
         maximum += 60 * (3 * (5 + 5) + 2) + 19 * (2 * (10 + 5) + 1)
@@ -236,7 +247,7 @@ class SourceTests(unittest.TestCase):
 
     def test_prelaunch_hook_is_atomic_and_gates_smoke_after_action_catches_failure(self):
         workflow = (ROOT / '.github/workflows/build.yml').read_text()
-        self.assertIn('pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"', workflow)
+        self.assertIn('pre-emulator-launch-script: timeout --kill-after=5 90 bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"', workflow)
         self.assertIn('sudo apt-get install --no-install-recommends -y libpulse0', workflow)
         self.assertLess(workflow.index('          rm -f smoke/prelaunch-ready.txt'),
                         workflow.index('      - name: 安装并检查启动'))
@@ -1098,6 +1109,12 @@ exit 0
             if reference is not None:
                 self.assertEqual(receipt, reference)
             reference = receipt
+
+    def test_candidate_instrumentation_has_a_shorter_budget_with_the_same_strict_report(self):
+        result = self.smoke(mode="candidate", test_classes='app.daiyu.android.FirstTest')
+        self.assertEqual(result.returncode, 0, result.stderr.decode())
+        self.assertIn('phase=instrumentation budget=1080s', (self.root / 'smoke/stages.txt').read_text())
+        self.assertTrue(json.loads((self.root / 'smoke/instrumentation-result.json').read_text())['valid'])
 
     def test_candidate_runs_new_selected_class_on_both_apis(self):
         selected = 'app.daiyu.android.other.SecondTest'

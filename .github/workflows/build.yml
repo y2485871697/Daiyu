@@ -533,7 +533,8 @@ jobs:
     needs: [build, release, candidate]
     if: always() && github.ref == 'refs/heads/main' && ((inputs.mode == 'build' && needs.build.result == 'success') || ((inputs.mode == 'release' || inputs.mode == 'daily') && needs.release.result == 'success') || (inputs.mode == 'candidate' && needs.candidate.result == 'success') || inputs.mode == 'smoke')
     runs-on: ubuntu-26.04
-    timeout-minutes: 255
+    # Targeted candidates must not inherit the long full-suite runner budget.
+    timeout-minutes: ${{ fromJSON(inputs.mode == 'candidate' && '45' || '255') }}
     strategy:
       fail-fast: false
       matrix:
@@ -636,13 +637,14 @@ jobs:
           cat "$tools/latest/source.properties" | tee smoke/commandline-tools.txt
           "$tools/latest/bin/sdkmanager" --version
       - name: 安装模拟器宿主依赖
+        timeout-minutes: 4
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libpulse0
       - name: 预启动 ADB
-        run: adb start-server
+        run: timeout --kill-after=5 30 adb start-server
       - name: 安装并检查启动
-        timeout-minutes: 245
+        timeout-minutes: ${{ fromJSON(inputs.mode == 'candidate' && '30' || '245') }}
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
         env:
           EMULATOR_RAM_MB: ${{ matrix.ram }}
@@ -660,7 +662,7 @@ jobs:
           emulator-build: ${{ matrix.api == '26' && '13610412' || '' }}
           emulator-options: -memory ${{ matrix.ram }} -no-window -gpu ${{ matrix.api == '26' && 'swiftshader_indirect' || 'swiftshader' }} -noaudio -no-boot-anim -camera-back none -no-snapshot -no-metrics -show-kernel ${{ matrix.api == '26' && '-feature -GLDMA' || '' }} ${{ matrix.api == '37.2' && '-feature -Uwb -qemu -chardev netsim,id=uwb -device virtserialport,chardev=uwb,name=uwb' || '' }}
           emulator-boot-timeout: 180
-          pre-emulator-launch-script: bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"
+          pre-emulator-launch-script: timeout --kill-after=5 90 bash scripts/prepare_smoke_emulator.sh "${{ matrix.api }}"
           disable-animations: true
           script: bash -c 'set +e; smoke_script=scripts/smoke_boot.sh; if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "app.daiyu.android.SearchHistoryDialogTest,app.daiyu.android.SearchHostActivityTest,app.daiyu.android.RetainedSearchDataTest,app.daiyu.android.SearchSQLiteCancellationTest"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi; if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "app.daiyu.android.GenerationInputImportTest,app.daiyu.android.storage.SQLiteGenerationAttemptStoreTest,app.daiyu.android.storage.SQLiteGenerationOutputStoreTest,app.daiyu.android.integration.tools.RunGenerationToolsDeviceTest,app.daiyu.android.ControllerGenerationResourcesTest,app.daiyu.android.ControllerGenerationIntegrationTest,app.daiyu.android.storage.GenerationProtocolMigrationTest"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi; if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "app.daiyu.android.ui.screens.chat.conversation.ChildTaskListTest,app.daiyu.android.ChatThemeInteractionActivityTest,app.daiyu.android.ui.screens.chat.conversation.WorkflowDisclosureDirectionTest"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi; if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "app.daiyu.android.ChildStopChoiceActivityTest,app.daiyu.android.ControllerChildRetentionTest"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi; if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "app.daiyu.android.ui.screens.chat.conversation.ChatMessageSpacingTest,app.daiyu.android.ui.screens.chat.conversation.ReportedReasoningTypingTest,app.daiyu.android.ui.screens.chat.conversation.MarkdownRevealTraversalTest"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi; if test "$SMOKE_MODE" = smoke && test "$SMOKE_TEST_CLASSES" = "app.daiyu.android.QuestionBarrierIntegrationTest,app.daiyu.android.ConversationPaneSwitchActivityTest,app.daiyu.android.ui.screens.chat.conversation.MessageActionBarLayoutTest"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi; if test "$SMOKE_MODE" = smoke && python3 -c "import os,runpy; m=runpy.run_path(\".smoke-validation-tools/scripts/acceptance/record_tool_tests.py\"); raise SystemExit(m[\"command_for\"](\"python3\",os.environ)[1] != \"child-hot-configuration-targeted\")"; then smoke_script=.smoke-validation-tools/scripts/smoke_boot.sh; fi; test -s smoke/prelaunch-ready.txt && bash "$smoke_script"; code=$?; printf "%s\n" "$code" > smoke/exit-code.txt; exit "$code"'
       - name: 上传启动证据

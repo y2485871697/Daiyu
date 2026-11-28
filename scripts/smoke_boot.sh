@@ -5,10 +5,11 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 exec 3>&2
 # The pre-launch wrapper bounds action probes; smoke stages set their own budgets.
 instrumentation_budget=7200
-if test "${SMOKE_MODE:-}" = release; then
+case "${SMOKE_MODE:-}" in
+  candidate) instrumentation_budget=1080 ;;
   # Full release shards ran out of the old budget while still advancing.
-  instrumentation_budget=9600
-fi
+  release) instrumentation_budget=9600 ;;
+esac
 export ADB_COMMAND_TIMEOUT=$((instrumentation_budget + 60))
 export SMOKE_SCRIPT_DIR="$SCRIPT_DIR"
 adb_stage() {

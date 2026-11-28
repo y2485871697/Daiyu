@@ -1,5 +1,8 @@
 package app.daiyu.android
 
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.*
 import app.daiyu.android.vd.AndroidVirtualDisplayOwnerHost
 import app.daiyu.android.vd.OwnerRunBinding
@@ -434,13 +437,60 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
     }
 
     private fun tapCleanupEntry() {
-        // Drive the editor exit before asking Compose for the actual tap target.
-        ui.mainClock.advanceTimeByFrame()
-        awaitHostWindowFocus(activity, waitForVisualIdle = false)
-        dismissIme(waitForVisualIdle = false)
-        val button = node("vd-cleanup-entry")
-        awaitNodeTouchReady(button)
-        button.performClick()
+        val clock = ui.mainClock
+        val autoAdvance = clock.autoAdvance
+        clock.autoAdvance = false
+        try {
+            lateinit var entry: ControllerVirtualDisplayEntry
+            controlMain { entry = checkNotNull(fixture.controller.virtualDisplayEntry()) }
+            // Drive the editor exit and scroll locally; unrelated pending recompositions
+            // must not block the first lookup of the real cleanup button.
+            clock.advanceTimeByFrame()
+            awaitHostWindowFocus(activity, waitForVisualIdle = false)
+            dismissIme(waitForVisualIdle = false)
+            val matcher = hasTestTag("vd-cleanup-entry") and hasAnyAncestor(hasTestTag("chat-extra-actions"))
+            val button = ui.onNode(matcher)
+            val extras = ui.onNodeWithTag("chat-extra-actions")
+            var scrollRequested = false
+            ui.waitUntil(5_000) {
+                clock.advanceTimeByFrame()
+                val target = ui.onAllNodes(matcher and isEnabled())
+                    .fetchSemanticsNodes(atLeastOneRootRequired = false).singleOrNull()
+                    ?: return@waitUntil false
+                if (!target.layoutInfo.isPlaced || target.size.height <= 0) return@waitUntil false
+                val viewport = extras.fetchSemanticsNode()
+                val bounds = viewport.boundsInRoot
+                if (bounds.height <= 0f) return@waitUntil false
+                val center = target.positionInRoot.y + target.size.height / 2f
+                if (center >= bounds.top && center < bounds.bottom && target.boundsInRoot.height > 0f) {
+                    true
+                } else {
+                    if (!scrollRequested) {
+                        val axis = checkNotNull(viewport.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange))
+                        val dy = center - bounds.center.y
+                        extras.performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
+                            assertTrue("Cleanup entry scroll rejected", scroll(0f, if (axis.reverseScrolling) -dy else dy))
+                        }
+                        scrollRequested = true
+                    }
+                    false
+                }
+            }
+            awaitNodeTouchReady(button)
+            button.performTouchInput { click() }
+            ui.waitUntil(5_000) {
+                clock.advanceTimeByFrame()
+                var opened = false
+                controlMain {
+                    val visit = invokeMain("getVirtualDisplayCleanupVisit")
+                    opened = visit?.javaClass?.getDeclaredMethod("getEntry")?.apply { isAccessible = true }
+                        ?.invoke(visit) === entry
+                }
+                opened
+            }
+        } finally {
+            clock.autoAdvance = autoAdvance
+        }
     }
 
     private fun openInitializedCleanup(): app.daiyu.android.vdapproval.R08CleanupApprovalRequest {

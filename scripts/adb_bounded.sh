@@ -9,6 +9,14 @@ if [[ -z ${ADB_COMMAND_TIMEOUT:-} && $# == 6 && ${1:-} == -s && ${2:-} =~ ^emula
       ${3:-} == shell && ${4:-} == input && ${5:-} == keyevent && ${6:-} == 82 ]]; then
   limit=45
 fi
+grace=5
+# The pinned action counts retries, not elapsed seconds. Keep the first-boot
+# probe short so its 120s nominal limit cannot turn into a ~20min loop.
+if [[ -z ${ADB_COMMAND_TIMEOUT:-} && $# == 5 && ${1:-} == -s && ${2:-} =~ ^emulator-[0-9]+$ &&
+      ${3:-} == shell && ${4:-} == getprop && ${5:-} == sys.boot_completed ]]; then
+  limit=2
+  grace=1
+fi
 [[ "$limit" =~ ^[1-9][0-9]*$ ]] || exit 2
 log=${ADB_COMMAND_LOG:-smoke/adb-commands.txt}
 mkdir -p "$(dirname "$log")"
@@ -18,7 +26,7 @@ if [[ ${ADB_OUTER_TIMEOUT:-} == 1 ]]; then
   exec "$real" "$@"
 fi
 printf '%s begin timeout=%s command=%q\n' "$(date -u +%FT%TZ)" "$limit" "$*" >> "$log"
-timeout --kill-after=5 "$limit" "$real" "$@"
+timeout "--kill-after=$grace" "$limit" "$real" "$@"
 code=$?
 printf '%s end exit=%s\n' "$(date -u +%FT%TZ)" "$code" >> "$log"
 if test "$code" -eq 124 || test "$code" -eq 137; then

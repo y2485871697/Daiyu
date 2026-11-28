@@ -119,7 +119,7 @@ class SourceTests(unittest.TestCase):
         self.assertGreaterEqual(candidate_job - candidate_step, 10 * 60)
         self.assertGreaterEqual(candidate_step - budgets[1], 10 * 60)
         self.assertIn('run: timeout --kill-after=5 30 adb start-server', workflow)
-        self.assertIn('emulator-boot-timeout: 180', workflow)
+        self.assertIn('emulator-boot-timeout: 120', workflow)
         # 600s emulator boot + all one-shot stages; loops include kill grace.
         maximum = 600 + sum(seconds + 5 for _, seconds in stages)
         maximum += 60 * (3 * (5 + 5) + 2) + 19 * (2 * (10 + 5) + 1)
@@ -534,26 +534,30 @@ class ProcessTests(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 5)
         self.assertIn("timeout=external", (self.root / "smoke/adb-commands.txt").read_text())
 
-    def test_only_emulator_boot_unlock_gets_a_longer_deadline(self):
+    def test_emulator_boot_probe_and_unlock_have_separate_deadlines(self):
         wrapper = self.bin / 'adb'
         shutil.copy(ROOT / 'scripts/adb_bounded.sh', wrapper)
         wrapper.chmod(0o755)
-        self.executable('timeout', '#!/bin/sh\nprintf "%s\\n" "$2"\nexit "${TEST_ADB_EXIT:-0}"\n')
+        self.executable('timeout', '#!/bin/sh\nprintf "%s %s\\n" "$1" "$2"\nexit "${TEST_ADB_EXIT:-0}"\n')
         env = self.env.copy()
         env.pop('ADB_COMMAND_TIMEOUT', None)
         unlock = ('-s', 'emulator-5554', 'shell', 'input', 'keyevent', '82')
-        for args, extra, limit, code in (
-            (unlock, {}, 45, 0),
-            (unlock, {'TEST_ADB_EXIT': '124'}, 45, 124),
-            (unlock, {'ADB_COMMAND_TIMEOUT': '3'}, 3, 0),
-            ((*unlock[:-1], '4'), {}, 10, 0),
-            (('-s', 'physical-device', *unlock[2:]), {}, 10, 0),
-            (('-s', 'emulator-5554', 'shell', 'getprop', 'sys.boot_completed'), {}, 10, 0),
+        probe = ('-s', 'emulator-5554', 'shell', 'getprop', 'sys.boot_completed')
+        for args, extra, grace, limit, code in (
+            (unlock, {}, 5, 45, 0),
+            (unlock, {'TEST_ADB_EXIT': '124'}, 5, 45, 124),
+            (unlock, {'ADB_COMMAND_TIMEOUT': '3'}, 5, 3, 0),
+            ((*unlock[:-1], '4'), {}, 5, 10, 0),
+            (('-s', 'physical-device', *unlock[2:]), {}, 5, 10, 0),
+            (probe, {}, 1, 2, 0),
+            (probe, {'TEST_ADB_EXIT': '124'}, 1, 2, 124),
+            (probe, {'ADB_COMMAND_TIMEOUT': '15'}, 5, 15, 0),
+            (('-s', 'physical-device', *probe[2:]), {}, 5, 10, 0),
         ):
             with self.subTest(args=args, extra=extra):
                 result = subprocess.run([str(wrapper), *args], cwd=self.root, env=dict(env, **extra),
                                         capture_output=True, text=True, timeout=10)
-                self.assertEqual((result.returncode, result.stdout), (code, f'{limit}\n'))
+                self.assertEqual((result.returncode, result.stdout), (code, f'--kill-after={grace} {limit}\n'))
                 if code:
                     self.assertIn(f'ADB command timed out ({limit}s)', result.stderr)
 

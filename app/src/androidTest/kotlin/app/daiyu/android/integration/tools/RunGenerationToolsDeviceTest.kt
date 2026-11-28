@@ -23,18 +23,46 @@ import java.util.concurrent.atomic.AtomicReference
 class RunGenerationToolsDeviceTest : InstrumentationTestCase() {
     private val fixtures = mutableListOf<Fixture>()
 
-    private fun owner(message: Message): RunExecutionOwner {
-        var token: RunExecutionOwner? = null
-        val receiver = object : ReceiptBatchToolExecutor {
-            override fun bindOwner(owner: RunExecutionOwner) { token = owner }
+    private class ActiveOwner(message: Message) : AutoCloseable {
+        private val ready = CountDownLatch(1)
+        private val release = CountDownLatch(1)
+        private val token = AtomicReference<RunExecutionOwner>()
+        private val failure = AtomicReference<Throwable>()
+        private val receiver = object : ReceiptBatchToolExecutor {
+            override fun bindOwner(owner: RunExecutionOwner) { token.set(owner) }
             override fun execute(message: Message, invocations: List<ToolInvocation>, cancelled: () -> Boolean) = error("unused")
         }
-        ChatRunner(ModelPort { object : ModelSession {
-            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {}
-            override fun cancel() {}
+        private val runner = ChatRunner(ModelPort { object : ModelSession {
+            override fun next(outputs: List<ToolOutput>, sink: (ModelEvent) -> Unit) {
+                ready.countDown()
+                check(release.await(60, TimeUnit.SECONDS)) { "Fixture did not release the model session" }
+            }
+            override fun cancel() { release.countDown() }
         } }, object : ConversationStore { override fun save(message: Message) {} }, BatteryTool { error("unused") },
-            RunnerOptions(receiptBatchExecutor = receiver)) {}.run(message, emptyList())
-        return checkNotNull(token)
+            RunnerOptions(receiptBatchExecutor = receiver)) {}
+        private val worker = Thread {
+            try { runner.run(message, emptyList()) }
+            catch (error: Throwable) { failure.set(error) }
+            finally { ready.countDown() }
+        }.apply { start() }
+
+        fun await(): RunExecutionOwner = try {
+            check(ready.await(10, TimeUnit.SECONDS)) { "Model session did not start" }
+            failure.get()?.let { throw it }
+            check(worker.isAlive) { "Model session ended before tool dispatch" }
+            checkNotNull(token.get())
+        } catch (error: Throwable) {
+            release.countDown()
+            worker.join(5_000)
+            throw error
+        }
+
+        override fun close() {
+            release.countDown()
+            worker.join(5_000)
+            check(!worker.isAlive) { "Model session did not exit" }
+            failure.get()?.let { throw it }
+        }
     }
 
     private inner class Fixture(blockRegistration: Boolean = false, invalidSibling: Boolean = true,
@@ -45,6 +73,7 @@ class RunGenerationToolsDeviceTest : InstrumentationTestCase() {
         val root = File(context.filesDir, "generation-leaf-${UUID.randomUUID()}")
         val call = ToolInvocation(ToolCallId(callId), RunGenerationTools.IMAGE_TOOL, """{"batch_id":"batch"}""")
         val assistant: Message
+        private val activeOwner: ActiveOwner
         val token: RunExecutionOwner
         val config = GenerationRunConfig(listOf(GenerationRunConfig.Batch("batch", GenerationProtocol.OPENAI_IMAGES_JSON,
             "https://provider.example/v1/images/generations", "secret", "image-model",
@@ -68,7 +97,8 @@ class RunGenerationToolsDeviceTest : InstrumentationTestCase() {
             assistant = user.copy(id = MessageId(UUID.randomUUID().toString()), role = "assistant",
                 blocks = listOf(MessageBlock.Tool(call)), status = RunStatus.RUNNING)
             helper.send(user, assistant)
-            token = owner(assistant)
+            activeOwner = ActiveOwner(assistant)
+            token = activeOwner.await()
             task = TaskAuthorization("session", assistant.runId.value,
                 setOf(RunGenerationTools.writeEffect("test-account", token, config, config.batches.single())))
             val bitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
@@ -113,9 +143,14 @@ class RunGenerationToolsDeviceTest : InstrumentationTestCase() {
         fun dispatch(id: String = call.id.value, permission: TaskAuthorization = task) =
             dispatcher.dispatchOwned(permission, listOf(call.copy(id = ToolCallId(id))), token).single().outcome
         fun close() {
-            releaseRegistration.countDown(); leaf.close()
-            check(leaf.awaitClose(5000) == GenerationToolsCloseResult.Drained)
-            helper.close(); context.deleteDatabase("conversations.db"); root.deleteRecursively()
+            releaseRegistration.countDown()
+            try {
+                leaf.close()
+                check(leaf.awaitClose(5000) == GenerationToolsCloseResult.Drained)
+            } finally {
+                try { activeOwner.close() }
+                finally { helper.close(); context.deleteDatabase("conversations.db"); root.deleteRecursively() }
+            }
         }
     }
 

@@ -72,8 +72,8 @@ class MessageActionScrollActivityTest : WiredActivityTestCase() {
                 setField("loadedWindowReader", reader)
                 retainedControls(activity).onDeleteTurn("scroll-user-30")
             }
-            awaitUniqueTag("chat-selection-sheet")
-            awaitNodeWindowFocus(node("chat-selection-sheet"))
+            awaitUniqueTag("delete-confirm-dialog")
+            awaitNodeWindowFocus(node("delete-confirm-dialog"))
             node("dialog-confirm").performTouchInput { click() }
             assertTrue(entered.await(5, TimeUnit.SECONDS))
             ui.waitForIdle()

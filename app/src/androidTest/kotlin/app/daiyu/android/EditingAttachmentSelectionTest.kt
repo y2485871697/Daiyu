@@ -119,10 +119,20 @@ class EditingAttachmentSelectionTest : InstrumentationTestCase() {
         assertTrue(runCatching { f.store.prepareRegeneration(f.target, "edited", retainedImages = other.refs) }.isFailure)
         val assistant = f.store.snapshot(f.conversation.id).targets.values.single { it.role == Message.ASSISTANT_ROLE }
         assertTrue(runCatching { f.store.prepareRegeneration(assistant, retainedImages = emptyList()) }.isFailure)
-        val row = before.last()
-        f.db.save(row.copy(blocks = listOf(MessageBlock.Text("changed", "revision changed"))))
+        // Advance the real history revision without rewriting an already completed receipt.
+        val user = f.user.copy(id = MessageId(UUID.randomUUID().toString()),
+            runId = RunId(UUID.randomUUID().toString()), blocks = listOf(MessageBlock.Text("next", "next question")))
+        val reply = user.copy(id = MessageId(UUID.randomUUID().toString()), role = Message.ASSISTANT_ROLE,
+            blocks = listOf(MessageBlock.Text("answer", "next answer")), status = RunStatus.RUNNING)
+        f.db.send(user, reply, preserveDraft = true)
+        f.db.save(reply.copy(status = RunStatus.COMPLETED))
         val changed = f.history()
-        assertTrue(runCatching { f.store.prepareRegeneration(f.target, "edited", retainedImages = listOf(first)) }.isFailure)
+        assertEquals(before, changed.dropLast(2))
+        val stale = runCatching { f.store.prepareRegeneration(f.target, "edited", retainedImages = listOf(first)) }
+        assertEquals("消息或历史版本已变化；请刷新后重试", stale.exceptionOrNull()?.message)
+        val refreshed = f.store.snapshot(f.conversation.id).targets.getValue(f.user.id.value)
+        val valid = f.store.prepareRegeneration(refreshed, "edited", retainedImages = listOf(first))
+        assertEquals(listOf(f.user.blocks[1]), valid.user.blocks.filterIsInstance<MessageBlock.Image>())
         assertUntouched(f, changed)
     }
 

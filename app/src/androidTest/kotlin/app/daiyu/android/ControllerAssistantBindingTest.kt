@@ -173,7 +173,7 @@ class ControllerAssistantBindingTest : InstrumentationTestCase() {
         f.database.draft(deleted.id,"deleted draft")
         f.controller.assistantStore.delete("default")
         assertNull(f.controller.send(deleted,"deleted draft"))
-        assertTrue(f.controller.problem!!.contains("已删除"))
+        assertEquals("会话助手不存在，请重新选择", f.controller.problem)
         assertEquals("deleted draft",f.database.conversations().single { it.id==deleted.id }.draft)
         assertEquals("default",f.database.assistantId(deleted.id))
         assertEquals(0,factories.get()); assertEquals(0,f.memory.reads.get())

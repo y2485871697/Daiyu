@@ -45,13 +45,13 @@ class PickerEmptyStateActivityTest : WiredActivityTestCase() {
         awaitVisualIdle()
     }
 
-    private fun assertCentered(message: String, contentTag: String) {
+    private fun assertCentered(message: String, contentTag: String, context: String = contentTag) {
         awaitVisualIdle()
         val text = ui.onNodeWithText(message, useUnmergedTree = true).assertIsDisplayed()
         val bounds = text.fetchSemanticsNode().boundsInRoot
         val content = node(contentTag).fetchSemanticsNode().boundsInRoot
         assertTrue("empty text centered horizontally", abs(bounds.center.x - content.center.x) <= 2f)
-        assertTrue("empty text centered vertically", abs(bounds.center.y - content.center.y) <= 2f)
+        assertTrue("$context: empty text centered vertically ($bounds in $content)", abs(bounds.center.y - content.center.y) <= 2f)
         assertTrue("empty text fits content", bounds.top >= content.top - 1f && bounds.bottom <= content.bottom + 1f)
         val layouts = mutableListOf<TextLayoutResult>()
         text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
@@ -113,14 +113,28 @@ class PickerEmptyStateActivityTest : WiredActivityTestCase() {
             val options = mutableStateOf(emptyList<VoiceToneOption>())
             var selected = ""
             show(dark, font) { VoiceTonePicker("音色", "", options.value, { selected = it }, {}) }
-            val search = node("voice-tone-search").fetchSemanticsNode().boundsInRoot
+            val searchNode = node("voice-tone-search")
+            val content = node("voice-tone-content")
+            awaitDialogEnter(searchNode)
+            val search = searchNode.fetchSemanticsNode().boundsInRoot
+            val region = content.fetchSemanticsNode().boundsInRoot
+            val density = activity.resources.displayMetrics.density
             assertCentered("暂无可选音色", "voice-tone-content")
             mainThread { options.value = listOf(VoiceToneOption("zh_female_one", "第一音色")) }
             node("voice-tone-option:zh_female_one").assertIsDisplayed()
             setSearch("voice-tone-search", "not-a-voice")
             assertCentered("没有找到匹配的音色", "voice-tone-content")
-            assertEquals(search, node("voice-tone-search").fetchSemanticsNode().boundsInRoot)
+            val filteredSearch = searchNode.fetchSemanticsNode().boundsInRoot
+            val filteredRegion = content.fetchSemanticsNode().boundsInRoot
+            assertEquals(search.left, filteredSearch.left, 0f)
+            assertEquals(search.top, filteredSearch.top, 0f)
+            assertEquals(search.right, filteredSearch.right, 0f)
+            // Placeholder and entered text have different font metrics; the fixed gap does not move.
+            assertEquals(search.bottom, filteredSearch.bottom, 2f * density)
+            assertEquals(16f * density, filteredRegion.top - filteredSearch.bottom, 1f)
+            assertEquals(region.bottom, filteredRegion.bottom, 0f)
             setSearch("voice-tone-search", "")
+            assertEquals(search, searchNode.fetchSemanticsNode().boundsInRoot)
             node("voice-tone-option:zh_female_one").performClick()
             assertEquals("zh_female_one", selected)
             node("voice-tone-empty").assertDoesNotExist()
@@ -131,9 +145,12 @@ class PickerEmptyStateActivityTest : WiredActivityTestCase() {
         for (dark in listOf(false, true)) for (kind in ComposerShortcutKind.entries) {
             show(dark, 1.3f) { ComposerShortcutPicker(kind, "", emptyList(), null,
                 { fail("empty references cannot select") }, {}) }
+            val done = node("reference-picker-done")
+            awaitDialogTouchReady(done)
+            awaitDialogImeFrame(done, visible = false)
             assertCentered(if (kind == ComposerShortcutKind.CONVERSATION) "暂无可引用会话" else "暂无可用 Skill",
-                "reference-picker-list")
-            node("reference-picker-done").assertIsDisplayed()
+                "reference-picker-list", "$kind (dark=$dark)")
+            done.assertIsDisplayed()
         }
     }
 

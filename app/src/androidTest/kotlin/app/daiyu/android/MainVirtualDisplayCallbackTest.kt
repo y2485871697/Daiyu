@@ -477,7 +477,9 @@ class MainVirtualDisplayCallbackTest : WiredActivityTestCase() {
                 }
             }
             awaitNodeTouchReady(button)
-            button.performTouchInput { click() }
+            button.performSemanticsAction(SemanticsActions.OnClick) { action ->
+                assertTrue("Cleanup entry click rejected", action())
+            }
             ui.waitUntil(5_000) {
                 clock.advanceTimeByFrame()
                 var opened = false

@@ -258,8 +258,17 @@ class ResponsesCancellationTest:InstrumentationTestCase() {
             assertEquals(1,opened.get());assertTrue(connection.disconnected.get())
         } finally {runner.stop();connection.released.countDown();worker.join()}
     }
+    private fun assertFailure(result: Message, kind: ModelFailure, summary: String = kind.userMessage) {
+        assertEquals(RunStatus.FAILED, result.status)
+        val error = requireNotNull(result.error)
+        assertEquals(summary, error.substringBefore("\n\n"))
+        assertTrue("Expected the exact local error code for $kind", error.lineSequence().any { it == "本地错误码：${kind.name}" })
+    }
+
     fun testRunnerFailuresKeepTextButDoNotExecutePreviouslyReadyTool() {
         val prefix=frames(delta(),ready())
+        val input = initial().copy(id = MessageId("request-user"), role = Message.USER_ROLE,
+            blocks = listOf(MessageBlock.Text("body", sensitiveBody)), status = RunStatus.COMPLETED)
         val cases=transportFailures().map {Connection(prefix,readFailure=it) to when(it) {
             is SocketTimeoutException -> ModelFailure.TIMEOUT
             is SSLException -> ModelFailure.TLS
@@ -276,8 +285,8 @@ class ResponsesCancellationTest:InstrumentationTestCase() {
         for((connection,failure) in cases) {
             val opened=AtomicInteger();var executions=0
             val result=ChatRunner(model(connection,opened),object:ConversationStore {override fun save(message:Message) {}},
-                BatteryTool {executions++;"{}"},{}).run(initial(),emptyList())
-            assertEquals(RunStatus.FAILED,result.status);assertEquals(failure.userMessage,result.error)
+                BatteryTool {executions++;"{}"},{}).run(initial(),listOf(input))
+            assertFailure(result, failure)
             assertEquals("accepted",result.blocks.filterIsInstance<MessageBlock.Text>().single().text)
             assertTrue(result.protocolItems.isEmpty());assertEquals(0,executions)
             assertEquals(1,opened.get());assertTrue(connection.disconnected.get())
@@ -318,7 +327,7 @@ class ResponsesCancellationTest:InstrumentationTestCase() {
         val opened=AtomicInteger();var executions=0
         val result=ChatRunner(model(connection,opened),object:ConversationStore {override fun save(message:Message) {}},
             BatteryTool {executions++;"{}"},{}).run(initial(),emptyList())
-        assertEquals(ModelFailure.REDIRECT.userMessage+"（HTTP 302）",result.error);assertEquals(RunStatus.FAILED,result.status)
+        assertFailure(result, ModelFailure.REDIRECT, ModelFailure.REDIRECT.userMessage + "（HTTP 302）")
         assertEquals(1,opened.get());assertEquals(0,executions)
         assertFalse(connection.instanceFollowRedirects);assertTrue(connection.disconnected.get())
         assertTrue(result.blocks.isEmpty());assertTrue(result.protocolItems.isEmpty())

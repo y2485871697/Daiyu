@@ -121,8 +121,14 @@ class VoiceCallContractTest(unittest.TestCase):
         main = (SRC / "MainActivity.kt").read_text()
         send = main.split("submit = { turn, text, result ->", 1)[1].split("observe =", 1)[0]
         self.assertIn("voiceCallConversation", send)
-        self.assertIn("voiceConversation = true", send)
-        self.assertNotIn("updateDraft(", send)
+        self.assertIn("universalAdmissionSnapshot != VoiceAdmission.READY", send)
+        self.assertIn("target?.id?.value != turn.permit.conversationId", send)
+        self.assertIn("submitAdmittedVoiceTurn(target, turn, text, result)", send)
+        admitted = main.split("private fun submitAdmittedVoiceTurn(", 1)[1].split("private fun migrateUniversalEditor(", 1)[0]
+        self.assertEqual(admitted.count("controller.sendText("), 1)
+        self.assertIn("controller.sendText(target, 0, turn.number.toLong(), text, ticket, voiceConversation = true)", admitted)
+        self.assertNotIn("updateDraft(", send + admitted)
+        self.assertNotIn("sendDraft(", send + admitted)
         self.assertIn('仅对话前可更改', main)
         self.assertIn('voiceCallModelName = ticket.record.id', main)
         self.assertIn('voiceCallPresentation.begin(voiceCallAnchor', main)

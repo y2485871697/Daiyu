@@ -400,21 +400,7 @@ class MainActivity : ComponentActivity() {
                 if (universalAdmissionSnapshot != VoiceAdmission.READY || target?.id?.value != turn.permit.conversationId) {
                     result(VoiceControlReceipt.Rejected(turn.requestId))
                 } else {
-                    voiceCallHasDialogue = true
-                    val ticket = ChatController.TextSendTicket()
-                    val expected = ChatController.TextSendOwner(target.id, 0, turn.number.toLong())
-                    val sending = UniversalSend(turn, expected, result)
-                    universalTickets[ticket] = sending
-                    val queued = controller.sendText(target, 0, turn.number.toLong(), text, ticket, voiceConversation = true) { receipt ->
-                        controller.acknowledgeTextSend(ticket)
-                        val mapped = productionUniversalReceipt(turn, expected, receipt) { owner, exact ->
-                            if (sending.retained.add(owner)) universalAssistants[owner] = exact
-                        }
-                        if (receipt !is ChatController.TextSendResult.Unknown) universalTickets.remove(ticket)
-                        result(mapped)
-                        refreshUniversalAdmission()
-                    }
-                    if (!queued) { universalTickets.remove(ticket); result(VoiceControlReceipt.Rejected(turn.requestId)) }
+                    submitAdmittedVoiceTurn(target, turn, text, result)
                 }
             },
             observe = { owner, body ->
@@ -460,6 +446,25 @@ class MainActivity : ComponentActivity() {
             }
     }
     private val universalVoice: ActivityUniversalVoiceHost get() = universalVoiceDelegate.value
+    private fun submitAdmittedVoiceTurn(target: Conversation, turn: VoiceControlTurn, text: String,
+        result: (VoiceControlReceipt) -> Unit) {
+        voiceCallHasDialogue = true
+        val ticket = ChatController.TextSendTicket()
+        val expected = ChatController.TextSendOwner(target.id, 0, turn.number.toLong())
+        val sending = UniversalSend(turn, expected, result)
+        universalTickets[ticket] = sending
+        val queued = controller.sendText(target, 0, turn.number.toLong(), text, ticket, voiceConversation = true) { receipt ->
+            controller.acknowledgeTextSend(ticket)
+            val mapped = productionUniversalReceipt(turn, expected, receipt) { owner, exact ->
+                if (sending.retained.add(owner)) universalAssistants[owner] = exact
+            }
+            if (receipt !is ChatController.TextSendResult.Unknown) universalTickets.remove(ticket)
+            result(mapped)
+            refreshUniversalAdmission()
+        }
+        if (!queued) { universalTickets.remove(ticket); result(VoiceControlReceipt.Rejected(turn.requestId)) }
+    }
+
     private fun migrateUniversalEditor(before: ChatController.TextSendOwner, after: ChatController.TextSendOwner) {
         universalEditor = after
         if (voiceConversationDialogOwner == before) voiceConversationDialogOwner = after

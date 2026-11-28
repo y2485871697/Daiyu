@@ -167,7 +167,10 @@ data class WorkStepUi(
         else -> displayActivity.label
     }
     val isVisibleInWorkflow: Boolean get() =
-        !awaitingDispatch && (category !in setOf("terminal", "background_job") || !executionTargetLabel.isNullOrBlank())
+        // A validated historical question can be read even with no confirmed dispatch receipt.
+        (toolName == app.daiyu.android.domain.question.ASK_USER_TOOL_NAME && dedicatedKey != null &&
+            state == WorkStepState.UNKNOWN) ||
+            (!awaitingDispatch && (category !in setOf("terminal", "background_job") || !executionTargetLabel.isNullOrBlank()))
     val toolCallId: String get() = id
 }
 

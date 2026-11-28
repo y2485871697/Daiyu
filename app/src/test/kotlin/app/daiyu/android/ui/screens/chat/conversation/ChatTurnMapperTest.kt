@@ -465,6 +465,28 @@ class ChatTurnMapperTest {
         assertEquals(WorkStepState.UNKNOWN, actual.workProcess!!.segments.single().steps.single().state)
     }
 
+    @Test fun recoveredQuestionStaysVisibleWithoutMarkingDispatchAsProven() {
+        val q = question("recovered")
+        val unknown = ToolReceiptUi(WorkStepState.UNKNOWN, dispatched = null)
+        val questionOnly = message(q, status = RunStatus.INTERRUPTED)
+        fun visible(source: Message, hasProjection: Boolean): AssistantWorkflowContent =
+            (ChatTurnMapper.map(listOf(source), dedicatedTool = { _, _ ->
+                "recovered-key".takeIf { hasProjection }
+            }, toolReceipt = { _, _ -> unknown }).single() as ChatTurnUi.Assistant)
+                .workflowContent().withResolvedTerminalCards()
+
+        val resolved = visible(questionOnly, hasProjection = true)
+        val shown = resolved.steps.filterIsInstance<MessageContentUi.Tool>().single().step
+        assertNotNull(resolved.work)
+        assertEquals("recovered", shown.id)
+        assertEquals("recovered-key", shown.dedicatedKey)
+        assertEquals(WorkStepState.UNKNOWN, shown.state)
+        assertTrue(shown.awaitingDispatch)
+        assertNull(visible(questionOnly, hasProjection = false).work)
+        assertNull(visible(message(tool("ordinary", result = null), status = RunStatus.INTERRUPTED),
+            hasProjection = true).work)
+    }
+
     @Test fun displayDedicatedKeysDoNotBorrowEvidenceFromRepeatedCallIds() {
         val oldCall = MessageBlock.Tool(ToolInvocation(ToolCallId("same-call"), "ask_user", "{\"old\":true}"), null)
         val provenCall = MessageBlock.Tool(oldCall.invocation.copy(arguments = "{}"), null)
